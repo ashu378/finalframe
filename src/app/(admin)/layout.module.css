@@ -1,0 +1,103 @@
+/**
+ * FinalFrame — Admin Layout Styles
+ */
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-gray-900);
+    color: var(--color-white);
+    padding: var(--spacing-4);
+}
+
+.logo {
+    margin-bottom: var(--spacing-6);
+}
+
+.logoLink {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    text-decoration: none;
+}
+
+.logoIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--color-error);
+    color: var(--color-white);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-bold);
+    border-radius: var(--radius-md);
+}
+
+.logoText {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-white);
+}
+
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    flex: 1;
+}
+
+.navItem {
+    display: block;
+    padding: var(--spacing-2) var(--spacing-3);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--color-gray-400);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-fast);
+}
+
+.navItem:hover {
+    color: var(--color-white);
+    background: var(--color-gray-800);
+}
+
+.footer {
+    padding-top: var(--spacing-4);
+    border-top: 1px solid var(--color-gray-800);
+}
+
+.backLink {
+    display: block;
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: var(--font-size-sm);
+    color: var(--color-gray-400);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+.backLink:hover {
+    color: var(--color-white);
+}
+
+.main {
+    flex: 1;
+    margin-left: 220px;
+    background: var(--bg-secondary);
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--spacing-6);
+}

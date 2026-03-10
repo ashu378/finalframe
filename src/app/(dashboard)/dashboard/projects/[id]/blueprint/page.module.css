@@ -1,0 +1,32 @@
+/**
+ * FinalFrame — Blueprint Page Styles
+ */
+
+.page {
+    max-width: 900px;
+}
+
+.header {
+    margin-bottom: 2rem;
+}
+
+.backLink {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    margin-bottom: 0.75rem;
+    transition: color 0.15s ease;
+}
+
+.backLink:hover {
+    color: var(--color-primary);
+}
+
+.projectName {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}

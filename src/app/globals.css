@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * FinalFrame — Global Styles (Phase 1.5 Design Overhaul)
+ * Theme: Studio Dark Mode (Deep Space / Cyberpunk Polish)
+ * Format: HSL for Tailwind Opacity Support
+ */
+
+@layer base {
+  :root {
+    /* --- HSL Color Palette (Studio Dark) --- */
+
+    /* Backgrounds: Studio neutral dark (Zinc-950) */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    /* Card: Zinc-900 for distinct separation */
+    --card: 240 10% 12%;
+    --card-foreground: 0 0% 98%;
+
+    /* Popover */
+    --popover: 240 10% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Primary: Neutral Amber (Intentional / Cinematic) */
+    --primary: 38 92% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Muted Zinc */
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    /* Muted: Deep Graphite */
+    --muted: 240 5% 10%;
+    --muted-foreground: 240 5% 80%;
+
+    /* Accent: Low-weight Graphite */
+    --accent: 240 5% 12%;
+    --accent-foreground: 0 0% 98%;
+
+    /* Borders: Standardizing to Zinc-800 for visibility */
+    --border: 240 5% 15%;
+    --input: 240 5% 15%;
+    --ring: 38 92% 50%;
+
+    --radius: 0.125rem;
+    /* Tighter, more precise corners */
+
+    /* Font Families */
+    --font-sans: var(--font-inter), 'Inter', -apple-system, sans-serif;
+    --font-mono: var(--font-mono), 'JetBrains Mono', monospace;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary;
+  }
+}
+
+@layer utilities {
+  .text-shadow-sm {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  .border-glass {
+    @apply border-white/5 backdrop-blur-sm bg-white/[0.02];
+  }
+
+  /* --- Premium Animations --- */
+  @keyframes progress {
+    0% {
+      transform: translateX(-100%);
+    }
+
+    50% {
+      transform: translateX(-20%);
+    }
+
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .animate-progress {
+    animation: progress 2s infinite linear;
+  }
+
+  /* --- Typography Accessibility Scale --- */
+  .text-metadata {
+    @apply text-xs font-bold uppercase tracking-widest;
+  }
+
+  .text-caption {
+    @apply text-[11px] font-black uppercase tracking-[0.2em];
+  }
+
+  /* --- Public Page Utility Classes --- */
+  .public-page-section {
+    @apply py-24 md:py-40 border-t border-zinc-800;
+  }
+
+  .public-heading-hero {
+    @apply text-5xl md:text-8xl font-bold tracking-tight leading-[0.95] text-zinc-50;
+  }
+
+  .public-heading-section {
+    @apply text-4xl md:text-6xl font-bold tracking-tight leading-[1.1] text-zinc-50;
+  }
+
+  .public-body-text {
+    @apply text-base md:text-lg text-zinc-400 leading-relaxed;
+  }
+
+  .legal-document-container {
+    @apply max-w-3xl mx-auto py-32 px-6;
+  }
+
+  .legal-text-block {
+    @apply text-zinc-300 leading-[1.8] space-y-8 text-base;
+  }
+
+  .legal-text-block h2 {
+    @apply text-2xl font-bold text-zinc-50 mt-16 mb-6 uppercase tracking-wider;
+  }
+
+  .legal-text-block p {
+    @apply mb-6;
+  }
+
+  .pricing-card {
+    @apply bg-zinc-900 border border-zinc-800 rounded-sm p-8 transition-all duration-300 hover:border-primary/30;
+  }
+
+  .primary-cta {
+    @apply bg-primary text-black font-black uppercase tracking-[0.2em] text-[12px] h-14 px-10 rounded-sm hover:bg-white transition-all inline-flex items-center justify-center shadow-2xl shadow-primary/20;
+  }
+}

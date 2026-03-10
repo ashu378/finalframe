@@ -1,0 +1,49 @@
+/**
+ * FinalFrame — Maintenance Page Styles
+ */
+
+.container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-gray-900) 0%, #1e1b4b 100%);
+    padding: var(--spacing-6);
+}
+
+.content {
+    text-align: center;
+    max-width: 500px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-2xl);
+    padding: var(--spacing-12);
+    box-shadow: var(--shadow-xl);
+}
+
+.icon {
+    font-size: 64px;
+    margin-bottom: var(--spacing-6);
+}
+
+.title {
+    font-size: var(--font-size-3xl);
+    font-weight: var(--font-weight-bold);
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-4);
+}
+
+.description {
+    font-size: var(--font-size-lg);
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-6);
+    line-height: var(--line-height-relaxed);
+}
+
+.eta {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    padding: var(--spacing-3) var(--spacing-4);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    display: inline-block;
+}

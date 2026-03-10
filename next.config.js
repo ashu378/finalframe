@@ -1,0 +1,19 @@
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+    optimizeFonts: false,
+    experimental: {
+        serverActions: {
+            bodySizeLimit: '50mb',
+        },
+    },
+    images: {
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: '**.supabase.co',
+            },
+        ],
+    },
+};
+
+module.exports = nextConfig;
