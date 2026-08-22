@@ -166,7 +166,7 @@ export function IdentityForm() {
                 size="lg"
                 className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
             >
-                {loading ? 'ARCHIVING_ENTITY...' : 'Authorize_Terminal_Identity'}
+                {loading ? 'Saving…' : 'Continue'}
             </Button>
         </form>
     );

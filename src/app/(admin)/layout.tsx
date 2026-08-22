@@ -1,50 +1,6 @@
-/**
- * FinalFrame — Admin Layout
- * Reference: MASTER_PRD.md § 5.III — Admin Panel
- * Reference: BUILD_PHASES.md — Phase 0 requires admin route protection
- * 
- * Admin-only layout. Access enforced in middleware.
- */
-
 import Link from 'next/link';
-import styles from './layout.module.css';
+import { Activity, AlertTriangle, ArrowLeft, Film, LayoutDashboard, Users } from 'lucide-react';
 
-export default function AdminLayout({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
-    return (
-        <div className={styles.layout}>
-            <aside className={styles.sidebar}>
-                <div className={styles.logo}>
-                    <Link href="/admin" className={styles.logoLink}>
-                        <span className={styles.logoIcon}>F</span>
-                        <span className={styles.logoText}>Admin</span>
-                    </Link>
-                </div>
-                <nav className={styles.nav}>
-                    <Link href="/admin" className={styles.navItem}>
-                        Dashboard
-                    </Link>
-                    <Link href="/admin/users" className={styles.navItem}>
-                        Users
-                    </Link>
-                    <Link href="/admin/moderation" className={styles.navItem}>
-                        Moderation
-                    </Link>
-                </nav>
-                <div className={styles.footer}>
-                    <Link href="/dashboard" className={styles.backLink}>
-                        ← Back to App
-                    </Link>
-                </div>
-            </aside>
-            <main className={styles.main}>
-                <div className={styles.container}>
-                    {children}
-                </div>
-            </main>
-        </div>
-    );
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return <div className="min-h-dvh bg-[#211b18] text-[#f7f0e3]"><aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-[#6c5746]/45 bg-[#2a231f] p-5 lg:flex"><Link href="/admin" className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#f6dfb1] text-[#211b18]"><Film className="size-4" /></span><span className="ff-display text-lg font-semibold">FinalFrame</span><span className="rounded-md bg-[#f1c7b7] px-2 py-1 text-[10px] font-semibold text-[#211b18]">Admin</span></Link><nav className="mt-10 space-y-1" aria-label="Admin navigation">{[[LayoutDashboard,'Overview','/admin'],[Users,'People','/admin/users'],[AlertTriangle,'Moderation','/admin/moderation']].map(([Icon, label, href]) => <Link key={href as string} href={href as string} className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm text-[#cbb7a4] transition hover:bg-[#342b25] hover:text-[#f7f0e3]"><Icon className="size-4" />{label as string}</Link>)}</nav><div className="mt-auto"><Link href="/dashboard" className="flex min-h-11 items-center gap-2 text-sm text-[#cbb7a4] transition hover:text-[#f7f0e3]"><ArrowLeft className="size-4" /> Back to app</Link></div></aside><main className="min-h-dvh lg:ml-64"><div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">{children}</div></main></div>;
 }

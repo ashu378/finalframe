@@ -43,7 +43,7 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
             {/* Header / Upload */}
             <div className="p-8 border-b border-zinc-800 space-y-8">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-metadata font-black uppercase tracking-[0.25em] text-zinc-500">Material_Manifest</h2>
+                    <h2 className="text-metadata font-black uppercase tracking-[0.25em] text-zinc-500">Media layers</h2>
                     <Button variant="ghost" size="sm" className="h-10 w-10 p-0 rounded-sm border border-zinc-800 hover:bg-zinc-900" onClick={loadAssets}>
                         <RefreshCw className={`w-4 h-4 text-zinc-600 ${loading ? 'animate-spin text-primary' : ''}`} />
                     </Button>
@@ -71,7 +71,7 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
                     <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary/50" /></div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-12 px-6">
-                        <p className="text-[10px] font-black text-zinc-700 uppercase tracking-[0.2em] italic">No Material Detected</p>
+                        <p className="text-[10px] font-black text-zinc-700 uppercase tracking-[0.2em] italic">No media yet</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-2 gap-4">
@@ -104,7 +104,7 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
 
             <div className="p-6 border-t border-zinc-800 bg-zinc-900/50">
                 <p className="text-metadata font-black text-zinc-600 text-center uppercase tracking-[0.2em] italic">
-                    DRAG_TO_MANIFEST_Registry
+                        Drag media into your video
                 </p>
             </div>
         </div>

@@ -1,74 +1,13 @@
-/**
- * FinalFrame — Case Studies
- * "Results worth auditing."
- */
-
+import Image from 'next/image';
 import Link from 'next/link';
-import { Play, MoveRight } from 'lucide-react';
-
-export const metadata = {
-    title: 'Case Studies // FinalFrame',
-    description: 'See how creators are using FinalFrame to produce Hollywood-standard content.',
-};
+import { ArrowRight, Check, Play } from 'lucide-react';
+import { showcaseItems } from '@/content/marketing';
+import { SectionHeading } from '@/components/finalframe/section-heading';
 
 export default function CaseStudiesPage() {
-    return (
-        <div className="min-h-screen pt-40 pb-20 bg-background text-foreground selection:bg-primary/20">
-            <div className="container px-6 mx-auto">
-
-                {/* Header Section */}
-                <header className="max-w-4xl mb-32">
-                    <h1 className="text-[14px] font-black uppercase tracking-[0.4em] mb-6 text-primary italic">Success_Manifests</h1>
-                    <h2 className="text-5xl md:text-7xl font-black tracking-tight leading-[0.9] text-white uppercase italic">
-                        Proof_of<br />
-                        <span className="text-zinc-500">Production.</span>
-                    </h2>
-                    <p className="text-[12px] font-bold text-zinc-400 uppercase tracking-[0.2em] mt-12 max-w-xl leading-relaxed">
-                        Explore how industry-leading agencies and studios are utilizing deterministic
-                        AI to streamline high-fidelity video throughput.
-                    </p>
-                </header>
-
-                {/* Placeholder Content */}
-                <section className="border-t border-white/5 pt-32 mb-32">
-                    <div className="bg-black/40 border border-white/5 p-20 rounded-sm text-center relative overflow-hidden group">
-                        {/* Visual Grid Detail */}
-                        <div className="absolute inset-0 opacity-[0.02] pointer-events-none">
-                            <div className="w-full h-full bg-[linear-gradient(to_right,#ffffff1a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff1a_1px,transparent_1px)] bg-[size:40px_40px]" />
-                        </div>
-
-                        <div className="relative z-10 space-y-8">
-                            <div className="w-20 h-20 bg-zinc-900 border border-white/5 rounded-sm flex items-center justify-center mx-auto mb-12">
-                                <Play className="w-6 h-6 text-zinc-500 animate-pulse" />
-                            </div>
-                            <h3 className="text-2xl font-black text-white uppercase italic tracking-tight">Signal_Pending</h3>
-                            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.3em] max-w-xs mx-auto leading-loose">
-                                We are currently declassifying success stories from our private beta partners.
-                            </p>
-                            <div className="pt-12">
-                                <Link
-                                    href="/signup"
-                                    className="text-[9px] font-black text-primary uppercase tracking-[0.4em] hover:text-white transition-colors underline underline-offset-8"
-                                >
-                                    Join_Beta_for_Access
-                                </Link>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Final CTA */}
-                <section className="text-center pt-32 border-t border-white/5">
-                    <Link
-                        href="/signup"
-                        className="group h-16 px-12 inline-flex items-center justify-center rounded-sm bg-primary text-black font-black text-[11px] uppercase tracking-[0.3em] shadow-2xl hover:bg-white transition-all active:scale-[0.98]"
-                    >
-                        Initialize_Studio_Access
-                        <MoveRight className="w-4 h-4 ml-4 opacity-50 group-hover:translate-x-2 transition-transform" />
-                    </Link>
-                </section>
-
-            </div>
-        </div>
-    );
+  return <div>
+    <section className="ff-section bg-[#f4ead6]"><div className="ff-container"><p className="ff-eyebrow">What you can make</p><h1 className="public-heading-hero mt-5 max-w-4xl">The format depends on the job. The starting point can still be simple.</h1><p className="public-body-text mt-7 max-w-2xl">These are examples of the kinds of stories FinalFrame is designed to help you make. They are creative directions, not invented customer results.</p></div></section>
+    <section className="ff-section"><div className="ff-container space-y-8">{showcaseItems.map((item, index) => <article key={item.title} className={`grid gap-8 rounded-[1.5rem] bg-secondary/50 p-5 sm:p-8 lg:grid-cols-2 lg:items-center ${index % 2 ? 'lg:[&>div:first-child]:order-2' : ''}`}><div className="relative aspect-[1.35] overflow-hidden rounded-[1.1rem] bg-[#2c2520]"><Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 50vw" /><span className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-[#211b18]/80 px-3 py-2 text-xs font-semibold text-[#f7f0e3]"><Play className="size-3.5" /> Preview direction</span></div><div className="p-2 sm:p-5"><p className="ff-eyebrow">{item.type}</p><h2 className="ff-display mt-4 text-4xl font-semibold">{item.title}</h2><p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">{item.description} Start with the purpose, then let the plan find the right rhythm, voice, visuals, and format.</p><div className="mt-7 space-y-3 text-sm text-muted-foreground"><p className="flex items-center gap-3"><Check className="size-4 text-[hsl(var(--success))]" /> Choose a platform and length</p><p className="flex items-center gap-3"><Check className="size-4 text-[hsl(var(--success))]" /> Add your own references when you have them</p><p className="flex items-center gap-3"><Check className="size-4 text-[hsl(var(--success))]" /> Review the plan before making it</p></div></div></article>)}</div></section>
+    <section className="ff-section border-y border-border/70 bg-[#211b18] text-[#f7f0e3]"><div className="ff-container grid gap-12 lg:grid-cols-[.9fr_1.1fr] lg:items-center"><SectionHeading eyebrow="Your story can be specific" title="Local, funny, useful, emotional, direct." description="FinalFrame is not trying to make every video look the same. It gives you a clear path to the video that fits your audience." /><Link href="/signup" className="ff-button-primary lg:justify-self-end">Make your own example <ArrowRight className="size-4" /></Link></div></section>
+  </div>;
 }

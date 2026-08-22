@@ -8,9 +8,9 @@ export default async function GoalPage() {
     return (
         <div className="space-y-8">
             <div className="space-y-2 text-center">
-                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">What is your primary goal?</h1>
+                <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">What should your video help you do?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                    We will optimize the AI engine to prioritize this outcome for your projects.
+                    Choose the outcome that matters most for the work you make.
                 </p>
             </div>
 

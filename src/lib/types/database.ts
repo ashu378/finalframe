@@ -329,3 +329,121 @@ export interface ReviewComment {
     is_resolved: boolean;
     created_at: string;
 }
+
+/**
+ * Production foundation types. These are additive to the legacy project,
+ * scene, and render types above so existing screens remain compatible while
+ * the new shot-based pipeline is introduced.
+ */
+export type ProductionWorkflow = 'SOCIAL' | 'COMEDY' | 'BUSINESS_AD' | 'FOOTAGE_TRANSFORM';
+export type ProductionInputMode = 'IDEA' | 'SCRIPT' | 'VOICE' | 'IMAGES' | 'FOOTAGE' | 'AD';
+export type OutputPreset = 'SOCIAL_VERTICAL' | 'SQUARE' | 'LANDSCAPE';
+export type QualityTier = 'ECONOMY' | 'STANDARD' | 'PREMIUM';
+export type ProductionStatus = 'DRAFT' | 'PLANNED' | 'APPROVED' | 'GENERATING' | 'REVIEW' | 'EXPORTED' | 'FAILED';
+export type GenerationJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface CreateIntent {
+    projectId?: string;
+    mode: ProductionInputMode;
+    prompt?: string;
+    script?: string;
+    inputAssetIds: string[];
+    requestedDurationSeconds: number;
+    outputPreset: OutputPreset;
+    language?: string;
+    workflow?: ProductionWorkflow;
+    qualityTier?: QualityTier;
+}
+
+export interface DirectorShotPlan {
+    title: string;
+    prompt: string;
+    durationSeconds: number;
+    orderIndex: number;
+    requiredAssetIds: string[];
+    camera?: CameraConfig;
+}
+
+export interface DirectorScenePlan {
+    title: string;
+    purpose: string;
+    visualDirection: string;
+    orderIndex: number;
+    shots: DirectorShotPlan[];
+}
+
+export interface DirectorPlan {
+    summary: string;
+    assumptions: string[];
+    questions: string[];
+    workflow: ProductionWorkflow;
+    bible: {
+        projectContext: Record<string, unknown>;
+        characters: Record<string, unknown>[];
+        locations: Record<string, unknown>[];
+        products: Record<string, unknown>[];
+        style: Record<string, unknown>;
+        story: Record<string, unknown>;
+    };
+    sequences: Array<{
+        title: string;
+        description: string;
+        orderIndex: number;
+        scenes: DirectorScenePlan[];
+    }>;
+    operations: Array<{
+        operation: string;
+        quantity: number;
+        unit: string;
+        qualityTier: QualityTier;
+    }>;
+}
+
+export interface CostLineItem {
+    operation: string;
+    quantity: number;
+    unit: string;
+    credits: number;
+    description: string;
+}
+
+export interface CostEstimate {
+    totalCredits: number;
+    qualityTier: QualityTier;
+    lineItems: CostLineItem[];
+    estimateVersion: string;
+    expiresAt: string;
+}
+
+export interface Production {
+    id: string;
+    project_id: string;
+    workflow: ProductionWorkflow;
+    requested_duration_seconds: number;
+    language: string;
+    output_preset: OutputPreset;
+    current_version_id: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface GenerationJob {
+    id: string;
+    production_id: string;
+    shot_id: string | null;
+    shot_version_id: string | null;
+    modality: string;
+    provider: string;
+    model: string | null;
+    provider_job_id: string | null;
+    status: GenerationJobStatus;
+    progress: number;
+    estimated_cost: number;
+    actual_cost: number | null;
+    idempotency_key: string;
+    error_code: string | null;
+    error_message: string | null;
+    created_at: string;
+    started_at: string | null;
+    completed_at: string | null;
+}

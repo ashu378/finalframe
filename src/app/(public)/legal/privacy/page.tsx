@@ -14,14 +14,11 @@ export default function PrivacyPage() {
             <p className="text-metadata text-center mb-16">Last updated: January 1, 2026</p>
 
             <div className="legal-text-block">
-                <p>
-                    This Privacy Policy describes how FinalFrame collects, uses, and shares your information.
-                    Our commitment to your data security is as mechanical and precise as our render engine.
-                </p>
-
-                <div className="p-8 rounded-sm bg-primary/5 border border-primary/20 text-center text-xs text-primary font-black uppercase tracking-widest italic">
-                    [Comprehensive Legal Manifest is currently in synthesis. Full documentation available upon private beta authorization.]
-                </div>
+                <p>This Privacy Policy describes how FinalFrame collects, uses, and shares information when you use the service.</p>
+                <h2>What we collect</h2>
+                <p>We may collect account details, project instructions, uploaded media, usage records, and support messages needed to provide and improve the service.</p>
+                <h2>Owner review</h2>
+                <p>This page is the current product-facing summary. The complete policy and any jurisdiction-specific language must be reviewed and approved by the FinalFrame owner or legal adviser before publication.</p>
             </div>
         </div>
     );

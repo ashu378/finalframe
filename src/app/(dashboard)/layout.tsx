@@ -9,6 +9,8 @@
 import { Sidebar } from '@/components/layout/sidebar';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { Film, FolderOpen, Plus, Settings } from 'lucide-react';
 
 export default async function DashboardLayout({
     children,
@@ -47,20 +49,20 @@ export default async function DashboardLayout({
     // and admin pages check their own permissions.
 
     return (
-        <div className="min-h-screen bg-background text-foreground flex font-sans selection:bg-primary/20 selection:text-primary overflow-hidden relative">
-            {/* ... rest of the JSX ... */}
-            <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
-                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-violet-600/10 blur-[150px] rounded-full mix-blend-screen animate-pulse duration-[5000ms]" />
-                <div className="absolute top-[20%] right-[-10%] w-[40%] h-[40%] bg-fuchsia-600/10 blur-[150px] rounded-full mix-blend-screen" />
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-150 contrast-150" />
-            </div>
-
-            <div className="relative z-20 h-screen sticky top-0">
+        <div className="min-h-dvh bg-background text-foreground font-sans">
+            <div className="relative z-20 hidden md:block">
                 <Sidebar />
             </div>
-
-            <main className="flex-1 relative z-10 overflow-y-auto h-screen">
-                <div className="container mx-auto px-6 py-8 max-w-7xl">
+            <nav className="sticky top-0 z-20 flex items-center justify-between border-b border-border/70 bg-background/95 px-4 py-3 backdrop-blur-xl md:hidden" aria-label="Mobile studio navigation">
+                <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold"><span className="grid size-8 place-items-center rounded-lg bg-foreground text-background"><Film className="size-4" /></span>FinalFrame</Link>
+                <div className="flex items-center gap-1">
+                    <Link href="/dashboard/create" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground" aria-label="Create a video"><Plus className="size-4" /></Link>
+                    <Link href="/dashboard/assets" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Media library"><FolderOpen className="size-4" /></Link>
+                    <Link href="/dashboard/settings" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Settings and credits"><Settings className="size-4" /></Link>
+                </div>
+            </nav>
+            <main id="main-content" className="min-h-dvh md:ml-64">
+                <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-8 sm:py-8">
                     {children}
                 </div>
             </main>

@@ -262,19 +262,11 @@ export async function saveAssets(formData: FormData) {
     const logo_name = formData.get('logo_name') as string;
     const visualsJson = formData.get('visuals') as string;
 
-    if (!logo_path) {
-        return { error: 'Please upload a logo' };
-    }
-
     let visuals: { path: string, name: string }[] = [];
     try {
         visuals = JSON.parse(visualsJson || '[]');
     } catch (e) {
         return { error: 'Invalid visuals data' };
-    }
-
-    if (visuals.length < 1) {
-        return { error: 'Please upload at least one product visual' };
     }
 
     const { data: studio } = await supabase
@@ -287,31 +279,21 @@ export async function saveAssets(formData: FormData) {
         return { error: 'Studio not found' };
     }
 
-    // Insert Logo
-    const { error: logoError } = await supabase
-        .from('studio_assets')
-        .insert({
+    if (logo_path) {
+        const { error: logoError } = await supabase.from('studio_assets').insert({
             studio_id: studio.id,
             asset_type: 'logo',
             file_path: logo_path,
             file_name: logo_name || 'logo',
         });
+        if (logoError) return { error: logoError.message };
+    }
 
-    if (logoError) return { error: logoError.message };
-
-    // Insert Visuals
-    const visualsData = visuals.map(v => ({
-        studio_id: studio.id,
-        asset_type: 'product_visual',
-        file_path: v.path,
-        file_name: v.name || 'visual',
-    }));
-
-    const { error: visualsError } = await supabase
-        .from('studio_assets')
-        .insert(visualsData);
-
-    if (visualsError) return { error: visualsError.message };
+    if (visuals.length > 0) {
+        const visualsData = visuals.map(v => ({ studio_id: studio.id, asset_type: 'product_visual', file_path: v.path, file_name: v.name || 'visual' }));
+        const { error: visualsError } = await supabase.from('studio_assets').insert(visualsData);
+        if (visualsError) return { error: visualsError.message };
+    }
 
     redirect('/onboarding/message');
 }

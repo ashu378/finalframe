@@ -1,51 +1,37 @@
 import Link from 'next/link';
+import { ArrowUpRight, Film } from 'lucide-react';
 import { getCurrentUser } from '@/lib/guards';
-import { Sparkles } from 'lucide-react';
 
 export async function Header() {
-    const user = await getCurrentUser();
+  const user = await getCurrentUser();
 
-    return (
-        <header className="fixed top-16 left-0 right-0 z-50 flex justify-center items-center gap-4 px-4 pointer-events-none">
-            {/* Main Navigation Pill */}
-            <div className="pointer-events-auto h-12 pl-1.5 pr-1.5 rounded-sm border border-white/10 bg-black/60 backdrop-blur-md shadow-lg shadow-black/40 flex items-center">
+  return (
+    <header className="sticky top-0 z-50 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+      <div className="ff-container flex min-h-16 items-center justify-between gap-6">
+        <Link href="/" className="group flex items-center gap-3" aria-label="FinalFrame home">
+          <span className="grid size-10 place-items-center rounded-[.8rem] bg-foreground text-background shadow-[0_10px_22px_-14px_hsl(24_22%_16%)] transition group-hover:-rotate-3">
+            <Film className="size-5" strokeWidth={2.2} />
+          </span>
+          <span className="ff-display text-xl font-semibold tracking-[-.04em]">FinalFrame</span>
+        </Link>
 
-                {/* Logo Icon Only */}
-                <Link href="/" className="flex items-center justify-center w-8 h-8 bg-primary rounded-sm shadow-lg shadow-primary/20 hover:scale-105 transition-transform mr-1">
-                    <div className="w-2.5 h-2.5 bg-black rounded-sm" />
-                </Link>
+        <nav className="hidden items-center gap-1 md:flex" aria-label="Main navigation">
+          <Link href="/methodology" className="ff-button-quiet min-h-10 px-4">How it works</Link>
+          <Link href="/case-studies" className="ff-button-quiet min-h-10 px-4">What you can make</Link>
+          <Link href="/pricing" className="ff-button-quiet min-h-10 px-4">Credits</Link>
+          <Link href="/about" className="ff-button-quiet min-h-10 px-4">About</Link>
+        </nav>
 
-                {/* Navigation Links */}
-                <nav className="hidden md:flex items-center gap-1">
-                    <Link href="/pricing" className="text-[11px] uppercase tracking-widest font-bold text-white px-4 py-2 rounded-sm bg-zinc-800 transition-all hover:bg-zinc-700">
-                        Pricing
-                    </Link>
-                    <Link href="/methodology" className="text-[11px] uppercase tracking-widest font-bold text-zinc-500 hover:text-white transition-colors px-4 py-2 rounded-sm hover:bg-white/5">
-                        Process
-                    </Link>
-                    <Link href="/about" className="text-[11px] uppercase tracking-widest font-bold text-zinc-500 hover:text-white transition-colors px-4 py-2 rounded-sm hover:bg-white/5">
-                        About Us
-                    </Link>
-                </nav>
-            </div>
-
-            <div className="pointer-events-auto hidden md:block">
-                {user ? (
-                    <Link
-                        href="/dashboard"
-                        className="h-10 px-8 flex items-center justify-center rounded-sm bg-primary text-black text-[11px] uppercase tracking-widest font-black shadow-xl transition-all hover:bg-white hover:-translate-y-0.5"
-                    >
-                        Enter Studio
-                    </Link>
-                ) : (
-                    <Link
-                        href="/login"
-                        className="h-10 px-6 flex items-center justify-center rounded-sm bg-zinc-900 border border-white/10 text-white text-[11px] uppercase tracking-widest font-bold transition-all hover:bg-zinc-800"
-                    >
-                        Login
-                    </Link>
-                )}
-            </div>
-        </header>
-    );
+        <div className="flex items-center gap-2">
+          <Link href={user ? '/dashboard' : '/login'} className="hidden min-h-11 items-center rounded-full px-4 text-sm font-semibold text-muted-foreground transition hover:text-foreground sm:inline-flex">
+            {user ? 'Open studio' : 'Log in'}
+          </Link>
+          <Link href={user ? '/dashboard/create' : '/signup'} className="ff-button-primary min-h-11 px-4 sm:px-5">
+            <span className="hidden sm:inline">Make a video</span><span className="sm:hidden">Start</span>
+            <ArrowUpRight className="size-4" />
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
 }

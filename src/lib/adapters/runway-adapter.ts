@@ -26,7 +26,7 @@ function getModelForProfile(profile: ExecutionProfile): string {
         'FAST_SOCIAL': 'veo3.1_fast',
         'COMMERCIAL': 'gen4_turbo',
         'CINEMATIC': 'veo3.1',
-        'PREMIUM': 'gen4_aleph',
+        'PREMIUM': 'gen4.5',
     };
     return modelMap[profile];
 }
@@ -145,6 +145,7 @@ async function submitTask(
         cameraConfig?: CameraConfig;
         motionConfig?: MotionConfig;
         duration?: 4 | 6 | 8;
+        ratio?: '16:9' | '9:16' | '1:1';
         sceneAssets?: SceneAsset[];
         studioAssets?: StudioAsset[];
     }
@@ -173,7 +174,7 @@ async function submitTask(
         model: model,
         promptText: enhancedPrompt.substring(0, 1000),
         duration: options.duration || 6,
-        ratio: '1280:720', // Supported by Image, Text, and Video endpoints
+        ratio: options.ratio === '9:16' ? '768:1280' : options.ratio === '1:1' ? '960:960' : '1280:720',
     };
 
     if (strategy === 'IMAGE_TO_VIDEO' && options.initImageUrl) {
@@ -260,6 +261,7 @@ export async function generateVideo(
         cameraConfig?: CameraConfig;
         motionConfig?: MotionConfig;
         duration?: 4 | 6 | 8;
+        ratio?: '16:9' | '9:16' | '1:1';
         sceneAssets?: SceneAsset[];
         studioAssets?: StudioAsset[];
     }

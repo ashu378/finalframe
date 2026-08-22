@@ -82,7 +82,7 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
                 </div>
                 <div className="text-center">
                     <p className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.3em] mb-2 italic">Awaiting Master Output</p>
-                    <p className="text-[9px] font-black text-zinc-700 uppercase tracking-widest">Signal propagation in progress...</p>
+                    <p className="text-[9px] font-black text-zinc-700 uppercase tracking-widest">Preparing your preview...</p>
                 </div>
             </div>
         );

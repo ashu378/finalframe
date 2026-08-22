@@ -1,65 +1,9 @@
-/**
- * FinalFrame — Reset Password Page
- */
-
 import Link from 'next/link';
+import { ArrowRight, KeyRound } from 'lucide-react';
 import { updatePassword } from '@/lib/auth/actions';
 
-export const metadata = {
-    title: 'Reset Password',
-    description: 'Set a new password for your FinalFrame account',
-};
+export const metadata = { title: 'Choose a new password', description: 'Set a new FinalFrame password.' };
 
 export default function ResetPasswordPage() {
-    return (
-        <div className="w-full max-w-sm mx-auto glass-card p-8 rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-500">
-            <div className="text-center mb-8">
-                <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60 mb-2">Set new password</h1>
-                <p className="text-sm text-slate-400">Choose a strong password for your account</p>
-            </div>
-
-            <form action={updatePassword} className="space-y-6">
-                <div className="space-y-2">
-                    <label htmlFor="password" className="text-sm font-medium text-slate-200 block ml-1">
-                        New Password
-                    </label>
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        required
-                        placeholder="••••••••"
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all hover:bg-white/10"
-                    />
-                </div>
-
-                <div className="space-y-2">
-                    <label htmlFor="confirmPassword" className="text-sm font-medium text-slate-200 block ml-1">
-                        Confirm Password
-                    </label>
-                    <input
-                        type="password"
-                        id="confirmPassword"
-                        name="confirmPassword"
-                        required
-                        placeholder="••••••••"
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all hover:bg-white/10"
-                    />
-                </div>
-
-                <button
-                    type="submit"
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-semibold shadow-[0_0_20px_-5px_rgba(124,58,237,0.5)] hover:shadow-[0_0_25px_-5px_rgba(124,58,237,0.7)] hover:brightness-110 active:scale-[0.98] transition-all"
-                >
-                    Update Password
-                </button>
-            </form>
-
-            <p className="mt-8 text-center text-sm text-slate-400">
-                <Link href="/login" className="text-violet-400 hover:text-violet-300 font-medium transition-colors hover:underline">
-                    Back to Login
-                </Link>
-            </p>
-        </div>
-    );
+  return <div className="ff-card p-7 sm:p-9"><span className="grid size-11 place-items-center rounded-2xl bg-[#f6dfb1]"><KeyRound className="size-5" /></span><h1 className="ff-display mt-7 text-3xl font-semibold">Choose a new password.</h1><p className="mt-3 leading-6 text-muted-foreground">A fresh password will keep your studio safe.</p><form action={updatePassword} className="mt-8 space-y-5"><div><label htmlFor="password" className="text-sm font-semibold">New password</label><input type="password" id="password" name="password" required minLength={8} placeholder="At least 8 characters" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><div><label htmlFor="confirmPassword" className="text-sm font-semibold">Confirm new password</label><input type="password" id="confirmPassword" name="confirmPassword" required minLength={8} placeholder="Type it again" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><button type="submit" className="ff-button-primary w-full">Update password <ArrowRight className="size-4" /></button></form><p className="mt-8 text-sm text-muted-foreground">Need to start over? <Link href="/login" className="ff-link">Back to log in</Link></p></div>;
 }

@@ -8,9 +8,9 @@ export default async function CreativeDNAPage() {
     return (
         <div className="space-y-6">
             <div className="space-y-2 text-center">
-                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">Define your Creative DNA</h1>
+                <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">What should it feel like?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                    These settings will govern every video we generate, ensuring brand consistency.
+                    Pick a starting style. You can change it whenever a project calls for something different.
                 </p>
             </div>
 

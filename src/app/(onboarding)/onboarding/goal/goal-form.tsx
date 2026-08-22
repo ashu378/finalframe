@@ -62,7 +62,7 @@ export function GoalForm() {
                 size="lg"
                 className="primary-cta w-full"
             >
-                {loading ? 'DEFINING OBJECTIVE...' : 'Authorize Studio Goal'}
+                {loading ? 'Saving…' : 'Continue'}
             </Button>
         </form>
     );

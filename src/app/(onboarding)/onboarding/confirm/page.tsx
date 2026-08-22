@@ -8,9 +8,9 @@ export default async function ConfirmPage() {
     return (
         <div className="space-y-6 text-center">
             <div className="space-y-2">
-                <h1 className="text-2xl font-bold tracking-tight">You are ready.</h1>
+                <h1 className="ff-display text-3xl font-semibold tracking-tight">Your studio is ready.</h1>
                 <p className="text-muted-foreground">
-                    Your studio is set up and calibrated.
+                    You can start with an idea now, and add the finer details when you need them.
                 </p>
             </div>
 

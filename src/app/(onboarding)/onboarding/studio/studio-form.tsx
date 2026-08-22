@@ -38,7 +38,7 @@ export function StudioForm() {
                     htmlFor="studioName"
                     className="text-metadata text-zinc-500 ml-1"
                 >
-                    Studio Designator (Identity)
+                    Studio name
                 </label>
                 <input
                     type="text"
@@ -46,12 +46,12 @@ export function StudioForm() {
                     name="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="ALPHA_CREATIVE_SYSTEMS"
+                    placeholder="e.g. Maya’s kitchen studio"
                     required
                     className="w-full h-16 rounded-sm border border-zinc-800 bg-zinc-950 px-6 text-sm font-black uppercase tracking-widest text-white placeholder:text-zinc-800 transition-all focus:border-primary/50 outline-none shadow-2xl"
                 />
                 <p className="text-metadata text-zinc-600 pl-1 italic normal-case">
-                    Permanent designator for production manifests and verified billing.
+                    You can change this later. It is just the name you will see in your studio.
                 </p>
             </div>
 
@@ -68,7 +68,7 @@ export function StudioForm() {
                 size="lg"
                 className="primary-cta w-full"
             >
-                {loading ? 'ESTABLISHING MANIFEST...' : 'Authorize Studio Creation'}
+                {loading ? 'Creating your studio…' : 'Continue'}
             </Button>
         </form>
     );

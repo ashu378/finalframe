@@ -5,6 +5,7 @@
  */
 
 import Link from 'next/link';
+import { ArrowLeft, Sparkles } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/guards';
 import { getProjectById } from '@/lib/project/actions';
@@ -33,6 +34,7 @@ export default async function BlueprintPage({ params }: BlueprintPageProps) {
 
     if (!result.success || !result.project) {
         notFound();
+        return null;
     }
 
     const project = result.project;
@@ -42,14 +44,12 @@ export default async function BlueprintPage({ params }: BlueprintPageProps) {
     const assets = await getAssets(project.studio_id);
 
     return (
-        <div className="max-w-[1200px] px-8 py-10">
+        <div className="mx-auto max-w-6xl py-5 sm:py-8">
             <header className="mb-10 space-y-4">
-                <Link href={`/dashboard/projects/${id}`} className="text-metadata font-black text-zinc-500 uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2">
-                    <span className="text-lg">←</span> Back to Project
+                <Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground">
+                    <ArrowLeft className="size-4" /> Back to project
                 </Link>
-                <h1 className="text-xl font-black text-zinc-50 uppercase tracking-[0.3em] italic border-b border-primary/20 pb-4 inline-block">
-                    {project.name}
-                </h1>
+                <div className="rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10"><p className="ff-eyebrow flex items-center gap-2"><Sparkles className="size-4 text-accent" /> Your video plan</p><h1 className="public-heading-section mt-4">{project.name}</h1><p className="public-body-text mt-4 max-w-2xl">Read the story, adjust the parts that matter, and approve the plan when it feels right.</p></div>
             </header>
 
             <BlueprintEditor project={project} scenes={scenes} studioAssets={assets} />

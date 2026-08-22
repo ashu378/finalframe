@@ -1,311 +1,51 @@
-/**
- * FinalFrame — Home Page
- * "Show certainty. Remove mystery."
- */
-
+import Image from 'next/image';
 import Link from 'next/link';
-import { MoveRight, ChevronRight, Lock, Layout, PencilLine, Share2, PlayCircle, ShieldCheck, Zap, Fingerprint, Users, Cpu, Database, Eye, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-
-export const metadata = {
-    title: 'FinalFrame — Studio-Grade Creative Production',
-    description: 'A studio-grade creative operating system for Hollywood-standard content.',
-};
+import { ArrowRight, Check, CirclePlay, FileText, ImagePlus, Mic2, MousePointer2, Sparkles, Upload, WandSparkles } from 'lucide-react';
+import { SectionHeading } from '@/components/finalframe/section-heading';
+import { StoryboardDemo } from '@/components/finalframe/storyboard-demo';
+import { creationModes } from '@/lib/ui/labels';
+import { faqs, showcaseItems } from '@/content/marketing';
 
 export default function HomePage() {
-    return (
-        <div className="min-h-screen flex flex-col bg-background text-foreground overflow-x-hidden font-sans selection:bg-primary/20">
-
-
-            {/* --- Hero Section --- */}
-            <section className="relative pt-40 pb-20 md:pt-64 md:pb-40 overflow-hidden flex flex-col items-center justify-center min-h-[80vh]">
-                <div className="container relative z-10 flex flex-col items-center text-center px-4 md:px-0">
-                    {/* H1 Title - Precise & Intentional */}
-                    <h1 className="public-heading-hero mb-8 max-w-5xl animate-in fade-in slide-in-from-bottom-8 duration-1000">
-                        Direct your video.<br />
-                        <span className="text-zinc-400 font-medium font-sans">Don’t prompt it.</span>
-                    </h1>
-
-                    {/* Subtitle - Certainty */}
-                    <p className="public-body-text max-w-2xl mb-12 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-200">
-                        FinalFrame turns intent, assets, and structure into<br className="hidden md:block" />
-                        production-ready video. Built for agencies and founders.
-                    </p>
-
-                    {/* CTA - Private Beta */}
-                    <div className="flex flex-col sm:flex-row gap-5 items-center animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300">
-                        <Link
-                            href="/beta-request"
-                            className="primary-cta group"
-                        >
-                            Request Private Beta
-                            <MoveRight className="w-4 h-4 ml-3 opacity-50 group-hover:translate-x-1 transition-transform" />
-                        </Link>
-                    </div>
-                </div>
-
-                {/* Subtle Background Detail */}
-                <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/5 blur-[120px] rounded-full" />
-                </div>
-            </section>
-
-            {/* --- Proof Section: The Pipeline --- */}
-            <section className="public-page-section relative bg-zinc-900/10">
-                <div className="container px-4 md:px-0">
-                    <div className="max-w-3xl mb-24">
-                        <h2 className="text-caption text-primary mb-6">Proof of Workflow</h2>
-                        <h3 className="public-heading-section">
-                            A pipeline built for<br /> deterministic results.
-                        </h3>
-                    </div>
-
-                    <div className="relative">
-                        {/* Connecting Line (Desktop) */}
-                        <div className="hidden md:block absolute top-[60px] left-0 right-0 h-[1px] bg-zinc-800/50 z-0" />
-
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-8 relative z-10">
-                            {[
-                                { step: '01', label: 'Project', icon: Layout, desc: 'Define intent & lock brand energy.' },
-                                { step: '02', label: 'Blueprint', icon: PencilLine, desc: 'Generate unique, structured scenes.' },
-                                { step: '03', label: 'Scene', icon: Zap, desc: 'Bind assets & cinematic constraints.' },
-                                { step: '04', label: 'Render', icon: PlayCircle, desc: 'Execute production with certainty.' },
-                                { step: '05', label: 'Export', icon: Share2, desc: 'Final delivery in studio quality.' },
-                            ].map((item, idx) => (
-                                <div key={idx} className="group relative">
-                                    <div className="w-12 h-12 rounded-sm bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-8 group-hover:border-primary/50 transition-colors shadow-xl">
-                                        <item.icon className="w-5 h-5 text-zinc-400 group-hover:text-primary transition-colors" />
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-mono text-xs text-zinc-500">{item.step}</span>
-                                            <span className="font-bold text-sm tracking-tight text-zinc-200">{item.label}</span>
-                                        </div>
-                                        <p className="text-xs text-zinc-400 leading-relaxed max-w-[180px]">
-                                            {item.desc}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Differentiation: Determinism --- */}
-            <section className="public-page-section">
-                <div className="container px-4 md:px-0">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-24 items-center">
-                        <div className="space-y-12">
-                            <div className="space-y-8">
-                                <h2 className="public-heading-section">Show certainty.<br />Remove mystery.</h2>
-                                <p className="public-body-text">
-                                    Generative AI is often a slot machine. FinalFrame is a studio.
-                                    By locking assets to specific scenes and defining non-negotiable intent,
-                                    we remove the guesswork from high-stakes production.
-                                </p>
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-10">
-                                {[
-                                    { title: 'Asset-Locked Scenes', desc: 'Your brand assets don’t drift. They are anchored to specific narrative beats.' },
-                                    { title: 'Explainable AI', desc: 'Every scene has a goal, an emotional intent, and a cinematic configuration.' },
-                                    { title: 'No Hallucinations', desc: 'Technical constraints overrule creative randomness. Every frame serves the script.' }
-                                ].map((feature, idx) => (
-                                    <div key={idx} className="flex gap-6 items-start">
-                                        <div className="mt-2 w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                                        <div className="space-y-2">
-                                            <h4 className="font-bold text-base text-zinc-100 uppercase tracking-wider">{feature.title}</h4>
-                                            <p className="text-sm text-zinc-400 leading-relaxed">{feature.desc}</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Visual Proof: Technical Layout */}
-                        <div className="aspect-square bg-zinc-900 border border-zinc-800 rounded-sm p-10 flex items-center justify-center relative overflow-hidden group shadow-2xl">
-                            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] pointer-events-none" />
-                            <div className="w-full h-full border border-zinc-800 rounded-sm p-6 font-mono text-[11px] text-zinc-500 overflow-hidden select-none">
-                                <div className="flex justify-between border-b border-zinc-800 pb-4 mb-6">
-                                    <span className="font-bold tracking-widest text-[10px] uppercase">SCENE_01_PROD_LOG</span>
-                                    <span className="text-primary font-black uppercase tracking-[0.2em] italic">LOCKED</span>
-                                </div>
-                                <div className="space-y-2">
-                                    <div>{'>'} INJECTING_STATIC_ASSET: logo_v2.png</div>
-                                    <div>{'>'} APPLYING_LENS: 35mm_cinematic</div>
-                                    <div>{'>'} SYNCING_MOTION_DELTA: 0.82</div>
-                                    <div className="pt-8 text-zinc-400 font-sans text-sm italic font-light leading-relaxed">"The truth is in the structure."</div>
-                                </div>
-                            </div>
-                            {/* Subtle Gradient Shadow */}
-                            <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-zinc-950 to-transparent" />
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- The Studio Engines --- */}
-            <section className="public-page-section bg-zinc-900/5 overflow-hidden">
-                <div className="container px-4 md:px-0">
-                    <div className="max-w-3xl mb-24">
-                        <h2 className="text-caption text-primary mb-6">Studio Toolset</h2>
-                        <h3 className="public-heading-section">
-                            Five professional engines.<br />One unified workflow.
-                        </h3>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1px bg-zinc-800 border border-zinc-800 rounded-sm overflow-hidden">
-                        {[
-                            { title: 'Blueprint Director', icon: Cpu, desc: 'AI-driven narrative structure that generates scene hierarchies based on studio intent.' },
-                            { title: 'Signal Validator', icon: Eye, desc: 'Real-time health monitoring of scene continuity, asset binding, and cinematic constraints.' },
-                            { title: 'Material Registry', icon: Database, desc: 'Centralized brand vault for 1:1 asset injection. No style drift, no compromise.' },
-                            { title: 'Magic Oven', icon: Zap, desc: 'High-fidelity synthesis engine optimized for studio-grade export and temporal consistency.' },
-                            { title: 'Collaborative Sync', icon: Users, desc: 'Multi-seat studio environments with permission models and unified production logs.' },
-                            { title: 'Studio Templates', icon: Layout, desc: 'Access legendary cinematic structures. Inject pre-baked creative DNA directly into your timeline.' },
-                        ].map((engine, idx) => (
-                            <div key={idx} className="bg-zinc-950 p-10 group hover:bg-zinc-900/40 transition-all duration-500">
-                                <engine.icon className="w-8 h-8 text-zinc-600 group-hover:text-primary transition-colors mb-8" />
-                                <h4 className="text-base font-black text-zinc-100 uppercase tracking-widest mb-4 italic">{engine.title}</h4>
-                                <p className="text-sm text-zinc-500 leading-relaxed group-hover:text-zinc-400 transition-colors">
-                                    {engine.desc}
-                                </p>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Your Creative DNA --- */}
-            <section className="public-page-section border-t border-white/5">
-                <div className="container px-4 md:px-0">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-24 items-center">
-                        <div className="relative order-2 md:order-1">
-                            <div className="absolute -inset-20 bg-primary/5 blur-[100px] rounded-full" />
-                            <div className="relative aspect-video bg-zinc-950 border border-zinc-800 rounded-sm p-1 flex items-center justify-center overflow-hidden">
-                                <div className="absolute inset-0 flex items-center justify-center opacity-10">
-                                    <Fingerprint className="w-64 h-64 text-primary" />
-                                </div>
-                                <div className="z-10 text-center space-y-4">
-                                    <div className="text-[10px] font-mono text-primary uppercase tracking-[0.4em] animate-pulse">DNA_SYNC_IN_PROGRESS</div>
-                                    <div className="w-48 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                                        <div className="w-2/3 h-full bg-primary" />
-                                    </div>
-                                    <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Aesthetic Calibration: 84.2%</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-8 order-1 md:order-2">
-                            <h2 className="text-caption text-primary">Identity Presence</h2>
-                            <h3 className="public-heading-section">Your creative DNA.<br />Unlocked.</h3>
-                            <p className="public-body-text">
-                                FinalFrame doesn't just generate generic video. It learns your studio's specific
-                                aesthetic preferences, brand constraints, and narrative voice to ensure
-                                every output feels native to your identity.
-                            </p>
-                            <div className="flex gap-4">
-                                <Link href="/beta-request" className="text-xs font-black uppercase tracking-widest text-primary hover:text-white transition-colors flex items-center gap-2">
-                                    Learn about DNA Tuning <ChevronRight className="w-3 h-3" />
-                                </Link>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Cinematic Gallery --- */}
-            <section className="public-page-section bg-black overflow-hidden relative">
-                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
-                <div className="container px-4 md:px-0">
-                    <div className="text-center mb-24 space-y-4">
-                        <h2 className="text-caption text-zinc-500">Recent Productions</h2>
-                        <h3 className="public-heading-section text-4xl md:text-5xl">Studio Results.</h3>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                        <div className="space-y-10 mt-20">
-                            <div className="group relative overflow-hidden rounded-sm border border-zinc-800 bg-zinc-900 shadow-2xl">
-                                <img src="/images/gallery/frame_1.png" alt="Sci-Fi Laboratory" className="w-full aspect-video object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" />
-                                <div className="absolute bottom-0 inset-x-0 p-6 bg-black/60 backdrop-blur-md border-t border-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">SCENE_01: NEON_SYNTHESIS</p>
-                                </div>
-                            </div>
-                            <div className="group relative overflow-hidden rounded-sm border border-zinc-800 bg-zinc-900 shadow-2xl">
-                                <img src="/images/gallery/frame_2.png" alt="Luxury Car Commercial" className="w-full aspect-video object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" />
-                                <div className="absolute bottom-0 inset-x-0 p-6 bg-black/60 backdrop-blur-md border-t border-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">SCENE_04: GOLDEN_PASS</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="space-y-10">
-                            <div className="group relative overflow-hidden rounded-sm border border-zinc-800 bg-zinc-900 shadow-2xl">
-                                <img src="/images/gallery/frame_3.png" alt="Fashion Documentary" className="w-full aspect-video object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" />
-                                <div className="absolute bottom-0 inset-x-0 p-6 bg-black/60 backdrop-blur-md border-t border-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">UNIT_02: BRUTALIST_WALK</p>
-                                </div>
-                            </div>
-                            <div className="group relative overflow-hidden rounded-sm border border-zinc-800 bg-zinc-900 shadow-2xl">
-                                <img src="/images/gallery/frame_4.png" alt="Designer Workspace" className="w-full aspect-video object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" />
-                                <div className="absolute bottom-0 inset-x-0 p-6 bg-black/60 backdrop-blur-md border-t border-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">SCENE_07: CREATIVE_SYNC</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Built for Commercial Use --- */}
-            <section className="public-page-section bg-zinc-950 relative overflow-hidden">
-                <div className="absolute -right-64 -top-64 w-[600px] h-[600px] bg-primary/5 blur-[120px] rounded-full" />
-                <div className="container px-4 md:px-0 relative z-10">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-16">
-                        <div className="space-y-6">
-                            <ShieldCheck className="w-12 h-12 text-primary" />
-                            <h4 className="text-lg font-black uppercase tracking-[0.2em] italic text-zinc-50">Studio-Grade Security</h4>
-                            <p className="text-sm text-zinc-500 leading-loose">
-                                Your data and assets are isolated at the infrastructure level.
-                                We never use studio production data to train our global models.
-                            </p>
-                        </div>
-                        <div className="space-y-6">
-                            <Lock className="w-12 h-12 text-primary" />
-                            <h4 className="text-lg font-black uppercase tracking-[0.2em] italic text-zinc-50">Rights Cleared</h4>
-                            <p className="text-sm text-zinc-500 leading-loose">
-                                Architected for full legal and intellectual property compliance.
-                                Own every pixel, every structure, and every sequence you direct.
-                            </p>
-                        </div>
-                        <div className="space-y-6">
-                            <Sparkles className="w-12 h-12 text-primary" />
-                            <h4 className="text-lg font-black uppercase tracking-[0.2em] italic text-zinc-50">Private Beta</h4>
-                            <p className="text-sm text-zinc-500 leading-loose">
-                                We are currently selecting a limited number of studios for high-touch
-                                support and custom creative DNA calibration.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Final CTA --- */}
-            <section className="py-40 text-center relative overflow-hidden bg-zinc-900/20">
-                <div className="container relative z-10 px-4">
-                    <h2 className="public-heading-hero mb-12">
-                        Ready to direct?<br />
-                        <span className="text-zinc-500 font-sans italic">Join the waiting list.</span>
-                    </h2>
-                    <Link
-                        href="/beta-request"
-                        className="primary-cta group"
-                    >
-                        Request Private Beta
-                        <MoveRight className="w-4 h-4 ml-3 opacity-50 group-hover:translate-x-1 transition-transform" />
-                    </Link>
-                </div>
-            </section>
-
+  return (
+    <div className="overflow-hidden">
+      <section className="ff-noise relative border-b border-border/70 bg-[#f4ead6]">
+        <div className="ff-container grid min-h-[680px] items-center gap-16 py-20 lg:grid-cols-[.92fr_1.08fr] lg:py-28">
+          <div className="relative z-10">
+            <p className="ff-eyebrow flex items-center gap-2"><span className="size-2 rounded-full bg-accent" /> A creative studio for real people</p>
+            <h1 className="public-heading-hero mt-6 max-w-3xl">Make the video in your head.</h1>
+            <p className="public-body-text mt-7 max-w-xl">Describe an idea, paste a script, upload footage, or bring your own media. FinalFrame helps you shape it, see the cost, and make a video you are proud to share.</p>
+            <div className="mt-9 flex flex-wrap items-center gap-3"><Link href="/signup" className="ff-button-primary min-h-12 px-6">Start with an idea <ArrowRight className="size-4" /></Link><Link href="/methodology" className="ff-button-quiet min-h-12 px-5"><CirclePlay className="size-4" /> See how it works</Link></div>
+            <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm text-muted-foreground"><span className="flex items-center gap-2"><Check className="size-4 text-[hsl(var(--success))]" /> See your plan first</span><span className="flex items-center gap-2"><Check className="size-4 text-[hsl(var(--success))]" /> Approve the cost</span><span className="flex items-center gap-2"><Check className="size-4 text-[hsl(var(--success))]" /> Keep your media yours</span></div>
+          </div>
+          <div className="relative lg:-mr-24">
+            <div className="absolute -left-8 -top-8 size-28 rounded-full bg-[#e8b37d]/45 blur-2xl" />
+            <div className="relative rounded-[2rem] border border-[#6a4a32]/15 bg-[#e1caa5]/60 p-3 shadow-[0_35px_80px_-45px_rgba(54,35,20,.75)] sm:p-5">
+              <div className="grid grid-cols-[.27fr_1fr] gap-3 rounded-[1.4rem] bg-[#211b18] p-3 text-[#f7f0e3] sm:p-4">
+                <div className="space-y-2 rounded-[.9rem] bg-[#2a231f] p-2"><div className="mb-4 flex items-center gap-2 px-1"><span className="size-5 rounded-md bg-[#f6dfb1]" /><span className="text-[9px] font-semibold">FinalFrame</span></div>{['Idea', 'Plan', 'Make', 'Review'].map((step, index) => <div key={step} className={`rounded-lg px-2 py-3 text-[10px] ${index === 1 ? 'bg-[#f6dfb1] font-semibold text-[#211b18]' : 'text-[#ad9d8e]'}`}>{step}</div>)}</div>
+                <div className="space-y-3"><div className="flex items-center justify-between rounded-xl bg-[#342b25] px-4 py-3"><span className="text-xs font-semibold">A short story about a brave pigeon</span><span className="rounded-full bg-[#f6dfb1] px-2 py-1 text-[9px] font-semibold text-[#211b18]">Plan ready</span></div><div className="relative aspect-[1.25] overflow-hidden rounded-xl bg-[#b9734b]"><Image src="/images/gallery/frame_1.png" alt="Storyboard preview of a colorful cartoon scene" fill className="object-cover" sizes="(max-width: 1024px) 90vw, 45vw" /><div className="absolute bottom-3 left-3 rounded-lg bg-[#211b18]/80 px-3 py-2 text-[10px]">Part 2 · The surprise</div></div><div className="grid grid-cols-3 gap-2">{['/images/gallery/frame_2.png','/images/gallery/frame_3.png','/images/gallery/frame_4.png'].map((src, index) => <div key={src} className={`relative aspect-video overflow-hidden rounded-lg ${index === 0 ? 'ring-2 ring-[#f6dfb1]' : ''}`}><Image src={src} alt={`Storyboard thumbnail ${index + 1}`} fill className="object-cover" sizes="15vw" /></div>)}</div></div>
+              </div>
+            </div>
+            <div className="absolute -bottom-5 -left-5 flex items-center gap-3 rounded-2xl border border-border/70 bg-card px-4 py-3 shadow-xl sm:-left-12"><span className="grid size-9 place-items-center rounded-xl bg-[#c8ddd5] text-[hsl(var(--success))]"><WandSparkles className="size-4" /></span><div><p className="text-xs font-semibold text-foreground">Made for first-timers</p><p className="mt-1 text-[11px] text-muted-foreground">No prompt lessons required</p></div></div>
+          </div>
         </div>
-    );
+      </section>
+
+      <section className="ff-section"><div className="ff-container"><SectionHeading eyebrow="A better starting point" title="You do not need a production team to make something good." description="FinalFrame gives your rough idea a little structure, keeps the important details consistent, and lets you stay in control without making you learn a new language." /><div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-4">{creationModes.map((mode, index) => <Link href="/signup" key={mode.id} className={`group ${mode.accent} rounded-[1.25rem] p-6 transition duration-300 hover:-translate-y-2 ${index === 1 ? 'lg:mt-10' : index === 3 ? 'lg:mt-5' : ''}`}><span className="grid size-10 place-items-center rounded-xl bg-white/55 text-foreground">{index === 0 ? <Sparkles className="size-5" /> : index === 1 ? <FileText className="size-5" /> : index === 2 ? <Upload className="size-5" /> : <ImagePlus className="size-5" />}</span><h3 className="ff-display mt-12 text-2xl font-semibold">{mode.title}</h3><p className="mt-3 text-sm leading-6 text-foreground/70">{mode.description}</p><span className="mt-7 inline-flex items-center gap-2 text-sm font-semibold">Try it <ArrowRight className="size-4 transition group-hover:translate-x-1" /></span></Link>)}</div></div></section>
+
+      <section className="ff-section border-y border-border/70 bg-secondary/30"><div className="ff-container"><SectionHeading eyebrow="See the difference" title="Your idea becomes a story you can actually follow." description="FinalFrame shows the plan before it spends credits. You can change the parts that matter, then let the studio handle the heavy lifting." /><div className="mt-14"><StoryboardDemo /></div></div></section>
+
+      <section className="ff-section"><div className="ff-container"><div className="grid gap-12 lg:grid-cols-[.75fr_1.25fr] lg:items-end"><SectionHeading eyebrow="What people make" title="From a funny cartoon to the video on your homepage." description="Start with the job you need the video to do. The creative style can come after." /><Link href="/case-studies" className="ff-link inline-flex items-center gap-2 text-sm lg:justify-self-end">Explore examples <ArrowRight className="size-4" /></Link></div><div className="mt-14 grid gap-5 md:grid-cols-2">{showcaseItems.map((item, index) => <article key={item.title} className={`group relative overflow-hidden rounded-[1.25rem] bg-[#2c2520] ${index === 0 ? 'md:row-span-2' : ''}`}><div className={`${index === 0 ? 'aspect-[.88]' : 'aspect-[1.45]'} relative`}><Image src={item.image} alt={item.title} fill className="object-cover transition duration-500 group-hover:scale-105" sizes="(max-width: 768px) 100vw, 50vw" /><div className="absolute inset-0 bg-gradient-to-t from-[#211b18] via-transparent to-transparent" /><div className="absolute bottom-0 left-0 right-0 p-6 text-[#f7f0e3]"><p className="text-xs font-semibold uppercase tracking-[.14em] text-[#f6dfb1]">{item.type}</p><h3 className="ff-display mt-2 text-2xl font-semibold">{item.title}</h3><p className="mt-2 max-w-sm text-sm leading-6 text-[#e0d4c7]/80">{item.description}</p></div></div></article>)}</div></div></section>
+
+      <section className="ff-section bg-[#211b18] text-[#f7f0e3]"><div className="ff-container"><div className="grid gap-14 lg:grid-cols-[.8fr_1.2fr] lg:items-start"><div><p className="ff-eyebrow text-[#cbb7a4]">How it works</p><h2 className="public-heading-section mt-4 text-[#f7f0e3]">A calm path from thought to finished video.</h2><p className="mt-6 max-w-lg text-base leading-7 text-[#cbb7a4]">You always know what is happening, what it costs, and what you can change.</p></div><div className="grid gap-3 sm:grid-cols-2">{[['01','Describe it','Tell us what you want to say or show.'],['02','Build the plan','Review the story, style, and media.'],['03','Approve the cost','See the estimate before generation.'],['04','Get the video','Review, revise, and download.']].map(([number, title, description]) => <div key={number} className="rounded-[1.1rem] border border-[#6c5746]/45 bg-[#2a231f] p-6"><span className="text-sm font-semibold text-[#f6dfb1]">{number}</span><h3 className="ff-display mt-12 text-2xl font-semibold">{title}</h3><p className="mt-3 text-sm leading-6 text-[#cbb7a4]">{description}</p></div>)}</div></div></div></section>
+
+      <section className="ff-section"><div className="ff-container grid gap-12 lg:grid-cols-[1fr_.8fr] lg:items-center"><div><SectionHeading eyebrow="Bring your own world" title="Your logo, your footage, your characters, your voice." description="Upload what makes the video yours. FinalFrame keeps those references attached to the project so the story stays consistent from the first part to the last." /><div className="mt-9 grid gap-3 sm:grid-cols-2">{[['Your media stays attached','Keep products, characters, and references easy to find.'],['Continuity you can see','Know which image, voice, or clip belongs to each part.'],['Room to change your mind','Make a new version without losing the old one.'],['A review link for others','Share a clean version and collect notes.']].map(([title, description]) => <div key={title} className="ff-soft-card p-5"><h3 className="font-semibold">{title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p></div>)}</div></div><div className="relative rounded-[2rem] bg-[#f1c7b7] p-6 sm:p-10"><div className="rounded-[1.25rem] bg-card p-5 shadow-xl sm:p-7"><div className="flex items-center justify-between border-b border-border/70 pb-5"><div><p className="ff-eyebrow">Your media</p><p className="mt-2 text-lg font-semibold">A little library for your story</p></div><ImagePlus className="size-5 text-accent" /></div><div className="mt-5 grid grid-cols-3 gap-3">{['/images/templates/brand_story.png','/images/templates/avatar_keynote.png','/images/templates/viral_ad.png'].map((src) => <div key={src} className="relative aspect-square overflow-hidden rounded-xl"><Image src={src} alt="FinalFrame media reference" fill className="object-cover" sizes="20vw" /></div>)}</div><div className="mt-5 flex items-center gap-3 rounded-xl bg-secondary p-3 text-sm"><span className="grid size-8 place-items-center rounded-lg bg-[#c8ddd5]"><Mic2 className="size-4 text-[hsl(var(--success))]" /></span>Voice and audio can join the story too</div></div></div></div></section>
+
+      <section className="ff-section border-y border-border/70 bg-[#f4ead6]"><div className="ff-container grid gap-12 lg:grid-cols-[.85fr_1.15fr]"><SectionHeading eyebrow="Clear before costly" title="No surprise button at the end." description="Before FinalFrame starts an expensive step, you see the plan, the estimated credits, and the parts that will be created. Approve when it looks right." /><div className="ff-card p-6 sm:p-8"><div className="flex items-center justify-between border-b border-border/70 pb-5"><div><p className="ff-eyebrow">Estimated video</p><p className="mt-2 text-2xl font-semibold">30-second product story</p></div><span className="rounded-full bg-[#f6dfb1] px-3 py-2 text-sm font-semibold">Ready to review</span></div><div className="mt-6 space-y-4">{[['4','Story parts'],['8','Video takes'],['1','Review version']].map(([value, label]) => <div key={label} className="flex items-center justify-between rounded-xl bg-secondary/60 px-4 py-4"><span className="text-sm text-muted-foreground">{label}</span><span className="font-semibold">{value}</span></div>)}</div><div className="mt-6 flex items-end justify-between border-t border-border/70 pt-6"><div><p className="text-sm text-muted-foreground">Estimated cost</p><p className="mt-1 text-3xl font-semibold">48 credits</p></div><MousePointer2 className="size-5 text-accent" /></div></div></div></section>
+
+      <section className="ff-section"><div className="ff-container"><SectionHeading eyebrow="Questions, answered" title="You can start without knowing the right words." align="center" /><div className="mx-auto mt-12 max-w-3xl divide-y divide-border/70 border-y border-border/70">{faqs.map((faq) => <details key={faq.question} className="group py-6"><summary className="flex cursor-pointer list-none items-center justify-between gap-6 text-left font-semibold"><span>{faq.question}</span><span className="text-2xl font-normal text-muted-foreground transition group-open:rotate-45">+</span></summary><p className="mt-4 max-w-2xl leading-7 text-muted-foreground">{faq.answer}</p></details>)}</div></div></section>
+
+      <section className="ff-container pb-24 sm:pb-32"><div className="relative overflow-hidden rounded-[2rem] bg-foreground px-7 py-16 text-background sm:px-14 sm:py-20"><div className="absolute -right-12 -top-24 size-72 rounded-full bg-primary/25 blur-3xl" /><div className="relative max-w-2xl"><p className="ff-eyebrow text-background/60">Your next video can start here</p><h2 className="ff-display mt-4 text-4xl font-semibold leading-tight sm:text-6xl">Bring the rough idea. Leave with something real.</h2><p className="mt-6 max-w-xl text-base leading-7 text-background/70">Start free, explore the plan, and decide what is worth making.</p><Link href="/signup" className="ff-button-primary mt-8 min-h-12 bg-primary px-6">Make a video <ArrowRight className="size-4" /></Link></div></div></section>
+    </div>
+  );
 }

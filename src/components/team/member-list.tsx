@@ -78,11 +78,11 @@ export function MemberList({ members, currentUserId }: MemberListProps) {
             <Table className="relative overflow-visible">
                 <TableHeader className="bg-zinc-950 border-b border-zinc-800">
                     <TableRow className="border-zinc-800 hover:bg-transparent">
-                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Personnel_ID</TableHead>
-                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Authorization_Level</TableHead>
-                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Registry_Status</TableHead>
-                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Commission_Date</TableHead>
-                        <TableHead className="text-right text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Control_Ops</TableHead>
+                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Person</TableHead>
+                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Role</TableHead>
+                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Status</TableHead>
+                        <TableHead className="text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Added</TableHead>
+                        <TableHead className="text-right text-metadata font-black uppercase tracking-[0.3em] text-zinc-500 italic">Actions</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -101,7 +101,7 @@ export function MemberList({ members, currentUserId }: MemberListProps) {
                                             {member.full_name?.toUpperCase()}
                                             {member.user_id === currentUserId && (
                                                 <Badge variant="secondary" className="text-metadata font-black py-1 px-3 bg-primary !text-black border-transparent rounded-sm italic shadow-2xl shadow-primary/20">
-                                                    PRIMARY_ADMIN
+                                                    You
                                                 </Badge>
                                             )}
                                         </div>
@@ -117,9 +117,9 @@ export function MemberList({ members, currentUserId }: MemberListProps) {
                             </TableCell>
                             <TableCell>
                                 {member.status === 'pending' ? (
-                                    <Badge className="bg-zinc-950 text-zinc-500 border border-zinc-800 text-metadata uppercase font-black tracking-[0.3em] rounded-sm px-3 py-1 animate-pulse italic">Pending_Signal</Badge>
+                                    <Badge className="bg-zinc-950 text-zinc-500 border border-zinc-800 text-metadata uppercase font-black tracking-[0.3em] rounded-sm px-3 py-1 animate-pulse italic">Invitation pending</Badge>
                                 ) : (
-                                    <Badge className="bg-emerald-500/5 text-emerald-500 border border-emerald-500/20 text-metadata uppercase font-black tracking-[0.3em] rounded-sm px-3 py-1 italic shadow-2xl shadow-emerald-500/10">Active_Status</Badge>
+                                    <Badge className="bg-emerald-500/5 text-emerald-500 border border-emerald-500/20 text-metadata uppercase font-black tracking-[0.3em] rounded-sm px-3 py-1 italic shadow-2xl shadow-emerald-500/10">Active</Badge>
                                 )}
                             </TableCell>
                             <TableCell className="text-zinc-500 text-metadata font-black uppercase tracking-widest italic leading-relaxed">

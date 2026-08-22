@@ -13,8 +13,8 @@ export default async function TemplatesPage() {
 
     if (!studioRes.success || !studioRes.studioId) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <p className="text-zinc-500">No Studio found. Please onboard first.</p>
+            <div className="ff-card flex min-h-[400px] flex-col items-center justify-center p-8 text-center">
+                <p className="text-muted-foreground">We could not find your studio yet. Please finish onboarding first.</p>
             </div>
         );
     }
@@ -25,27 +25,26 @@ export default async function TemplatesPage() {
     const templates = await getTemplates(studioId);
 
     return (
-        <div className="flex-1 flex flex-col h-full bg-background text-white p-10 space-y-12 animate-in fade-in duration-700">
+        <div className="flex-1 flex flex-col space-y-10 animate-in fade-in duration-700">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-8 pb-4 border-b border-white/5">
+            <div className="flex flex-col gap-8 rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10 md:flex-row md:items-end md:justify-between">
                 <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                        <div className="p-3 rounded-sm bg-primary/10 border border-primary/20 text-primary shadow-2xl shadow-primary/5 italic">
+                        <div className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1] text-foreground">
                             <LayoutTemplate className="w-7 h-7" />
                         </div>
                         <div className="space-y-1">
-                            <h1 className="text-4xl font-black tracking-tighter text-white uppercase italic flex items-center gap-4">
-                                Blueprint_Gallery
-                                <div className="p-1.5 rounded-sm bg-white/5 border border-white/10 group cursor-help transition-colors hover:border-primary/30">
-                                    <Sparkles className="w-3.5 h-3.5 text-zinc-400 group-hover:text-primary transition-colors" />
+                            <h1 className="ff-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+                                Start from a template
+                                <div className="grid size-8 place-items-center rounded-xl bg-background/60">
+                                    <Sparkles className="size-4 text-accent" />
                                 </div>
                             </h1>
-                            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.4em]">Official_Studio_Presets</p>
+                            <p className="mt-2 text-sm text-muted-foreground">A useful first shape for the video you want to make.</p>
                         </div>
                     </div>
-                    <p className="text-[12px] font-bold text-zinc-500 uppercase tracking-[0.2em] max-w-xl leading-loose">
-                        Select high-performance blueprints to initialize production.
-                        Pre-configured vectors for mission-critical creative DNA.
+                    <p className="max-w-xl text-base leading-7 text-muted-foreground">
+                        Choose a starting point for a social ad, product story, UGC review, cartoon, or launch video. You can change every part later.
                     </p>
                 </div>
             </div>

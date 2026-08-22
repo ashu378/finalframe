@@ -32,7 +32,7 @@ export function ConfirmForm() {
 
             <form action={handleSubmit}>
                 <Button type="submit" disabled={loading} size="lg" className="w-full">
-                    {loading ? 'Entering...' : 'Enter Studio'}
+                    {loading ? 'Opening your studio…' : 'Start making videos'}
                 </Button>
             </form>
         </div>

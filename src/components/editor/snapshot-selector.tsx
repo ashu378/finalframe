@@ -32,7 +32,7 @@ export function SnapshotSelector({ snapshots, currentSnapshotId }: SnapshotSelec
         <div className="border-t border-zinc-800 p-6 bg-zinc-950">
             <h3 className="text-metadata font-black text-zinc-500 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                 <History className="w-4 h-4 text-primary italic" />
-                Snapshot Timeline Registry
+                Version history
             </h3>
             <div className="space-y-1 max-h-40 overflow-y-auto">
                 {snapshots.map(snapshot => (

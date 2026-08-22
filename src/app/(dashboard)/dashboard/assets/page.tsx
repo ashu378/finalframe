@@ -17,8 +17,8 @@ export default async function AssetsPage() {
 
     if (!studioRes.success || !studioRes.studioId) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[400px]">
-                <p className="text-zinc-500">No Studio found. Please onboard first.</p>
+            <div className="ff-card flex min-h-[400px] flex-col items-center justify-center p-8 text-center">
+                <p className="text-muted-foreground">We could not find your studio yet. Please finish onboarding first.</p>
             </div>
         );
     }
@@ -29,32 +29,31 @@ export default async function AssetsPage() {
     const assets = await getAssets(studioId, '/');
 
     return (
-        <div className="flex-1 flex flex-col h-full bg-zinc-950 text-zinc-50 p-10 space-y-12 animate-in fade-in duration-700">
+        <div className="flex flex-1 flex-col space-y-10 animate-in fade-in duration-700">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-8 pb-10 border-b border-zinc-800">
+            <div className="flex flex-col justify-between gap-8 rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10 md:flex-row md:items-end">
                 <div className="space-y-6">
-                    <div className="flex items-center gap-6">
-                        <div className="p-4 rounded-sm bg-primary/10 border border-primary/20 text-primary shadow-2xl shadow-primary/5 italic">
+                    <div className="flex items-center gap-4">
+                        <div className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1] text-foreground">
                             <FolderOpen className="w-8 h-8" />
                         </div>
                         <div className="space-y-1">
-                            <h1 className="text-4xl font-black tracking-tighter text-zinc-50 uppercase italic flex items-center gap-5">
-                                Material_Registry
-                                <div className="p-2 rounded-sm bg-zinc-900 border border-zinc-800 group cursor-help transition-colors hover:border-primary/30 shadow-inner">
-                                    <Sparkles className="w-4 h-4 text-zinc-600 group-hover:text-primary transition-colors" />
+                            <h1 className="ff-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+                                Media library
+                                <div className="grid size-8 place-items-center rounded-xl bg-background/60">
+                                    <Sparkles className="size-4 text-accent" />
                                 </div>
                             </h1>
-                            <p className="text-metadata font-black text-zinc-500 uppercase tracking-[0.4em]">Index_Staging_Deployment</p>
+                            <p className="mt-2 text-sm text-muted-foreground">Keep the pieces that make your videos feel like yours.</p>
                         </div>
                     </div>
-                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-[0.2em] max-w-xl leading-relaxed italic">
-                        Manage studio creative materials. Synthesize high-fidelity assets for
-                        deterministic production throughput.
+                    <p className="max-w-xl text-base leading-7 text-muted-foreground">
+                        Upload logos, products, characters, voice notes, footage, backgrounds, and references. Add them to a project whenever they are useful.
                     </p>
                 </div>
 
                 <div className="shrink-0 pt-4">
-                    <div className="[&_button]:h-14 [&_button]:px-10 [&_button]:font-black [&_button]:uppercase [&_button]:tracking-widest">
+                    <div className="[&_button]:min-h-11 [&_button]:rounded-full [&_button]:px-5 [&_button]:font-semibold">
                         <UploadButton studioId={studioId} />
                     </div>
                 </div>

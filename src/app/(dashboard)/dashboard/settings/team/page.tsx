@@ -50,7 +50,7 @@ export default async function TeamSettingsPage() {
     const members = result.success && result.data ? result.data : [];
 
     return (
-        <div className="max-w-6xl mx-auto py-16 px-10 space-y-12 animate-in fade-in duration-500">
+        <div className="team-theme mx-auto max-w-6xl space-y-10 py-5 sm:py-8 animate-in fade-in duration-500">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-10 pb-10 border-b border-zinc-800">
                 <div className="space-y-4">
@@ -62,12 +62,11 @@ export default async function TeamSettingsPage() {
                             <div className="p-3 rounded-sm bg-primary/10 text-primary border border-primary/20 shadow-2xl shadow-primary/5">
                                 <Users className="w-6 h-6" />
                             </div>
-                            Personnel_Provisioning_Matrix
+                            People who can help make videos
                         </h2>
                     </div>
                     <p className="text-metadata font-bold text-zinc-500 max-w-xl uppercase tracking-[0.2em] leading-relaxed pl-20 italic">
-                        Manage studio personnel and their authorization levels.
-                        Master_Admins have full control over billing and team parameters.
+                        Invite teammates, reviewers, or clients and choose what they can access.
                     </p>
                 </div>
 

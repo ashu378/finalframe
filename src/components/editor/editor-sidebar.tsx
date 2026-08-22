@@ -39,7 +39,7 @@ export function EditorSidebar({
                     )}
                 >
                     <MessageSquare className="w-4 h-4" />
-                    Signal intelligence
+                    Video details
                 </button>
                 <button
                     onClick={() => setActiveTab('assets')}
@@ -51,7 +51,7 @@ export function EditorSidebar({
                     )}
                 >
                     <FolderOpen className="w-4 h-4" />
-                    Material registry
+                    Media library
                 </button>
             </div>
 

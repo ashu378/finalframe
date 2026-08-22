@@ -7,8 +7,6 @@
  * Middleware redirects all traffic here during maintenance.
  */
 
-import styles from './page.module.css';
-
 export const metadata = {
     title: 'Maintenance',
     description: 'FinalFrame is currently undergoing maintenance',
@@ -16,18 +14,18 @@ export const metadata = {
 
 export default function MaintenancePage() {
     return (
-        <div className={styles.container}>
-            <div className={styles.content}>
-                <div className={styles.icon}>🔧</div>
-                <h1 className={styles.title}>Under Maintenance</h1>
-                <p className={styles.description}>
+        <main className="ff-noise grid min-h-dvh place-items-center bg-background px-5 py-16">
+            <div className="ff-card w-full max-w-xl p-8 text-center sm:p-12">
+                <p className="ff-eyebrow">A short pause</p>
+                <h1 className="ff-display mt-5 text-4xl font-semibold">We are tuning the studio.</h1>
+                <p className="mx-auto mt-4 max-w-md leading-7 text-muted-foreground">
                     FinalFrame is currently undergoing scheduled maintenance.
                     We&apos;ll be back shortly.
                 </p>
-                <p className={styles.eta}>
-                    Expected duration: Less than 1 hour
+                <p className="mt-6 text-sm font-semibold text-accent">
+                    Please check back soon.
                 </p>
             </div>
-        </div>
+        </main>
     );
 }

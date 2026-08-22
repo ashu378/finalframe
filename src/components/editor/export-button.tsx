@@ -25,7 +25,7 @@ export function ExportButton({ projectId, snapshotId, snapshotLabel, disabled }:
                 className="gap-3 h-10 px-6 text-metadata font-black uppercase tracking-widest shadow-[0_0_15px_rgba(251,191,36,0.2)]"
             >
                 <Download className="w-4 h-4" />
-                Export Manifest
+                Export video
             </Button>
 
             <ExportModal

@@ -2,143 +2,125 @@
 @tailwind components;
 @tailwind utilities;
 
-/**
- * FinalFrame — Global Styles (Phase 1.5 Design Overhaul)
- * Theme: Studio Dark Mode (Deep Space / Cyberpunk Polish)
- * Format: HSL for Tailwind Opacity Support
- */
-
+/* FinalFrame design system: warm, tactile, creator-first. */
 @layer base {
   :root {
-    /* --- HSL Color Palette (Studio Dark) --- */
-
-    /* Backgrounds: Studio neutral dark (Zinc-950) */
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-
-    /* Card: Zinc-900 for distinct separation */
-    --card: 240 10% 12%;
-    --card-foreground: 0 0% 98%;
-
-    /* Popover */
-    --popover: 240 10% 12%;
-    --popover-foreground: 0 0% 98%;
-
-    /* Primary: Neutral Amber (Intentional / Cinematic) */
-    --primary: 38 92% 50%;
-    --primary-foreground: 0 0% 100%;
-
-    /* Secondary: Muted Zinc */
-    --secondary: 240 5% 15%;
-    --secondary-foreground: 0 0% 98%;
-
-    /* Muted: Deep Graphite */
-    --muted: 240 5% 10%;
-    --muted-foreground: 240 5% 80%;
-
-    /* Accent: Low-weight Graphite */
-    --accent: 240 5% 12%;
-    --accent-foreground: 0 0% 98%;
-
-    /* Borders: Standardizing to Zinc-800 for visibility */
-    --border: 240 5% 15%;
-    --input: 240 5% 15%;
-    --ring: 38 92% 50%;
-
-    --radius: 0.125rem;
-    /* Tighter, more precise corners */
-
-    /* Font Families */
-    --font-sans: var(--font-inter), 'Inter', -apple-system, sans-serif;
-    --font-mono: var(--font-mono), 'JetBrains Mono', monospace;
+    --background: 42 48% 96%;
+    --foreground: 24 22% 16%;
+    --card: 42 45% 99%;
+    --card-foreground: 24 22% 16%;
+    --popover: 42 45% 99%;
+    --popover-foreground: 24 22% 16%;
+    --primary: 38 86% 48%;
+    --primary-foreground: 25 30% 10%;
+    --secondary: 34 28% 91%;
+    --secondary-foreground: 24 22% 20%;
+    --muted: 36 24% 92%;
+    --muted-foreground: 25 12% 43%;
+    --accent: 13 65% 58%;
+    --accent-foreground: 0 0% 100%;
+    --border: 34 22% 83%;
+    --input: 34 22% 83%;
+    --ring: 38 86% 48%;
+    --destructive: 0 65% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 163 38% 35%;
+    --radius: 1rem;
+    --font-sans: "DM Sans", "Avenir Next", Avenir, ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Space Grotesk", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   }
+
+  .dark {
+    --background: 26 20% 12%;
+    --foreground: 38 42% 95%;
+    --card: 27 18% 16%;
+    --card-foreground: 38 42% 95%;
+    --popover: 27 18% 16%;
+    --popover-foreground: 38 42% 95%;
+    --primary: 38 86% 54%;
+    --primary-foreground: 25 30% 10%;
+    --secondary: 27 15% 21%;
+    --secondary-foreground: 38 42% 95%;
+    --muted: 27 15% 18%;
+    --muted-foreground: 33 14% 68%;
+    --accent: 13 61% 60%;
+    --accent-foreground: 0 0% 100%;
+    --border: 30 14% 27%;
+    --input: 30 14% 27%;
+    --ring: 38 86% 54%;
+    --success: 163 38% 52%;
+  }
+
+  * { @apply border-border; }
+  html { scroll-behavior: smooth; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: hsl(var(--primary) / .28); color: hsl(var(--foreground)); }
+  :focus-visible { outline: 3px solid hsl(var(--ring) / .75); outline-offset: 3px; }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary;
-  }
+@layer components {
+  .ff-container { @apply mx-auto w-full max-w-[1240px] px-5 sm:px-8 lg:px-10; }
+  .ff-display { font-family: var(--font-display); letter-spacing: -0.045em; text-wrap: balance; }
+  .ff-eyebrow { @apply text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground; }
+  .ff-copy { @apply max-w-[65ch] text-base leading-7 text-muted-foreground; }
+  .ff-card { @apply rounded-[1.25rem] border border-border/70 bg-card shadow-[0_18px_50px_-32px_hsl(24_30%_22%_/_0.45)]; }
+  .ff-soft-card { @apply rounded-[1.25rem] bg-secondary/70; }
+  .ff-button { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 active:translate-y-px disabled:pointer-events-none disabled:opacity-50; }
+  .ff-button-primary { @apply ff-button bg-primary text-primary-foreground shadow-[0_12px_24px_-14px_hsl(38_86%_48%_/_0.9)] hover:bg-[hsl(var(--primary)/.88)]; }
+  .ff-button-secondary { @apply ff-button bg-foreground text-background hover:bg-foreground/85; }
+  .ff-button-quiet { @apply ff-button bg-transparent text-foreground hover:bg-secondary; }
+  .ff-link { @apply font-semibold text-foreground underline decoration-primary/50 underline-offset-4 transition hover:text-accent; }
+  .ff-section { @apply py-20 sm:py-28 lg:py-36; }
+  .ff-grid-paper { background-image: linear-gradient(hsl(var(--foreground) / .045) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / .045) 1px, transparent 1px); background-size: 32px 32px; }
+  .ff-noise { position: relative; isolation: isolate; }
+  .ff-noise::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .045; background-image: url('/images/noise.svg'); mix-blend-mode: multiply; }
+  .studio-surface { @apply bg-[#211b18] text-[#f7f0e3]; }
+  .studio-card { @apply rounded-[1.1rem] border border-[#6c5746]/45 bg-[#2a231f] text-[#f7f0e3] shadow-[0_18px_50px_-30px_rgba(0,0,0,.85)]; }
 }
 
 @layer utilities {
-  .text-shadow-sm {
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  }
+  .text-metadata { @apply text-xs font-semibold tracking-[0.12em]; }
+  .text-caption { @apply text-[11px] font-semibold tracking-[0.14em]; }
+  .public-page-section { @apply border-t border-border/70 py-20 sm:py-28 lg:py-36; }
+  .public-heading-hero { @apply ff-display text-5xl font-semibold leading-[.96] text-foreground sm:text-7xl lg:text-[6.8rem]; }
+  .public-heading-section { @apply ff-display text-4xl font-semibold leading-[1.02] text-foreground sm:text-6xl; }
+  .public-body-text { @apply text-base leading-7 text-muted-foreground sm:text-lg; }
+  .legal-document-container { @apply ff-container py-24 sm:py-32; }
+  .legal-text-block { @apply max-w-3xl space-y-7 text-base leading-8 text-muted-foreground; }
+  .legal-text-block h2 { @apply ff-display mt-14 text-2xl font-semibold text-foreground; }
+  .legal-text-block p { @apply mb-6; }
+  .pricing-card { @apply ff-card p-7 transition duration-200 hover:-translate-y-1 hover:border-primary/50; }
+  .primary-cta { @apply ff-button-primary; }
+  .onboarding-theme [class*="text-white"], .onboarding-theme [class*="text-zinc-50"], .onboarding-theme [class*="text-zinc-100"], .onboarding-theme [class*="text-zinc-200"], .onboarding-theme [class*="text-slate-200"] { color: hsl(var(--foreground)) !important; }
+  .onboarding-theme [class*="text-zinc-400"], .onboarding-theme [class*="text-zinc-500"], .onboarding-theme [class*="text-zinc-600"], .onboarding-theme [class*="text-slate-400"], .onboarding-theme [class*="text-slate-500"] { color: hsl(var(--muted-foreground)) !important; }
+  .onboarding-theme [class*="bg-black"], .onboarding-theme [class*="bg-zinc-900"], .onboarding-theme [class*="bg-zinc-950"] { background-color: hsl(var(--card)) !important; }
+  .onboarding-theme [class*="border-white"], .onboarding-theme [class*="border-zinc"] { border-color: hsl(var(--border)) !important; }
+  .blueprint-theme [class*="text-zinc-50"], .blueprint-theme [class*="text-zinc-100"], .blueprint-theme [class*="text-zinc-200"], .blueprint-theme [class*="text-white"] { color: hsl(var(--foreground)) !important; }
+  .blueprint-theme [class*="text-zinc-400"], .blueprint-theme [class*="text-zinc-500"], .blueprint-theme [class*="text-zinc-600"], .blueprint-theme [class*="text-slate-400"] { color: hsl(var(--muted-foreground)) !important; }
+  .blueprint-theme [class*="bg-zinc-900"], .blueprint-theme [class*="bg-zinc-950"], .blueprint-theme [class*="bg-black"] { background-color: hsl(var(--card)) !important; }
+  .blueprint-theme [class*="border-zinc"], .blueprint-theme [class*="border-white"] { border-color: hsl(var(--border)) !important; }
+  .project-theme [class*="text-zinc-50"], .project-theme [class*="text-zinc-100"], .project-theme [class*="text-zinc-200"], .project-theme [class*="text-white"] { color: hsl(var(--foreground)) !important; }
+  .project-theme [class*="text-zinc-400"], .project-theme [class*="text-zinc-500"], .project-theme [class*="text-zinc-600"] { color: hsl(var(--muted-foreground)) !important; }
+  .project-theme [class*="bg-zinc-900"], .project-theme [class*="bg-zinc-950"], .project-theme [class*="bg-black"] { background-color: hsl(var(--card)) !important; }
+  .project-theme [class*="border-zinc"], .project-theme [class*="border-white"] { border-color: hsl(var(--border)) !important; }
+  .review-theme [class*="text-white"], .review-theme [class*="text-zinc-50"], .review-theme [class*="text-zinc-100"], .review-theme [class*="text-zinc-200"] { color: hsl(var(--foreground)) !important; }
+  .review-theme [class*="text-zinc-400"], .review-theme [class*="text-zinc-500"], .review-theme [class*="text-zinc-600"] { color: hsl(var(--muted-foreground)) !important; }
+  .review-theme [class*="bg-zinc-900"], .review-theme [class*="bg-zinc-950"], .review-theme [class*="bg-black"] { background-color: hsl(var(--card)) !important; }
+  .review-theme [class*="border-white"], .review-theme [class*="border-zinc"] { border-color: hsl(var(--border)) !important; }
+  .team-theme [class*="text-zinc-50"], .team-theme [class*="text-zinc-100"], .team-theme [class*="text-zinc-200"], .team-theme [class*="text-white"] { color: hsl(var(--foreground)) !important; }
+  .team-theme [class*="text-zinc-400"], .team-theme [class*="text-zinc-500"], .team-theme [class*="text-zinc-600"] { color: hsl(var(--muted-foreground)) !important; }
+  .team-theme [class*="bg-zinc-900"], .team-theme [class*="bg-zinc-950"], .team-theme [class*="bg-black"] { background-color: hsl(var(--card)) !important; }
+  .team-theme [class*="border-zinc"], .team-theme [class*="border-white"] { border-color: hsl(var(--border)) !important; }
+  .animate-progress { animation: progress 2s infinite linear; }
+  @keyframes progress { 0% { transform: translateX(-100%); } 50% { transform: translateX(-20%); } 100% { transform: translateX(100%); } }
+}
 
-  .border-glass {
-    @apply border-white/5 backdrop-blur-sm bg-white/[0.02];
-  }
-
-  /* --- Premium Animations --- */
-  @keyframes progress {
-    0% {
-      transform: translateX(-100%);
-    }
-
-    50% {
-      transform: translateX(-20%);
-    }
-
-    100% {
-      transform: translateX(100%);
-    }
-  }
-
-  .animate-progress {
-    animation: progress 2s infinite linear;
-  }
-
-  /* --- Typography Accessibility Scale --- */
-  .text-metadata {
-    @apply text-xs font-bold uppercase tracking-widest;
-  }
-
-  .text-caption {
-    @apply text-[11px] font-black uppercase tracking-[0.2em];
-  }
-
-  /* --- Public Page Utility Classes --- */
-  .public-page-section {
-    @apply py-24 md:py-40 border-t border-zinc-800;
-  }
-
-  .public-heading-hero {
-    @apply text-5xl md:text-8xl font-bold tracking-tight leading-[0.95] text-zinc-50;
-  }
-
-  .public-heading-section {
-    @apply text-4xl md:text-6xl font-bold tracking-tight leading-[1.1] text-zinc-50;
-  }
-
-  .public-body-text {
-    @apply text-base md:text-lg text-zinc-400 leading-relaxed;
-  }
-
-  .legal-document-container {
-    @apply max-w-3xl mx-auto py-32 px-6;
-  }
-
-  .legal-text-block {
-    @apply text-zinc-300 leading-[1.8] space-y-8 text-base;
-  }
-
-  .legal-text-block h2 {
-    @apply text-2xl font-bold text-zinc-50 mt-16 mb-6 uppercase tracking-wider;
-  }
-
-  .legal-text-block p {
-    @apply mb-6;
-  }
-
-  .pricing-card {
-    @apply bg-zinc-900 border border-zinc-800 rounded-sm p-8 transition-all duration-300 hover:border-primary/30;
-  }
-
-  .primary-cta {
-    @apply bg-primary text-black font-black uppercase tracking-[0.2em] text-[12px] h-14 px-10 rounded-sm hover:bg-white transition-all inline-flex items-center justify-center shadow-2xl shadow-primary/20;
-  }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

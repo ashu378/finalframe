@@ -45,7 +45,7 @@ export function ReviewClient({
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="review-theme grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
             {/* Left Column: Player & Meta */}
             <div className="lg:col-span-8 space-y-6">
                 <div className="relative aspect-video rounded-3xl overflow-hidden bg-zinc-900 border border-white/5 shadow-2xl group">
@@ -58,7 +58,7 @@ export function ReviewClient({
 
                 <div className="glass-card rounded-3xl border border-white/5 p-8 space-y-6">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-bold tracking-tight">Project Overview</h2>
+                        <h2 className="text-xl font-semibold tracking-tight">About this video</h2>
                         <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black text-indigo-400 uppercase tracking-widest">
                             {snapshot?.label || 'Current Snapshot'}
                         </div>
@@ -84,7 +84,7 @@ export function ReviewClient({
                     </div>
 
                     <p className="text-zinc-400 text-sm leading-relaxed">
-                        Welcome to the FinalFrame review portal. Please review the footage above and provide feedback using the time-stamped commenting system on the right.
+                        Watch the video, leave a note at the right moment, and approve it when it is ready. Your feedback stays attached to this version.
                     </p>
                 </div>
             </div>
@@ -99,21 +99,21 @@ export function ReviewClient({
                             className={`flex-1 flex items-center justify-center gap-2 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'comments' ? 'text-white bg-white/5' : 'text-zinc-500 hover:text-zinc-300'}`}
                         >
                             <MessageSquare className="w-3.5 h-3.5" />
-                            Feed
+                            Notes
                         </button>
                         <button
                             onClick={() => setActiveTab('scenes')}
                             className={`flex-1 flex items-center justify-center gap-2 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'scenes' ? 'text-white bg-white/5' : 'text-zinc-500 hover:text-zinc-300'}`}
                         >
                             <ListMusic className="w-3.5 h-3.5" />
-                            Script
+                            Parts
                         </button>
                         <button
                             onClick={() => setActiveTab('layers')}
                             className={`flex-1 flex items-center justify-center gap-2 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'layers' ? 'text-white bg-white/5' : 'text-zinc-500 hover:text-zinc-300'}`}
                         >
                             <Layers className="w-3.5 h-3.5" />
-                            Assets
+                            Media
                         </button>
                     </div>
 
@@ -133,7 +133,7 @@ export function ReviewClient({
                                 {scenes.map((scene, i) => (
                                     <div key={scene.id} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 group hover:border-white/10 transition-all">
                                         <div className="flex items-center justify-between mb-2">
-                                            <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Scene {i + 1}</span>
+                                            <span className="text-[10px] font-semibold text-muted-foreground">Part {i + 1}</span>
                                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{scene.scene_goal.split('_')[0]}</span>
                                         </div>
                                         <p className="text-white text-sm font-medium leading-relaxed mb-3">{scene.scene_text}</p>
@@ -152,7 +152,7 @@ export function ReviewClient({
                                     <div key={layer.id} className="flex items-center gap-4 p-3 rounded-2xl bg-white/[0.02] border border-white/5">
                                         <div className="w-12 h-12 rounded-xl bg-zinc-950 overflow-hidden flex items-center justify-center border border-white/5">
                                             {layer.layer_type === 'image' || layer.layer_type === 'background' ? (
-                                                <img src={layer.asset_url} className="w-full h-full object-cover" />
+                                            <img src={layer.asset_url} alt="Media used in this video" className="w-full h-full object-cover" />
                                             ) : (
                                                 <Layers className="w-5 h-5 text-zinc-800" />
                                             )}

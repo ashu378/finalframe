@@ -21,7 +21,7 @@ export default function GdprPage() {
                 </p>
 
                 <div className="p-8 rounded-sm bg-primary/5 border border-primary/20 text-center text-xs text-primary font-black uppercase tracking-widest italic">
-                    [GDPR Compliance Manifest is currently in synthesis. Full documentation available upon private beta authorization.]
+                    This page is a product-facing summary. A complete GDPR/DPA notice requires owner or legal review before publication and should reflect the deployed vendors, retention rules, and user rights process.
                 </div>
             </div>
         </div>

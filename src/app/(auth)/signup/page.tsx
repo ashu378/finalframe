@@ -1,91 +1,9 @@
-/**
- * FinalFrame — Signup Page
- */
-
 import Link from 'next/link';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import { signUp } from '@/lib/auth/actions';
 
-export const metadata = {
-    title: 'Sign Up',
-    description: 'Create your FinalFrame account',
-};
+export const metadata = { title: 'Create your account', description: 'Start making videos with FinalFrame.' };
 
 export default function SignupPage() {
-    return (
-        <div className="bg-zinc-900 border border-zinc-800 p-10 shadow-2xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-10 opacity-[0.02] group-hover:opacity-5 transition-opacity duration-1000">
-                <div className="w-32 h-32 border-2 border-primary rotate-12" />
-            </div>
-            <div className="text-center mb-10 relative z-10">
-                <h1 className="text-lg font-black uppercase tracking-[0.3em] mb-4 text-zinc-50 italic">Registry Enrollment</h1>
-                <p className="text-metadata text-zinc-400 mt-6">
-                    Initialize master account for production management.
-                </p>
-            </div>
-
-            <form action={signUp} className="flex flex-col gap-6">
-                <div className="space-y-3">
-                    <label htmlFor="fullName" className="text-metadata text-zinc-400 px-1">
-                        Master Identity (Full Name)
-                    </label>
-                    <input
-                        type="text"
-                        id="fullName"
-                        name="fullName"
-                        required
-                        placeholder="NAME_REQUIRED..."
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-5 py-4 text-sm font-bold text-white placeholder:text-zinc-600 focus:outline-none focus:border-primary/50 transition-all uppercase tracking-widest"
-                    />
-                </div>
-
-                <div className="space-y-3">
-                    <label htmlFor="email" className="text-metadata text-zinc-400 px-1">
-                        Access ID (Email)
-                    </label>
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        required
-                        placeholder="PRODUCER_ID..."
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-5 py-4 text-sm font-bold text-white placeholder:text-zinc-600 focus:outline-none focus:border-primary/50 transition-all uppercase tracking-widest"
-                    />
-                </div>
-
-                <div className="space-y-3">
-                    <label htmlFor="password" className="text-metadata text-zinc-400 px-1">
-                        Authorization Key
-                    </label>
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        required
-                        minLength={8}
-                        placeholder="••••••••"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-5 py-4 text-sm font-bold text-white placeholder:text-zinc-600 focus:outline-none focus:border-primary/50 transition-all"
-                    />
-                    <p className="text-metadata text-zinc-500 normal-case px-1">
-                        Security requirement: 8+ characters.
-                    </p>
-                </div>
-
-                <button
-                    type="submit"
-                    className="primary-cta w-full mt-6"
-                >
-                    Initialize Account
-                </button>
-            </form>
-
-            <div className="mt-10 pt-8 border-t border-zinc-800 text-center px-4">
-                <p className="text-metadata text-zinc-500 normal-case">
-                    Existing registry detected? {' '}
-                    <Link href="/login" className="text-white hover:text-primary font-black transition-colors underline underline-offset-4 decoration-primary/30 uppercase tracking-widest">
-                        Authorize Access
-                    </Link>
-                </p>
-            </div>
-        </div>
-    );
+  return <div className="ff-card p-7 sm:p-9"><div className="mb-8"><span className="grid size-11 place-items-center rounded-2xl bg-[#f1c7b7]"><Sparkles className="size-5 text-accent" /></span><h1 className="ff-display mt-7 text-3xl font-semibold">Start with an idea.</h1><p className="mt-3 leading-6 text-muted-foreground">Create your studio, then make something worth watching.</p></div><form action={signUp} className="space-y-5"><div><label htmlFor="fullName" className="text-sm font-semibold">Your name</label><input type="text" id="fullName" name="fullName" required placeholder="What should we call you?" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><div><label htmlFor="email" className="text-sm font-semibold">Email address</label><input type="email" id="email" name="email" required placeholder="you@example.com" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><div><label htmlFor="password" className="text-sm font-semibold">Create a password</label><input type="password" id="password" name="password" required minLength={8} placeholder="At least 8 characters" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /><p className="mt-2 text-xs text-muted-foreground">Use at least 8 characters.</p></div><button type="submit" className="ff-button-primary w-full">Create account <ArrowRight className="size-4" /></button></form><p className="mt-8 border-t border-border/70 pt-6 text-center text-sm text-muted-foreground">Already have an account? <Link href="/login" className="ff-link">Log in</Link></p></div>;
 }

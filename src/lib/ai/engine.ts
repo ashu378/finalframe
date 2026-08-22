@@ -56,6 +56,7 @@ export async function executeVideoGeneration(
         cameraConfig?: CameraConfig;
         motionConfig?: MotionConfig;
         duration?: 4 | 6 | 8;
+        ratio?: '16:9' | '9:16' | '1:1';
         sceneAssets?: SceneAsset[];
         studioAssets?: StudioAsset[];
     }

@@ -161,7 +161,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
     }, [draggedId, scenes, canEdit, project.id]);
 
     return (
-        <div className="space-y-6 pb-20 animate-in fade-in duration-500">
+        <div className="blueprint-theme space-y-6 pb-20 animate-in fade-in duration-500">
             {/* Blueprint Metrics & Status */}
             <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-8 rounded-sm bg-zinc-900 border border-zinc-800 shadow-2xl">
                 <div className="flex items-center gap-8">
@@ -236,7 +236,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
                             <CheckCircle2 className="w-8 h-8 text-emerald-400" />
                         </div>
                         <div>
-                            <strong className="text-sm font-black text-emerald-400 uppercase tracking-widest block mb-1">Manifest Authorized</strong>
+                            <strong className="text-sm font-black text-emerald-400 uppercase tracking-widest block mb-1">Plan approved</strong>
                             <p className="text-metadata text-zinc-500 uppercase tracking-widest italic">
                                 Blueprint locked and synced with production engines. Ready for high-fidelity execution.
                             </p>
@@ -278,7 +278,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
                         <div className="flex items-center gap-4">
                             <div className="w-1.5 h-1.5 rounded-none bg-primary shadow-[0_0_8px_#fbbf24]" />
                             <p className="text-metadata text-primary font-bold uppercase tracking-widest italic">
-                                Studio Alignment: Intent, assets, and narrative structure have been synced.
+                            Your idea, media, and story structure are lined up.
                             </p>
                         </div>
 
@@ -313,7 +313,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
                             <div className="flex items-center justify-between">
                                 <h3 className="text-caption text-zinc-500 flex items-center gap-3">
                                     <div className="w-1 h-1 bg-zinc-700" />
-                                    Segment_Selector
+                                    Choose a part
                                 </h3>
                                 <p className="text-metadata font-black text-zinc-600 uppercase tracking-widest italic">
                                     Unit <span className="text-primary">{activeSceneIndex + 1}</span> of <span className="text-zinc-50">{scenes.length}</span>

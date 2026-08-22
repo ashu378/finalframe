@@ -14,15 +14,11 @@ export default function PublicLayout({
 }) {
     return (
         <>
-            {/* --- Static Top Bar (Status) --- */}
-            <div className="fixed top-0 left-0 right-0 h-10 bg-black/40 backdrop-blur-md border-b border-white/5 z-[60] flex items-center justify-center">
-                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] font-bold text-zinc-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                    Private Beta Access Only
-                </div>
+            <div className="border-b border-border/70 bg-secondary/60 px-4 py-2 text-center text-xs font-medium text-muted-foreground">
+                Early access is open — bring an idea and make your first video.
             </div>
             <Header />
-            <main>{children}</main>
+            <main id="main-content">{children}</main>
             <Footer />
         </>
     );

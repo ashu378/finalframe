@@ -8,9 +8,9 @@ export default async function PlatformPage() {
     return (
         <div className="space-y-6">
             <div className="space-y-2 text-center">
-                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">Where will this content live?</h1>
+                <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">Where will people watch it?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                    We tune aspect ratios, safe zones, and pacing for the destination's best practices.
+                    We will start with the right shape and rhythm for the place you want to share it.
                 </p>
             </div>
 

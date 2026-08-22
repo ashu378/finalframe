@@ -15,19 +15,10 @@ export function AssetsForm() {
         setLoading(true);
         setError(null);
 
-        if (!logo) {
-            setError('Please upload a logo');
-            setLoading(false);
-            return;
+        if (logo) {
+            formData.set('logo_path', logo.path);
+            formData.set('logo_name', logo.name);
         }
-        if (visuals.length < 1) {
-            setError('Please upload at least one product visual');
-            setLoading(false);
-            return;
-        }
-
-        formData.set('logo_path', logo.path);
-        formData.set('logo_name', logo.name);
         formData.set('visuals', JSON.stringify(visuals));
 
         try {
@@ -47,10 +38,10 @@ export function AssetsForm() {
             <div className="space-y-6 border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
                 <div className="flex justify-between items-start">
-                    <h2 className="text-[14px] font-black text-white uppercase tracking-[0.3em] italic">01. Master_Mark (Logo)</h2>
-                    <span className="text-[9px] font-black text-primary bg-primary/10 border border-primary/20 px-3 py-1 rounded-sm uppercase tracking-widest italic">Required</span>
+                    <h2 className="text-[14px] font-semibold text-foreground">01. Your logo <span className="font-normal text-muted-foreground">(optional)</span></h2>
+                    <span className="rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-muted-foreground">Optional</span>
                 </div>
-                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose">High-resolution vector data (SVG/PNG) for manifest branding.</p>
+                <p className="text-sm leading-6 text-muted-foreground">Add a logo if you want it in your first video. You can always add it later.</p>
 
                 {!logo ? (
                     <FileUpload
@@ -77,10 +68,10 @@ export function AssetsForm() {
             <div className="space-y-6 border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
                 <div className="flex justify-between items-start">
-                    <h2 className="text-[14px] font-black text-white uppercase tracking-[0.3em] italic">02. Static_Manifest (Visuals)</h2>
-                    <span className="text-[9px] font-black text-primary bg-primary/10 border border-primary/20 px-3 py-1 rounded-sm uppercase tracking-widest italic">Min_1_Required</span>
+                    <h2 className="text-[14px] font-semibold text-foreground">02. Your images and clips <span className="font-normal text-muted-foreground">(optional)</span></h2>
+                    <span className="rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-muted-foreground">Optional</span>
                 </div>
-                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose">Authorize production material for AI signal reference.</p>
+                <p className="text-sm leading-6 text-muted-foreground">Products, characters, footage, or references can help with consistency, but you do not need them to begin.</p>
 
                 <div className="space-y-2">
                     {visuals.map((v, i) => (
@@ -117,11 +108,11 @@ export function AssetsForm() {
 
             <Button
                 type="submit"
-                disabled={loading || !logo || visuals.length < 1}
+                disabled={loading}
                 size="lg"
                 className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
             >
-                {loading ? 'ARCHIVING_MANIFEST...' : 'Authorize_Material'}
+                {loading ? 'Saving…' : logo || visuals.length ? 'Save media and continue' : 'Skip for now'}
             </Button>
         </form>
     );

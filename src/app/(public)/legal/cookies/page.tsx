@@ -17,11 +17,11 @@ export default function CookiesPage() {
             <div className="legal-text-block">
                 <p>
                     This Cookie Policy explains how FinalFrame uses cookies and similar technologies.
-                    Our technical stack uses cookies primarily for studio session integrity and registry authorization.
+                    FinalFrame uses cookies and similar storage where needed for secure sessions, account preferences, and reliable product operation.
                 </p>
 
                 <div className="p-8 rounded-sm bg-primary/5 border border-primary/20 text-center text-xs text-primary font-black uppercase tracking-widest italic">
-                    [Cookie Governance Protocol is currently in synthesis. Full documentation available upon private beta authorization.]
+                    This page is a product-facing summary. The complete cookie notice and consent language require owner or legal review before publication.
                 </div>
             </div>
         </div>

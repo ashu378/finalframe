@@ -8,9 +8,9 @@ export default async function MessagePage() {
     return (
         <div className="space-y-6">
             <div className="space-y-2 text-center">
-                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">Refine your Core Message</h1>
+                <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">What do you want people to remember?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                    The AI Director will use these pillars to write your scripts.
+                    A few plain-language notes help us keep the video focused.
                 </p>
             </div>
 

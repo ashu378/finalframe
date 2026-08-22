@@ -77,7 +77,7 @@ export function MessageBlocksForm() {
                 size="lg"
                 className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:brightness-110 shadow-[0_0_20px_-5px_rgba(124,58,237,0.5)] transition-all"
             >
-                {loading ? 'Saving...' : 'Review & Confirm'}
+                {loading ? 'Saving…' : 'Continue'}
             </Button>
         </form>
     );

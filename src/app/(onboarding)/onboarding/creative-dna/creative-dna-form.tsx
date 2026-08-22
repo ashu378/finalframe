@@ -90,7 +90,7 @@ export function CreativeDNAForm() {
                 size="lg"
                 className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
             >
-                {loading ? 'CALIBRATING_DNA...' : 'Authorize_Creative_DNA'}
+                {loading ? 'Saving…' : 'Continue'}
             </Button>
         </form>
     );

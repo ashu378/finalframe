@@ -4,14 +4,14 @@ import { usePathname } from 'next/navigation';
 
 const STEPS = [
     { path: 'welcome', label: 'Welcome' },
-    { path: 'studio', label: 'Studio' },
-    { path: 'goal', label: 'Goal' },
-    { path: 'platform', label: 'Platform' },
-    { path: 'creative-dna', label: 'Creative DNA' },
-    { path: 'identity', label: 'Identity' },
-    { path: 'assets', label: 'Assets' },
-    { path: 'message', label: 'Message' },
-    { path: 'confirm', label: 'Confirm' }
+    { path: 'studio', label: 'Your studio' },
+    { path: 'goal', label: 'Your goal' },
+    { path: 'platform', label: 'Where it goes' },
+    { path: 'creative-dna', label: 'Your style' },
+    { path: 'identity', label: 'People and voice' },
+    { path: 'assets', label: 'Your media' },
+    { path: 'message', label: 'Your message' },
+    { path: 'confirm', label: 'Ready to make' }
 ];
 
 export function OnboardingProgressBar() {
@@ -24,14 +24,14 @@ export function OnboardingProgressBar() {
 
     return (
         <div className="w-full space-y-3">
-            <div className="flex justify-between items-end text-[9px] font-black uppercase tracking-[0.25em] text-zinc-600 px-1">
-                <span className="text-white font-black italic">PHASE_{activeIndex + 1} // TOTAL_{STEPS.length}</span>
-                <span className="text-primary italic">{STEPS[activeIndex]?.label?.toUpperCase() || 'CORE_CONFIGURATION'}</span>
+            <div className="flex justify-between items-end text-xs font-semibold text-muted-foreground px-1">
+                <span>Step {activeIndex + 1} of {STEPS.length}</span>
+                <span className="text-foreground">{STEPS[activeIndex]?.label || 'Getting started'}</span>
             </div>
 
-            <div className="h-1 w-full bg-black/40 rounded-none overflow-hidden border border-white/5 relative">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary relative">
                 <div
-                    className="h-full bg-primary shadow-[0_0_15px_rgba(251,191,36,0.3)] transition-all duration-700 ease-out rounded-none relative"
+                    className="h-full rounded-full bg-primary transition-all duration-700 ease-out relative"
                     style={{ width: `${Math.max(5, progressPercent)}%` }}
                 >
                     <div className="absolute inset-x-0 bottom-0 h-[1px] bg-white/20" />

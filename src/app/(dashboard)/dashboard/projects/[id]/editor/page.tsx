@@ -118,7 +118,7 @@ export default async function EditorPage({
     }
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] bg-zinc-950 text-white animate-in fade-in">
+        <div className="studio-surface flex min-h-dvh flex-col animate-in fade-in">
             {/* ... Header ... */}
             <div className="h-16 border-b border-zinc-800 flex items-center px-6 justify-between flex-shrink-0">
                 <div className="flex items-center gap-4">
@@ -129,12 +129,12 @@ export default async function EditorPage({
                     </Link>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-50 italic">{project.name}</h1>
-                        <p className="text-metadata text-zinc-500 font-bold uppercase tracking-widest mt-0.5">Mastering Registry</p>
+                        <p className="text-sm text-[#cbb7a4] mt-0.5">Finishing studio · {snapshots?.length || 0} versions</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="text-metadata px-3 py-1.5 rounded-sm bg-primary/10 text-primary border border-primary/20 font-black uppercase tracking-widest">
-                        Status: Finalizing
+                            Ready for finishing
                     </span>
                     {snapshots && snapshots.length > 0 ? (
                         <ExportButton
@@ -165,7 +165,7 @@ export default async function EditorPage({
                             {renderJob.remix_locked ? (
                                 <div className="flex flex-col items-center gap-4 z-10">
                                     <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_15px_rgba(255,255,0,0.5)]" />
-                                    <span className="text-metadata font-black uppercase tracking-[0.2em] text-primary italic">Processing Signal...</span>
+                                        <span className="text-sm font-semibold text-primary">Preparing your preview…</span>
                                 </div>
                             ) : (
                                 activeLayers.find(l => l.type === 'background')?.url ? (
@@ -177,8 +177,8 @@ export default async function EditorPage({
                                     />
                                 ) : (
                                     <div className="flex flex-col items-center gap-2 text-zinc-600">
-                                        <span>No Video Source</span>
-                                        <span className="text-xs">Initial render may be incomplete</span>
+                                        <span>No preview yet</span>
+                                        <span className="text-xs">Your first version may still be processing.</span>
                                     </div>
                                 )
                             )}

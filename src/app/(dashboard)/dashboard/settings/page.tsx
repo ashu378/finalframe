@@ -1,103 +1,16 @@
-/**
- * FinalFrame — Settings Page
- * Reference: MASTER_PRD.md § 5.II — Settings
- * 
- * UI shell only. No mock data per user requirements.
- */
-
+import Link from 'next/link';
+import { ArrowRight, CreditCard, Mail, Users } from 'lucide-react';
 import { requireAuth } from '@/lib/guards';
-import { Users } from 'lucide-react';
-// import styles from './page.module.css'; // Removed in favor of premium Tailwind
+import { createClient } from '@/lib/supabase/server';
+import { CreditPacks } from '@/components/billing/credit-packs';
+import { getStudioCreditBalance } from '@/lib/credits/service';
 
-export const metadata = {
-    title: 'Settings',
-    description: 'FinalFrame Settings',
-};
+export const metadata = { title: 'Settings and credits', description: 'Manage your FinalFrame account, team, and video credits.' };
 
 export default async function SettingsPage() {
-    // Ensure user is authenticated (server-side guard)
-    const { user } = await requireAuth();
-
-    return (
-        <div className="max-w-5xl mx-auto py-20 px-10 space-y-20 animate-in fade-in duration-700">
-            <header className="space-y-8">
-                <h1 className="text-sm font-black uppercase tracking-[0.4em] text-zinc-50 underline underline-offset-[16px] decoration-primary/50 italic">
-                    Studio_Configuration_Registry
-                </h1>
-                <p className="text-metadata font-bold text-zinc-500 uppercase tracking-[0.2em] mt-12 italic leading-relaxed">Manage account parameters, team authorization, and studio preferences.</p>
-            </header>
-
-            <div className="grid gap-12">
-                {/* Profile Section */}
-                <section className="space-y-8">
-                    <h2 className="text-sm font-black text-primary uppercase tracking-[0.4em] flex items-center gap-4 italic">
-                        <div className="w-2 h-2 rounded-full bg-primary shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
-                        Identity_Profile
-                    </h2>
-                    <div className="p-12 rounded-sm bg-zinc-900 border border-zinc-800 shadow-3xl">
-                        <div className="grid gap-10 md:grid-cols-2">
-                            <div className="space-y-4">
-                                <label className="text-metadata font-black text-zinc-500 uppercase tracking-[0.3em]">Master_Email_ID</label>
-                                <div className="text-zinc-50 font-black text-sm bg-zinc-950 px-6 py-4 rounded-sm border border-zinc-800 inline-block w-full tracking-wider shadow-inner">
-                                    {user.email}
-                                </div>
-                            </div>
-                            <div className="space-y-4">
-                                <label className="text-metadata font-black text-zinc-500 uppercase tracking-[0.3em]">Operational_UID</label>
-                                <div className="text-zinc-600 font-black text-metadata bg-zinc-950 px-6 py-4 rounded-sm border border-zinc-800 truncate tracking-widest uppercase shadow-inner">
-                                    {user.id}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Team Section */}
-                <section className="space-y-8">
-                    <h2 className="text-sm font-black text-primary uppercase tracking-[0.4em] flex items-center gap-4 italic">
-                        <div className="w-2 h-2 rounded-full bg-primary shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
-                        Authorization_Matrix
-                    </h2>
-                    <div className="rounded-sm bg-zinc-900 border border-zinc-800 overflow-hidden group shadow-3xl">
-                        <div className="p-12 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-10 opacity-[0.05] group-hover:opacity-[0.1] transition-opacity duration-1000">
-                                <Users className="w-40 h-40 text-primary" />
-                            </div>
-
-                            <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-10">
-                                <div className="space-y-4">
-                                    <h3 className="text-lg font-black text-zinc-50 uppercase tracking-[0.2em] italic">Personnel_Registry</h3>
-                                    <p className="text-sm font-bold text-zinc-500 max-w-md uppercase tracking-widest leading-relaxed italic">
-                                        Configure collaboration parameters. Authorize personnel, assign operational roles, and manage signal permissions.
-                                    </p>
-                                </div>
-                                <a
-                                    href="/dashboard/settings/team"
-                                    className="shrink-0 inline-flex items-center justify-center h-14 px-10 rounded-sm bg-primary text-black font-black text-metadata uppercase tracking-[0.2em] transition-all hover:bg-white active:scale-[0.98] shadow-2xl shadow-primary/20"
-                                >
-                                    Manage_Personnel
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Billing Section (Placeholder) */}
-                <section className="space-y-8 opacity-40 grayscale group hover:opacity-100 hover:grayscale-0 transition-all duration-1000">
-                    <h2 className="text-sm font-black text-zinc-600 group-hover:text-primary uppercase tracking-[0.4em] flex items-center gap-4 italic">
-                        <div className="w-2 h-2 rounded-full bg-zinc-800 group-hover:bg-primary shadow-[0_0_12px_rgba(251,191,36,0.4)]" />
-                        Fiscal_Registry
-                    </h2>
-                    <div className="p-20 rounded-sm bg-zinc-950/50 border border-dashed border-zinc-800 flex items-center justify-center shadow-inner">
-                        <div className="text-center space-y-8">
-                            <p className="text-metadata font-black text-zinc-700 uppercase tracking-[0.4em] italic leading-loose">Fiscal parameter controls pending declassification.</p>
-                            <span className="inline-block text-metadata font-black text-primary uppercase tracking-[0.5em] border border-primary/20 px-6 py-2 rounded-sm bg-primary/5 shadow-2xl">
-                                Protocol_Stage_07
-                            </span>
-                        </div>
-                    </div>
-                </section>
-            </div>
-        </div>
-    );
+  const { user } = await requireAuth();
+  const supabase = await createClient();
+  const { data: studio } = await supabase.from('studios').select('id,name').eq('user_id', user.id).single();
+  const balance = studio ? await getStudioCreditBalance(studio.id) : 0;
+  return <div className="mx-auto max-w-5xl space-y-10 py-5 sm:py-8"><div><p className="ff-eyebrow">Settings</p><h1 className="public-heading-section mt-4">Make your studio work the way you do.</h1><p className="public-body-text mt-5 max-w-2xl">Manage your account, your people, and the credits you use to make videos.</p></div><section className="ff-card p-6 sm:p-8"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-secondary"><Mail className="size-5" /></span><div><h2 className="font-semibold">Your account</h2><p className="text-sm text-muted-foreground">The email connected to your studio.</p></div></div><div className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-xl bg-secondary/55 p-4"><p className="ff-eyebrow">Email</p><p className="mt-2 truncate text-sm font-semibold">{user.email}</p></div><div className="rounded-xl bg-secondary/55 p-4"><p className="ff-eyebrow">Studio</p><p className="mt-2 text-sm font-semibold">{studio?.name || 'Your studio'}</p></div></div></section><section className="ff-card p-6 sm:p-8"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#f1c7b7]"><Users className="size-5 text-accent" /></span><div><h2 className="font-semibold">People and access</h2><p className="text-sm text-muted-foreground">Invite people to review or help make projects.</p></div></div><Link href="/dashboard/settings/team" className="ff-button-quiet">Manage team <ArrowRight className="size-4" /></Link></div></section><section className="ff-card p-6 sm:p-8"><div className="mb-6 flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#f6dfb1]"><CreditCard className="size-5" /></span><div><h2 className="font-semibold">Video credits</h2><p className="text-sm text-muted-foreground">See your balance and buy more when you need them.</p></div></div><CreditPacks balance={balance} /></section></div>;
 }

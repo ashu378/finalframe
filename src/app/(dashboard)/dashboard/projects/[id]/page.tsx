@@ -42,6 +42,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
     if (!result.success || !result.project) {
         notFound();
+        return null;
     }
 
     const project = result.project;
@@ -53,7 +54,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
     const isEditable = canEdit(project.state as ProjectState);
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="project-theme space-y-8 animate-in fade-in duration-500">
+            <div className="flex justify-end">
+                <Link href={`/dashboard/projects/${id}/production`} className="ff-button-primary min-h-11">Open production workspace</Link>
+            </div>
             {/* Header */}
             <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
                 <div>
@@ -62,10 +66,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                         className="inline-flex items-center gap-2 text-metadata text-zinc-500 hover:text-primary transition-all group mb-4"
                     >
                         <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                        Back to Productions
+                        Back to projects
                     </Link>
                     <div className="flex items-center gap-4 mb-4">
-                        <h1 className="text-xl font-black tracking-[0.1em] text-zinc-50 uppercase italic">
+                        <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
                             {project.name}
                         </h1>
                         <span className={cn(
@@ -77,7 +81,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             {stateLabel}
                         </span>
                     </div>
-                    <p className="text-zinc-400 max-w-2xl font-bold text-sm uppercase tracking-widest leading-loose">
+                        <p className="max-w-2xl text-base leading-7 text-muted-foreground">
                         {project.project_description || stateDescription}
                     </p>
                 </div>
@@ -91,7 +95,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             className="gap-3 px-8 h-10 rounded-sm font-black uppercase tracking-[0.2em] text-[10px]"
                         >
                             {isEditable ? <Edit2 className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                            {isEditable ? 'Open Blueprint' : 'Inspect Specification'}
+                            {isEditable ? 'Open plan' : 'View plan'}
                         </Button>
                     </Link>
                 </div>
@@ -107,7 +111,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                     <div className="relative z-10 space-y-8">
                         <div className="flex items-center justify-between border-b border-white/5 pb-6">
                             <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">
-                                Project Specification
+                                Video details
                             </h2>
                         </div>
 
@@ -147,7 +151,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                 <div className="bg-zinc-900/40 rounded-sm border border-white/5 p-10 flex flex-col justify-between group">
                     <div>
                         <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400 mb-8 pb-6 border-b border-white/5">
-                            Production DNA
+                            Creative direction
                         </h2>
 
                         <div className="space-y-6">
@@ -166,7 +170,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             </div>
 
                             <div className="flex flex-col gap-2">
-                                <span className="text-metadata text-zinc-500">Narrative Mode</span>
+                                <span className="text-sm text-muted-foreground">Story type</span>
                                 <span className="text-sm font-black text-zinc-400 uppercase tracking-widest leading-none">
                                     {project.context?.replace(/_/g, ' ') || 'Organic Content'}
                                 </span>
@@ -174,7 +178,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
                             {project.creative_dna_snapshot && (
                                 <div className="pt-2">
-                                    <span className="text-metadata text-zinc-500 block mb-4">Studio Directives</span>
+                                    <span className="text-sm text-muted-foreground block mb-4">Style notes</span>
                                     <div className="flex flex-wrap gap-2">
                                         {Object.values(project.creative_dna_snapshot).filter(v => typeof v === 'string' && v.length > 0).map((val, i) => (
                                             <span key={i} className="px-3 py-1.5 rounded-sm bg-primary/5 border border-primary/20 text-metadata font-black text-primary uppercase tracking-widest hover:bg-primary/10 transition-colors">
@@ -188,7 +192,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                     </div>
 
                     <div className="mt-8 pt-4 border-t border-zinc-800">
-                        <Link href={`/dashboard/projects/${id}/blueprint`} className="block">
+                                <Link href={`/dashboard/projects/${id}/blueprint`} className="block">
                             <Button variant="ghost" className="w-full text-metadata font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 py-6">
                                 Adjust Studio Defaults
                             </Button>
@@ -208,9 +212,9 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             <div className="w-16 h-16 rounded-sm bg-primary/10 flex items-center justify-center mb-8 border border-primary/20 group-hover:scale-105 transition-transform duration-700">
                                 <Film className="w-8 h-8 text-primary" />
                             </div>
-                            <h3 className="text-base font-black text-zinc-50 mb-4 uppercase tracking-[0.3em]">Blueprint Locked</h3>
+                            <h3 className="text-base font-black text-zinc-50 mb-4 uppercase tracking-[0.3em]">Your plan is approved</h3>
                             <p className="text-sm font-bold text-zinc-400 mb-10 uppercase tracking-widest leading-loose">
-                                Technical specifications verified. Engage studio engines for high-fidelity master execution.
+                                Your plan is approved. Start making the takes when you are ready.
                             </p>
                             <RenderButton projectId={project.id} />
                         </div>
@@ -227,12 +231,12 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center relative">
                                         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.05),transparent_70%)]" />
-                                        <span className="text-zinc-600 font-black uppercase tracking-[0.3em] text-metadata">Registry Playback Standby</span>
+                                        <span className="text-zinc-600 font-black uppercase tracking-[0.3em] text-metadata">Your preview will appear here</span>
                                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/video:opacity-100 transition-all duration-500 flex items-center justify-center backdrop-blur-sm">
                                             <Link href={`/dashboard/projects/${id}/editor`}>
                                                 <Button size="lg" className="primary-cta px-10">
                                                     <Edit2 className="w-4 h-4" />
-                                                    Enter Mastering Studio
+                                                    Open finishing studio
                                                 </Button>
                                             </Link>
                                         </div>
@@ -248,15 +252,15 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             <div className="w-16 h-16 rounded-sm bg-primary/10 flex items-center justify-center mb-8 border border-primary/20 group-hover:rotate-6 transition-transform duration-700">
                                 <Eye className="w-8 h-8 text-primary" />
                             </div>
-                            <h3 className="text-base font-black text-zinc-50 mb-4 uppercase tracking-[0.3em]">Registry Awaiting Approval</h3>
+                            <h3 className="text-base font-semibold text-foreground mb-4">Plan ready for your review</h3>
                             <p className="text-sm font-bold text-zinc-400 mb-10 uppercase tracking-widest leading-loose">
-                                The Director has synthesized a technical blueprint. Complete verification to initiate execution.
+                                FinalFrame has turned your idea into an ordered video plan. Review it before generation.
                             </p>
                             <div className="flex gap-4">
                                 <Link href={`/dashboard/projects/${project.id}/blueprint`}>
                                     <Button variant="primary" size="md" className="gap-3 px-10 h-12 rounded-sm font-black uppercase tracking-widest text-metadata italic">
                                         <Edit2 className="w-4 h-4" />
-                                        Verify Specification
+                                        Review the plan
                                     </Button>
                                 </Link>
                             </div>
@@ -269,16 +273,16 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                             <div className="w-14 h-14 rounded-sm bg-zinc-950 border border-zinc-800 flex items-center justify-center mb-8 text-zinc-700 group-hover:text-primary transition-colors duration-700 shadow-xl">
                                 <Lock className="w-5 h-5" />
                             </div>
-                            <h4 className="text-base font-black text-zinc-50 mb-4 uppercase tracking-[0.3em] italic">Sequence Registry Locked</h4>
+                            <h4 className="text-base font-semibold text-foreground mb-4">Your plan is waiting for a decision</h4>
                             <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest leading-loose mb-10">
                                 {project.state === 'draft'
-                                    ? 'Studio execution requires an approved creative manifest. Finalize your blueprint to authorize production engines.'
-                                    : 'This sequence is archived in read-only mode and cannot be modified.'}
+                                    ? 'Review the plan and approve it before FinalFrame starts making your video.'
+                                    : 'This project is archived and can be viewed but not changed.'}
                             </p>
                             {project.state === 'draft' && (
                                 <Link href={`/dashboard/projects/${project.id}/blueprint`}>
                                     <Button size="md" className="primary-cta px-12">
-                                        Generate Creative Manifest
+                                        Open the plan
                                     </Button>
                                 </Link>
                             )}

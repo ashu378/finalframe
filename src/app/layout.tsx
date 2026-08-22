@@ -7,17 +7,15 @@
  * It provides global metadata, fonts, and styles.
  */
 import type { Metadata } from 'next';
-const inter = { variable: 'font-sans' };
-const mono = { variable: 'font-mono' };
 import './globals.css';
 import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
     title: {
-        default: 'FinalFrame — Studio-Grade Creative Production',
+        default: 'FinalFrame — Make the video in your head',
         template: '%s | FinalFrame',
     },
-    description: 'A studio-grade creative operating system for Hollywood-standard content.',
+    description: 'Turn an idea, script, or your own media into a finished video with FinalFrame.',
     keywords: ['video production', 'AI video', 'creative studio', 'content creation'],
     authors: [{ name: 'FinalFrame' }],
     creator: 'FinalFrame',
@@ -26,8 +24,8 @@ export const metadata: Metadata = {
         locale: 'en_US',
         url: 'https://finalframe.ai',
         siteName: 'FinalFrame',
-        title: 'FinalFrame — Studio-Grade Creative Production',
-        description: 'A studio-grade creative operating system for Hollywood-standard content.',
+        title: 'FinalFrame — Make the video in your head',
+        description: 'Turn an idea, script, or your own media into a finished video with FinalFrame.',
         images: [
             {
                 url: '/og-image.png',
@@ -59,9 +57,10 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
-            <body className="min-h-screen bg-background font-sans antialiased" suppressHydrationWarning>
-                <Toaster position="top-right" theme="dark" richColors />
+        <html lang="en" suppressHydrationWarning>
+            <body className="min-h-dvh bg-background font-sans antialiased" suppressHydrationWarning>
+                <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-foreground focus:px-4 focus:py-3 focus:text-background">Skip to content</a>
+                <Toaster position="top-right" theme="light" richColors />
                 {children}
             </body>
         </html>

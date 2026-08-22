@@ -2,9 +2,12 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { type FullProject } from '@/lib/types/database';
+import { getStudioCreditBalance } from '@/lib/credits/service';
 
 export async function getDashboardOverview() {
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: studio } = user ? await supabase.from('studios').select('id').eq('user_id', user.id).single() : { data: null };
 
     // 1. Fetch Stats
     const [
@@ -45,7 +48,7 @@ export async function getDashboardOverview() {
             totalProjects: totalProjects || 0,
             activeJobs: activeJobs || 0,
             totalAssets: totalAssets || 0,
-            creditsRemaining: 1240, // To be hooked up to real billing in Phase 7
+        creditsRemaining: studio ? await getStudioCreditBalance(studio.id) : 0,
         },
         recentProjects: (recentProjects as FullProject[]) || [],
         activities
