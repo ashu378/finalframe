@@ -7,8 +7,7 @@
  */
 
 import { Sidebar } from '@/components/layout/sidebar';
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
+import { requireOnboardingComplete } from '@/lib/guards';
 import Link from 'next/link';
 import { Film, FolderOpen, Plus, Settings } from 'lucide-react';
 
@@ -17,27 +16,7 @@ export default async function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    // Middleware handles basic auth, but layout handles the onboarding/admin logic
-    if (!user) {
-        return redirect('/login');
-    }
-
-    // Fetch profile for onboarding & admin status
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('onboarding_completed, is_admin')
-        .eq('id', user.id)
-        .single();
-
-    // Force onboarding if not completed
-    if (!profile?.onboarding_completed) {
-        // Since this layout wraps (dashboard) routes, any access here 
-        // with an incomplete profile should lead to onboarding.
-        return redirect('/onboarding');
-    }
+    await requireOnboardingComplete();
 
     // Admin Access Control
     // If we're on a route starting with /admin, ensure the user is an admin

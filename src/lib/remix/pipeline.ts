@@ -80,8 +80,10 @@ export async function processRemixJob(jobId: string) {
 
         // 7. Persist New Layer
         // Mocking URL generation if text model returned description
-        const content = result.content || 'No content generated';
-        const newAssetUrl = content.startsWith('http') ? content : `https://mock-asset.com/${Date.now()}.png`;
+        const content = result.content;
+        if (!content) throw new Error('The provider returned no usable remix media.');
+        const newAssetUrl = content.startsWith('http') ? content : null;
+        if (!newAssetUrl) throw new Error('The remix provider returned text instead of a media asset.');
 
         const { data: newLayer, error: layerError } = await supabase
             .from('render_layers')

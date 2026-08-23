@@ -1,26 +1,17 @@
-/**
- * FinalFrame — Auth Callback Route
- * Reference: BUILD_PHASES.md — Phase 0 authentication callback handling
- * 
- * Handles OAuth callbacks and magic link confirmations.
- */
-
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 
+function safeNextPath(value: string | null) {
+    return value && value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard';
+}
+
+/**
+ * Convex Auth completes code exchange in its Next.js provider/middleware.
+ * This compatibility route only forwards the code to a same-origin page.
+ */
 export async function GET(request: Request) {
-    const { searchParams, origin } = new URL(request.url);
-    const code = searchParams.get('code');
-    const next = searchParams.get('next') ?? '/dashboard';
-
-    if (code) {
-        const supabase = await createClient();
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (!error) {
-            return NextResponse.redirect(`${origin}${next}`);
-        }
-    }
-
-    // Return the user to an error page with instructions
-    return NextResponse.redirect(`${origin}/login?error=auth_callback_error`);
+    const url = new URL(request.url);
+    const destination = new URL(safeNextPath(url.searchParams.get('next')), url.origin);
+    const code = url.searchParams.get('code');
+    if (code) destination.searchParams.set('code', code);
+    return NextResponse.redirect(destination);
 }

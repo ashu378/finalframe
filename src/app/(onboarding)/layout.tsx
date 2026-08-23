@@ -1,12 +1,15 @@
 import { OnboardingProgressBar } from '@/components/onboarding/progress-bar';
 import Link from 'next/link';
 import { Film } from 'lucide-react';
+import { requireAuth } from '@/lib/guards';
 
-export default function OnboardingLayout({
+export default async function OnboardingLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    await requireAuth();
+
     return (
         <div className="onboarding-theme ff-noise flex min-h-dvh items-center justify-center overflow-hidden bg-[#f4ead6] py-10">
             <main className="relative z-10 w-full max-w-2xl px-5 sm:px-6">

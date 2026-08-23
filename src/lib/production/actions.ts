@@ -91,6 +91,16 @@ export async function createDirectorPlan(intent: CreateIntent) {
     const totalSeconds = plan.sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.reduce((shotTotal, shot) => shotTotal + shot.durationSeconds, 0), 0), 0);
     const estimate = await estimateProductionCost({ shotCount: totalShots, videoSeconds: Math.ceil(totalSeconds), qualityTier: normalized.qualityTier || 'STANDARD', hasVoice: normalized.mode === 'VOICE', needsCaptions: normalized.mode === 'VOICE' || normalized.mode === 'FOOTAGE', needsAssembly: true });
 
+    const authToken = await import('@convex-dev/auth/nextjs/server').then((module) => module.convexAuthNextjsToken());
+    if (authToken) {
+        const convex = getConvexClient();
+        convex.setAuth(authToken);
+        const current = await convex.query(api.account.current, {});
+        if (!current.studio) return { success: false, error: 'Studio setup is required before creating a video.' };
+        const production = await convex.mutation(api.productions.createPlan, { studioExternalId: current.studio.externalId, projectExternalId: normalized.projectId || `project_${Date.now()}`, workflow: plan.workflow, inputMode: normalized.mode, durationSeconds: normalized.requestedDurationSeconds, language: normalized.language || 'en', outputPreset: normalized.outputPreset, input: normalized, plan, estimate });
+        return { success: true, planId: production.planId.toString(), productionId: production.productionId.toString(), plan, estimate, balance: await convex.query(api.credits.getBalance, { studioExternalId: current.studio.externalId }) };
+    }
+
     if (!normalized.projectId || !normalized.projectId.includes('-')) {
         return { success: false, error: 'A project is required before creating a production plan' };
     }
@@ -98,26 +108,34 @@ export async function createDirectorPlan(intent: CreateIntent) {
     const { data: project } = await supabase.from('projects').select('id,studio_id,name,description').eq('id', normalized.projectId).single();
     if (!project || project.studio_id !== studio.id) return { success: false, error: 'Project not found' };
     const convex = getConvexClient();
-    await convex.mutation(api.bootstrap.ensureStudio, { ownerExternalId: user.id, studioExternalId: studio.id, name: project.name || 'FinalFrame Studio', initialCredits: Number(studio.credits || 0) });
-    await convex.mutation(api.bootstrap.mirrorProject, { ownerExternalId: user.id, studioExternalId: studio.id, projectExternalId: project.id, name: project.name || 'Untitled production', description: project.description || undefined });
-    const production = await convex.mutation(api.productions.createPlan, { ownerExternalId: user.id, studioExternalId: studio.id, projectExternalId: project.id, workflow: plan.workflow, inputMode: normalized.mode, durationSeconds: normalized.requestedDurationSeconds, language: normalized.language || 'en', outputPreset: normalized.outputPreset, input: normalized, plan, estimate });
+    await convex.mutation(api.bootstrap.ensureStudio, { studioExternalId: studio.id, name: project.name || 'FinalFrame Studio', initialCredits: Number(studio.credits || 0) });
+    await convex.mutation(api.bootstrap.mirrorProject, { studioExternalId: studio.id, projectExternalId: project.id, name: project.name || 'Untitled production', description: project.description || undefined });
+    const production = await convex.mutation(api.productions.createPlan, { studioExternalId: studio.id, projectExternalId: project.id, workflow: plan.workflow, inputMode: normalized.mode, durationSeconds: normalized.requestedDurationSeconds, language: normalized.language || 'en', outputPreset: normalized.outputPreset, input: normalized, plan, estimate });
 
     if (normalized.inputAssetIds.length > 0) {
         const { data: assets } = await supabase.from('studio_assets').select('id,name,type,mime_type,size,url').eq('studio_id', studio.id).in('id', normalized.inputAssetIds);
         if ((assets || []).length !== normalized.inputAssetIds.length) return { success: false, error: 'One or more selected assets are unavailable' };
         for (const asset of assets || []) {
-            await convex.mutation(api.bootstrap.mirrorAsset, { ownerExternalId: user.id, studioExternalId: studio.id, productionId: production.productionId, assetExternalId: asset.id, source: 'USER_UPLOAD', roles: [normalized.mode === 'VOICE' ? 'VOICE' : normalized.mode === 'FOOTAGE' ? 'SOURCE_VIDEO' : normalized.mode === 'AD' ? 'PRODUCT_REFERENCE' : 'IMAGE_REFERENCE'], name: asset.name, mimeType: asset.mime_type || undefined, storageUrl: asset.url || undefined, metadata: asset });
+            await convex.mutation(api.bootstrap.mirrorAsset, { studioExternalId: studio.id, productionId: production.productionId, assetExternalId: asset.id, source: 'USER_UPLOAD', roles: [normalized.mode === 'VOICE' ? 'VOICE' : normalized.mode === 'FOOTAGE' ? 'SOURCE_VIDEO' : normalized.mode === 'AD' ? 'PRODUCT_REFERENCE' : 'IMAGE_REFERENCE'], name: asset.name, mimeType: asset.mime_type || undefined, storageUrl: asset.url || undefined, metadata: asset });
         }
     }
-    return { success: true, planId: production.planId.toString(), productionId: production.productionId.toString(), plan, estimate, balance: await convex.query(api.credits.getBalance, { ownerExternalId: user.id, studioExternalId: studio.id }) };
+    return { success: true, planId: production.planId.toString(), productionId: production.productionId.toString(), plan, estimate, balance: await convex.query(api.credits.getBalance, { studioExternalId: studio.id }) };
 }
 
 export async function approveDirectorPlan(planId: string) {
+    const authToken = await import('@convex-dev/auth/nextjs/server').then((module) => module.convexAuthNextjsToken());
+    if (authToken) {
+        const convex = getConvexClient();
+        convex.setAuth(authToken);
+        const result = await convex.mutation(api.productions.approvePlan, { planId: planId as any });
+        revalidatePath('/dashboard');
+        return { success: true, productionId: result.productionId.toString(), versionId: result.versionId.toString() };
+    }
     const supabase = await createClient();
     const { user, studio } = await getUserStudio(supabase);
     if (!user || !studio) return { success: false, error: 'Unauthorized' };
     const convex = getConvexClient();
-    const result = await convex.mutation(api.productions.approvePlan, { ownerExternalId: user.id, planId: planId as any });
+    const result = await convex.mutation(api.productions.approvePlan, { planId: planId as any });
     revalidatePath('/dashboard');
     return { success: true, productionId: result.productionId.toString(), versionId: result.versionId.toString() };
 }
@@ -131,6 +149,6 @@ export async function getProductionWorkspace(projectId: string): Promise<any> {
     const { data: studio } = await supabase.from('studios').select('id').eq('id', project.studio_id).eq('user_id', user.id).single();
     if (!studio) return { success: false, error: 'Project not found' };
     const convex = getConvexClient();
-    const workspace = await convex.query(api.productions.getWorkspaceByProject, { ownerExternalId: user.id, projectExternalId: projectId });
+    const workspace = await convex.query(api.productions.getWorkspaceByProject, { projectExternalId: projectId });
     return { success: true, ...workspace };
 }

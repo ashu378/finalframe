@@ -1,8 +1,13 @@
 import type { AuthConfig } from "convex/server";
 
-// Password authentication is self-contained. OAuth/email delivery can be
-// added later through Convex environment configuration without changing the
-// identity helpers used by production functions.
+// Convex Auth's Password provider is configured in auth.ts. This deployment
+// config intentionally has no external JWT issuers: accepting an issuer here
+// without its complete production configuration would widen the trust boundary.
 export default {
-  providers: [],
+  providers: [
+    {
+      domain: process.env.CONVEX_SITE_URL!,
+      applicationID: "convex",
+    },
+  ],
 } satisfies AuthConfig;

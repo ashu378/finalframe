@@ -23,30 +23,7 @@ export async function processExportJob(jobId: string) {
             .update({ status: 'processing' })
             .eq('id', jobId);
 
-        // 2. Fetch Source Asset from Snapshot
-        // In simulation, we grab the 'completed' asset from layer manifest or similar.
-        // For now, valid snapshots usually map to a composed video URL in a real renderer.
-        // We will grab the 'output_result' from the *original* render job linked to the snapshot?
-        // Actually, snapshots link to `layer_manifest`. 
-        // We'll simulate by creating a "signed" URL pointing to a placeholder or the project original asset.
-
-        // Let's assume the snapshot has a 'composed_asset_url' if strictly defined, 
-        // OR we just use a placeholder that clearly indicates status.
-        // Mock Output: use a valid public video for testing the UI flow
-        const mockOutputUrl = `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4`;
-
-        // Simulate Encoding Delay (2 seconds)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // 3. Complete
-        await supabase
-            .from('export_jobs')
-            .update({
-                status: 'completed',
-                output_url: mockOutputUrl,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', jobId);
+        throw new Error('Legacy export records require a completed Convex renderer artifact.');
 
     } catch (err) {
         console.error("Export Failed", err);

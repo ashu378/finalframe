@@ -1,9 +1,7 @@
-import Link from 'next/link';
-import { ArrowRight, Sparkles } from 'lucide-react';
-import { signUp } from '@/lib/auth/actions';
+import { SignupForm } from '@/lib/auth/forms';
 
 export const metadata = { title: 'Create your account', description: 'Start making videos with FinalFrame.' };
 
 export default function SignupPage() {
-  return <div className="ff-card p-7 sm:p-9"><div className="mb-8"><span className="grid size-11 place-items-center rounded-2xl bg-[#f1c7b7]"><Sparkles className="size-5 text-accent" /></span><h1 className="ff-display mt-7 text-3xl font-semibold">Start with an idea.</h1><p className="mt-3 leading-6 text-muted-foreground">Create your studio, then make something worth watching.</p></div><form action={signUp} className="space-y-5"><div><label htmlFor="fullName" className="text-sm font-semibold">Your name</label><input type="text" id="fullName" name="fullName" required placeholder="What should we call you?" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><div><label htmlFor="email" className="text-sm font-semibold">Email address</label><input type="email" id="email" name="email" required placeholder="you@example.com" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /></div><div><label htmlFor="password" className="text-sm font-semibold">Create a password</label><input type="password" id="password" name="password" required minLength={8} placeholder="At least 8 characters" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" /><p className="mt-2 text-xs text-muted-foreground">Use at least 8 characters.</p></div><button type="submit" className="ff-button-primary w-full">Create account <ArrowRight className="size-4" /></button></form><p className="mt-8 border-t border-border/70 pt-6 text-center text-sm text-muted-foreground">Already have an account? <Link href="/login" className="ff-link">Log in</Link></p></div>;
+  return <SignupForm />;
 }

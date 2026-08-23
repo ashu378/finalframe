@@ -3,15 +3,15 @@ import { v } from "convex/values";
 import { now, requireStudio } from "./_shared";
 
 export const getBalance = query({
-  args: { ownerExternalId: v.string(), studioExternalId: v.string() },
-  handler: async (ctx, args) => (await requireStudio(ctx, args.studioExternalId, args.ownerExternalId)).credits,
+  args: { studioExternalId: v.string() },
+  handler: async (ctx, args) => (await requireStudio(ctx, args.studioExternalId)).credits,
 });
 
 export const reserve = mutation({
-  args: { ownerExternalId: v.string(), studioExternalId: v.string(), amount: v.number(), idempotencyKey: v.string(), generationJobId: v.optional(v.id("generationJobs")) },
+  args: { studioExternalId: v.string(), amount: v.number(), idempotencyKey: v.string(), generationJobId: v.optional(v.id("generationJobs")) },
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.amount) || args.amount <= 0) throw new Error("Credit amount must be positive");
-    const studio = await requireStudio(ctx, args.studioExternalId, args.ownerExternalId);
+    const studio = await requireStudio(ctx, args.studioExternalId);
     const existing = await ctx.db.query("creditReservations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", args.idempotencyKey)).unique();
     if (existing) return { reservationId: existing._id, status: existing.status };
     if (studio.credits < args.amount) throw new Error("Insufficient credits");
@@ -23,11 +23,11 @@ export const reserve = mutation({
 });
 
 export const finalize = mutation({
-  args: { ownerExternalId: v.string(), reservationId: v.id("creditReservations"), outcome: v.union(v.literal("COMMIT"), v.literal("RELEASE")) },
+  args: { reservationId: v.id("creditReservations"), outcome: v.union(v.literal("COMMIT"), v.literal("RELEASE")) },
   handler: async (ctx, args) => {
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) throw new Error("Reservation not found");
-    const studio = await requireStudio(ctx, reservation.studioExternalId, args.ownerExternalId);
+    const studio = await requireStudio(ctx, reservation.studioExternalId);
     if (reservation.status !== "RESERVED") return reservation.status;
     if (args.outcome === "RELEASE") {
       await ctx.db.patch(studio._id, { credits: studio.credits + reservation.amount, updatedAt: now() });

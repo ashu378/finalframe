@@ -3,9 +3,9 @@ import { v } from "convex/values";
 import { now, requireStudio } from "./_shared";
 
 export const createPurchase = mutation({
-  args: { ownerExternalId: v.string(), studioExternalId: v.string(), provider: v.string(), providerCheckoutId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), metadata: v.any() },
+  args: { studioExternalId: v.string(), provider: v.string(), providerCheckoutId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), metadata: v.any() },
   handler: async (ctx, args) => {
-    await requireStudio(ctx, args.studioExternalId, args.ownerExternalId);
+    await requireStudio(ctx, args.studioExternalId);
     return await ctx.db.insert("paymentPurchases", { studioExternalId: args.studioExternalId, provider: args.provider, providerCheckoutId: args.providerCheckoutId, amount: args.amount, currency: args.currency, credits: args.credits, reference: args.reference, status: "PENDING", metadata: args.metadata, createdAt: now() });
   },
 });

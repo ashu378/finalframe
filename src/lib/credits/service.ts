@@ -20,7 +20,7 @@ async function currentUserId() { const supabase = await createClient(); const { 
 export async function getStudioCreditBalance(studioId: string): Promise<number> {
     const userId = await currentUserId();
     if (!userId) return 0;
-    try { return await getConvexClient().query(api.credits.getBalance, { ownerExternalId: userId, studioExternalId: studioId }); }
+    try { return await getConvexClient().query(api.credits.getBalance, { studioExternalId: studioId }); }
     catch { return 0; }
 }
 
@@ -29,7 +29,7 @@ export async function reserveCredits(input: { studioId: string; amount: number; 
     const userId = await currentUserId();
     if (!userId) return { success: false, error: 'Unauthorized' };
     try {
-        const result = await getConvexClient().mutation(api.credits.reserve, { ownerExternalId: userId, studioExternalId: input.studioId, amount: input.amount, idempotencyKey: input.idempotencyKey, generationJobId: input.generationJobId as any });
+        const result = await getConvexClient().mutation(api.credits.reserve, { studioExternalId: input.studioId, amount: input.amount, idempotencyKey: input.idempotencyKey, generationJobId: input.generationJobId as any });
         return { success: result.status === 'RESERVED', reservationId: result.reservationId.toString(), error: result.status === 'RESERVED' ? undefined : 'Reservation already finalized' };
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to reserve credits' }; }
 }
@@ -37,6 +37,6 @@ export async function reserveCredits(input: { studioId: string; amount: number; 
 export async function finalizeCreditReservation(reservationId: string, outcome: 'COMMIT' | 'RELEASE') {
     const userId = await currentUserId();
     if (!userId) return { success: false, error: 'Unauthorized' };
-    try { await getConvexClient().mutation(api.credits.finalize, { ownerExternalId: userId, reservationId: reservationId as any, outcome }); return { success: true }; }
+    try { await getConvexClient().mutation(api.credits.finalize, { reservationId: reservationId as any, outcome }); return { success: true }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to finalize reservation' }; }
 }

@@ -34,7 +34,13 @@ export type CapabilityParameter =
     | 'speed'
     | 'language'
     | 'input_references'
-    | 'provider_options';
+    | 'provider_options'
+    | 'output_format'
+    | 'background'
+    | 'output_compression'
+    | 'seed'
+    | 'n'
+    | 'instructions';
 
 export interface CapabilityDescriptor {
     capability: CapabilityId;
@@ -62,6 +68,8 @@ export interface NormalizedUsage {
     totalTokens: number;
     inputTokens?: number;
     outputTokens?: number;
+    cachedTokens?: number;
+    reasoningTokens?: number;
     seconds?: number;
     costUsd?: number;
     raw?: unknown;

@@ -219,8 +219,9 @@ export async function processRenderJob(jobId: string, supabaseClient?: any) {
                     { role: 'user', content: imagePrompt }
                 ]);
 
-                initImageUrl = imageResult.content || "https://example.com/generated-image-placeholder.jpg";
-                aiModelsUsed[`image_gen_${scene.id}`] = imageResult.modelUsed;
+                if (!imageResult.content) throw new Error(`Image generation returned no media for scene ${scene.id}`);
+                initImageUrl = imageResult.content;
+                aiModelsUsed[`image_gen_${scene.id}`] = imageResult.modelUsed || imageResult.model || 'openrouter';
             }
 
             // Step B: Video Synthesis via Runway with ExecutionProfile
@@ -250,7 +251,8 @@ export async function processRenderJob(jobId: string, supabaseClient?: any) {
                 throw new Error(`Runway failed for scene ${scene.id}: ${runwayResult.error}`);
             }
 
-            const videoUrl = runwayResult.videoUrl || 'https://example.com/fallback.mp4';
+            if (!runwayResult.videoUrl) throw new Error(`Video generation returned no media for scene ${scene.id}`);
+            const videoUrl = runwayResult.videoUrl;
             segments.push({ scene_id: scene.id, url: videoUrl });
 
             // --- INCREMENTAL SAVE ---

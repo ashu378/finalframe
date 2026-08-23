@@ -28,8 +28,12 @@ export async function getUser(ctx: AuthorizationCtx): Promise<AuthorizedUser | n
 
   const user = await ctx.db
     .query("users")
-    .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
-    .unique();
+    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+    .unique()
+    ?? await ctx.db
+      .query("users")
+      .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
+      .unique();
 
   return user ? { identity, user } : null;
 }
@@ -39,13 +43,24 @@ export async function requireUser(ctx: AuthorizationCtx): Promise<AuthorizedUser
   const identity = await requireIdentity(ctx);
   const user = await ctx.db
     .query("users")
-    .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
-    .unique();
+    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+    .unique()
+    ?? await ctx.db
+      .query("users")
+      .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
+      .unique();
 
   if (!user) {
     throw new ConvexAuthError(
       "USER_NOT_FOUND",
       "The authenticated user is not provisioned in Convex.",
+    );
+  }
+
+  if (user.status === "disabled") {
+    throw new ConvexAuthError(
+      "USER_NOT_FOUND",
+      "The authenticated user is disabled.",
     );
   }
 
@@ -55,15 +70,14 @@ export async function requireUser(ctx: AuthorizationCtx): Promise<AuthorizedUser
 /**
  * Require access to an existing studio.
  *
- * The current schema has an owner relation but no membership table, so this
- * helper deliberately authorizes only the provisioned owner. It does not
- * accept an owner/user ID from the caller.
+ * The external ID is only a lookup key. Authorization comes from the
+ * verified user and the canonical membership/ownership records.
  */
 export async function requireStudio(
   ctx: AuthorizationCtx,
   studioExternalId: string,
 ): Promise<Studio> {
-  const { identity } = await requireUser(ctx);
+  const { identity, user } = await requireUser(ctx);
   const studio = await ctx.db
     .query("studios")
     .withIndex("by_external_id", (q) => q.eq("externalId", studioExternalId))
@@ -76,7 +90,15 @@ export async function requireStudio(
     );
   }
 
-  if (studio.ownerExternalId !== identity.externalId) {
+  const ownerId = studio.ownerUserId ?? studio.ownerId;
+  if (ownerId && ownerId !== user._id) {
+    throw new ConvexAuthorizationError(
+      "STUDIO_ACCESS_DENIED",
+      "You are not authorized to access this studio.",
+    );
+  }
+
+  if (!ownerId && studio.ownerExternalId !== identity.externalId) {
     throw new ConvexAuthorizationError(
       "STUDIO_ACCESS_DENIED",
       "You are not authorized to access this studio.",
@@ -87,9 +109,8 @@ export async function requireStudio(
 }
 
 /**
- * Require studio membership using the ownership model currently present in
- * schema.ts. A future studio-members table can extend this function while
- * preserving its fail-closed contract.
+ * Require an active canonical membership. The legacy membership and owner
+ * fields are migration fallbacks only when no canonical membership exists.
  */
 export async function requireMember(
   ctx: AuthorizationCtx,
@@ -108,14 +129,30 @@ export async function requireMember(
     );
   }
 
-  if (studio.ownerExternalId !== authorizedUser.identity.externalId) {
-    throw new ConvexAuthorizationError(
-      "NOT_A_MEMBER",
-      "You are not a member of this studio.",
-    );
+  const canonicalMembership = await ctx.db.query("members")
+    .withIndex("by_studio_user", (q) => q.eq("studioId", studio._id).eq("userId", authorizedUser.user._id))
+    .unique();
+  if (canonicalMembership?.status === "active") {
+    return { ...authorizedUser, studio, role: canonicalMembership.role };
   }
 
-  return { ...authorizedUser, studio, role: "owner" };
+  const hasCanonicalMembers = (await ctx.db.query("members")
+    .withIndex("by_studio", (q) => q.eq("studioId", studio._id))
+    .take(1)).length > 0;
+
+  const membership = await ctx.db.query("studioMembers")
+    .withIndex("by_studio_user", (q) => q.eq("studioExternalId", studioExternalId).eq("userExternalId", authorizedUser.identity.externalId))
+    .unique();
+  if (membership?.status === "active") return { ...authorizedUser, studio, role: membership.role };
+
+  const ownerId = studio.ownerUserId ?? studio.ownerId;
+  if (!hasCanonicalMembers && !membership &&
+      (ownerId === authorizedUser.user._id ||
+       (!ownerId && studio.ownerExternalId === authorizedUser.identity.externalId))) {
+    return { ...authorizedUser, studio, role: "owner" };
+  }
+
+  throw new ConvexAuthorizationError("NOT_A_MEMBER", "You are not a member of this studio.");
 }
 
 /** Require an owner/admin role; the current schema only defines the owner role. */
@@ -132,4 +169,3 @@ export async function requireAdmin(
   }
   return member;
 }
-

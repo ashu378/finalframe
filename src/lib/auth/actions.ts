@@ -1,128 +1,138 @@
-/**
- * FinalFrame — Auth Server Actions
- * Reference: BUILD_PHASES.md — Phase 0 requires authentication logic
- * 
- * Server actions for authentication operations.
- * All actions redirect on completion (with error params if failed).
- */
+'use client';
 
-'use server';
+type AuthRequest = {
+    action: 'auth:signIn' | 'auth:signOut';
+    args: Record<string, unknown>;
+};
 
-import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+function field(formData: FormData, name: string) {
+    const value = formData.get(name);
+    return typeof value === 'string' ? value.trim() : '';
+}
 
-/**
- * Sign up a new user
- * 
- * Reference: MASTER_PRD.md § 5.I — Signup modal
- */
+function safeNextPath() {
+    if (typeof window === 'undefined') return '/dashboard';
+    const value = new URLSearchParams(window.location.search).get('redirect');
+    return value && value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard';
+}
+
+async function callConvexAuth(request: AuthRequest) {
+    const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(request),
+    });
+
+    let body: { error?: string } | null = null;
+    try {
+        body = await response.json();
+    } catch {
+        // Treat a non-JSON proxy response as a failed authentication attempt.
+    }
+
+    if (!response.ok || body?.error) {
+        throw new Error(body?.error || 'Authentication failed.');
+    }
+}
+
+function showAuthError(path: string, error: unknown) {
+    const message = error instanceof Error ? error.message : 'Authentication failed.';
+    window.location.assign(`${path}?error=${encodeURIComponent(message)}`);
+}
+
 export async function signUp(formData: FormData) {
-    const supabase = await createClient();
-
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
-    const fullName = formData.get('fullName') as string;
-
-    const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-            data: {
-                full_name: fullName,
+    try {
+        await callConvexAuth({
+            action: 'auth:signIn',
+            args: {
+                provider: 'password',
+                params: {
+                    flow: 'signUp',
+                    email: field(formData, 'email'),
+                    password: formData.get('password') || '',
+                    name: field(formData, 'fullName'),
+                },
             },
-        },
-    });
-
-    if (error) {
-        redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+        });
+        window.location.assign(safeNextPath());
+    } catch (error) {
+        showAuthError('/signup', error);
     }
-
-    // If email confirmation is required, redirect with message
-    if (data.user && !data.session) {
-        redirect('/login?message=Check your email to confirm your account');
-    }
-
-    revalidatePath('/', 'layout');
-    redirect('/dashboard');
 }
 
-/**
- * Sign in an existing user
- * 
- * Reference: MASTER_PRD.md § 5.I — Login modal
- */
 export async function signIn(formData: FormData) {
-    const supabase = await createClient();
-
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
-
-    const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-    });
-
-    if (error) {
-        redirect(`/login?error=${encodeURIComponent(error.message)}`);
+    try {
+        await callConvexAuth({
+            action: 'auth:signIn',
+            args: {
+                provider: 'password',
+                params: {
+                    flow: 'signIn',
+                    email: field(formData, 'email'),
+                    password: formData.get('password') || '',
+                },
+            },
+        });
+        window.location.assign(safeNextPath());
+    } catch (error) {
+        showAuthError('/login', error);
     }
-
-    revalidatePath('/', 'layout');
-    redirect('/dashboard');
 }
 
-/**
- * Sign out the current user
- * 
- * Reference: MASTER_PRD.md — User can log out
- */
+/** Sign out through Convex Auth so its HTTP-only cookies are cleared. */
 export async function signOut() {
-    const supabase = await createClient();
-
-    await supabase.auth.signOut();
-
-    revalidatePath('/', 'layout');
-    redirect('/');
+    try {
+        await callConvexAuth({ action: 'auth:signOut', args: {} });
+        window.location.assign('/');
+    } catch {
+        // A failed sign-out is not reported as success and can be retried.
+    }
 }
 
-/**
- * Request password reset
- * 
- * Reference: MASTER_PRD.md § 5.I — Forgot Password modal
- */
+/** Fails closed until Password({ reset }) has a real email provider. */
 export async function requestPasswordReset(formData: FormData) {
-    const supabase = await createClient();
-
-    const email = formData.get('email') as string;
-
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/reset-password`,
-    });
-
-    if (error) {
-        redirect(`/forgot-password?error=${encodeURIComponent(error.message)}`);
+    try {
+        await callConvexAuth({
+            action: 'auth:signIn',
+            args: {
+                provider: 'password',
+                params: { flow: 'reset', email: field(formData, 'email') },
+            },
+        });
+        window.location.assign('/login?message=Check your email for a password reset link');
+    } catch (error) {
+        showAuthError('/forgot-password', error);
     }
-
-    redirect('/login?message=Check your email for a password reset link');
 }
 
-/**
- * Update password (after clicking reset link)
- */
 export async function updatePassword(formData: FormData) {
-    const supabase = await createClient();
+    const code = typeof window === 'undefined'
+        ? ''
+        : new URLSearchParams(window.location.search).get('code') || '';
+    const password = formData.get('password') || '';
+    const confirmation = formData.get('confirmPassword') || '';
 
-    const password = formData.get('password') as string;
-
-    const { error } = await supabase.auth.updateUser({
-        password,
-    });
-
-    if (error) {
-        redirect(`/reset-password?error=${encodeURIComponent(error.message)}`);
+    if (password !== confirmation) {
+        showAuthError('/reset-password', new Error('Passwords do not match.'));
+        return;
     }
 
-    revalidatePath('/', 'layout');
-    redirect('/dashboard');
+    try {
+        await callConvexAuth({
+            action: 'auth:signIn',
+            args: {
+                provider: 'password',
+                params: {
+                    flow: 'reset-verification',
+                    email: field(formData, 'email'),
+                    code,
+                    newPassword: password,
+                },
+            },
+        });
+        window.location.assign('/dashboard');
+    } catch (error) {
+        showAuthError('/reset-password', error);
+    }
 }
-

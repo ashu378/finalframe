@@ -1,137 +1,93 @@
-/**
- * FinalFrame — Route Guards
- * Reference: BUILD_PHASES.md — Phase 0 requires global guards
- * 
- * Server-side guards for route protection.
- * These are used in middleware and server components.
- */
-
+import { isAuthenticatedNextjs, convexAuthNextjsToken } from '@convex-dev/auth/nextjs/server';
+import { makeFunctionReference } from 'convex/server';
+import { ConvexHttpClient } from 'convex/browser';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
 import type { UserProfile } from '@/lib/types/database';
 
-/**
- * Require authentication to access a route
- * Redirects to login if not authenticated
- * 
- * @throws Redirect to /login if not authenticated
- * 
- * Reference: BUILD_PHASES.md — "No access to dashboard actions unless authenticated"
- */
+type VerifiedUser = {
+    id: string;
+    email: string;
+    name: string | null;
+    onboardingCompleted: boolean;
+    isAdmin: boolean;
+    studioExternalId: string | null;
+    createdAt: number;
+};
+
+const currentUserQuery = makeFunctionReference<'query', {}, VerifiedUser | null>('auth:currentUser');
+
+async function getVerifiedUser(): Promise<VerifiedUser | null> {
+    if (!process.env.NEXT_PUBLIC_CONVEX_URL) return null;
+
+    try {
+        if (!(await isAuthenticatedNextjs({ convexUrl: process.env.NEXT_PUBLIC_CONVEX_URL }))) {
+            return null;
+        }
+
+        const token = await convexAuthNextjsToken();
+        if (!token) return null;
+
+        const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL, {
+            auth: token,
+            logger: false,
+        });
+        return await client.query(currentUserQuery, {});
+    } catch {
+        // Auth/provider/configuration errors must never become an allow path.
+        return null;
+    }
+}
+
+function profileFromUser(user: VerifiedUser): UserProfile {
+    const timestamp = new Date(user.createdAt).toISOString();
+    return {
+        id: user.id,
+        email: user.email,
+        full_name: user.name,
+        avatar_url: null,
+        onboarding_completed: user.onboardingCompleted,
+        is_admin: user.isAdmin,
+        studio_name: null,
+        role: user.isAdmin ? 'admin' : 'creator',
+        created_at: timestamp,
+        updated_at: timestamp,
+    };
+}
+
+/** Require a verified Convex Auth session. */
 export async function requireAuth(): Promise<{ user: { id: string; email: string } }> {
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
-        redirect('/login');
-    }
-
-    return { user: { id: user.id, email: user.email || '' } };
+    const user = await getVerifiedUser();
+    if (!user) redirect('/login');
+    return { user: { id: user.id, email: user.email } };
 }
 
-/**
- * Require onboarding completion to access protected features
- * Redirects to onboarding if not completed
- * 
- * @throws Redirect to /onboarding if onboarding is not complete
- * 
- * Reference: BUILD_PHASES.md — Phase 1 exit rule
- * "Dashboard, project creation, and editor routes must be blocked unless onboarding = completed"
- */
+/** Require a verified session with a Convex-backed studio. */
 export async function requireOnboardingComplete(): Promise<UserProfile> {
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
-        redirect('/login');
-    }
-
-    // Get user profile from database
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-    if (!profile || !profile.onboarding_completed) {
-        redirect('/onboarding');
-    }
-
-    return profile as UserProfile;
+    const user = await getVerifiedUser();
+    if (!user) redirect('/login');
+    if (!user.onboardingCompleted) redirect('/onboarding');
+    return profileFromUser(user);
 }
 
 /**
- * Require admin role to access admin routes
- * Redirects to dashboard if not admin
- * 
- * @throws Redirect to /dashboard if not admin
- * 
- * Reference: MASTER_PRD.md § 5.III — Admin Panel access control
+ * Admin access is deny-by-default until an explicit Convex role claim/storage
+ * is provisioned. No caller-supplied role or user id can grant access.
  */
 export async function requireAdmin(): Promise<UserProfile> {
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
-        redirect('/login');
-    }
-
-    // Get user profile from database
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-    if (!profile || !profile.is_admin) {
-        redirect('/dashboard');
-    }
-
-    return profile as UserProfile;
+    const user = await getVerifiedUser();
+    if (!user) redirect('/login');
+    if (!user.isAdmin) redirect('/dashboard');
+    return profileFromUser(user);
 }
 
-/**
- * Get current user without redirecting
- * Returns null if not authenticated
- * 
- * Useful for pages that behave differently based on auth state
- */
+/** Get the verified current user without redirecting. */
 export async function getCurrentUser(): Promise<{ id: string; email: string } | null> {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        return null;
-    }
-
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
-        return null;
-    }
-
-    return { id: user.id, email: user.email || '' };
+    const user = await getVerifiedUser();
+    return user ? { id: user.id, email: user.email } : null;
 }
 
-/**
- * Get current user profile without redirecting
- * Returns null if not authenticated or profile doesn't exist
- */
+/** Get the verified current user profile without redirecting. */
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        return null;
-    }
-
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
-        return null;
-    }
-
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-    return profile as UserProfile | null;
+    const user = await getVerifiedUser();
+    return user ? profileFromUser(user) : null;
 }

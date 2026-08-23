@@ -20,9 +20,9 @@ export async function createCreditCheckout(packId: string, currency: SupportedCu
     const reference = `ff_${studio.id.slice(0, 8)}_${Date.now()}_${packId}`;
     const amount = basePack.amounts[currency];
     const convex = getConvexClient();
-    await convex.mutation(api.bootstrap.ensureStudio, { ownerExternalId: user.id, studioExternalId: studio.id, name: studio.name || 'FinalFrame Studio', initialCredits: Number(studio.credits || 0) });
+    await convex.mutation(api.bootstrap.ensureStudio, { studioExternalId: studio.id, name: studio.name || 'FinalFrame Studio', initialCredits: Number(studio.credits || 0) });
     const provider = new BachsPaymentProvider();
     const checkout = await provider.createCheckout({ amount, currency, reference, customerEmail: user.email || '', credits: basePack.credits, successUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/dashboard/settings`, cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/dashboard/settings` });
-    await convex.mutation(api.payments.createPurchase, { ownerExternalId: user.id, studioExternalId: studio.id, provider: 'bachs', providerCheckoutId: checkout.checkoutId, amount, currency, credits: basePack.credits, reference, metadata: { packId, customerEmail: user.email } });
+    await convex.mutation(api.payments.createPurchase, { studioExternalId: studio.id, provider: 'bachs', providerCheckoutId: checkout.checkoutId, amount, currency, credits: basePack.credits, reference, metadata: { packId, customerEmail: user.email } });
     return { success: true, checkoutUrl: checkout.checkoutUrl, checkoutId: checkout.checkoutId, reference };
 }

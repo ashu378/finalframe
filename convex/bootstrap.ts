@@ -1,15 +1,16 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { now, requireStudio } from "./_shared";
+import { requireIdentity } from "./identity";
 
 export const ensureStudio = mutation({
   args: {
-    ownerExternalId: v.string(),
     studioExternalId: v.string(),
     name: v.string(),
     initialCredits: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx);
     const existing = await ctx.db
       .query("studios")
       .withIndex("by_external_id", (q) => q.eq("externalId", args.studioExternalId))
@@ -17,7 +18,7 @@ export const ensureStudio = mutation({
     if (existing) return existing._id;
     return await ctx.db.insert("studios", {
       externalId: args.studioExternalId,
-      ownerExternalId: args.ownerExternalId,
+      ownerExternalId: identity.externalId,
       name: args.name,
       credits: args.initialCredits ?? 0,
       createdAt: now(),
@@ -28,7 +29,6 @@ export const ensureStudio = mutation({
 
 export const mirrorProject = mutation({
   args: {
-    ownerExternalId: v.string(),
     studioExternalId: v.string(),
     projectExternalId: v.string(),
     name: v.string(),
@@ -36,7 +36,8 @@ export const mirrorProject = mutation({
   },
   handler: async (ctx, args) => {
     const studio = await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", args.studioExternalId)).unique();
-    if (!studio || studio.ownerExternalId !== args.ownerExternalId) throw new Error("Studio not found");
+    if (!studio) throw new Error("Studio not found");
+    await requireStudio(ctx, args.studioExternalId);
     const existing = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
     if (existing) return existing._id;
     return await ctx.db.insert("projects", { externalId: args.projectExternalId, studioExternalId: args.studioExternalId, name: args.name, description: args.description, createdAt: now(), updatedAt: now() });
@@ -45,7 +46,6 @@ export const mirrorProject = mutation({
 
 export const mirrorAsset = mutation({
   args: {
-    ownerExternalId: v.string(),
     studioExternalId: v.string(),
     productionId: v.id("productions"),
     assetExternalId: v.string(),
@@ -57,7 +57,7 @@ export const mirrorAsset = mutation({
     metadata: v.any(),
   },
   handler: async (ctx, args) => {
-    await requireStudio(ctx, args.studioExternalId, args.ownerExternalId);
+    await requireStudio(ctx, args.studioExternalId);
     const existing = await ctx.db.query("assets").withIndex("by_external_id", (q) => q.eq("externalId", args.assetExternalId)).unique();
     if (existing) return existing._id;
     return await ctx.db.insert("assets", { externalId: args.assetExternalId, productionId: args.productionId, studioExternalId: args.studioExternalId, source: args.source, roles: args.roles, name: args.name, mimeType: args.mimeType, storageUrl: args.storageUrl, metadata: args.metadata, createdAt: now() });

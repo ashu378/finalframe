@@ -1,11 +1,12 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getProduction, now, requireStudio } from "./_shared";
+import { getProduction, now } from "./_shared";
+import { requireMember } from "./authorization";
 
 export const createJob = mutation({
-  args: { ownerExternalId: v.string(), productionId: v.id("productions"), shotId: v.id("shots"), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), idempotencyKey: v.string() },
+  args: { productionId: v.id("productions"), shotId: v.id("shots"), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
-    const production = await getProduction(ctx, args.productionId.toString(), args.ownerExternalId);
+    const production = await getProduction(ctx, args.productionId.toString());
     const existing = await ctx.db.query("generationJobs").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", args.idempotencyKey)).unique();
     if (existing) return existing;
     const shot = await ctx.db.get(args.shotId);
@@ -17,9 +18,9 @@ export const createJob = mutation({
 });
 
 export const getShot = query({
-  args: { ownerExternalId: v.string(), productionId: v.id("productions"), shotId: v.id("shots") },
+  args: { productionId: v.id("productions"), shotId: v.id("shots") },
   handler: async (ctx, args) => {
-    const production = await getProduction(ctx, args.productionId.toString(), args.ownerExternalId);
+    const production = await getProduction(ctx, args.productionId.toString());
     const shot = await ctx.db.get(args.shotId);
     if (!shot || shot.sceneId === undefined) throw new Error("Shot not found");
     return { production, shot };
@@ -27,11 +28,11 @@ export const getShot = query({
 });
 
 export const getJob = query({
-  args: { ownerExternalId: v.string(), jobId: v.id("generationJobs") },
+  args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) throw new Error("Generation job not found");
-    await requireStudio(ctx, job.studioExternalId, args.ownerExternalId);
+    await requireMember(ctx, job.studioExternalId);
     const shot = await ctx.db.get(job.shotId);
     const production = await ctx.db.get(job.productionId);
     return { ...job, shot, production };
@@ -39,11 +40,11 @@ export const getJob = query({
 });
 
 export const markProcessing = mutation({
-  args: { ownerExternalId: v.string(), jobId: v.id("generationJobs") },
+  args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) throw new Error("Generation job not found");
-    await requireStudio(ctx, job.studioExternalId, args.ownerExternalId);
+    await requireMember(ctx, job.studioExternalId);
     if (job.status !== "QUEUED") return job;
     await ctx.db.patch(job._id, { status: "PROCESSING", progress: 5, attemptCount: job.attemptCount + 1, startedAt: now(), updatedAt: now() });
     return await ctx.db.get(job._id);
@@ -51,11 +52,11 @@ export const markProcessing = mutation({
 });
 
 export const completeJob = mutation({
-  args: { ownerExternalId: v.string(), jobId: v.id("generationJobs"), assetUrl: v.string(), providerJobId: v.optional(v.string()), response: v.any() },
+  args: { jobId: v.id("generationJobs"), assetUrl: v.string(), providerJobId: v.optional(v.string()), response: v.any() },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) throw new Error("Generation job not found");
-    await requireStudio(ctx, job.studioExternalId, args.ownerExternalId);
+    await requireMember(ctx, job.studioExternalId);
     const assetId = await ctx.db.insert("assets", { productionId: job.productionId, studioExternalId: job.studioExternalId, source: "AI_GENERATED", roles: ["GENERATED_VIDEO"], storageUrl: args.assetUrl, metadata: args.response, createdAt: now() });
     await ctx.db.patch(job.shotVersionId, { status: "COMPLETED", assetId });
     await ctx.db.patch(job.shotId, { status: "COMPLETED" });
@@ -65,11 +66,11 @@ export const completeJob = mutation({
 });
 
 export const failJob = mutation({
-  args: { ownerExternalId: v.string(), jobId: v.id("generationJobs"), errorMessage: v.string() },
+  args: { jobId: v.id("generationJobs"), errorMessage: v.string() },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) throw new Error("Generation job not found");
-    await requireStudio(ctx, job.studioExternalId, args.ownerExternalId);
+    await requireMember(ctx, job.studioExternalId);
     await ctx.db.patch(job._id, { status: "FAILED", errorCode: "PROVIDER_ERROR", errorMessage: args.errorMessage, updatedAt: now() });
     await ctx.db.patch(job.shotVersionId, { status: "FAILED" });
     return true;

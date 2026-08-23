@@ -1,4 +1,4 @@
-import { AICapabilityError, type AIProvider, type Modality } from './types';
+import { AICapabilityError, type AIProvider, type CapabilityId, type Modality } from './types';
 
 export interface DiscoveredModel {
     id: string;
@@ -18,47 +18,64 @@ export interface DiscoveredModel {
 }
 
 export interface ModelDiscoveryOptions {
-    apiKey?: string;
+    /** OpenRouter's catalog endpoint is public, so this remains optional. */
+    apiKey?: string | null;
     baseUrl?: string;
     fetch?: typeof globalThis.fetch;
     ttlMs?: number;
     now?: () => number;
     force?: boolean;
+    staleIfError?: boolean;
 }
 
-const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
-const cache = new Map<string, { expiresAt: number; models: DiscoveredModel[] }>();
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+export const DEFAULT_MODEL_CATALOG_TTL_MS = 5 * 60 * 1000;
+
+interface CatalogCacheEntry {
+    fetchedAt: number;
+    expiresAt: number;
+    models: DiscoveredModel[];
+}
+
+const cache = new Map<string, CatalogCacheEntry>();
 const inFlight = new Map<string, Promise<DiscoveredModel[]>>();
 
 function asRecord(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+function asString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
 function asStringArray(value: unknown): string[] {
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
     if (value && typeof value === 'object') return Object.keys(value as object);
     return [];
 }
 
 function asNumber(value: unknown): number | undefined {
-    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isFinite(number) ? number : undefined;
+}
+
+function normalizeBaseUrl(baseUrl?: string): string {
+    return (baseUrl || OPENROUTER_BASE_URL).replace(/\/+$/, '');
 }
 
 export function normalizeDiscoveredModel(value: unknown): DiscoveredModel | null {
     const item = asRecord(value);
-    if (typeof item.id !== 'string' || item.id.length === 0) return null;
+    const id = asString(item.id);
+    if (!id) return null;
     const architecture = asRecord(item.architecture);
     const pricing = asRecord(item.pricing);
-    const inputModalities = asStringArray(architecture.input_modalities) as Modality[];
-    const outputModalities = asStringArray(architecture.output_modalities) as Modality[];
     return {
-        id: item.id,
-        name: typeof item.name === 'string' ? item.name : undefined,
-        description: typeof item.description === 'string' ? item.description : undefined,
+        id,
+        name: asString(item.name),
+        description: asString(item.description),
         contextLength: asNumber(item.context_length),
-        inputModalities,
-        outputModalities,
+        inputModalities: asStringArray(architecture.input_modalities) as Modality[],
+        outputModalities: asStringArray(architecture.output_modalities) as Modality[],
         supportedParameters: asStringArray(item.supported_parameters),
         pricing: {
             input: asNumber(pricing.prompt),
@@ -70,55 +87,87 @@ export function normalizeDiscoveredModel(value: unknown): DiscoveredModel | null
     };
 }
 
-function makeHeaders(apiKey?: string): HeadersInit {
+function catalogHeaders(apiKey?: string | null): HeadersInit {
     return {
         Accept: 'application/json',
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     };
 }
 
+function providerError(status: number): { code: AICapabilityError['code']; retryable: boolean } {
+    if (status === 401 || status === 403) return { code: 'PROVIDER_AUTHENTICATION', retryable: false };
+    if (status === 408) return { code: 'REQUEST_TIMEOUT', retryable: true };
+    if (status === 429) return { code: 'PROVIDER_RATE_LIMIT', retryable: true };
+    if (status >= 500) return { code: 'PROVIDER_UNAVAILABLE', retryable: true };
+    return { code: 'PROVIDER_ERROR', retryable: false };
+}
+
 async function fetchModels(options: ModelDiscoveryOptions): Promise<DiscoveredModel[]> {
     const fetcher = options.fetch || globalThis.fetch;
     if (!fetcher) {
-        throw new AICapabilityError({
-            code: 'NETWORK_ERROR',
-            message: 'No fetch implementation is available for OpenRouter model discovery.',
-            provider: 'openrouter',
-            retryable: false,
-        });
+        throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'No fetch implementation is available for OpenRouter model discovery.', provider: 'openrouter', retryable: false });
     }
-    const baseUrl = (options.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
-    const response = await fetcher(`${baseUrl}/models`, { headers: makeHeaders(options.apiKey) });
+    const baseUrl = normalizeBaseUrl(options.baseUrl);
+    let response: Response;
+    try {
+        response = await fetcher(`${baseUrl}/models`, { headers: catalogHeaders(options.apiKey) });
+    } catch (cause) {
+        throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'OpenRouter model discovery could not be reached.', provider: 'openrouter', retryable: true, cause });
+    }
     const body = await response.json().catch(() => null) as unknown;
     if (!response.ok) {
+        const classification = providerError(response.status);
         const errorBody = asRecord(body);
+        const nested = asRecord(errorBody.error);
         throw new AICapabilityError({
-            code: response.status === 429 ? 'PROVIDER_RATE_LIMIT' : response.status === 401 ? 'PROVIDER_AUTHENTICATION' : 'PROVIDER_ERROR',
-            message: typeof errorBody.message === 'string' ? errorBody.message : `OpenRouter model discovery failed (${response.status}).`,
+            code: classification.code,
+            message: asString(errorBody.message) || asString(nested.message) || `OpenRouter model discovery failed (${response.status}).`,
             provider: 'openrouter',
             status: response.status,
-            retryable: response.status === 429 || response.status >= 500,
+            requestId: response.headers.get('x-request-id') || undefined,
+            retryable: classification.retryable,
             details: body,
         });
     }
     const data = asRecord(body).data;
-    return (Array.isArray(data) ? data : []).map(normalizeDiscoveredModel).filter((item): item is DiscoveredModel => item !== null);
+    return (Array.isArray(data) ? data : [])
+        .map(normalizeDiscoveredModel)
+        .filter((item): item is DiscoveredModel => item !== null);
 }
 
-/** Discover and cache OpenRouter's general model catalog. No API key is required by this endpoint. */
+/** Discover and cache OpenRouter's general model catalog. No API key is required. */
 export async function discoverOpenRouterModels(options: ModelDiscoveryOptions = {}): Promise<DiscoveredModel[]> {
-    const key = options.baseUrl || DEFAULT_BASE_URL;
+    const key = normalizeBaseUrl(options.baseUrl);
     const now = options.now || Date.now;
     const cached = cache.get(key);
     if (!options.force && cached && cached.expiresAt > now()) return cached.models;
-    const pending = inFlight.get(key);
-    if (pending && !options.force) return pending;
-    const request = fetchModels(options).then((models) => {
-        cache.set(key, { models, expiresAt: now() + (options.ttlMs ?? DEFAULT_TTL_MS) });
-        return models;
-    }).finally(() => inFlight.delete(key));
+    if (!options.force) {
+        const pending = inFlight.get(key);
+        if (pending) return pending;
+    }
+
+    const request = fetchModels(options)
+        .then((models) => {
+            const fetchedAt = now();
+            cache.set(key, { fetchedAt, expiresAt: fetchedAt + Math.max(0, options.ttlMs ?? DEFAULT_MODEL_CATALOG_TTL_MS), models });
+            return models;
+        })
+        .catch((error: unknown) => {
+            if (options.staleIfError !== false && cached) return cached.models;
+            throw error;
+        })
+        .finally(() => {
+            if (inFlight.get(key) === request) inFlight.delete(key);
+        });
     inFlight.set(key, request);
     return request;
+}
+
+export const getOpenRouterModelCatalog = discoverOpenRouterModels;
+
+export function getCachedOpenRouterModels(baseUrl?: string, now: () => number = Date.now): DiscoveredModel[] | null {
+    const entry = cache.get(normalizeBaseUrl(baseUrl));
+    return entry && entry.expiresAt > now() ? entry.models : null;
 }
 
 export async function discoverOpenRouterModelsForModality(modality: Modality, options: ModelDiscoveryOptions = {}): Promise<DiscoveredModel[]> {
@@ -132,7 +181,9 @@ export async function findOpenRouterModel(modelId: string, options: ModelDiscove
 }
 
 export async function selectOpenRouterModel(input: {
+    capability?: CapabilityId;
     model?: string;
+    inputModality?: Modality;
     outputModality?: Modality;
     requiredParameters?: string[];
     options?: ModelDiscoveryOptions;
@@ -140,6 +191,7 @@ export async function selectOpenRouterModel(input: {
     const models = await discoverOpenRouterModels(input.options);
     const candidates = models.filter((model) => {
         if (input.model && model.id !== input.model) return false;
+        if (input.inputModality && !model.inputModalities.includes(input.inputModality)) return false;
         if (input.outputModality && !model.outputModalities.includes(input.outputModality)) return false;
         return (input.requiredParameters || []).every((parameter) => model.supportedParameters.includes(parameter));
     });
@@ -149,6 +201,7 @@ export async function selectOpenRouterModel(input: {
             code: input.model ? 'UNSUPPORTED_MODEL' : 'UNSUPPORTED_CAPABILITY',
             message: input.model ? `OpenRouter model does not satisfy the requested capability: ${input.model}` : 'No OpenRouter model satisfies the requested capability.',
             provider: 'openrouter' as AIProvider,
+            capability: input.capability,
             model: input.model,
             retryable: false,
         });
@@ -160,4 +213,3 @@ export function clearOpenRouterModelCache(): void {
     cache.clear();
     inFlight.clear();
 }
-

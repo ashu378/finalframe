@@ -12,6 +12,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
+import { api } from '../../../convex/_generated/api';
 import {
     isValidTransition,
     validateTransition,
@@ -60,6 +62,12 @@ export async function createProject(
     console.log('--- [SERVER] createProject: Atomic Start ---', { name, contentType });
 
     try {
+        const convex = await getAuthenticatedConvexClient();
+        const token = await import('@convex-dev/auth/nextjs/server').then((module) => module.convexAuthNextjsToken());
+        if (token) {
+            const project = await convex.mutation(api.projects.create, { name, description, contentType, outcomeGoal });
+            return { success: true, projectId: project.externalId };
+        }
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
 
@@ -609,6 +617,12 @@ export async function getStudioContext(): Promise<{
     blocks?: any;
     error?: string;
 }> {
+    const token = await import('@convex-dev/auth/nextjs/server').then((module) => module.convexAuthNextjsToken());
+    if (token) {
+        const current = await (await getAuthenticatedConvexClient()).query(api.account.current, {});
+        if (!current.studio) return { success: false, error: 'Studio not found' };
+        return { success: true, studioId: current.studio.externalId };
+    }
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };

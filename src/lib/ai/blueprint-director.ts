@@ -8,8 +8,6 @@
  * Generates structured scene plans (text only) based on studio defaults.
  * NO media generation, NO free-form prompts in this phase.
  * 
- * NOTE: This is a placeholder implementation using structured templates.
- * Replace with actual AI integration (OpenAI, Anthropic) when configured.
  */
 
 import { createClient } from '@/lib/supabase/server';
@@ -21,7 +19,6 @@ import type {
     MotionConfig
 } from '@/lib/types/database';
 import { executeAITask } from './engine';
-import { AICapability } from './model-registry';
 
 interface BlueprintScene {
     scene_title: string;
@@ -44,6 +41,97 @@ interface BlueprintInput {
     context: string;
     creative_dna: CreativeDNASnapshot;
     message_blocks: MessageBlocksSnapshot;
+}
+
+const BLUEPRINT_SCHEMA: Record<string, unknown> = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['scenes'],
+    properties: {
+        scenes: {
+            type: 'array',
+            minItems: 4,
+            maxItems: 6,
+            items: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                    'scene_title', 'scene_goal', 'scene_text', 'visual_description',
+                    'action_sequence', 'emotional_beat', 'differentiation_note',
+                    'why_this_scene_exists', 'camera_config', 'motion_config',
+                ],
+                properties: {
+                    scene_title: { type: 'string', minLength: 1 },
+                    scene_goal: { type: 'string', minLength: 1 },
+                    scene_text: { type: 'string', minLength: 1 },
+                    visual_description: { type: 'string', minLength: 1 },
+                    action_sequence: { type: 'string', minLength: 1 },
+                    emotional_beat: { type: 'string', minLength: 1 },
+                    differentiation_note: { type: 'string', minLength: 1 },
+                    why_this_scene_exists: { type: 'string', minLength: 1 },
+                    camera_config: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['angle', 'movement', 'lens'],
+                        properties: {
+                            angle: { type: 'string', enum: ['eye_level', 'low_angle', 'high_angle', 'drone', 'macro'] },
+                            movement: { type: 'string', enum: ['static', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'zoom_in', 'zoom_out', 'orbit'] },
+                            lens: { type: 'string', enum: ['wide', 'standard', 'telephoto'] },
+                        },
+                    },
+                    motion_config: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['speed', 'stability'],
+                        properties: {
+                            speed: { type: 'string', enum: ['slow', 'normal', 'fast'] },
+                            stability: { type: 'number', minimum: 0, maximum: 1 },
+                        },
+                    },
+                },
+            },
+        },
+    },
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requiredString(value: unknown, field: string): string {
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`Blueprint scene field ${field} is required.`);
+    return value.trim();
+}
+
+function parseBlueprint(content: string): BlueprintScene[] {
+    const parsed = JSON.parse(content) as unknown;
+    const scenesValue = isRecord(parsed) ? parsed.scenes : undefined;
+    if (!Array.isArray(scenesValue) || scenesValue.length < 4 || scenesValue.length > 6) {
+        throw new Error('Blueprint must contain 4-6 scenes.');
+    }
+    const scenes = scenesValue.map((value, index): BlueprintScene => {
+        if (!isRecord(value)) throw new Error(`Blueprint scene ${index + 1} is invalid.`);
+        const camera = value.camera_config;
+        const motion = value.motion_config;
+        if (!isRecord(camera) || !isRecord(motion)) throw new Error(`Blueprint scene ${index + 1} camera and motion configuration are required.`);
+        const stability = motion.stability;
+        if (typeof stability !== 'number' || stability < 0 || stability > 1) throw new Error(`Blueprint scene ${index + 1} has invalid motion stability.`);
+        return {
+            scene_title: requiredString(value.scene_title, 'scene_title'),
+            scene_goal: requiredString(value.scene_goal, 'scene_goal'),
+            scene_text: requiredString(value.scene_text, 'scene_text'),
+            visual_description: requiredString(value.visual_description, 'visual_description'),
+            action_sequence: requiredString(value.action_sequence, 'action_sequence'),
+            emotional_beat: requiredString(value.emotional_beat, 'emotional_beat'),
+            differentiation_note: requiredString(value.differentiation_note, 'differentiation_note'),
+            why_this_scene_exists: requiredString(value.why_this_scene_exists, 'why_this_scene_exists'),
+            camera_config: camera as CameraConfig,
+            motion_config: motion as MotionConfig,
+        };
+    });
+    const descriptions = new Set(scenes.map((scene) => scene.visual_description.toLowerCase()));
+    if (descriptions.size !== scenes.length) throw new Error('Blueprint scenes must have distinct visual descriptions.');
+    return scenes;
 }
 
 /**
@@ -101,7 +189,7 @@ You ARE directing scenes.
 1. **Every scene MUST be unique**
    - No repeated context
    - No reused phrasing
-   - No generic placeholders
+   - No generic filler
 
 2. **Every scene MUST contain:**
    - A clear GOAL (why this scene exists)
@@ -199,53 +287,23 @@ If a scene:
 This blueprint must feel like it was created by:
 **A creative director + cinematographer + motion designer working together.**
 
-Return a JSON array of 4-6 scenes.`;
+Return a JSON object with a "scenes" array containing 4-6 scenes.`;
 
     try {
         const response = await executeAITask('AI_BRAIN', [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Expand this project into a 4-6 scene blueprint: ${project.project_description}` }
-        ], { jsonMode: true });
+        ], {
+            structuredOutput: {
+                name: 'finalframe_blueprint',
+                schema: BLUEPRINT_SCHEMA,
+                strict: true,
+                description: 'A production-ready FinalFrame scene blueprint.',
+            },
+        });
 
-        const content = 'content' in response ? (response.content as string) : null;
-        const error = 'error' in response ? (response.error as string) : 'AI generation failed';
-
-        if (!content) {
-            return { success: false, error };
-        }
-
-        // Helper to extract JSON from potential markdown blocks
-        const extractJson = (str: string) => {
-            const match = str.match(/```(?:json)?\s*([\s\S]*?)```/);
-            return match ? match[1].trim() : str.trim();
-        };
-
-        const cleanedContent = extractJson(content);
-        const rawScenes = JSON.parse(cleanedContent);
-        if (!Array.isArray(rawScenes)) {
-            return { success: false, error: 'AI returned invalid format' };
-        }
-
-        // Add validation for empty fields and normalization
-        const scenes: BlueprintScene[] = rawScenes.map(s => ({
-            scene_title: s.scene_title || 'Untitled Scene',
-            scene_goal: s.why_this_scene_exists || 'Strategic production segment.',
-            scene_text: s.visual_description || '',
-            visual_description: s.visual_description || '',
-            action_sequence: s.action_sequence || '',
-            emotional_beat: s.emotional_intent || s.emotional_beat || '',
-            differentiation_note: s.differentiation_note || '',
-            why_this_scene_exists: s.why_this_scene_exists || 'Ensures narrative continuity.',
-            camera_config: s.camera_config || { angle: 'eye_level', movement: 'static', lens: 'standard' },
-            motion_config: s.motion_config || { speed: 'normal', stability: 0.8 },
-        }));
-
-        // FINAL VALIDATION: Check for duplicate visual descriptions
-        const descriptions = new Set(scenes.map(s => s.visual_description.toLowerCase().trim()));
-        if (descriptions.size < scenes.length) {
-            console.warn('AI generated duplicate scenes. Regenerating once...');
-            // In a production environment, we might retry once. For now, we log and proceed.
-        }
+        if (!response.content) return { success: false, error: 'AI returned no blueprint.' };
+        const scenes = parseBlueprint(response.content);
 
         // Save to DB
         const result = await createScenesFromBlueprint(projectId, scenes);

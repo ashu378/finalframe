@@ -3,9 +3,9 @@ import { v } from "convex/values";
 import { getProduction, now, requireStudio } from "./_shared";
 
 export const createPlan = mutation({
-  args: { ownerExternalId: v.string(), studioExternalId: v.string(), projectExternalId: v.string(), workflow: v.string(), inputMode: v.string(), durationSeconds: v.number(), language: v.string(), outputPreset: v.string(), input: v.any(), plan: v.any(), estimate: v.any() },
+  args: { studioExternalId: v.string(), projectExternalId: v.string(), workflow: v.string(), inputMode: v.string(), durationSeconds: v.number(), language: v.string(), outputPreset: v.string(), input: v.any(), plan: v.any(), estimate: v.any() },
   handler: async (ctx, args) => {
-    await requireStudio(ctx, args.studioExternalId, args.ownerExternalId);
+    await requireStudio(ctx, args.studioExternalId);
     let production = await ctx.db.query("productions").withIndex("by_project", (q) => q.eq("externalProjectId", args.projectExternalId)).unique();
     if (!production) production = await ctx.db.insert("productions", { externalProjectId: args.projectExternalId, studioExternalId: args.studioExternalId, workflow: args.workflow, inputMode: args.inputMode, requestedDurationSeconds: args.durationSeconds, language: args.language, outputPreset: args.outputPreset, status: "PLANNING", createdAt: now(), updatedAt: now() }).then((id) => ctx.db.get(id));
     if (!production) throw new Error("Unable to create production");
@@ -15,11 +15,11 @@ export const createPlan = mutation({
 });
 
 export const approvePlan = mutation({
-  args: { ownerExternalId: v.string(), planId: v.id("directorPlans") },
+  args: { planId: v.id("directorPlans") },
   handler: async (ctx, args) => {
     const planRecord = await ctx.db.get(args.planId);
     if (!planRecord) throw new Error("Plan not found");
-    const production = await getProduction(ctx, planRecord.productionId.toString(), args.ownerExternalId);
+    const production = await getProduction(ctx, planRecord.productionId.toString());
     if (planRecord.status === "APPROVED" && production.currentVersionId) return { productionId: production._id, versionId: production.currentVersionId };
     const previous = await ctx.db.query("productionVersions").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect();
     const versionId = await ctx.db.insert("productionVersions", { productionId: production._id, versionNumber: previous.length + 1, status: "APPROVED", sourcePlanId: args.planId, approvedAt: now(), createdAt: now() });
@@ -29,7 +29,7 @@ export const approvePlan = mutation({
       const sequenceId = await ctx.db.insert("sequences", { productionVersionId: versionId, title: sequence.title, description: sequence.description ?? "", orderIndex: sequence.orderIndex ?? 0 });
       for (const scene of sequence.scenes ?? []) {
         const sceneId = await ctx.db.insert("scenes", { sequenceId, title: scene.title, purpose: scene.purpose ?? "", visualDirection: scene.visualDirection ?? "", orderIndex: scene.orderIndex ?? 0 });
-        for (const shot of scene.shots ?? []) await ctx.db.insert("shots", { sceneId, title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, orderIndex: shot.orderIndex ?? 0, camera: shot.camera ?? {}, requiredAssetIds: shot.requiredAssetIds ?? [], status: "PLANNED" });
+        for (const shot of scene.shots ?? []) await ctx.db.insert("shots", { sceneId, title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, orderIndex: shot.orderIndex ?? 0, camera: shot.camera ?? {}, requiredAssetIds: shot.requiredAssetIds ?? [], status: "PLANNING" });
       }
     }
     await ctx.db.patch(args.planId, { status: "APPROVED", approvedAt: now() });
@@ -39,9 +39,9 @@ export const approvePlan = mutation({
 });
 
 export const getWorkspace = query({
-  args: { ownerExternalId: v.string(), productionId: v.id("productions") },
+  args: { productionId: v.id("productions") },
   handler: async (ctx, args) => {
-    const production = await getProduction(ctx, args.productionId.toString(), args.ownerExternalId);
+    const production = await getProduction(ctx, args.productionId.toString());
     if (!production.currentVersionId) return { production, version: null, sequences: [], jobs: [] };
     const sequences = await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", production.currentVersionId!)).collect();
     const nested = [];
@@ -57,11 +57,11 @@ export const getWorkspace = query({
 });
 
 export const getWorkspaceByProject = query({
-  args: { ownerExternalId: v.string(), projectExternalId: v.string() },
+  args: { projectExternalId: v.string() },
   handler: async (ctx, args) => {
     const production = await ctx.db.query("productions").withIndex("by_project", (q) => q.eq("externalProjectId", args.projectExternalId)).unique();
     if (!production) return { production: null, version: null, sequences: [], jobs: [] };
-    await requireStudio(ctx, production.studioExternalId, args.ownerExternalId);
+    await requireStudio(ctx, production.studioExternalId);
     if (!production.currentVersionId) return { production, version: null, sequences: [], jobs: [] };
     const sequences = await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", production.currentVersionId!)).collect();
     const nested = [];

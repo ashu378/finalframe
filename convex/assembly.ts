@@ -3,9 +3,9 @@ import { v } from "convex/values";
 import { getProduction, now } from "./_shared";
 
 export const createJob = mutation({
-  args: { ownerExternalId: v.string(), productionId: v.id("productions") },
+  args: { productionId: v.id("productions") },
   handler: async (ctx, args) => {
-    const production = await getProduction(ctx, args.productionId.toString(), args.ownerExternalId);
+    const production = await getProduction(ctx, args.productionId.toString());
     if (!production.currentVersionId) throw new Error("Production has no approved version");
     const sequences = await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", production.currentVersionId!)).collect();
     const items: any[] = [];

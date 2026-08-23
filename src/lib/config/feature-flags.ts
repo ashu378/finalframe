@@ -18,7 +18,7 @@ function readFlag(name: string, fallback: boolean) {
 
 const defaults: Record<FinalFrameFeature, boolean> = {
     productionStudio: true,
-    convexAuth: false,
+    convexAuth: true,
     openRouterMedia: true,
     motionGraphics: true,
     stylized2d: false,
