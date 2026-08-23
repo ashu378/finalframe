@@ -12,7 +12,7 @@ export const ensureAccount = mutation({
     let user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
     if (!user) {
       const existing = identity.email
-        ? await ctx.db.query("users").withIndex("email", q => q.eq("email", identity.email)).unique()
+        ? await ctx.db.query("users").withIndex("by_email", q => q.eq("email", identity.email)).unique()
         : null;
       if (existing) {
         await ctx.db.patch(existing._id, { authSubject: identity.subject, externalId: identity.externalId, name: args.name || existing.name, updatedAt: timestamp });

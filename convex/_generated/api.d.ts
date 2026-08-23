@@ -11,15 +11,19 @@
 import type * as _shared from "../_shared.js";
 import type * as account from "../account.js";
 import type * as app from "../app.js";
-import type * as assetStorage from "../assetStorage.js";
 import type * as assembly from "../assembly.js";
+import type * as assetStorage from "../assetStorage.js";
+import type * as auth from "../auth.js";
+import type * as authorization from "../authorization.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as credits from "../credits.js";
 import type * as generation from "../generation.js";
 import type * as http from "../http.js";
+import type * as identity from "../identity.js";
 import type * as payments from "../payments.js";
 import type * as productions from "../productions.js";
 import type * as projects from "../projects.js";
+import type * as secureJobs from "../secureJobs.js";
 
 import type {
   ApiFromModules,
@@ -31,15 +35,19 @@ declare const fullApi: ApiFromModules<{
   _shared: typeof _shared;
   account: typeof account;
   app: typeof app;
-  assetStorage: typeof assetStorage;
   assembly: typeof assembly;
+  assetStorage: typeof assetStorage;
+  auth: typeof auth;
+  authorization: typeof authorization;
   bootstrap: typeof bootstrap;
   credits: typeof credits;
   generation: typeof generation;
   http: typeof http;
+  identity: typeof identity;
   payments: typeof payments;
   productions: typeof productions;
   projects: typeof projects;
+  secureJobs: typeof secureJobs;
 }>;
 
 /**

@@ -36,7 +36,7 @@ export default defineSchema({
     externalId: v.optional(v.string()), authSubject: v.optional(v.string()),
     status: v.optional(status), metadata: v.optional(json), createdAt: v.optional(timestamp),
     updatedAt: v.optional(timestamp),
-  }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]).index("email", ["email"]),
+  }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]),
 
   studios: defineTable({
     externalId: v.string(), ownerExternalId: v.string(), ownerId: v.optional(v.id("users")), ownerUserId: v.optional(v.id("users")),

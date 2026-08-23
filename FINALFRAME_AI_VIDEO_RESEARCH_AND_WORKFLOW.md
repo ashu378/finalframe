@@ -483,3 +483,140 @@ The user should feel like they are operating a small production studio:
 `Choose the production → prepare the words/performance → approve the plan → lock the world → approve shots → generate in controlled passes → assemble → review → publish`
 
 “Generate everything” may exist as a convenience for advanced users later, but it should be a shortcut over completed stage contracts—not the primary product experience. The primary experience must make creative decisions visible, preserve user control, show progress and cost, and keep every approved asset reusable.
+
+## Editing is a required studio layer
+
+The workflow should include editing after generation and before final review/export. The correct product is not “generate, download, edit elsewhere.” It is:
+
+`Generate → Edit with AI or controls → Assemble → Review → Export`
+
+This is especially important because current model APIs increasingly support iterative editing. Google’s current Gemini documentation describes conversational video editing with multimodal inputs and multi-turn refinement, while Veo supports video extension, image/last-frame control, reference images, audio cues, and prompt/negative-prompt controls. Nano Banana supports conversational image editing with supplied images and text instructions. These capabilities should be exposed through Final Frame’s capability layer, not as provider-specific buttons in the UI.
+
+### Two editing modes
+
+#### 1. AI edit
+
+Users select a shot, frame range, layer, or the whole assembly and describe a change in plain language:
+
+- “Make the character smile but keep the outfit and background.”
+- “Replace the cup with the approved product.”
+- “Change the camera to a close-up during the punchline.”
+- “Remove the extra person in the background.”
+- “Make the lighting warmer.”
+- “Extend this shot by two seconds while keeping the same character.”
+- “Shorten the pause before the CTA.”
+
+Final Frame should convert the request into a typed edit operation, show the affected asset/shot, estimate cost, and ask for approval before generation. The original version must remain intact. Every edit creates a new shot version or assembly version with a diff, provenance, and rollback path.
+
+#### 2. Direct editing controls
+
+MVP controls should cover the high-value 80% of creator work:
+
+- trim and split a clip;
+- reorder shots;
+- replace a shot with another approved version;
+- regenerate a shot;
+- adjust shot duration within supported bounds;
+- change crop, aspect ratio, position, and scale;
+- add/edit text overlays and CTA cards;
+- edit captions and caption style;
+- adjust voice, music, ambience, and SFX volume;
+- fade in/out and basic audio ducking;
+- choose a transition from a small approved set;
+- freeze frame, hold frame, and simple speed adjustment where the media runtime supports it;
+- undo, redo, duplicate version, and restore previous version.
+
+These controls should operate on a lightweight shot strip and multi-track assembly view. They do not require a Premiere-style editor in the first release.
+
+### Editing boundaries for MVP
+
+Do not attempt to ship all of CapCut. Defer advanced masking, keyframing, chroma key, rotoscoping, 3D compositing, detailed color grading, beat-sync automation, complex effects, and a giant transition marketplace. These features create a large media-runtime and UX surface without solving the primary Final Frame problem: consistent, finished, publishable AI video.
+
+The MVP editor should be a **review-and-touch-up editor**, not a general-purpose NLE. Its job is to let a user fix a generated production without leaving Final Frame.
+
+### Editing workflow inside the studio
+
+1. User opens the generated production in Review/Edit.
+2. The system displays the shot strip, playback, captions, audio tracks, and continuity/status badges.
+3. User selects either a shot, a range, an audio/text track, or the whole assembly.
+4. User chooses an action: trim, replace, regenerate, prompt-edit, caption-edit, audio-edit, overlay-edit, or layout-edit.
+5. For AI edits, the user describes the change and sees the parsed operation, affected assets, continuity implications, and estimated credits.
+6. The system creates a new version without overwriting the approved version.
+7. The user compares before/after and accepts, rejects, or continues editing.
+8. Final Frame re-runs only the relevant quality gates.
+9. The user returns to Review and then exports a selected assembly version.
+
+### Editing data model
+
+The current `render_layers`, remix concepts, and `RemixChat` are useful foundations, but the product needs an explicit versioned edit model:
+
+- `shot_versions`: immutable generated/edit results;
+- `edit_operations`: typed operation, target, prompt, input version, output version, provider task, cost, and status;
+- `assembly_versions`: ordered shot/audio/caption/overlay manifest;
+- `timeline_tracks` and `timeline_clips`: video, voice, music, SFX, captions, overlays;
+- `edit_history`: undo/redo and user-visible change descriptions;
+- `edit_capabilities`: provider/runtime-supported operations and limits.
+
+An AI edit must never mutate the original asset in place. A direct edit that only changes assembly metadata can be cheap and immediate; an edit that changes pixels, motion, speech, or generated audio must create a new asynchronous job and reserve credits.
+
+### Recommended editor architecture
+
+Use three layers:
+
+1. **Shot editor:** AI prompt edits, regenerate, replace, trim, crop, and shot-level controls.
+2. **Assembly editor:** reorder clips, trim/split, captions, overlays, audio levels, transitions, and CTA.
+3. **Review/export:** quality gates, platform previews, version selection, and export.
+
+Keep deterministic edits in the Remotion/media runtime. Route AI edits through capability adapters. This allows Google, Runway, or another provider to offer different operations without changing the user’s mental model.
+
+### New quality gates created by editing
+
+After an edit, validate:
+
+- the edit did not break the character/location/product Bible;
+- the changed shot still covers its dialogue and timing;
+- captions remain aligned after trims and speed changes;
+- audio ducking and loudness remain valid;
+- text and logos stay inside safe areas;
+- the new assembly still meets platform duration/aspect constraints;
+- the user has not accidentally edited a locked brand or identity asset;
+- the source and generated derivative lineage remain auditable.
+
+## Additional recommendations beyond the original workflow
+
+### Make the production state visible
+
+Replace a single “rendering” feeling with a production board showing: Brief, Script, Plan, Bible, Shots, Assembly, Review, and Export. Each stage should show `Not started`, `Needs input`, `Ready`, `In progress`, `Needs review`, or `Approved`.
+
+### Separate creative approval from execution approval
+
+Users should approve both:
+
+- **Creative plan:** what will be made;
+- **Execution estimate:** what it will cost and which operations will run.
+
+This makes the system feel professional and prevents unexpected credit spend.
+
+### Treat reusable assets as a product moat
+
+Characters, voices, locations, products, styles, caption presets, CTA cards, and shot patterns should be saved to a studio library. A successful Nigerian comedy character or SaaS brand should become easier to reuse in episode two, not recreated from scratch.
+
+### Offer “guided” and “advanced” views
+
+Beginners should see stage cards and recommended defaults. Technical users should be able to open shot prompts, negative prompts, reference images, model capability notes, timing, and edit history. Advanced controls should be progressive disclosure, not the default wall of settings.
+
+### Build a revision loop, not just a render loop
+
+The product’s core loop should be:
+
+`Plan → Generate → Inspect → Edit → Compare → Approve → Reuse`
+
+The inspect/edit/compare loop is where Final Frame can outperform tools that only generate a first draft.
+
+### Measure real quality
+
+Track time-to-first-review, number of edits per approved video, shot regeneration rate, continuity failure rate, caption corrections, assembly failures, export success, and percentage of assets reused across projects. These metrics will show whether the studio is actually becoming more autonomous and useful.
+
+## Final recommendation
+
+Yes: add editing to the MVP. Make it a deliberate “Edit & Assemble” stage between generation and final review. Start with shot-level AI edits plus a small deterministic editor for trim, split, reorder, captions, overlays, audio, crop, transitions, undo/redo, and version comparison. This is achievable with the current Final Frame direction, uses the existing remix/layer/editor foundations, and gives technical users control without forcing every beginner into a complicated timeline.
