@@ -1,13 +1,13 @@
 /**
- * FinalFrame — AI Model Registry & Canonical Capabilities
- * Reference: HARD CONSTRAINT DOCUMENT § 2 & § 3
- * Reference: HARD CONSTRAINT DOCUMENT § 4 — Execution Profile Rule
- * 
- * This file is the SINGLE SOURCE OF TRUTH for:
- * 1. AI Capabilities (Locked to 4 Structural Pillars)
- * 2. Execution Profiles (Deterministic Video Drivers)
- * 3. Model ID Configuration (Encapsulated)
+ * FinalFrame model routing defaults.
+ *
+ * The registry describes the role a model fulfils. OpenRouter model slugs are
+ * configuration, not application logic: operators can change them without
+ * changing capability callers. `openrouter/auto` is a valid bounded default
+ * for chat roles; media helpers select an explicit model or use discovery.
  */
+
+import type { AIProvider, CapabilityId } from './types';
 
 /**
  * AI Capabilities — The four structural pillars of FinalFrame intelligence.
@@ -30,8 +30,9 @@ export type ExecutionProfile =
     | 'PREMIUM';
 
 export interface AIModelConfig {
-    id: string;         // Provider-specific model ID
-    provider: string;   // e.g., 'anthropic', 'google', 'runway'
+    id: string;
+    provider: AIProvider;
+    capability: CapabilityId;
     contextWindow: number;
     description: string;
     maxTokens?: number;
@@ -43,28 +44,32 @@ export interface AIModelConfig {
  */
 export const MODEL_REGISTRY: Record<AICapability, AIModelConfig> = {
     AI_BRAIN: {
-        id: 'anthropic/claude-sonnet-4.5',
-        provider: 'anthropic',
+        id: process.env.OPENROUTER_AI_BRAIN_MODEL || 'openrouter/auto',
+        provider: 'openrouter',
+        capability: 'AI_BRAIN',
         contextWindow: 200000,
-        description: 'SOTA Reasoning for Scripting and Planning'
+        description: 'General-purpose reasoning, planning and scripting'
     },
     IMAGE_ENGINE: {
-        id: 'google/gemini-3-pro-image-preview',
-        provider: 'google',
+        id: process.env.OPENROUTER_IMAGE_MODEL || 'openrouter/auto',
+        provider: 'openrouter',
+        capability: 'IMAGE_ENGINE',
         contextWindow: 32000,
-        description: 'High-fidelity static visual generation'
+        description: 'Image understanding and image-generation routing'
     },
     VIDEO_ENGINE: {
-        id: 'runway/adapter-managed',
-        provider: 'runway',
+        id: process.env.OPENROUTER_VIDEO_MODEL || 'auto',
+        provider: 'openrouter',
+        capability: 'VIDEO_ENGINE',
         contextWindow: 128000,
-        description: 'Internal suite: Gen-3, Gen-4, Veo 3.x'
+        description: 'Asynchronous video-generation routing'
     },
     VALIDATOR_ENGINE: {
-        id: 'google/gemini-3-pro-preview',
-        provider: 'google',
+        id: process.env.OPENROUTER_VALIDATOR_MODEL || 'openrouter/auto',
+        provider: 'openrouter',
+        capability: 'VALIDATOR_ENGINE',
         contextWindow: 1000000,
-        description: 'Deterministic safety and quality gates'
+        description: 'Structured validation and quality gates'
     }
 };
 

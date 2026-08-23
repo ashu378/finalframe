@@ -20,10 +20,13 @@ import { MAINTENANCE_MODE, shouldBypassMaintenance } from '@/lib/config/maintena
  */
 const PUBLIC_ROUTES = [
     '/',
+    '/about',
+    '/methodology',
     '/pricing',
     '/case-studies',
     '/contact',
     '/legal',
+    '/review',
 ];
 
 const AUTH_ROUTES = [
@@ -81,6 +84,16 @@ export async function middleware(request: NextRequest) {
     // 3. PUBLIC ROUTES — No auth required, early exit
     // ============================================
     if (matchesRoute(pathname, PUBLIC_ROUTES)) {
+        return NextResponse.next();
+    }
+
+    // Local/public development can run with Convex configured before legacy
+    // Supabase authentication credentials are supplied. Protected routes stay
+    // closed, while public and authentication pages remain available.
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        if (matchesRoute(pathname, PROTECTED_ROUTES) || matchesRoute(pathname, ADMIN_ROUTES)) {
+            return NextResponse.redirect(new URL('/login', request.url));
+        }
         return NextResponse.next();
     }
 

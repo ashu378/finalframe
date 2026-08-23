@@ -6,8 +6,10 @@ import { api } from '../../../convex/_generated/api';
 import { BachsPaymentProvider } from './bachs';
 import type { SupportedCurrency } from './types';
 import { CREDIT_PACKS } from './config';
+import { isFeatureEnabled } from '@/lib/config/feature-flags';
 
-export async function createCreditCheckout(packId: string, currency: SupportedCurrency = 'XAF') {
+export async function createCreditCheckout(packId: string, currency: SupportedCurrency = 'NGN') {
+    if (!isFeatureEnabled('bacsPayments')) return { success: false, error: 'Credit purchases are not enabled in this environment.' };
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };

@@ -1,0 +1,31 @@
+{
+  "kind": "finalframe.render-manifest",
+  "version": 1,
+  "manifestId": "fixture-kinetic-title-v1",
+  "projectId": "fixture-project",
+  "rendererVersion": "0.1.0",
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationInFrames": 150,
+    "codec": "h264"
+  },
+  "items": [
+    {
+      "id": "title-card",
+      "kind": "motion-graphics",
+      "templateId": "kinetic-title",
+      "startFrame": 0,
+      "durationInFrames": 150,
+      "props": {
+        "eyebrow": "FINALFRAME",
+        "title": "Make the moment move.",
+        "subtitle": "A bounded, deterministic motion system.",
+        "accentColor": "#ff6b4a",
+        "backgroundColor": "#111827",
+        "textColor": "#f9fafb"
+      }
+    }
+  ]
+}

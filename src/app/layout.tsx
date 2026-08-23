@@ -9,8 +9,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from 'sonner';
+import { FinalFrameProviders } from '@/components/providers/convex-auth-provider';
 
 export const metadata: Metadata = {
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://finalframe.ai'),
     title: {
         default: 'FinalFrame — Make the video in your head',
         template: '%s | FinalFrame',
@@ -61,7 +63,7 @@ export default function RootLayout({
             <body className="min-h-dvh bg-background font-sans antialiased" suppressHydrationWarning>
                 <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-foreground focus:px-4 focus:py-3 focus:text-background">Skip to content</a>
                 <Toaster position="top-right" theme="light" richColors />
-                {children}
+                <FinalFrameProviders>{children}</FinalFrameProviders>
             </body>
         </html>
     );

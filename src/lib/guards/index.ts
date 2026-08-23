@@ -97,6 +97,10 @@ export async function requireAdmin(): Promise<UserProfile> {
  * Useful for pages that behave differently based on auth state
  */
 export async function getCurrentUser(): Promise<{ id: string; email: string } | null> {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        return null;
+    }
+
     const supabase = await createClient();
     const { data: { user }, error } = await supabase.auth.getUser();
 
@@ -112,6 +116,10 @@ export async function getCurrentUser(): Promise<{ id: string; email: string } | 
  * Returns null if not authenticated or profile doesn't exist
  */
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        return null;
+    }
+
     const supabase = await createClient();
     const { data: { user }, error } = await supabase.auth.getUser();
 

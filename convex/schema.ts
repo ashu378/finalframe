@@ -1,17 +1,25 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 const timestamp = v.number();
 const json = v.any();
 
 export default defineSchema({
+  ...authTables,
   users: defineTable({
-    externalId: v.string(),
-    email: v.optional(v.string()),
     name: v.optional(v.string()),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }).index("by_external_id", ["externalId"]),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    externalId: v.optional(v.string()),
+    authSubject: v.optional(v.string()),
+    createdAt: v.optional(timestamp),
+    updatedAt: v.optional(timestamp),
+  }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("email", ["email"]),
 
   studios: defineTable({
     externalId: v.string(),
@@ -21,6 +29,15 @@ export default defineSchema({
     createdAt: timestamp,
     updatedAt: timestamp,
   }).index("by_external_id", ["externalId"]).index("by_owner", ["ownerExternalId"]),
+
+  studioMembers: defineTable({
+    studioExternalId: v.string(),
+    userExternalId: v.string(),
+    role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")),
+    status: v.union(v.literal("active"), v.literal("invited"), v.literal("suspended")),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }).index("by_studio", ["studioExternalId"]).index("by_user", ["userExternalId"]).index("by_studio_user", ["studioExternalId", "userExternalId"]),
 
   projects: defineTable({
     externalId: v.string(),
@@ -40,6 +57,11 @@ export default defineSchema({
     name: v.optional(v.string()),
     mimeType: v.optional(v.string()),
     storageUrl: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    checksum: v.optional(v.string()),
+    provenance: v.optional(json),
+    rights: v.optional(json),
+    retention: v.optional(json),
     metadata: json,
     createdAt: timestamp,
   }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"]).index("by_production", ["productionId"]),
@@ -57,6 +79,17 @@ export default defineSchema({
     createdAt: timestamp,
     updatedAt: timestamp,
   }).index("by_project", ["externalProjectId"]).index("by_studio", ["studioExternalId"]),
+
+  createIntents: defineTable({
+    studioExternalId: v.string(),
+    inputMode: v.string(),
+    brief: v.string(),
+    metadata: json,
+    status: v.string(),
+    productionId: v.optional(v.id("productions")),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }).index("by_studio", ["studioExternalId"]).index("by_status", ["status"]),
 
   directorPlans: defineTable({
     productionId: v.id("productions"),
@@ -136,6 +169,13 @@ export default defineSchema({
     progress: v.number(),
     estimatedCost: v.number(),
     idempotencyKey: v.string(),
+    requestHash: v.optional(v.string()),
+    reservationId: v.optional(v.id("creditReservations")),
+    correlationId: v.optional(v.string()),
+    leaseId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(timestamp),
+    nextAttemptAt: v.optional(timestamp),
+    actualCost: v.optional(v.number()),
     providerJobId: v.optional(v.string()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
@@ -164,6 +204,7 @@ export default defineSchema({
     createdAt: timestamp,
     committedAt: v.optional(timestamp),
     releasedAt: v.optional(timestamp),
+    actualAmount: v.optional(v.number()),
   }).index("by_idempotency", ["idempotencyKey"]).index("by_studio", ["studioExternalId"]),
 
   creditTransactions: defineTable({
@@ -182,6 +223,8 @@ export default defineSchema({
     manifest: json,
     outputUrl: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
+    rendererJobId: v.optional(v.string()),
+    correlationId: v.optional(v.string()),
     createdAt: timestamp,
     updatedAt: timestamp,
   }).index("by_production", ["productionId"]),
@@ -198,7 +241,7 @@ export default defineSchema({
     metadata: json,
     createdAt: timestamp,
     completedAt: v.optional(timestamp),
-  }).index("by_reference", ["reference"]).index("by_studio", ["studioExternalId"]),
+  }).index("by_reference", ["reference"]).index("by_checkout", ["providerCheckoutId"]).index("by_studio", ["studioExternalId"]),
 
   paymentEvents: defineTable({
     provider: v.string(),
@@ -208,4 +251,56 @@ export default defineSchema({
     processedAt: v.optional(timestamp),
     createdAt: timestamp,
   }).index("by_provider_event", ["provider", "providerEventId"]),
+
+  creditEstimates: defineTable({
+    studioExternalId: v.string(),
+    productionId: v.optional(v.id("productions")),
+    estimateVersion: v.string(),
+    totalCredits: v.number(),
+    lineItems: json,
+    expiresAt: timestamp,
+    createdAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
+
+  reviews: defineTable({
+    productionId: v.id("productions"),
+    studioExternalId: v.string(),
+    status: v.union(v.literal("DRAFT"), v.literal("REQUESTED"), v.literal("APPROVED"), v.literal("CHANGES_REQUESTED")),
+    shareTokenHash: v.optional(v.string()),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
+
+  reviewComments: defineTable({
+    reviewId: v.id("reviews"),
+    authorExternalId: v.optional(v.string()),
+    body: v.string(),
+    timeSeconds: v.optional(v.number()),
+    resolvedAt: v.optional(timestamp),
+    createdAt: timestamp,
+  }).index("by_review", ["reviewId"]),
+
+  exports: defineTable({
+    productionId: v.id("productions"),
+    studioExternalId: v.string(),
+    assemblyJobId: v.optional(v.id("assemblyJobs")),
+    preset: v.string(),
+    status: v.string(),
+    storageId: v.optional(v.id("_storage")),
+    outputUrl: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: timestamp,
+    completedAt: v.optional(timestamp),
+  }).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
+
+  auditEvents: defineTable({
+    studioExternalId: v.optional(v.string()),
+    actorExternalId: v.optional(v.string()),
+    action: v.string(),
+    entityType: v.string(),
+    entityId: v.string(),
+    correlationId: v.optional(v.string()),
+    metadata: json,
+    createdAt: timestamp,
+  }).index("by_studio", ["studioExternalId"]).index("by_entity", ["entityType", "entityId"]),
 });
