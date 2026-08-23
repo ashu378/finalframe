@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
-import { getConvexClient } from '@/lib/convex/server';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { api } from '../../../convex/_generated/api';
 import type { CostEstimate, CostLineItem, QualityTier } from '@/lib/types/database';
 
@@ -15,28 +14,20 @@ export async function estimateProductionCost(input: { shotCount: number; videoSe
     return { totalCredits: items.reduce((total, item) => total + item.credits, 0), qualityTier: input.qualityTier, lineItems: items, estimateVersion: `pricing-${new Date().toISOString().slice(0, 10)}`, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
 }
 
-async function currentUserId() { const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); return user?.id; }
-
 export async function getStudioCreditBalance(studioId: string): Promise<number> {
-    const userId = await currentUserId();
-    if (!userId) return 0;
-    try { return await getConvexClient().query(api.credits.getBalance, { studioExternalId: studioId }); }
+    try { return await (await getAuthenticatedConvexClient()).query(api.credits.getBalance, { studioExternalId: studioId }); }
     catch { return 0; }
 }
 
 export async function reserveCredits(input: { studioId: string; amount: number; idempotencyKey: string; generationJobId?: string }): Promise<{ success: boolean; reservationId?: string; error?: string }> {
     if (!Number.isInteger(input.amount) || input.amount <= 0) return { success: false, error: 'Credit amount must be positive' };
-    const userId = await currentUserId();
-    if (!userId) return { success: false, error: 'Unauthorized' };
     try {
-        const result = await getConvexClient().mutation(api.credits.reserve, { studioExternalId: input.studioId, amount: input.amount, idempotencyKey: input.idempotencyKey, generationJobId: input.generationJobId as any });
+        const result = await (await getAuthenticatedConvexClient()).mutation(api.credits.reserve, { studioExternalId: input.studioId, amount: input.amount, idempotencyKey: input.idempotencyKey, generationJobId: input.generationJobId as any });
         return { success: result.status === 'RESERVED', reservationId: result.reservationId.toString(), error: result.status === 'RESERVED' ? undefined : 'Reservation already finalized' };
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to reserve credits' }; }
 }
 
 export async function finalizeCreditReservation(reservationId: string, outcome: 'COMMIT' | 'RELEASE') {
-    const userId = await currentUserId();
-    if (!userId) return { success: false, error: 'Unauthorized' };
-    try { await getConvexClient().mutation(api.credits.finalize, { reservationId: reservationId as any, outcome }); return { success: true }; }
+    try { await (await getAuthenticatedConvexClient()).mutation(api.credits.finalize, { reservationId: reservationId as any, outcome }); return { success: true }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to finalize reservation' }; }
 }

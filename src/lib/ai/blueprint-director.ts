@@ -10,8 +10,9 @@
  * 
  */
 
-import { createClient } from '@/lib/supabase/server';
 import { createScenesFromBlueprint } from '@/lib/scene/actions';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
+import { api } from '../../../convex/_generated/api';
 import type {
     CreativeDNASnapshot,
     MessageBlocksSnapshot,
@@ -142,37 +143,19 @@ export async function generateBlueprint(projectId: string): Promise<{
     scenesGenerated?: number;
     error?: string;
 }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) return { success: false, error: 'Unauthorized' };
-
-    // Get project with all inherited data
-    const { data: project, error: projectError } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .single();
-
-    if (projectError || !project) return { success: false, error: 'Project not found' };
-
-    // Verify ownership
-    const { data: studio } = await supabase
-        .from('studios')
-        .select('id')
-        .eq('id', project.studio_id)
-        .eq('user_id', user.id)
-        .single();
-
-    if (!studio) return { success: false, error: 'Access denied' };
-
-    // Check project state
-    if (project.state !== 'draft' && project.state !== 'blueprint_ready') {
-        return { success: false, error: 'Blueprint can only be generated in draft or blueprint_ready state' };
+    const convex = await getAuthenticatedConvexClient();
+    const current = await convex.query(api.account.current, {});
+    if (!current.studio) return { success: false, error: 'Authentication or studio setup required' };
+    const projects = await convex.query(api.projects.list, { studioExternalId: current.studio.externalId });
+    const project = projects.find((row) => row.externalId === projectId || row._id === projectId);
+    if (!project) return { success: false, error: 'Project not found' };
+    const metadata = (project.metadata || {}) as Record<string, any>;
+    const state = project.status || 'DRAFT';
+    if (state !== 'DRAFT' && state !== 'PLANNING' && state !== 'READY') {
+        return { success: false, error: 'Blueprint can only be generated in a draft or planning state' };
     }
-
-    const dna = project.creative_dna_snapshot as CreativeDNASnapshot || {};
-    const blocks = project.message_blocks_snapshot as MessageBlocksSnapshot || {};
+    const dna = (metadata.creativeDnaSnapshot || {}) as CreativeDNASnapshot;
+    const blocks = (metadata.messageBlocksSnapshot || {}) as MessageBlocksSnapshot;
 
     const systemPrompt = `You are the **FinalFrame AI Director**.
 
@@ -266,14 +249,14 @@ Adapt the blueprint automatically based on Content Type:
 ---
 
 ## PROJECT CONTEXT
-- Platform: ${project.platform}
-- Identity Presence: ${project.identity_presence || 'no_people'}
-- Outcome Goal: ${project.outcome_goal}
-- Content Type: ${project.content_type || 'social_ad'}
+- Platform: ${metadata.platform || 'social'}
+- Identity Presence: ${metadata.identityPresence || 'no_people'}
+- Outcome Goal: ${metadata.outcomeGoal || 'explain_value'}
+- Content Type: ${metadata.contentType || 'social_ad'}
 - Brand Energy: ${dna.brand_energy}
 - Visual Style: ${dna.visual_style}
 - Value Prop: ${blocks.value_proposition}
-- User Description: ${project.project_description}
+- User Description: ${project.description || ''}
 
 ---
 
@@ -292,7 +275,7 @@ Return a JSON object with a "scenes" array containing 4-6 scenes.`;
     try {
         const response = await executeAITask('AI_BRAIN', [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: `Expand this project into a 4-6 scene blueprint: ${project.project_description}` }
+            { role: 'user', content: `Expand this project into a 4-6 scene blueprint: ${project.description || ''}` }
         ], {
             structuredOutput: {
                 name: 'finalframe_blueprint',

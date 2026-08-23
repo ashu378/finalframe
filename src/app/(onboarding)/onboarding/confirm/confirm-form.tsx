@@ -12,11 +12,7 @@ export function ConfirmForm() {
         setLoading(true);
         setError(null);
         try {
-            const result = await completeOnboarding();
-            if (result?.error) {
-                setError(result.error);
-                setLoading(false);
-            }
+            await completeOnboarding();
         } catch (e) {
             // Redirect
         }

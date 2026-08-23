@@ -13,7 +13,6 @@ export const metadata = {
 
 // We need a client component wrapper for the header button to open the dialog
 import { TeamHeader } from './team-header';
-import { createClient } from '@/lib/supabase/server'; // Import here to fix scope issue in bootstrap
 
 export default async function TeamSettingsPage() {
     const { user } = await requireAuth();
@@ -23,29 +22,6 @@ export default async function TeamSettingsPage() {
 
     // Fetch members
     let result = await getTeamMembers(studioId);
-
-    // Bootstrap: If no members found, it means the user hasn't initialized their studio.
-    // We must insert them as the OWNER.
-    // The previous check might have failed if `result.data` was undefined.
-    const hasMembers = result.success && result.data && result.data.length > 0;
-
-    if (!hasMembers) {
-        console.log(`[TeamBootstrap] Bootstrapping studio for user ${user.id}...`);
-        const supabase = await createClient();
-
-        // Use RPC to bypass RLS complexity and ensure atomic insert
-        const { error: bootstrapError } = await supabase.rpc('bootstrap_studio_owner', {
-            studio_uuid: studioId
-        });
-
-        if (bootstrapError) {
-            console.error('[TeamBootstrap] RPC Failed:', bootstrapError);
-        } else {
-            // Retry fetch
-            console.log('[TeamBootstrap] Success. Refetching members...');
-            result = await getTeamMembers(studioId);
-        }
-    }
 
     const members = result.success && result.data ? result.data : [];
 

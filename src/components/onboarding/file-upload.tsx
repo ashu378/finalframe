@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -20,6 +21,9 @@ export function FileUpload({
 }: FileUploadProps) {
     const [uploading, setUploading] = useState(false);
     const [fileUrl, setFileUrl] = useState<string | null>(null);
+    const account = useQuery(api.account.current, {});
+    const generateUploadUrl = useMutation(api.assetStorage.generateUploadUrl);
+    const ingestAsset = useMutation(api.assetStorage.ingestAsset);
 
     async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
         try {
@@ -27,21 +31,15 @@ export function FileUpload({
             const file = event.target.files?.[0];
             if (!file) return;
 
-            const supabase = createClient();
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-            const filePath = `${fileName}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from(bucketName)
-                .upload(filePath, file);
-
-            if (uploadError) {
-                throw uploadError;
-            }
-
-            onUploadComplete(filePath, file.name);
-            setFileUrl(filePath); // Just tracking we have one
+            const studioExternalId = account?.studio?.externalId;
+            if (!studioExternalId) throw new Error('Create your studio before uploading media.');
+            const uploadUrl = await generateUploadUrl({ studioExternalId });
+            const response = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+            if (!response.ok) throw new Error('Media upload failed');
+            const { storageId } = await response.json() as { storageId: string };
+            await ingestAsset({ studioExternalId, storageId: storageId as never, source: 'user_upload', roles: ['reference'], name: file.name, mimeType: file.type, metadata: { fileName: file.name, size: file.size, bucketName } });
+            onUploadComplete(storageId, file.name);
+            setFileUrl(storageId);
         } catch (error) {
             alert('Error uploading file');
             console.error(error);

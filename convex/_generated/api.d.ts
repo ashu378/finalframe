@@ -10,6 +10,8 @@
 
 import type * as _shared from "../_shared.js";
 import type * as account from "../account.js";
+import type * as app from "../app.js";
+import type * as assetStorage from "../assetStorage.js";
 import type * as assembly from "../assembly.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as credits from "../credits.js";
@@ -28,6 +30,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   _shared: typeof _shared;
   account: typeof account;
+  app: typeof app;
+  assetStorage: typeof assetStorage;
   assembly: typeof assembly;
   bootstrap: typeof bootstrap;
   credits: typeof credits;

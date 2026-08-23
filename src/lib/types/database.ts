@@ -12,7 +12,7 @@ export type Json =
  * Reference: BUILD_PHASES.md — Phase 0 type definitions
  * 
  * Type definitions for database entities.
- * These align with Supabase table structures.
+ * These are compatibility view models for the Convex-backed UI.
  */
 
 // ... (Existing types preserved by using replace_file_content essentially, but here I am rewriting the file. 

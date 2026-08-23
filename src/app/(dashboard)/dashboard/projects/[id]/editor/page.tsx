@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
@@ -7,7 +6,24 @@ import { LayerList } from '@/components/editor/layer-list';
 import { EditorSidebar } from '@/components/editor/editor-sidebar';
 import { SnapshotSelector } from '@/components/editor/snapshot-selector';
 import { ExportButton } from '@/components/editor/export-button';
-import type { RemixLayerType } from '@/lib/types/database';
+import { api } from '../../../../../../../convex/_generated/api';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
+
+type RemixLayerType = 'background' | 'text' | 'motion' | 'actor' | 'audio' | 'overlay';
+
+type EditorLayer = {
+    id: string;
+    type: RemixLayerType;
+    url: string;
+    isOriginal: boolean;
+};
+
+function getMediaUrl(response: unknown) {
+    if (!response || typeof response !== 'object') return null;
+    const value = response as Record<string, unknown>;
+    const url = value.videoUrl ?? value.assetUrl ?? value.outputUrl ?? value.url;
+    return typeof url === 'string' && url.length > 0 ? url : null;
+}
 
 export default async function EditorPage({
     params,
@@ -16,106 +32,56 @@ export default async function EditorPage({
     params: Promise<{ id: string }>;
     searchParams: Promise<{ snapshotId?: string }>;
 }) {
-    const supabase = await createClient();
     const { id } = await params;
     const { snapshotId } = await searchParams;
 
-    // 1. Fetch Project
-    const { data: project } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', id)
-        .single();
+    const convex = await getAuthenticatedConvexClient();
+    let current;
+    try {
+        current = await convex.query(api.account.current, {});
+    } catch {
+        redirect(`/login?next=/dashboard/projects/${encodeURIComponent(id)}/editor`);
+    }
 
+    const studioExternalId = current?.studio?.externalId;
+    if (!studioExternalId) redirect('/onboarding');
+
+    const projects = await convex.query(api.projects.list, { studioExternalId });
+    const project = projects.find((candidate) => candidate.externalId === id);
     if (!project) notFound();
 
-    // 2. Fetch Active Render Job
-    // We assume the latest render job is the active one
-    const { data: renderJob } = await supabase
-        .from('render_jobs')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+    const workspace = await convex.query(api.productions.getWorkspaceByProject, { projectExternalId: id });
+    if (!workspace.production || !workspace.version) redirect(`/dashboard/projects/${id}`);
 
-    if (!renderJob) {
-        // No render job found? Redirect back or show error
-        redirect(`/dashboard/projects/${id}`);
-    }
+    const snapshots = [{
+        id: workspace.version._id,
+        label: `Version ${workspace.version.versionNumber}`,
+        created_at: new Date(workspace.version.createdAt).toISOString(),
+    }];
+    const activeSnapshotId = snapshots.some((snapshot) => snapshot.id === snapshotId && snapshotId)
+        ? snapshotId!
+        : snapshots[0].id;
 
-    // 3. Fetch Snapshots
-    const { data: snapshots } = await supabase
-        .from('render_snapshots')
-        .select('id, label, created_at, layer_manifest')
-        .eq('render_job_id', renderJob.id)
-        .order('created_at', { ascending: false });
-
-    // 4. Determine Active Layers
-    let activeLayersPlain: any[] = [];
-
-    if (snapshotId && snapshots) {
-        // Load from Snapshot Manifest
-        const snapshot = snapshots.find(s => s.id === snapshotId);
-        if (snapshot && snapshot.layer_manifest) {
-            // Manifest is { type: id }
-            const layerIds = Object.values(snapshot.layer_manifest);
-            if (layerIds.length > 0) {
-                const { data: layers } = await supabase
-                    .from('render_layers')
-                    .select('*')
-                    .in('id', layerIds); // TS cast needed if layerIds is any[]
-                activeLayersPlain = layers || [];
-            }
-        }
-    } else {
-        // Load Latest
-        const { data: allLayers } = await supabase
-            .from('render_layers')
-            .select('*')
-            .eq('render_job_id', renderJob.id)
-            .order('created_at', { ascending: false });
-        activeLayersPlain = allLayers || [];
-    }
-
-    // Deduplicate/Format Layers
-    const layerMap = new Map<string, any>();
-    activeLayersPlain.forEach((layer) => {
-        if (!layerMap.has(layer.layer_type)) {
-            layerMap.set(layer.layer_type, {
-                id: layer.id,
-                type: layer.layer_type as RemixLayerType,
-                url: layer.asset_url,
-                isOriginal: layer.is_original
+    const activeLayers = workspace.jobs.reduce<EditorLayer[]>((layers, job) => {
+        if (job.status !== 'COMPLETED') return layers;
+            const url = getMediaUrl(job.response);
+            if (!url) return layers;
+            layers.push({
+                id: String(job._id),
+                type: 'background',
+                url,
+                isOriginal: false,
             });
-        }
-    });
+            return layers;
+        }, []);
 
-    const activeLayers = Array.from(layerMap.values());
-
-    // 5. Fetch Remix History (for Chat)
-    const { data: remixJobs } = await supabase
-        .from('remix_jobs')
-        .select('intent, status, target_layer, error_message, created_at')
-        .eq('render_job_id', renderJob.id)
-        .order('created_at', { ascending: true }); // Oldest first
+    const latestJob = [...workspace.jobs].sort((a, b) => b.createdAt - a.createdAt)[0];
+    const renderJob = {
+        id: latestJob?._id ?? workspace.production._id,
+        remix_locked: workspace.jobs.some((job) => ['QUEUED', 'PROCESSING', 'SUBMITTED', 'POLLING'].includes(job.status)),
+    };
 
     const chatHistory: { role: 'user' | 'assistant', content: string }[] = [];
-    if (remixJobs) {
-        remixJobs.forEach(job => {
-            // User Request
-            chatHistory.push({ role: 'user', content: job.intent });
-
-            // System Response
-            if (job.status === 'completed') {
-                chatHistory.push({ role: 'assistant', content: `Remix complete! I've updated the ${job.target_layer} layer.` });
-            } else if (job.status === 'failed') {
-                chatHistory.push({ role: 'assistant', content: `Remix failed: ${job.error_message || 'Unknown error'}` });
-            } else {
-                chatHistory.push({ role: 'assistant', content: `Remix started! I'm updating the ${job.target_layer} layer...` });
-            }
-        });
-    }
 
     return (
         <div className="studio-surface flex min-h-dvh flex-col animate-in fade-in">
@@ -139,12 +105,8 @@ export default async function EditorPage({
                     {snapshots && snapshots.length > 0 ? (
                         <ExportButton
                             projectId={id}
-                            snapshotId={snapshotId || snapshots[0].id} // Default to latest if no ID param
-                            snapshotLabel={
-                                snapshotId
-                                    ? snapshots.find(s => s.id === snapshotId)?.label
-                                    : snapshots[0].label
-                            }
+                            snapshotId={activeSnapshotId}
+                            snapshotLabel={snapshots.find(s => s.id === activeSnapshotId)?.label}
                             // Block export if remixing
                             disabled={renderJob.remix_locked}
                         />
@@ -197,7 +159,7 @@ export default async function EditorPage({
                 {/* Right: Sidebar (Chat + Assets) */}
                 <EditorSidebar
                     projectId={id}
-                    studioId={project.studio_id}
+                    studioId={workspace.production.studioExternalId}
                     renderJobId={renderJob.id}
                     isRemixing={renderJob.remix_locked}
                     initialMessages={chatHistory}

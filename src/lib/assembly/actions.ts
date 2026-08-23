@@ -1,15 +1,16 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
-import { getConvexClient } from '@/lib/convex/server';
 import { api } from '../../../convex/_generated/api';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
 export async function createAssemblyJob(productionId: string) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { success: false, error: 'Unauthorized' };
     try {
-        const result = await getConvexClient().mutation(api.assembly.createJob, { productionId: productionId as any });
+        const client = await getAuthenticatedConvexClient();
+        const account = await client.query(api.account.current, {});
+        if (!account?.user) return { success: false, error: 'Unauthorized' };
+        const result = await client.mutation(api.assembly.createJob, { productionId: productionId as any });
         return { success: true, jobId: result.jobId.toString(), manifest: result.manifest };
-    } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to create assembly job' }; }
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to create assembly job' };
+    }
 }
