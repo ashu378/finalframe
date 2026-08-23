@@ -11,8 +11,13 @@ import './globals.css';
 import { Toaster } from 'sonner';
 import { FinalFrameProviders } from '@/components/providers/convex-auth-provider';
 
+function siteUrl(value?: string) {
+    const candidate = value?.trim() || 'https://finalframe.ai';
+    return new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`);
+}
+
 export const metadata: Metadata = {
-    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://finalframe.ai'),
+    metadataBase: siteUrl(process.env.NEXT_PUBLIC_SITE_URL),
     title: {
         default: 'FinalFrame — Make the video in your head',
         template: '%s | FinalFrame',
