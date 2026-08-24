@@ -4,7 +4,7 @@
 
 Final Frame should own an opinionated **story-to-publish pipeline** for short-form AI video. The product advantage is not another image or video model. It is a continuity-aware production system that turns an idea, script, or voice recording into a finished, captioned, platform-ready video while preserving characters, locations, voices, style, pacing, and reusable show assets.
 
-The first flagship workflow should be **Nigerian voice-led animated comedy**: import or record a voiceover, identify speakers, create or reuse a cast, generate a visual bible, break the performance into shots, create 2D/cartoon or realistic visuals, assemble to the audio, caption, review, and export to 9:16 feeds. The same engine can later power realistic AI skits, ads, UGC, faceless explainers, and short films.
+The first flagship workflow should be **voice-led 2D animated comedy** for users from any country: a user may describe an idea, paste a script, upload a voice performance, or bring mixed media. When voice is supplied, FinalFrame can transcribe it, segment dialogue turns, map them to characters, create a visual bible, break the performance into shots, animate the visuals, assemble to the original audio, caption, review, and export to platform presets. Nigerian/African comedy is one culturally specific preset and showcase direction, not a requirement for the workflow. The same engine can power realistic AI skits, ads, UGC, faceless explainers, and short films.
 
 ## What the research shows
 
@@ -458,7 +458,7 @@ The user selects one or more platform presets. Final Frame creates the master pl
 
 ### Release 1 — Studio foundation
 
-Support three deeply reliable recipes: **Voice-led Nigerian Cartoon Comedy**, **Commercial/Social Ad**, and **Existing Footage Transformation**. All three share the same nine stages. Add persisted stage status, plan approval, cost approval, shot records, anchor assets, and a reviewable assembly.
+Support three deeply reliable recipes: **Voice-led 2D Cartoon Comedy**, **Commercial/Social Ad**, and **Existing Footage Transformation**. All three share the same nine stages. Each recipe must support idea-first, script-first, optional voice-first, and mixed-media entry where relevant. Add persisted stage status, plan approval, cost approval, shot records, anchor assets, and a reviewable assembly.
 
 ### Release 2 — Audio and continuity
 

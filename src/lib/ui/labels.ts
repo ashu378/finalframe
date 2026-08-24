@@ -49,7 +49,7 @@ export const humanLabels: UiLabelMap = {
   director: customerTerminology.productionGuide,
 };
 
-export type CreationMode = 'IDEA' | 'SCRIPT' | 'FOOTAGE' | 'ASSETS';
+export type CreationMode = 'IDEA' | 'SCRIPT' | 'VOICE' | 'FOOTAGE' | 'ASSETS' | 'AD';
 
 export type CreationModeDefinition = {
   id: CreationMode;
@@ -60,9 +60,11 @@ export type CreationModeDefinition = {
 
 export const creationModes = [
   { id: 'IDEA', title: 'Start with an idea', description: 'Describe a story, ad, cartoon, or product video in your own words.', accent: 'bg-[#f6dfb1]' },
-  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring a script, voiceover, or rough outline and we will shape the visuals.', accent: 'bg-[#f1c7b7]' },
-  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-[#c8ddd5]' },
-  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or brand references.', accent: 'bg-[#d8cee8]' },
+  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring dialogue or a rough outline and we will shape the visuals.', accent: 'bg-[#f1c7b7]' },
+  { id: 'VOICE', title: 'Bring a voice recording', description: 'Use your performance as an optional timing and feeling guide.', accent: 'bg-[#c8ddd5]' },
+  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-[#d8cee8]' },
+  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or references.', accent: 'bg-[#e8c7a8]' },
+  { id: 'AD', title: 'Make an ad', description: 'Start with a product, service, audience, or offer.', accent: 'bg-[#d7d0e9]' },
 ] satisfies readonly CreationModeDefinition[];
 
 export function getCreationMode(mode: CreationMode): CreationModeDefinition {
@@ -101,7 +103,7 @@ export function friendlyProjectStatus(status?: string): FriendlyProjectStatus {
   }
 }
 
-export type WorkflowStepKey = 'idea' | 'plan' | 'approve' | 'make' | 'review' | 'download';
+export type WorkflowStepKey = 'brief' | 'performance' | 'plan' | 'bible' | 'shots' | 'make' | 'finish' | 'review' | 'export';
 
 export type FriendlyWorkflowStep = {
   key: WorkflowStepKey;
@@ -110,12 +112,15 @@ export type FriendlyWorkflowStep = {
 };
 
 export const workflowSteps = [
-  { key: 'idea', label: 'Idea', description: 'Tell us what you want to make.' },
-  { key: 'plan', label: 'Plan', description: 'Review the story and visuals.' },
-  { key: 'approve', label: 'Approve cost', description: 'See credits before anything runs.' },
-  { key: 'make', label: 'Make', description: 'FinalFrame creates each part.' },
+  { key: 'brief', label: 'Brief', description: 'Choose the outcome and starting point.' },
+  { key: 'performance', label: 'Performance', description: 'Add a script, voice, or footage.' },
+  { key: 'plan', label: 'Plan', description: 'Review the story, shots, and cost.' },
+  { key: 'bible', label: 'Creative guide', description: 'Keep characters and details consistent.' },
+  { key: 'shots', label: 'Takes', description: 'Approve the visual anchors and versions.' },
+  { key: 'make', label: 'Make', description: 'Create the approved parts.' },
+  { key: 'finish', label: 'Finish', description: 'Put sound, captions, and shots together.' },
   { key: 'review', label: 'Review', description: 'Give notes or approve the video.' },
-  { key: 'download', label: 'Download', description: 'Share your finished video.' },
+  { key: 'export', label: 'Export', description: 'Download a ready-to-share version.' },
 ] satisfies readonly FriendlyWorkflowStep[];
 
 export function getWorkflowStep(key: WorkflowStepKey): FriendlyWorkflowStep {

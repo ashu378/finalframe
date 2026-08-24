@@ -5,6 +5,59 @@ import { authTables } from "@convex-dev/auth/server";
 const timestamp = v.number();
 const json = v.any();
 
+const workflowPreset = v.union(
+  v.literal("NIGERIAN_CARTOON_COMEDY"),
+  v.literal("REALISTIC_AI_SKIT"),
+  v.literal("VOICEOVER_STORY"),
+  v.literal("AI_PRODUCT_AD"),
+  v.literal("FACELESS_EXPLAINER"),
+  v.literal("SHORT_FILM"),
+);
+
+const inputMode = v.union(
+  v.literal("IDEA"),
+  v.literal("SCRIPT"),
+  v.literal("VOICE"),
+  v.literal("CAST_REFERENCES"),
+  v.literal("FOOTAGE"),
+  v.literal("AD_BRIEF"),
+  v.literal("MIXED_MEDIA"),
+);
+
+const workflowStage = v.union(
+  v.literal("BRIEF"),
+  v.literal("PERFORMANCE"),
+  v.literal("PLAN"),
+  v.literal("BIBLE"),
+  v.literal("SHOTS"),
+  v.literal("MAKE"),
+  v.literal("FINISH"),
+  v.literal("REVIEW"),
+  v.literal("EXPORT"),
+);
+
+const qualityGateStatus = v.union(
+  v.literal("NOT_RUN"),
+  v.literal("PASS"),
+  v.literal("PASS_WITH_WARNINGS"),
+  v.literal("BLOCKED"),
+  v.literal("REQUIRES_HUMAN_REVIEW"),
+);
+
+const qualityGateEvidence = v.object({
+  rule: v.string(),
+  result: v.union(v.literal("PASS"), v.literal("WARN"), v.literal("FAIL")),
+  explanation: v.string(),
+});
+
+const qualityGateResult = v.object({
+  status: qualityGateStatus,
+  continuityScore: v.optional(v.number()),
+  audioAlignmentScore: v.optional(v.number()),
+  captionAccuracyScore: v.optional(v.number()),
+  evidence: v.array(qualityGateEvidence),
+});
+
 // Persisted application state is constrained to known lifecycle values.
 const status = v.union(
   v.literal("DRAFT"), v.literal("PLANNING"), v.literal("READY"), v.literal("SUBMITTED"),
@@ -61,7 +114,7 @@ export default defineSchema({
     studioId: v.id("studios"), userId: v.id("users"),
     role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")), status: v.union(v.literal("active"), v.literal("invited"), v.literal("suspended"), v.literal("removed")),
     createdAt: v.optional(timestamp), updatedAt: v.optional(timestamp),
-  }).index("by_studio_user", ["studioId", "userId"]).index("by_studio", ["studioId"]),
+  }).index("by_studio_user", ["studioId", "userId"]).index("by_studio", ["studioId"]).index("by_user", ["userId"]),
 
   projects: defineTable({
     externalId: v.string(), studioExternalId: v.string(), studioId: v.optional(v.id("studios")), name: v.string(),
@@ -74,6 +127,9 @@ export default defineSchema({
     externalProjectId: v.string(), projectId: v.optional(v.id("projects")), studioExternalId: v.string(),
     studioId: v.optional(v.id("studios")), workflow: v.string(), inputMode: v.string(),
     requestedDurationSeconds: v.number(), language: v.string(), outputPreset: v.string(), status,
+    preset: v.optional(workflowPreset), inputModes: v.optional(v.array(inputMode)), platform: v.optional(v.string()),
+    aspectRatio: v.optional(v.string()), qualityTier: v.optional(v.union(v.literal("ECONOMY"), v.literal("STANDARD"), v.literal("PREMIUM"))),
+    currentStage: v.optional(workflowStage), qualityGateStatus: v.optional(qualityGateStatus), qualityGateResults: v.optional(json),
     currentVersionId: v.optional(v.id("productionVersions")), currentPlanId: v.optional(v.id("directorPlans")),
     createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")), metadata: v.optional(json),
     createdAt: timestamp, updatedAt: timestamp,
@@ -83,7 +139,11 @@ export default defineSchema({
   createIntents: defineTable({
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")),
     createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")), inputMode: v.string(),
-    brief: v.string(), inputAssetIds: v.optional(v.array(v.id("assets"))), metadata: json, status,
+    preset: v.optional(workflowPreset), inputModes: v.optional(v.array(inputMode)), brief: v.optional(v.string()), idea: v.optional(v.string()),
+    script: v.optional(v.string()), language: v.optional(v.string()), platform: v.optional(v.string()), aspectRatio: v.optional(v.string()),
+    durationSeconds: v.optional(v.number()), qualityTier: v.optional(v.union(v.literal("ECONOMY"), v.literal("STANDARD"), v.literal("PREMIUM"))),
+    inputAssetIds: v.optional(v.array(v.id("assets"))), performanceAssetIds: v.optional(v.array(v.id("assets"))), referenceAssetIds: v.optional(v.array(v.id("assets"))),
+    metadata: json, status, currentStage: v.optional(workflowStage), qualityGateStatus: v.optional(qualityGateStatus),
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_studio", ["studioExternalId"]).index("by_studio_id", ["studioId"])
     .index("by_project", ["projectId"]).index("by_production", ["productionId"]).index("by_status", ["status"]),
@@ -102,6 +162,34 @@ export default defineSchema({
     productionVersionId: v.id("productionVersions"), versionNumber: v.optional(v.number()), projectContext: json,
     characters: json, locations: json, products: json, style: json, story: json, entities: v.optional(json), createdAt: v.optional(timestamp),
   }).index("by_version", ["productionVersionId"]).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
+
+  characters: defineTable({
+    ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
+    name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
+
+  locations: defineTable({
+    ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
+    name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
+
+  products: defineTable({
+    ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
+    name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
+
+  speakerSegments: defineTable({
+    ...studioOwned, productionId: v.id("productions"), audioId: v.optional(v.id("audio")), characterId: v.optional(v.id("characters")),
+    speakerLabel: v.string(), startSeconds: v.number(), endSeconds: v.number(), text: v.string(), confidence: v.optional(v.number()),
+    reviewed: v.boolean(), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_audio", ["audioId"]).index("by_character", ["characterId"]).index("by_studio", ["studioExternalId"]),
+
+  anchorPacks: defineTable({
+    ...studioOwned, productionVersionId: v.id("productionVersions"), characterAssetIds: v.array(v.id("assets")),
+    locationAssetIds: v.array(v.id("assets")), styleAssetIds: v.array(v.id("assets")), productAssetIds: v.array(v.id("assets")),
+    approvalStatus: v.union(v.literal("DRAFT"), v.literal("APPROVED"), v.literal("REJECTED")), continuityRules: v.array(v.string()),
+    qualityGate: v.optional(json), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
 
   referencePacks: defineTable({
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")), name: v.string(),

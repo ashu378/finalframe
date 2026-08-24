@@ -47,6 +47,14 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
         model: modelId('VALIDATOR_ENGINE'),
         supportsStructuredOutput: true,
     }),
+    STRUCTURED_PLANNING: descriptor('STRUCTURED_PLANNING', ['text', 'image', 'audio', 'video', 'file'], ['text'], ['temperature', 'top_p', 'max_tokens', 'response_format', 'input_references'], {
+        model: modelId('STRUCTURED_PLANNING'),
+        supportsStructuredOutput: true,
+    }),
+    VALIDATION: descriptor('VALIDATION', ['text', 'image', 'audio', 'video', 'file'], ['text'], ['temperature', 'top_p', 'max_tokens', 'response_format', 'input_references'], {
+        model: modelId('VALIDATION'),
+        supportsStructuredOutput: true,
+    }),
     IMAGE_GENERATION: descriptor('IMAGE_GENERATION', ['text', 'image'], ['image'], ['resolution', 'size', 'aspect_ratio', 'quality', 'input_references', 'provider_options', 'output_format', 'background', 'output_compression', 'seed', 'n'], {
         model: modelId('IMAGE_GENERATION'),
         discovery: 'images',

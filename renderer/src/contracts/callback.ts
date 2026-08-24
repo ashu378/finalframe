@@ -38,6 +38,11 @@ export type CallbackHandlingResult =
   | { status: 'accepted'; duplicate: true }
   | { status: 'rejected'; reason: string };
 
+export interface CallbackVerificationOptions {
+  maxAgeMs?: number;
+  now?: () => number;
+}
+
 export function signCallbackBody(rawBody: string, secret: string): string {
   return `${RENDERER_CALLBACK_SIGNATURE_PREFIX}${createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')}`;
 }
@@ -47,6 +52,41 @@ export function verifyCallbackSignature(rawBody: string, signature: string, secr
   const actualBytes = Buffer.from(signature);
   const expectedBytes = Buffer.from(expected);
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+
+/**
+ * Verify and claim a renderer callback before any side effect is performed.
+ * The raw body must be passed unchanged from the HTTP request. A duplicate
+ * event is acknowledged, but is never handed back to the caller as new work.
+ */
+export async function handleRendererCallback(
+  rawBody: string,
+  signature: string,
+  secret: string,
+  receipts: CallbackReceiptStore,
+  options: CallbackVerificationOptions = {},
+): Promise<{ result: CallbackHandlingResult; envelope?: RendererCallbackEnvelope }> {
+  if (!verifyCallbackSignature(rawBody, signature, secret)) return { result: { status: 'rejected', reason: 'Invalid callback signature' } };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+    assertCallbackEnvelope(parsed);
+  } catch (error) {
+    return { result: { status: 'rejected', reason: error instanceof Error ? error.message : 'Invalid callback body' } };
+  }
+
+  const envelope = parsed as RendererCallbackEnvelope;
+  const occurredAt = Date.parse(envelope.occurredAt);
+  const maxAgeMs = options.maxAgeMs ?? 10 * 60 * 1000;
+  const now = options.now?.() ?? Date.now();
+  if (!Number.isFinite(occurredAt) || Math.abs(now - occurredAt) > maxAgeMs) return { result: { status: 'rejected', reason: 'Callback timestamp is outside the accepted window' } };
+
+  const existing = await receipts.get(envelope.eventId);
+  if (existing) return { result: { status: 'accepted', duplicate: true }, envelope };
+  const claimed = await receipts.claim({ eventId: envelope.eventId, idempotencyKey: envelope.idempotencyKey, receivedAt: new Date(now).toISOString(), status: 'processed' });
+  if (claimed === 'duplicate') return { result: { status: 'accepted', duplicate: true }, envelope };
+  return { result: { status: 'accepted', duplicate: false }, envelope };
 }
 
 export function assertCallbackEnvelope(input: unknown): asserts input is RendererCallbackEnvelope {

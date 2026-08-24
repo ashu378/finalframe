@@ -13,6 +13,8 @@ export type CapabilityId =
     | 'IMAGE_ENGINE'
     | 'VIDEO_ENGINE'
     | 'VALIDATOR_ENGINE'
+    | 'STRUCTURED_PLANNING'
+    | 'VALIDATION'
     | 'VIDEO_GENERATION'
     | 'IMAGE_GENERATION'
     | 'TEXT_TO_SPEECH'
@@ -93,6 +95,110 @@ export type AIErrorCode =
     | 'INVALID_PROVIDER_RESPONSE'
     | 'REQUEST_TIMEOUT'
     | 'NETWORK_ERROR';
+
+/**
+ * Customer-facing creation inputs. Voice is deliberately optional: a user
+ * can start from an idea or script and let the platform create the voices, or
+ * bring a performance recording that becomes the timing source.
+ */
+export type WorkflowPreset =
+    | '2D_ANIMATION'
+    | 'REALISTIC_SKIT'
+    | 'VOICEOVER_STORY'
+    | 'PRODUCT_AD'
+    | 'FACELESS_EXPLAINER'
+    | 'SHORT_FILM';
+
+export type InputMode = 'IDEA' | 'SCRIPT' | 'VOICE' | 'MIXED_MEDIA';
+
+export interface CreateIntent {
+    preset: WorkflowPreset;
+    inputMode: InputMode;
+    brief: string;
+    script?: string;
+    inputAssetIds: string[];
+    language: string;
+    platform: string;
+    aspectRatio: string;
+    durationSeconds: number;
+    qualityTier: 'ECONOMY' | 'STANDARD' | 'PREMIUM';
+}
+
+export interface SpeakerSegment {
+    id: string;
+    speakerLabel: string;
+    characterId: string | null;
+    startSeconds: number;
+    endSeconds: number;
+    text: string;
+    confidence: number | null;
+    reviewed: boolean;
+}
+
+export interface ShotSpec {
+    sequenceId: string;
+    sceneId: string;
+    orderIndex: number;
+    purpose: string;
+    durationSeconds: number;
+    dialogueSegmentIds: string[];
+    characterIds: string[];
+    locationIds: string[];
+    productIds: string[];
+    referencePackIds: string[];
+    camera: Record<string, unknown>;
+    action: string;
+    prompt: string;
+    negativePrompt: string | null;
+    providerCapability: CapabilityId;
+}
+
+export interface DirectorPlan {
+    intentSummary: string;
+    preset: WorkflowPreset;
+    language: string;
+    platform: string;
+    durationSeconds: number;
+    aspectRatio: string;
+    script: string;
+    speakers: SpeakerSegment[];
+    shots: ShotSpec[];
+    creativeGuide: {
+        visualStyle: string;
+        palette: string[];
+        continuityRules: string[];
+        audioDirection: string;
+    };
+    riskFlags: string[];
+    estimatedCredits: number;
+}
+
+export interface AnchorPack {
+    productionVersionId: string;
+    characterAssetIds: string[];
+    locationAssetIds: string[];
+    styleAssetIds: string[];
+    productAssetIds: string[];
+    approvalStatus: 'DRAFT' | 'APPROVED' | 'REJECTED';
+    continuityRules: string[];
+}
+
+export interface ProviderReference {
+    url?: string;
+    data?: string;
+    mediaType?: string;
+}
+
+export interface GenerationRequest {
+    capability: CapabilityId;
+    prompt: string;
+    model?: string;
+    references?: ProviderReference[];
+    parameters: Record<string, unknown>;
+    idempotencyKey: string;
+    productionId: string;
+    shotId?: string;
+}
 
 export interface NormalizedAIErrorShape {
     name: 'AICapabilityError';

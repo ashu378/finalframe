@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowUpRight, Film } from 'lucide-react';
 import { getCurrentUser } from '@/lib/guards';
+import { MobilePublicMenu } from './mobile-public-menu';
 
 export async function Header() {
   const user = await getCurrentUser();
@@ -30,6 +31,7 @@ export async function Header() {
             <span className="hidden sm:inline">Make a video</span><span className="sm:hidden">Start</span>
             <ArrowUpRight className="size-4" />
           </Link>
+          <MobilePublicMenu authenticated={Boolean(user)} />
         </div>
       </div>
     </header>

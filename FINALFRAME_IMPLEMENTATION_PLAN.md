@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This final planning pass is based on the checked-out repository, the approved Master Implementation Specification, and live provider documentation. FinalFrame is an existing Next.js application with Supabase authentication/database/storage, a studio/project onboarding flow, AI blueprint generation, scene editing, Runway-backed video rendering, OpenRouter-backed language/validation tasks, asset management, remixing, export, review links, templates, and studio teams.
+This final planning pass is based on the checked-out repository, the approved Master Implementation Specification, and the current AI video research workflow. FinalFrame is an existing Next.js application with Convex authentication/database/storage, a studio/project onboarding flow, AI blueprint generation, scene editing, OpenRouter-backed AI tasks, asset management, remixing, export, review links, templates, and studio teams.
 
 The current system is a credible prototype for structured commercial/social video creation. It is not yet the target general-purpose AI production studio. The approved MVP customer loop is: **Describe it. Paste it. Upload it. Bring your own assets. Approve the cost. Get the video.** The largest gaps are:
 
@@ -11,9 +11,24 @@ The current system is a credible prototype for structured commercial/social vide
 - Rendering is a project/blueprint batch process rather than independently resumable shot jobs.
 - Credits exist as a balance and ledger, but there is no Bachs-backed purchase flow, provider-neutral payment abstraction, reservation/commit/release accounting, or configurable cost engine.
 - The model registry is centralized in one file but is capability/profile oriented and contains hard-coded assumptions; capability validation and provider fallback are incomplete.
-- Voice, transcription, captions, music/SFX, timeline assembly, and long-form continuation are not represented as first-class workflows.
+- Voice, transcription, captions, music/SFX, timeline assembly, and long-form continuation are not yet complete as first-class workflows.
 
-Recommended direction: evolve incrementally. Preserve the working Supabase auth/RLS foundation, project/scene editor, asset UI, review system, and existing provider adapters. Add production/shot/job/asset-intent/continuity/credit-reservation primitives, then route the existing render flow through them. Do not begin with a rewrite or a microservice split.
+Recommended direction: evolve incrementally. Preserve the working Convex Auth foundation, project/scene editor, asset UI, review system, and renderer foundation. Add first-class performance, Bible, anchor-pack, shot/job, continuity, credit-reservation, and deterministic-assembly flows, then route the existing UI through them. Do not begin with a rewrite or a microservice split.
+
+## 1.1 Corrected workflow framing
+
+The flagship workflow is **2D animated comedy with optional idea, script, voice, footage, or mixed-media input**. It is not Nigerian-only, and it is not voice-upload-only. Nigerian/African comedy is one supported cultural/style preset and an important showcase direction, but users may come from any country and may create any supported style.
+
+Voice is optional. Every workflow must support these entry paths:
+
+1. **Idea-first:** the user describes the concept; FinalFrame creates the characters, voices, script treatment, visuals, and shot plan.
+2. **Script-first:** the user pastes a script; FinalFrame identifies characters, dialogue, scenes, and required assets.
+3. **Voice-first:** the user uploads a voice recording; FinalFrame transcribes it, segments speakers or dialogue turns, maps them to characters, and animates to the original performance.
+4. **Mixed-media:** the user brings any combination of voice, script, characters, images, footage, products, logos, or references.
+
+If one person performs multiple characters in a recording, FinalFrame may map the timed dialogue turns to different animated characters while preserving the uploaded audio. Voice cloning, voice transformation, dubbing, and lip-sync remain separate opt-in capabilities requiring consent and provider-quality verification. They are not required for the core 2D comedy workflow.
+
+The implementation must never require a user to upload voice in order to create 2D comedy. AI-generated voices remain available when the user supplies only an idea or script, with explicit selection and cost approval.
 
 ## 2. Current FinalFrame Architecture
 
@@ -22,10 +37,10 @@ Recommended direction: evolve incrementally. Preserve the working Supabase auth/
 - Framework: Next.js 16 App Router, React 19, TypeScript 5.
 - Styling/UI: Tailwind CSS, CSS modules, Framer Motion, Lucide, custom UI components.
 - Package manager: npm (`package-lock.json`).
-- Persistence/auth/storage: Supabase JS/SSR, Postgres migrations, Supabase Auth, Supabase Storage.
-- AI: OpenAI SDK pointed at OpenRouter for chat/completion-style AI tasks; Runway HTTP adapter for video.
+- Persistence/auth/storage: Convex Auth, Convex database, Convex Storage.
+- AI: OpenRouter gateway for text, structured planning, image/video, speech, and transcription capabilities; any legacy direct-provider adapter is disabled from production paths.
 - Server execution: Next.js server actions and route handlers. No external worker/queue runtime is confirmed.
-- Media processing: provider output and Supabase URLs are used; a separate ffmpeg/render service is not confirmed.
+- Media processing: Convex Storage and a renderer package foundation exist; a deployed authenticated FFmpeg/Remotion worker remains to be completed.
 - Deployment/observability: UNKNOWN — REQUIRES VERIFICATION. No deployment manifest, CI workflow, logging/metrics service, or webhook provider is present in the inspected tree.
 
 ### Request/data flow today
@@ -34,14 +49,14 @@ Recommended direction: evolve incrementally. Preserve the working Supabase auth/
 Browser
   -> Next App Router pages/components
   -> server actions / route handlers
-  -> Supabase Auth + Postgres + Storage
-  -> blueprint-director via OpenRouter
-  -> render pipeline via Runway
-  -> render_jobs / snapshots / layers
+  -> Convex Auth + Convex database/storage
+  -> Director and capability gateway via OpenRouter
+  -> durable generation jobs / shot versions
+  -> authenticated Remotion/FFmpeg renderer worker
   -> editor, review, remix, export
 ```
 
-Authentication is enforced by middleware and server-side `supabase.auth.getUser()` checks. Data isolation is primarily implemented with Supabase RLS around studio/project ownership.
+Authentication is enforced with Convex Auth and server-side verified identity checks. Data isolation is enforced by Convex membership authorization and studio ownership checks. Caller-supplied external IDs are resource selectors only and never authorization sources.
 
 ## 3. Current Product Capabilities
 
@@ -51,7 +66,7 @@ Implemented or materially represented:
 - Onboarding: identity, creative DNA, goals, platform, studio, message blocks, uploaded identity/assets.
 - Projects: create/list/update/archive-style states, project metadata, branding, platform/content type/outcome goal.
 - Blueprint: AI-generated scenes, scene editing, reordering, deletion, camera/motion fields, validation monitor.
-- Rendering: queued/processing/completed/failed/cancelled jobs, scene iteration, Runway strategies including text/image/video-to-video paths, progress polling.
+- Rendering: queued/processing/completed/failed/cancelled jobs, scene iteration, OpenRouter capability routing, and a Remotion/FFmpeg renderer foundation.
 - Assets: studio image/video/audio library, upload, tags, folders, deletion, public templates/presets.
 - Remix: intent parsing, layer model, remix jobs, diffs, snapshots.
 - Export: export jobs, platform/resolution fields, pipeline/actions.
@@ -59,11 +74,11 @@ Implemented or materially represented:
 - Teams/templates/admin: studio members/RBAC-like roles, templates, admin pages/moderation.
 - Credits: studio balance, ledger table, render/remix/export cost columns.
 
-Not confirmed as complete: payment purchase flow, voice transcription, TTS/dubbing, captions generation, music/SFX generation, real timeline assembly, resumable long-form generation, provider webhooks, durable background workers, and automated test suites beyond SQL seed data.
+Not confirmed as complete: payment purchase flow, voice transcription, TTS/dubbing, captions generation, music/SFX generation, deployed timeline assembly, resumable long-form generation, provider webhooks, and a production renderer worker. These remain implementation gates.
 
 ## 4. Current AI Architecture
 
-`src/lib/ai/model-registry.ts` is a single registry for four capabilities: `AI_BRAIN`, `IMAGE_ENGINE`, `VIDEO_ENGINE`, and `VALIDATOR_ENGINE`. `src/lib/ai/engine.ts` routes non-video tasks to the OpenRouter adapter and video tasks to the Runway adapter. `blueprint-director.ts` prompts an AI model to produce a production-oriented blueprint and has a duplicate-scene regeneration attempt.
+`src/lib/ai/model-registry.ts` and `src/lib/ai/capabilities.ts` are the central capability boundary. `src/lib/ai/engine.ts` and `src/lib/adapters/openrouter-adapter.ts` route planning, validation, image, video, speech, and transcription work through OpenRouter contracts. Legacy direct-provider code must remain disabled from production paths.
 
 Strengths:
 
@@ -76,22 +91,22 @@ Risks/gaps:
 
 - The registry hard-codes model IDs, context windows, and unsupported/uncertain descriptions.
 - It does not describe validated input/output modalities, parameters, durations, aspect ratios, reference support, pricing, enablement, or fallback.
-- OpenRouter is not the video gateway; Runway is directly used. This is acceptable if deliberate, but differs from the target “OpenRouter where supported” principle.
+- Live OpenRouter capability, model, duration, reference, and pricing support still requires verification before enabling each workflow.
 - Capability validation before requests is not a complete independent gate.
-- `runway-adapter.ts` contains provider-specific model mapping and assumes endpoint/parameter behavior.
+- Any legacy direct-provider adapter must not be reachable from production generation or billing paths.
 - No provider webhook/callback or durable worker is confirmed; polling and/or server execution appears to own the flow.
 - Cost estimation is not coupled to actual provider consumption.
 
 ## 5. Current Data Model
 
-The migrations establish these major areas:
+The current Convex schema establishes these major areas. Earlier Supabase migration references in the historical audit below are retained only as provenance and are not production authorities:
 
 | Area | Current tables/fields observed | Assessment |
 |---|---|---|
-| Identity | `profiles`, `studios`, studio defaults/creative DNA/message blocks | Useful foundation; studio is the main ownership boundary. |
-| Project | `projects` with state, platform, content type, goals, description, branding/signals | Keep and extend; current fields are marketing-video oriented. |
-| Production | `scenes` with order, text, visual/action/emotional fields, camera/motion JSON, asset bindings | Keep as a migration bridge; add sequences and shots. |
-| Rendering | `render_jobs`, `render_layers`, `render_snapshots` | Reuse concepts; split project batch jobs from shot generation jobs. |
+| Identity | Convex Auth users, studios, memberships, roles | Current authority; authorization derives from verified Convex identity. |
+| Project | Convex projects and productions with preset, input, platform, stage, and quality metadata | Keep and extend through typed adapters. |
+| Production | Convex versions, Bibles, sequences, scenes, shots, and shot versions | Canonical graph; add persistent entity and anchor-pack records. |
+| Rendering | Convex render jobs, manifests, exports, plus renderer package | Complete authenticated worker deployment and callback lifecycle. |
 | Remix | `remix_jobs`, `layer_diffs` | Keep for layer-level remix where applicable; connect to versions/shots. |
 | Assets | `studio_assets` with type, URL, size, MIME type, tags, folder | Keep as library compatibility layer; add storage path/provenance/roles/project links. |
 | Credits | `studios.credits`, `credit_ledger`, cost columns on jobs | Extend, do not replace blindly; add immutable entry types and reservations. |
@@ -476,19 +491,19 @@ Dependency: verify the live Bachs API/checkout/webhook contract and confirm laun
 
 Acceptance: verified payment credits wallet once and only once; generation accounting is auditable.
 
-### Phase 5 — Voice and multilingual short-form (P1)
+### Phase 5 — Optional voice/performance and multilingual short-form (P1)
 
-Objective: support uploaded voice as timing backbone.
+Objective: support uploaded voice as an optional timing backbone while keeping idea-first and script-first creation equally complete.
 
 Database: transcript segments, speaker/character mapping, caption tracks, language metadata.
 
 Backend/AI: STT, timing analysis, optional translation/TTS/dubbing adapters, audio normalization.
 
-Frontend: audio upload/record, transcript review, language/caption controls.
+Frontend: optional audio upload first, transcript review, speaker/character mapping, language/caption controls. Browser recording is a later capability and must not block idea/script creation.
 
 Testing: noisy audio, multilingual text, duration alignment, provider failure.
 
-Acceptance: uploaded voice can drive a short production with synchronized captions where providers support it.
+Acceptance: an uploaded voice can drive a short production with synchronized captions where providers support it; an idea-only or script-only project can create the same workflow with explicitly selected AI voices or no voice.
 
 ### Phase 6 — Long-form continuation and stronger continuity (P1)
 
@@ -633,13 +648,13 @@ CreateIntent
 ### V1 decisions
 
 - Audience: individual creators and small businesses.
-- Fully supported input modes: idea, script, voice recording, characters/images, existing footage, and business-ad creation.
+- Fully supported input modes: idea, script, optional uploaded voice, characters/images, existing footage, business-ad briefs, and mixed media.
 - Finished production duration: 15–60 seconds in V1.
 - Default output: 9:16 vertical social video; secondary 1:1 and 16:9 presets may be implemented after the default path is stable.
 - User control: approve the plan and make light edits; no full scene/shot/prompt editor in the beginner flow.
 - Assembly: automatically concatenate approved shots in order and apply the selected voice, captions, music/SFX, and output preset.
 - V1 editing: reorder, replace, regenerate, change captions/audio, and export. No Premiere-like timeline.
-- Voice: uploaded voice is used for transcription, timing, and captions. Voice cloning, lip sync, and dubbing are not V1 requirements.
+- Voice: optional uploaded voice is used for transcription, timing, speaker/character mapping, and captions. A user may create the same workflow from an idea or script using an explicitly selected AI voice or no voice. Voice cloning, lip sync, and dubbing are not V1 requirements.
 - AI voice: optional and explicitly selected; never silently added to a user’s bill.
 - Existing footage: upload, trim/reformat, transcribe/caption, and augment with supported AI B-roll/opening/ending.
 - Ads: generic business ads for product, restaurant, service, real-estate, and similar requests.

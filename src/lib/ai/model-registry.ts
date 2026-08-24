@@ -12,7 +12,9 @@ export type AICapability =
     | 'AI_BRAIN'
     | 'IMAGE_ENGINE'
     | 'VIDEO_ENGINE'
-    | 'VALIDATOR_ENGINE';
+    | 'VALIDATOR_ENGINE'
+    | 'STRUCTURED_PLANNING'
+    | 'VALIDATION';
 
 export type ExecutionProfile =
     | 'FAST_SOCIAL'
@@ -84,6 +86,22 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         description: 'Structured validation and quality gates',
         fallbackIds: configuredFallbacks('OPENROUTER_VALIDATOR_FALLBACK_MODELS'),
     },
+    STRUCTURED_PLANNING: {
+        id: configuredModel('OPENROUTER_PLANNER_MODEL', configuredModel('OPENROUTER_AI_BRAIN_MODEL', 'openrouter/auto')),
+        provider: 'openrouter',
+        capability: 'STRUCTURED_PLANNING',
+        contextWindow: 200000,
+        description: 'Strict structured production planning',
+        fallbackIds: configuredFallbacks('OPENROUTER_PLANNER_FALLBACK_MODELS'),
+    },
+    VALIDATION: {
+        id: configuredModel('OPENROUTER_VALIDATION_MODEL', configuredModel('OPENROUTER_VALIDATOR_MODEL', 'openrouter/auto')),
+        provider: 'openrouter',
+        capability: 'VALIDATION',
+        contextWindow: 1000000,
+        description: 'Strict multimodal and production quality validation',
+        fallbackIds: configuredFallbacks('OPENROUTER_VALIDATION_FALLBACK_MODELS'),
+    },
     IMAGE_GENERATION: {
         id: configuredModel('OPENROUTER_IMAGE_MODEL', 'openrouter/auto'),
         provider: 'openrouter',
@@ -141,4 +159,13 @@ export function isCatalogSelectionModel(capability: CapabilityId, model: string)
 
 export function getRegisteredModelIds(): string[] {
     return Array.from(new Set(Object.values(MODEL_REGISTRY).flatMap((config) => [config.id, ...(config.fallbackIds || [])])));
+}
+
+/**
+ * Registry membership is checked before a caller-supplied model can be used.
+ * Catalog-selected models are resolved by model-discovery and validated again
+ * against the live catalog before the provider request is sent.
+ */
+export function isRegisteredModelId(model: string): boolean {
+    return getRegisteredModelIds().includes(model);
 }

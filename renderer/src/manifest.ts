@@ -1,9 +1,14 @@
 import {
   RENDER_MANIFEST_KIND,
   RENDER_MANIFEST_VERSION,
+  SUPPORTED_RENDER_MANIFEST_VERSIONS,
+  type AudioTrack,
+  type CaptionTrack,
   type MotionGraphicsRenderItem,
+  type PosterSpec,
   type RenderItem,
   type RenderManifest,
+  type ShotManifestEntry,
   type ValidationIssue,
   type ValidationResult,
   type Validated,
@@ -21,6 +26,10 @@ export const RENDER_LIMITS = {
   maxPropsKeys: 64,
   maxPropsDepth: 4,
   maxPropsArrayLength: 32,
+  maxAudioTracks: 64,
+  maxCaptionTracks: 32,
+  maxCaptionCues: 2_000,
+  maxShots: 500,
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -86,12 +95,78 @@ function validateItem(value: unknown, index: number, outputDuration: number): { 
   return { issues };
 }
 
+function validateAudioTrack(value: unknown, index: number, outputDuration: number): { value?: AudioTrack; issues: ValidationIssue[] } {
+  const path = `audioTracks[${index}]`;
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
+  if (!isBoundedString(value.id, 128)) issues.push({ path: `${path}.id`, message: 'must be a non-empty bounded string' });
+  if (!isBoundedString(value.src, 2048)) issues.push({ path: `${path}.src`, message: 'must be a non-empty source URL or path' });
+  if (!isFiniteInteger(value.startFrame) || value.startFrame < 0) issues.push({ path: `${path}.startFrame`, message: 'must be a non-negative integer' });
+  if (!isFiniteInteger(value.durationInFrames) || value.durationInFrames <= 0) issues.push({ path: `${path}.durationInFrames`, message: 'must be a positive integer' });
+  if (isFiniteInteger(value.startFrame) && isFiniteInteger(value.durationInFrames) && value.startFrame + value.durationInFrames > outputDuration) issues.push({ path, message: 'frame window must fit inside output.durationInFrames' });
+  for (const key of ['trimStartInFrames', 'fadeInFrames', 'fadeOutFrames']) {
+    if (value[key] !== undefined && (!isFiniteInteger(value[key]) || (value[key] as number) < 0)) issues.push({ path: `${path}.${key}`, message: 'must be a non-negative integer' });
+  }
+  if (value.volume !== undefined && (typeof value.volume !== 'number' || value.volume < 0 || value.volume > 2)) issues.push({ path: `${path}.volume`, message: 'must be between 0 and 2' });
+  if (value.role !== undefined && !['dialogue', 'voiceover', 'music', 'ambience', 'sfx'].includes(value.role as string)) issues.push({ path: `${path}.role`, message: 'must be a supported audio role' });
+  return issues.length ? { issues } : { value: value as unknown as AudioTrack, issues };
+}
+
+function validateCaptionTrack(value: unknown, index: number, outputDuration: number): { value?: CaptionTrack; issues: ValidationIssue[] } {
+  const path = `captionTracks[${index}]`;
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
+  if (!isBoundedString(value.id, 128)) issues.push({ path: `${path}.id`, message: 'must be a non-empty bounded string' });
+  if (!isBoundedString(value.language, 32)) issues.push({ path: `${path}.language`, message: 'must be a non-empty language tag' });
+  if (!Array.isArray(value.cues) || value.cues.length === 0) issues.push({ path: `${path}.cues`, message: 'must contain at least one cue' });
+  if (Array.isArray(value.cues) && value.cues.length > RENDER_LIMITS.maxCaptionCues) issues.push({ path: `${path}.cues`, message: `must contain at most ${RENDER_LIMITS.maxCaptionCues} cues` });
+  const cueIds = new Set<string>();
+  if (Array.isArray(value.cues)) value.cues.forEach((cue, cueIndex) => {
+    const cuePath = `${path}.cues[${cueIndex}]`;
+    if (!isRecord(cue)) { issues.push({ path: cuePath, message: 'must be an object' }); return; }
+    if (!isBoundedString(cue.id, 128)) issues.push({ path: `${cuePath}.id`, message: 'must be a non-empty bounded string' });
+    if (typeof cue.id === 'string' && cueIds.has(cue.id)) issues.push({ path: `${cuePath}.id`, message: 'must be unique within the caption track' });
+    if (typeof cue.id === 'string') cueIds.add(cue.id);
+    if (!isFiniteInteger(cue.startFrame) || cue.startFrame < 0) issues.push({ path: `${cuePath}.startFrame`, message: 'must be a non-negative integer' });
+    if (!isFiniteInteger(cue.durationInFrames) || cue.durationInFrames <= 0) issues.push({ path: `${cuePath}.durationInFrames`, message: 'must be a positive integer' });
+    if (isFiniteInteger(cue.startFrame) && isFiniteInteger(cue.durationInFrames) && cue.startFrame + cue.durationInFrames > outputDuration) issues.push({ path: cuePath, message: 'frame window must fit inside output.durationInFrames' });
+    if (!isBoundedString(cue.text, 1_024)) issues.push({ path: `${cuePath}.text`, message: 'must be a non-empty string of at most 1024 characters' });
+    if (cue.speaker !== undefined && !isBoundedString(cue.speaker, 128)) issues.push({ path: `${cuePath}.speaker`, message: 'must be a bounded string' });
+  });
+  if (value.style !== undefined && !isRecord(value.style)) issues.push({ path: `${path}.style`, message: 'must be a JSON object' });
+  return issues.length ? { issues } : { value: value as unknown as CaptionTrack, issues };
+}
+
+function validatePoster(value: unknown): { value?: PosterSpec; issues: ValidationIssue[] } {
+  const path = 'poster';
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
+  if (!isBoundedString(value.src, 2048)) issues.push({ path: `${path}.src`, message: 'must be a non-empty source URL or path' });
+  if (!isFiniteInteger(value.width) || value.width < 1 || value.width > RENDER_LIMITS.maxWidth) issues.push({ path: `${path}.width`, message: 'must be a positive bounded integer' });
+  if (!isFiniteInteger(value.height) || value.height < 1 || value.height > RENDER_LIMITS.maxHeight) issues.push({ path: `${path}.height`, message: 'must be a positive bounded integer' });
+  if (value.mimeType !== undefined && !['image/jpeg', 'image/png', 'image/webp'].includes(value.mimeType as string)) issues.push({ path: `${path}.mimeType`, message: 'must be jpeg, png, or webp' });
+  return issues.length ? { issues } : { value: value as unknown as PosterSpec, issues };
+}
+
+function validateShotManifest(value: unknown, index: number, outputDuration: number): { value?: ShotManifestEntry; issues: ValidationIssue[] } {
+  const path = `shots[${index}]`;
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
+  for (const key of ['shotId', 'shotVersionId', 'assetId', 'itemId', 'src']) if (!isBoundedString(value[key], 2048)) issues.push({ path: `${path}.${key}`, message: 'must be a non-empty bounded string' });
+  if (!isFiniteInteger(value.orderIndex) || value.orderIndex < 0) issues.push({ path: `${path}.orderIndex`, message: 'must be a non-negative integer' });
+  if (!isFiniteInteger(value.startFrame) || value.startFrame < 0) issues.push({ path: `${path}.startFrame`, message: 'must be a non-negative integer' });
+  if (!isFiniteInteger(value.durationInFrames) || value.durationInFrames <= 0) issues.push({ path: `${path}.durationInFrames`, message: 'must be a positive integer' });
+  if (isFiniteInteger(value.startFrame) && isFiniteInteger(value.durationInFrames) && value.startFrame + value.durationInFrames > outputDuration) issues.push({ path, message: 'frame window must fit inside output.durationInFrames' });
+  if (value.title !== undefined && !isBoundedString(value.title, 256)) issues.push({ path: `${path}.title`, message: 'must be a bounded string' });
+  return issues.length ? { issues } : { value: value as unknown as ShotManifestEntry, issues };
+}
+
 export function validateManifest(input: unknown): ValidationResult {
   const issues: ValidationIssue[] = [];
   if (!isRecord(input)) return { ok: false, issues: [{ path: '$', message: 'manifest must be an object' }] };
 
   if (input.kind !== RENDER_MANIFEST_KIND) issues.push({ path: '$.kind', message: `must equal ${RENDER_MANIFEST_KIND}` });
-  if (input.version !== RENDER_MANIFEST_VERSION) issues.push({ path: '$.version', message: `must equal ${RENDER_MANIFEST_VERSION}` });
+  if (!SUPPORTED_RENDER_MANIFEST_VERSIONS.includes(input.version as 1 | 2)) issues.push({ path: '$.version', message: `must be one of: ${SUPPORTED_RENDER_MANIFEST_VERSIONS.join(', ')}` });
   for (const key of ['manifestId', 'projectId', 'rendererVersion']) {
     if (!isBoundedString(input[key])) issues.push({ path: `$.${key}`, message: 'must be a non-empty bounded string' });
   }
@@ -128,6 +203,36 @@ export function validateManifest(input: unknown): ValidationResult {
       }
     });
   }
+
+  if (Array.isArray(input.audioTracks)) {
+    if (input.audioTracks.length > RENDER_LIMITS.maxAudioTracks) issues.push({ path: '$.audioTracks', message: `must contain at most ${RENDER_LIMITS.maxAudioTracks} tracks` });
+    const ids = new Set<string>();
+    input.audioTracks.forEach((value, index) => {
+      const result = validateAudioTrack(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0);
+      issues.push(...result.issues);
+      if (result.value && ids.has(result.value.id)) issues.push({ path: `audioTracks[${index}].id`, message: 'must be unique within the manifest' });
+      if (result.value) ids.add(result.value.id);
+    });
+  } else if (input.audioTracks !== undefined) issues.push({ path: '$.audioTracks', message: 'must be an array' });
+
+  if (Array.isArray(input.captionTracks)) {
+    if (input.captionTracks.length > RENDER_LIMITS.maxCaptionTracks) issues.push({ path: '$.captionTracks', message: `must contain at most ${RENDER_LIMITS.maxCaptionTracks} tracks` });
+    input.captionTracks.forEach((value, index) => issues.push(...validateCaptionTrack(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0).issues));
+  } else if (input.captionTracks !== undefined) issues.push({ path: '$.captionTracks', message: 'must be an array' });
+
+  if (Array.isArray(input.shots)) {
+    if (input.shots.length > RENDER_LIMITS.maxShots) issues.push({ path: '$.shots', message: `must contain at most ${RENDER_LIMITS.maxShots} shots` });
+    const ids = new Set<string>();
+    input.shots.forEach((value, index) => {
+      const result = validateShotManifest(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0);
+      issues.push(...result.issues);
+      if (result.value && ids.has(result.value.shotId)) issues.push({ path: `shots[${index}].shotId`, message: 'must be unique within the manifest' });
+      if (result.value) ids.add(result.value.shotId);
+    });
+  } else if (input.shots !== undefined) issues.push({ path: '$.shots', message: 'must be an array' });
+
+  if (input.poster !== undefined) issues.push(...validatePoster(input.poster).issues);
+  if (input.metadata !== undefined && !isRecord(input.metadata)) issues.push({ path: '$.metadata', message: 'must be a JSON object' });
 
   return { ok: issues.length === 0, issues };
 }

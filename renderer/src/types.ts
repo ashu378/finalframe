@@ -1,5 +1,6 @@
 export const RENDER_MANIFEST_KIND = 'finalframe.render-manifest' as const;
-export const RENDER_MANIFEST_VERSION = 1 as const;
+export const RENDER_MANIFEST_VERSION = 2 as const;
+export const SUPPORTED_RENDER_MANIFEST_VERSIONS = [1, 2] as const;
 
 export type OutputCodec = 'h264' | 'vp9' | 'prores';
 
@@ -20,6 +21,10 @@ export interface RenderItemBase {
   startFrame: number;
   durationInFrames: number;
   opacity?: number;
+  orderIndex?: number;
+  shotId?: string;
+  shotVersionId?: string;
+  assetId?: string;
 }
 
 export interface VideoRenderItem extends RenderItemBase {
@@ -37,14 +42,95 @@ export interface MotionGraphicsRenderItem extends RenderItemBase {
 
 export type RenderItem = VideoRenderItem | MotionGraphicsRenderItem;
 
+export interface AudioTrack {
+  id: string;
+  src: string;
+  startFrame: number;
+  durationInFrames: number;
+  trimStartInFrames?: number;
+  volume?: number;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  role?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx';
+}
+
+export interface CaptionCue {
+  id: string;
+  startFrame: number;
+  durationInFrames: number;
+  text: string;
+  speaker?: string;
+}
+
+export interface CaptionTrack {
+  id: string;
+  language: string;
+  cues: CaptionCue[];
+  style?: Record<string, unknown>;
+}
+
+export interface PosterSpec {
+  src: string;
+  width: number;
+  height: number;
+  mimeType?: 'image/jpeg' | 'image/png' | 'image/webp';
+}
+
+export interface ShotManifestEntry {
+  shotId: string;
+  shotVersionId: string;
+  assetId: string;
+  orderIndex: number;
+  itemId: string;
+  title?: string;
+  startFrame: number;
+  durationInFrames: number;
+  src: string;
+}
+
 export interface RenderManifest {
   kind: typeof RENDER_MANIFEST_KIND;
-  version: typeof RENDER_MANIFEST_VERSION;
+  version: 1 | typeof RENDER_MANIFEST_VERSION;
   manifestId: string;
   projectId: string;
   rendererVersion: string;
   output: RenderOutputSpec;
   items: RenderItem[];
+  shots?: ShotManifestEntry[];
+  audioTracks?: AudioTrack[];
+  captionTracks?: CaptionTrack[];
+  poster?: PosterSpec;
+  metadata?: Record<string, unknown>;
+}
+
+export type RenderLifecycleState =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'RENDERING'
+  | 'UPLOADING'
+  | 'VERIFYING'
+  | 'COMPLETED'
+  | 'RETRYABLE_FAILURE'
+  | 'NON_RETRYABLE_FAILURE'
+  | 'CANCELED'
+  | 'TIMED_OUT';
+
+export interface RenderFailure {
+  code: string;
+  message: string;
+  retryable: boolean;
+  occurredAt: string;
+}
+
+export interface RenderJobState {
+  jobId: string;
+  idempotencyKey: string;
+  correlationId: string;
+  attempt: number;
+  maxAttempts: number;
+  state: RenderLifecycleState;
+  failure?: RenderFailure;
+  nextRetryAt?: string;
 }
 
 export interface ValidationIssue {
