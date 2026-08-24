@@ -1,0 +1,3 @@
+export default function PublicLoading() {
+  return <div className="ff-container flex min-h-[50dvh] items-center justify-center py-24"><div className="w-full max-w-3xl space-y-5" aria-busy="true" aria-label="Loading page"><div className="h-5 w-28 animate-pulse rounded-full bg-secondary" /><div className="h-16 w-11/12 animate-pulse rounded-2xl bg-secondary" /><div className="h-5 w-2/3 animate-pulse rounded-full bg-secondary" /><div className="grid gap-4 pt-8 sm:grid-cols-3"><div className="h-36 animate-pulse rounded-2xl bg-secondary" /><div className="h-36 animate-pulse rounded-2xl bg-secondary" /><div className="h-36 animate-pulse rounded-2xl bg-secondary" /></div></div></div>;
+}

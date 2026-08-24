@@ -1,7 +1,59 @@
 import { Password } from "@convex-dev/auth/providers/Password";
+import { Email } from "@convex-dev/auth/providers/Email";
 import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { ConvexError } from "convex/values";
+
+const emailDeliveryEnabled = process.env.CONVEX_AUTH_EMAIL_ENABLED === "true";
+
+function parseSender(value: string) {
+  const match = value.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  return match
+    ? { name: match[1] || "FinalFrame", address: match[2] }
+    : { name: "FinalFrame", address: value.trim() };
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
+}
+
+const emailProvider = Email({
+  id: "email",
+  maxAge: 60 * 60,
+  async sendVerificationRequest({ identifier, url, expires, token }) {
+    const apiKey = process.env.CONVEX_AUTH_ZEPTOMAIL_TOKEN;
+    const from = process.env.CONVEX_AUTH_FROM_EMAIL;
+    if (!apiKey || !from) {
+      throw new Error("Email delivery is enabled but ZeptoMail is not configured.");
+    }
+
+    const sender = parseSender(from);
+    const safeUrl = escapeHtml(url);
+    const safeToken = escapeHtml(token);
+
+    const response = await fetch("https://api.zeptomail.com/v1.1/email", {
+      method: "POST",
+      headers: {
+        Authorization: `Zoho-enczapikey ${apiKey}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: sender,
+        to: [{ email_address: { address: identifier } }],
+        subject: "Your FinalFrame verification link",
+        htmlbody: `<p>Continue to FinalFrame:</p><p><a href="${safeUrl}">Verify your email</a></p><p>Or enter this verification code: <strong>${safeToken}</strong></p><p>This code expires at ${escapeHtml(expires.toISOString())}.</p>`,
+      }),
+    });
+    if (!response.ok) throw new Error("We couldn't send the authentication email. Please try again.");
+  },
+});
 
 const passwordProvider = Password({
   profile: (params) => {
@@ -11,6 +63,7 @@ const passwordProvider = Password({
     const name = typeof params.name === "string" ? params.name.trim() : "";
     return { email, name };
   },
+  ...(emailDeliveryEnabled ? { reset: emailProvider, verify: emailProvider } : {}),
 });
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
@@ -27,15 +80,22 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         updatedAt: Date.now(),
       });
     },
+    beforeSessionCreation: async (ctx, { userId }) => {
+      const user = await ctx.db.get(userId);
+      if (user?.status === "disabled") {
+        throw new Error("This account is disabled. Contact FinalFrame support.");
+      }
+    },
   },
 });
 
 export const AUTH_INTEGRATION = {
   identitySource: "ctx.auth.getUserIdentity",
   externalIdSource: "getAuthUserId(ctx)",
-  providerConfigured: true,
+  providerConfigured: emailDeliveryEnabled,
   passwordProvider: true,
-  passwordResetProvider: false,
+  passwordResetProvider: emailDeliveryEnabled,
+  emailVerificationProvider: emailDeliveryEnabled,
 } as const;
 
 export type AuthErrorCode =
@@ -97,17 +157,37 @@ export const currentUser = query({
     const user = await ctx.db.get(userId);
     if (!user) return null;
 
-    const studio = await ctx.db
-      .query("studios")
-      .withIndex("by_owner", (q) => q.eq("ownerExternalId", userId.toString()))
-      .unique();
+    const canonicalMembership = await ctx.db
+      .query("members")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .first();
+    const legacyMembership = !canonicalMembership
+      ? await ctx.db.query("studioMembers")
+        .withIndex("by_user", (q) => q.eq("userExternalId", userId.toString()))
+        .filter((q) => q.eq(q.field("status"), "active"))
+        .first()
+      : null;
+    const studio = canonicalMembership
+      ? await ctx.db.get(canonicalMembership.studioId)
+      : legacyMembership?.studioExternalId
+        ? await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", legacyMembership.studioExternalId)).first()
+      : await ctx.db
+        .query("studios")
+        .withIndex("by_owner", (q) => q.eq("ownerExternalId", userId.toString()))
+        .first();
+    const role = canonicalMembership?.role ?? legacyMembership?.role ?? (studio ? "owner" : null);
+    const metadata = studio?.metadata && typeof studio.metadata === "object"
+      ? studio.metadata as Record<string, unknown>
+      : {};
 
     return {
       id: userId.toString(),
       email: user.email ?? "",
       name: user.name ?? null,
-      onboardingCompleted: Boolean(studio),
-      isAdmin: false,
+      onboardingCompleted: metadata.onboardingCompleted === true,
+      isAdmin: role === "owner" || role === "admin",
+      role,
       studioExternalId: studio?.externalId ?? null,
       createdAt: user._creationTime,
     };

@@ -93,10 +93,20 @@ export const current = query({
   handler: async (ctx) => {
     const identity = await requireIdentity(ctx);
     const user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
-    const studio = user
-      ? await ctx.db.query("studios").withIndex("by_owner_user", q => q.eq("ownerUserId", user._id)).first()
-        ?? await ctx.db.query("studios").withIndex("by_owner", q => q.eq("ownerExternalId", identity.externalId)).first()
+    const membership = user
+      ? await ctx.db.query("members").withIndex("by_user", q => q.eq("userId", user._id)).filter(q => q.eq(q.field("status"), "active")).first()
       : null;
-    return { user, studio };
+    const legacyMembership = !membership && user
+      ? await ctx.db.query("studioMembers").withIndex("by_user", q => q.eq("userExternalId", identity.externalId)).filter(q => q.eq(q.field("status"), "active")).first()
+      : null;
+    const studio = membership
+      ? await ctx.db.get(membership.studioId)
+      : legacyMembership?.studioExternalId
+        ? await ctx.db.query("studios").withIndex("by_external_id", q => q.eq("externalId", legacyMembership.studioExternalId)).first()
+        : user
+          ? await ctx.db.query("studios").withIndex("by_owner_user", q => q.eq("ownerUserId", user._id)).first()
+            ?? await ctx.db.query("studios").withIndex("by_owner", q => q.eq("ownerExternalId", identity.externalId)).first()
+          : null;
+    return { user, studio, role: membership?.role ?? legacyMembership?.role ?? (studio ? "owner" : null) };
   },
 });

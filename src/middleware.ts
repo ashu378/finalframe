@@ -13,7 +13,7 @@ const PUBLIC_ROUTES = [
     '/review',
 ];
 
-const AUTH_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password'];
+const AUTH_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/verify-email'];
 const PROTECTED_ROUTES = ['/dashboard', '/onboarding'];
 const ADMIN_ROUTES = ['/admin'];
 

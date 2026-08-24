@@ -1,6 +1,6 @@
 import nextConfig from 'eslint-config-next/core-web-vitals';
 
-export default [
+const eslintConfig = [
   { ignores: ['.next/**', 'node_modules/**', 'renderer/node_modules/**', 'convex/_generated/**'] },
   ...nextConfig,
   {
@@ -13,3 +13,5 @@ export default [
     },
   },
 ];
+
+export default eslintConfig;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Loader2, Search, RefreshCw, FileVideo, FileAudio } from 'lucide-react';
 import Image from 'next/image';
 
@@ -20,11 +20,7 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
 
-    useEffect(() => {
-        loadAssets();
-    }, [studioId]);
-
-    async function loadAssets() {
+    const loadAssets = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getAssets(studioId);
@@ -34,7 +30,11 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
         } finally {
             setLoading(false);
         }
-    }
+    }, [studioId]);
+
+    useEffect(() => {
+        void loadAssets();
+    }, [loadAssets]);
 
     const filtered = assets.filter(a => a.name.toLowerCase().includes(search.toLowerCase()));
 

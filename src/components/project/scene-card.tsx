@@ -14,6 +14,7 @@ import type { Scene, CameraConfig, MotionConfig, SceneAsset, StudioAsset } from 
 import { GripVertical, Pencil, Trash2, X, Check, Loader2, Image as ImageIcon, Film, ChevronDown, AlertCircle, Plus, Upload } from 'lucide-react';
 import { CameraControls } from './camera-controls';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -323,9 +324,9 @@ export function SceneCard({
                                                             onClick={() => addAsset(asset.id)}
                                                             className="flex items-center gap-4 p-3 rounded-sm hover:bg-zinc-800 focus:bg-zinc-800 cursor-pointer group/item transition-all"
                                                         >
-                                                            <div className="w-12 h-12 rounded-sm bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0">
+                                                            <div className="relative w-12 h-12 rounded-sm bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0">
                                                                 {asset.type === 'image' ? (
-                                                                    <img src={asset.url} alt="" className="w-full h-full object-cover" />
+                                                                    <Image src={asset.url} alt="Scene media" fill unoptimized sizes="48px" className="object-cover" />
                                                                 ) : (
                                                                     <Film className="w-5 h-5 text-zinc-600 m-3.5" />
                                                                 )}
@@ -348,9 +349,9 @@ export function SceneCard({
                                             const asset = studioAssets.find(a => a.id === binding.asset_id);
                                             return (
                                                 <div key={binding.asset_id} className="flex items-center gap-5 p-4 rounded-sm bg-zinc-950 border border-zinc-800 group/asset hover:border-primary/30 transition-all shadow-inner">
-                                                    <div className="w-12 h-12 rounded-none bg-black border border-zinc-800 overflow-hidden shadow-2xl">
+                                                    <div className="relative w-12 h-12 rounded-none bg-black border border-zinc-800 overflow-hidden shadow-2xl">
                                                         {asset?.type === 'image' ? (
-                                                            <img src={asset.url} alt="" className="w-full h-full object-cover" />
+                                                            <Image src={asset.url} alt="Bound scene media" fill unoptimized sizes="48px" className="object-cover" />
                                                         ) : (
                                                             <Film className="w-5 h-5 text-zinc-800 m-3.5" />
                                                         )}
@@ -515,9 +516,9 @@ export function SceneCard({
                                                 const asset = studioAssets.find(a => a.id === binding.asset_id);
                                                 return (
                                                     <div key={binding.asset_id} className="flex items-center gap-3 pl-1 pr-4 py-1.5 rounded-sm bg-primary/10 border border-primary/20 group/tag">
-                                                        <div className="w-8 h-8 rounded-none overflow-hidden bg-black flex items-center justify-center shrink-0 border border-zinc-800 shadow-2xl">
+                                                        <div className="relative w-8 h-8 rounded-none overflow-hidden bg-black flex items-center justify-center shrink-0 border border-zinc-800 shadow-2xl">
                                                             {asset?.type === 'image' ? (
-                                                                <img src={asset.url} alt="" className="w-full h-full object-cover" />
+                                                                <Image src={asset.url} alt="Bound scene media" fill unoptimized sizes="32px" className="object-cover" />
                                                             ) : (
                                                                 <Film className="w-4 h-4 text-primary" />
                                                             )}

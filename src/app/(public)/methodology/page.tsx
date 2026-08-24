@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { ArrowRight, Check, Eye, FileText, MessageCircle, Play, Sparkles, WalletCards } from 'lucide-react';
+import { ArrowRight, BookOpen, Check, Eye, FileText, Layers, MessageCircle, Play, Sparkles, WalletCards } from 'lucide-react';
 import { SectionHeading } from '@/components/finalframe/section-heading';
 import { workflowSteps } from '@/lib/ui/labels';
 
-const icons = [Sparkles, FileText, WalletCards, Play, MessageCircle, Check];
+const icons = [Sparkles, MessageCircle, WalletCards, BookOpen, Layers, Play, FileText, Eye, Check];
 
 export default function MethodologyPage() {
   return <div>

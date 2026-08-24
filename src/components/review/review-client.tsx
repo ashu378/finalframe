@@ -5,6 +5,7 @@ import { ReviewPlayer } from './review-player';
 import { ReviewComments } from './review-comments';
 import { type ReviewComment } from '@/lib/types/database';
 import { MessageSquare, ListMusic, Layers, ChevronRight } from 'lucide-react';
+import Image from 'next/image';
 
 interface ReviewClientProps {
     project: any;
@@ -150,9 +151,9 @@ export function ReviewClient({
                             <div className="space-y-3">
                                 {layers.map(layer => (
                                     <div key={layer.id} className="flex items-center gap-4 p-3 rounded-2xl bg-white/[0.02] border border-white/5">
-                                        <div className="w-12 h-12 rounded-xl bg-zinc-950 overflow-hidden flex items-center justify-center border border-white/5">
+                                        <div className="relative w-12 h-12 rounded-xl bg-zinc-950 overflow-hidden flex items-center justify-center border border-white/5">
                                             {layer.layer_type === 'image' || layer.layer_type === 'background' ? (
-                                            <img src={layer.asset_url} alt="Media used in this video" className="w-full h-full object-cover" />
+                                            <Image src={layer.asset_url} alt="Media used in this video" fill unoptimized sizes="48px" className="object-cover" />
                                             ) : (
                                                 <Layers className="w-5 h-5 text-zinc-800" />
                                             )}

@@ -24,7 +24,10 @@ export function ConvexAuthForm({ mode }: { mode: Mode }) {
         password: String(formData.get('password') || ''),
         ...(mode === 'signUp' ? { name: String(formData.get('fullName') || '').trim() } : {}),
       });
-      if (!result.signingIn) throw new Error('Additional verification is required.');
+      if (!result.signingIn) {
+        router.push(`/verify-email?email=${encodeURIComponent(String(formData.get('email') || ''))}`);
+        return;
+      }
       if (mode === 'signUp') await ensureAccount({ name: String(formData.get('fullName') || '').trim() });
       router.push('/dashboard');
       router.refresh();

@@ -79,3 +79,18 @@ export async function completeOnboarding() {
   await convex.mutation(api.app.completeOnboarding, {});
   redirect('/dashboard');
 }
+
+export async function saveFriendlyOnboarding(formData: FormData) {
+  const convex = await client();
+  const studioName = String(formData.get('studioName') || '').trim();
+  const data = {
+    outcomeGoal: String(formData.get('goal') || 'social_content'),
+    platform: String(formData.get('platform') || 'social'),
+    creativeDNA: { visualStyle: String(formData.get('style') || 'expressive'), brandEnergy: 'warm' },
+    mediaPreference: String(formData.get('media') || 'no_media_yet'),
+    role: String(formData.get('role') || 'creator'),
+  };
+  if (studioName.length < 2) return { error: 'Give your studio a short name so you can find it later.' };
+  await convex.mutation(api.app.saveFriendlyOnboarding, { studioName, data });
+  redirect('/dashboard/create');
+}

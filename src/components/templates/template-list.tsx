@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Loader2, Plus, LayoutTemplate } from 'lucide-react';
 import { useState } from 'react';
+import Image from 'next/image';
 
 interface TemplateListProps {
     templates: Template[];
@@ -60,7 +61,7 @@ export function TemplateList({ templates, studioId }: TemplateListProps) {
                         {/* Thumbnail */}
                         <div className="aspect-video bg-zinc-950 relative flex items-center justify-center overflow-hidden">
                             {template.thumbnail_url ? (
-                                <img src={template.thumbnail_url} alt={template.name} className="w-full h-full object-cover relative z-10 transition-transform duration-1000 group-hover:scale-105" />
+                                <Image src={template.thumbnail_url} alt={template.name} fill unoptimized sizes="(max-width: 768px) 100vw, 33vw" className="object-cover relative z-10 transition-transform duration-1000 group-hover:scale-105" />
                             ) : (
                                 <div className="w-full h-full bg-black/60 flex items-center justify-center group-hover:scale-105 transition-transform duration-1000">
                                     <LayoutTemplate className="w-16 h-16 text-zinc-900" />

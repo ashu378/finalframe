@@ -10,6 +10,7 @@ type VerifiedUser = {
     name: string | null;
     onboardingCompleted: boolean;
     isAdmin: boolean;
+    role: 'owner' | 'admin' | 'member' | null;
     studioExternalId: string | null;
     createdAt: number;
 };
