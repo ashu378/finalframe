@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
+    "test:planning": "node tests/planning/run-contract-tests.cjs",
     "test:audit": "node scripts/production-audit.mjs",
     "test:contracts": "pnpm --dir renderer build && node scripts/contract-check.mjs"
   },

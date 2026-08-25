@@ -1,4 +1,4 @@
-import { getModelForCapability, type AICapability } from './model-registry';
+import { getModelForCapability, isRegisteredModelId, type AICapability } from './model-registry';
 import { AICapabilityError, type CapabilityDescriptor, type CapabilityId, type CapabilityParameter, type Modality } from './types';
 
 /** Backwards-compatible shape used by generation job creation. */
@@ -97,6 +97,8 @@ export interface CapabilityValidationInput {
     outputModality?: Modality;
     parameters?: readonly CapabilityParameter[];
     structuredOutput?: boolean;
+    /** True only after a model has been selected from the verified live catalog. */
+    allowDiscoveredModel?: boolean;
 }
 
 export interface CapabilityValidationResult {
@@ -161,6 +163,16 @@ export function validateCapabilityRequest(input: CapabilityValidationInput): Cap
             message: `No model is configured for capability ${input.capability}.`,
             provider: descriptor.provider,
             capability: input.capability,
+            retryable: false,
+        });
+    }
+    if (!input.allowDiscoveredModel && !isRegisteredModelId(model)) {
+        throw new AICapabilityError({
+            code: 'UNSUPPORTED_MODEL',
+            message: `Model ${model} is not registered for capability ${input.capability}.`,
+            provider: descriptor.provider,
+            capability: input.capability,
+            model,
             retryable: false,
         });
     }

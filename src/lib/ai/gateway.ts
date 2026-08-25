@@ -8,8 +8,9 @@ import {
     type OpenRouterChatOptions,
     type OpenRouterTransportOptions,
 } from '@/lib/adapters/openrouter-adapter';
-import { getModelForCapability, type AICapability } from './model-registry';
+import { getModelForCapability } from './model-registry';
 import { DIRECTOR_PLAN_SCHEMA, validateCreateIntent, validateDirectorPlan } from './schemas';
+import { AICapabilityError } from './types';
 import type {
     CreateIntent,
     ImageGenerationRequest,
@@ -30,20 +31,44 @@ export type ProviderCapabilityInput =
  * workload by intent, not by an OpenRouter model ID or endpoint.
  */
 export async function executeProviderCapability(input: ProviderCapabilityInput) {
-    switch (input.kind) {
-        case 'planning':
-            return executeAITask('STRUCTURED_PLANNING', input.messages, input.options);
-        case 'validation':
-            return executeAITask('VALIDATION', input.messages, input.options);
-        case 'image':
-            return generateImage(input.request, input.options);
-        case 'video':
-            return generateVideo(input.request, input.options);
-        case 'speech':
-            return synthesizeSpeech(withConfiguredModel('TEXT_TO_SPEECH', input.request), input.options);
-        case 'transcription':
-            return transcribeAudio(withConfiguredModel('TRANSCRIPTION', input.request), input.options);
+    try {
+        switch (input.kind) {
+            case 'planning':
+                if (!input.messages.length) throw invalidGatewayRequest('Planning requires at least one message.');
+                if (!input.options?.structuredOutput && !input.options?.responseFormat && !input.options?.schema) throw invalidGatewayRequest('Planning requires a strict structured-output schema.');
+                return executeAITask('STRUCTURED_PLANNING', input.messages, input.options);
+            case 'validation':
+                if (!input.messages.length) throw invalidGatewayRequest('Validation requires at least one message.');
+                if (!input.options?.structuredOutput && !input.options?.responseFormat && !input.options?.schema) throw invalidGatewayRequest('Validation requires a strict structured-output schema.');
+                return executeAITask('VALIDATION', input.messages, input.options);
+            case 'image':
+                return generateImage(input.request, input.options);
+            case 'video':
+                return generateVideo(input.request, input.options);
+            case 'speech':
+                return synthesizeSpeech(withConfiguredModel('TEXT_TO_SPEECH', input.request), input.options);
+            case 'transcription':
+                return transcribeAudio(withConfiguredModel('TRANSCRIPTION', input.request), input.options);
+        }
+    } catch (cause) {
+        throw normalizeGatewayError(cause, input.kind);
     }
+}
+
+function invalidGatewayRequest(message: string): AICapabilityError {
+    return new AICapabilityError({ code: 'INVALID_REQUEST', message, provider: 'openrouter', retryable: false });
+}
+
+export function normalizeGatewayError(cause: unknown, capability?: string): AICapabilityError {
+    if (cause instanceof AICapabilityError) return cause;
+    return new AICapabilityError({
+        code: 'PROVIDER_ERROR',
+        message: `FinalFrame ${capability || 'AI'} capability failed.`,
+        provider: 'openrouter',
+        capability,
+        retryable: false,
+        cause,
+    });
 }
 
 function withConfiguredModel<T extends { model: string }>(capability: 'TEXT_TO_SPEECH' | 'TRANSCRIPTION', request: Omit<T, 'model'> & { model?: string }): T {
@@ -59,7 +84,7 @@ function creationInputSummary(intent: CreateIntent, transcript?: string): string
         `Aspect ratio: ${intent.aspectRatio}`,
         `Target duration: ${intent.durationSeconds} seconds`,
         `Quality tier: ${intent.qualityTier}`,
-        `Brief: ${intent.brief.trim()}`,
+        `Brief: ${intent.brief?.trim() || 'No brief supplied; infer the story from the script, voice, or media.'}`,
         intent.script?.trim() ? `Script: ${intent.script.trim()}` : 'Script: not provided; create one from the brief.',
         transcript?.trim() ? `Performance transcript: ${transcript.trim()}` : 'Performance transcript: not provided.',
     ];
@@ -86,14 +111,14 @@ export async function generateDirectorPlan(input: CreateIntent, options: OpenRou
             ].join('\n'),
         },
         { role: 'user', content: creationInputSummary(intent, transcript) },
-    ], {
-        ...options,
-        structuredOutput: options.structuredOutput || DIRECTOR_PLAN_SCHEMA,
-    });
+    ], { ...options, structuredOutput: DIRECTOR_PLAN_SCHEMA });
     if (!response.content) {
-        throw new Error('FinalFrame planning returned no plan content.');
+        throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'FinalFrame planning returned no structured plan content.', provider: 'openrouter', capability: 'STRUCTURED_PLANNING', retryable: false });
     }
-    const parsed = typeof response.content === 'string' ? JSON.parse(response.content) as unknown : response.content;
-    return { ...response, plan: validateDirectorPlan(parsed) };
+    try {
+        const parsed = typeof response.content === 'string' ? JSON.parse(response.content) as unknown : response.content;
+        return { ...response, plan: validateDirectorPlan(parsed) };
+    } catch (cause) {
+        throw normalizeGatewayError(cause, 'STRUCTURED_PLANNING');
+    }
 }
-

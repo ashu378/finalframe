@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { assertCapabilityRequest } from '@/lib/ai/capabilities';
-import { getFallbackModelsForCapability, getModelForCapability, isCatalogSelectionModel, type AICapability } from '@/lib/ai/model-registry';
+import { getFallbackModelsForCapability, getModelForCapability, isCatalogSelectionModel, isRegisteredModelId, type AICapability } from '@/lib/ai/model-registry';
 import { selectOpenRouterModel } from '@/lib/ai/model-discovery';
 import {
     AICapabilityError,
@@ -41,6 +41,31 @@ export interface OpenRouterTransportOptions {
     retryBaseDelayMs?: number;
     retryMaxDelayMs?: number;
     fallbackModels?: string[];
+    /** Deterministic provider seam for local/CI tests. Never enabled implicitly. */
+    mock?: OpenRouterMockOptions;
+}
+
+export interface OpenRouterMockRequest {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: unknown;
+}
+
+export interface OpenRouterMockResponse {
+    status?: number;
+    headers?: Record<string, string>;
+    body?: unknown;
+    binaryBody?: ArrayBuffer;
+}
+
+export interface OpenRouterMockOptions {
+    seed: string;
+    handler?: (request: OpenRouterMockRequest) => OpenRouterMockResponse | Promise<OpenRouterMockResponse>;
+}
+
+export function createDeterministicMockOptions(seed = 'finalframe-test'): OpenRouterTransportOptions {
+    return { mock: { seed }, apiKey: null, retry: { maxRetries: 0 } };
 }
 
 export interface StructuredOutputInput {
@@ -83,7 +108,7 @@ function apiKey(options?: OpenRouterTransportOptions): string | undefined {
 }
 
 function requireKey(options: OpenRouterTransportOptions | undefined, capability?: string, model?: string): void {
-    if (!apiKey(options)) {
+    if (!options?.mock && !apiKey(options)) {
         throw new AICapabilityError({
             code: 'MISSING_API_KEY',
             message: 'OPENROUTER_API_KEY is required to execute an OpenRouter request.',
@@ -95,7 +120,87 @@ function requireKey(options: OpenRouterTransportOptions | undefined, capability?
     }
 }
 
+function deterministicHash(value: string): string {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function valueFromSchema(schema: unknown, seed: string, path = '$'): unknown {
+    const item = asRecord(schema);
+    const union = Array.isArray(item.anyOf) ? item.anyOf : Array.isArray(item.oneOf) ? item.oneOf : undefined;
+    if (union?.length) return valueFromSchema(union.find((candidate) => asRecord(candidate).type !== 'null') || union[0], seed, path);
+    if (Array.isArray(item.enum) && item.enum.length) return item.enum[0];
+    switch (item.type) {
+        case 'object': {
+            const properties = asRecord(item.properties);
+            return Object.fromEntries(Object.entries(properties).map(([key, child]) => [key, valueFromSchema(child, `${seed}:${path}.${key}`, `${path}.${key}`)]));
+        }
+        case 'array': {
+            const minimum = typeof item.minItems === 'number' ? item.minItems : 0;
+            return Array.from({ length: minimum }, (_, index) => valueFromSchema(item.items, `${seed}:${path}[${index}]`, `${path}[${index}]`));
+        }
+        case 'number':
+        case 'integer':
+            return typeof item.minimum === 'number' ? item.minimum : 1;
+        case 'boolean':
+            return false;
+        case 'null':
+            return null;
+        default:
+            return `${path.replace(/^\$\.?/, '').replace(/[^a-zA-Z0-9]+/g, '-') || 'mock'}-${deterministicHash(seed).slice(0, 6)}`;
+    }
+}
+
+function defaultMockResponse(request: OpenRouterMockRequest, seed: string): OpenRouterMockResponse {
+    const path = new URL(request.url).pathname;
+    const body = asRecord(request.body);
+    const requestId = `mock-${deterministicHash(`${seed}:${request.method}:${path}`)}`;
+    if (path.endsWith('/chat/completions')) {
+        const responseFormat = asRecord(body.response_format);
+        const jsonSchema = asRecord(responseFormat.json_schema);
+        const schema = jsonSchema.schema;
+        const content = schema ? JSON.stringify(valueFromSchema(schema, seed)) : `FinalFrame deterministic mock response (${seed})`;
+        return { headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { id: requestId, model: body.model, choices: [{ message: { role: 'assistant', content } }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0 } } };
+    }
+    if (path.endsWith('/images')) {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { created: 0, data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', media_type: 'image/png' }], usage: { cost: 0 } } };
+    }
+    if (path.endsWith('/videos') && request.method === 'POST') {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { id: requestId, status: 'succeeded', model: body.model, generation_id: requestId, usage: { cost: 0 } } };
+    }
+    if (path.includes('/videos/') && path.endsWith('/content')) {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'video/mp4' }, binaryBody: new Uint8Array([0, 0, 0, 0]).buffer };
+    }
+    if (path.includes('/videos/')) {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { id: path.split('/').pop(), status: 'succeeded', unsigned_urls: [`mock://finalframe/${requestId}.mp4`], usage: { cost: 0 } } };
+    }
+    if (path.endsWith('/audio/transcriptions')) {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { text: `Deterministic transcript (${seed})`, segments: [], words: [], usage: { seconds: 0, cost: 0 } } };
+    }
+    if (path.endsWith('/audio/speech')) {
+        return { headers: { 'x-request-id': requestId, 'content-type': 'audio/mpeg', 'x-openrouter-usage': JSON.stringify({ seconds: 0, cost: 0 }) }, binaryBody: new Uint8Array([0x49, 0x44, 0x33, 0x04]).buffer };
+    }
+    return { status: 404, headers: { 'x-request-id': requestId, 'content-type': 'application/json' }, body: { error: { code: 'mock_not_implemented', message: `Mock route not implemented: ${path}` } } };
+}
+
 function getFetch(options?: OpenRouterTransportOptions): typeof globalThis.fetch {
+    if (options?.mock) {
+        const mock = options.mock;
+        return (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const headers = Object.fromEntries(new Headers(init?.headers).entries());
+            const rawBody = typeof init?.body === 'string' ? init.body : undefined;
+            const request: OpenRouterMockRequest = { url, method: (init?.method || 'GET').toUpperCase(), headers, body: rawBody ? JSON.parse(rawBody) : undefined };
+            const result = await (mock.handler ? mock.handler(request) : defaultMockResponse(request, mock.seed));
+            const responseHeaders = new Headers(result.headers);
+            if (result.binaryBody !== undefined) return new Response(result.binaryBody, { status: result.status || 200, headers: responseHeaders });
+            return new Response(result.body === undefined ? null : JSON.stringify(result.body), { status: result.status || 200, headers: responseHeaders });
+        }) as typeof globalThis.fetch;
+    }
     const result = options?.fetch || globalThis.fetch;
     if (!result) {
         throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'No fetch implementation is available for OpenRouter.', provider: 'openrouter', retryable: false });
@@ -174,6 +279,15 @@ function responseMessage(body: unknown, fallback: string): string {
     return asString(record.message) || asString(record.error) || asString(error.message) || fallback;
 }
 
+function normalizedProviderDetails(body: unknown): Record<string, unknown> | undefined {
+    const record = asRecord(body);
+    const nested = asRecord(record.error);
+    const code = asString(record.code) || asString(nested.code) || asString(record.type) || asString(nested.type);
+    const message = asString(record.message) || asString(nested.message);
+    if (!code && !message) return undefined;
+    return { ...(code ? { providerCode: code } : {}), ...(message ? { providerMessage: message } : {}) };
+}
+
 function abortError(cause: unknown, capability?: string, model?: string): AICapabilityError {
     const name = asRecord(cause).name;
     return new AICapabilityError({
@@ -229,7 +343,7 @@ async function requestJson<T>(path: string, init: RequestInit, options: OpenRout
                 status: response.status,
                 requestId: response.headers.get('x-request-id') || undefined,
                 retryable: classification.retryable,
-                details: body,
+                details: normalizedProviderDetails(body),
             });
             if (!error.retryable || attempt >= retry.maxRetries) throw error;
             if (retry.sleep) await retry.sleep(delayForAttempt(response, attempt, options));
@@ -296,6 +410,46 @@ export interface AIResponse {
 
 function isJsonSchemaObject(value: Record<string, unknown>): boolean {
     return value.type === 'object' && value.properties !== null && typeof value.properties === 'object' && !Array.isArray(value.properties) && value.additionalProperties === false && Array.isArray(value.required);
+}
+
+function assertStructuredValue(value: unknown, schema: unknown, path: string): void {
+    const definition = asRecord(schema);
+    const union = Array.isArray(definition.anyOf) ? definition.anyOf : Array.isArray(definition.oneOf) ? definition.oneOf : undefined;
+    if (union) {
+        const valid = union.some((candidate) => {
+            try {
+                assertStructuredValue(value, candidate, path);
+                return true;
+            } catch {
+                return false;
+            }
+        });
+        if (!valid) throw new Error(`${path} does not match any allowed schema branch.`);
+        return;
+    }
+    if (Array.isArray(definition.enum) && !definition.enum.some((candidate) => Object.is(candidate, value))) throw new Error(`${path} is not an allowed enum value.`);
+    if (definition.type === 'object') {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object.`);
+        const object = value as Record<string, unknown>;
+        const properties = asRecord(definition.properties);
+        const required = Array.isArray(definition.required) ? definition.required : [];
+        for (const key of required) if (!(key in object)) throw new Error(`${path}.${String(key)} is required.`);
+        if (definition.additionalProperties === false) for (const key of Object.keys(object)) if (!(key in properties)) throw new Error(`${path}.${key} is not allowed.`);
+        for (const [key, child] of Object.entries(properties)) if (key in object) assertStructuredValue(object[key], child, `${path}.${key}`);
+        return;
+    }
+    if (definition.type === 'array') {
+        if (!Array.isArray(value)) throw new Error(`${path} must be an array.`);
+        if (typeof definition.minItems === 'number' && value.length < definition.minItems) throw new Error(`${path} contains too few items.`);
+        value.forEach((item, index) => assertStructuredValue(item, definition.items, `${path}[${index}]`));
+        return;
+    }
+    if (definition.type === 'string' && (typeof value !== 'string' || (typeof definition.minLength === 'number' && value.length < definition.minLength))) throw new Error(`${path} must be a string.`);
+    if (definition.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`${path} must be a number.`);
+    if (definition.type === 'integer' && (typeof value !== 'number' || !Number.isInteger(value))) throw new Error(`${path} must be an integer.`);
+    if (definition.type === 'boolean' && typeof value !== 'boolean') throw new Error(`${path} must be a boolean.`);
+    if (typeof definition.minimum === 'number' && typeof value === 'number' && value < definition.minimum) throw new Error(`${path} is below its minimum.`);
+    if (typeof definition.exclusiveMinimum === 'number' && typeof value === 'number' && value <= definition.exclusiveMinimum) throw new Error(`${path} is below its exclusive minimum.`);
 }
 
 function assertStrictSchema(value: unknown, path: string): void {
@@ -385,9 +539,10 @@ function parseStructuredContent(content: string | null, definition?: StructuredO
     try {
         const parsed = JSON.parse(content) as unknown;
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected a JSON object.');
+        assertStructuredValue(parsed, definition.schema, '$');
         return JSON.stringify(parsed);
     } catch (cause) {
-        throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned content that is not valid strict JSON.', provider: 'openrouter', retryable: false, details: { content }, cause });
+        throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned structured output that failed the declared schema.', provider: 'openrouter', retryable: false, details: { responseType: 'structured_output' }, cause });
     }
 }
 
@@ -440,7 +595,7 @@ function imageBody(input: ImageGenerationRequest, model: string): Record<string,
     };
 }
 
-export function buildImageGenerationRequest(input: ImageGenerationRequest): Record<string, unknown> {
+export function buildImageGenerationRequest(input: ImageGenerationRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.prompt?.trim()) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Image prompt is required.', provider: 'openrouter', capability: 'IMAGE_GENERATION', retryable: false });
     if (input.n !== undefined) assertFiniteRange(input.n, 'n', 1);
     if (input.outputCompression !== undefined) assertFiniteRange(input.outputCompression, 'outputCompression', 0, 100);
@@ -456,14 +611,15 @@ export function buildImageGenerationRequest(input: ImageGenerationRequest): Reco
         ...(input.background ? ['background' as const] : []),
         ...(input.outputCompression === undefined ? [] : ['output_compression' as const]),
         ...(input.seed === undefined ? [] : ['seed' as const]),
-    ] });
+    ], allowDiscoveredModel: options.allowDiscoveredModel });
     return imageBody(input, validation.model);
 }
 
-async function resolveMediaModel(capability: CapabilityId, model: string | undefined, outputModality: 'image' | 'video', options: OpenRouterTransportOptions): Promise<string> {
+async function resolveCatalogModel(capability: CapabilityId, model: string | undefined, outputModality: 'image' | 'video' | 'audio' | 'transcription', options: OpenRouterTransportOptions, requiredParameters: string[] = []): Promise<string> {
     const configured = model || getModelForCapability(capability).id;
+    if (options.mock) return configured;
     if (!isCatalogSelectionModel(capability, configured)) return configured;
-    return (await selectOpenRouterModel({ capability, outputModality, options: { ...options, apiKey: apiKey(options) } })).id;
+    return (await selectOpenRouterModel({ capability, outputModality, requiredParameters, options: { ...options, apiKey: apiKey(options) } })).id;
 }
 
 export async function generateImage(input: ImageGenerationRequest, options: OpenRouterTransportOptions = {}) {
@@ -473,8 +629,8 @@ export async function generateImage(input: ImageGenerationRequest, options: Open
     let lastError: AICapabilityError | undefined;
     for (const candidate of candidates) {
         try {
-            const model = await resolveMediaModel('IMAGE_GENERATION', candidate, 'image', options);
-            const response = await requestJson<{ data?: Array<{ b64_json?: string; media_type?: string; url?: string }>; usage?: unknown; model?: string }>('/images', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildImageGenerationRequest({ ...input, model })) }, options, 'IMAGE_GENERATION', model);
+            const model = await resolveCatalogModel('IMAGE_GENERATION', candidate, 'image', options);
+            const response = await requestJson<{ data?: Array<{ b64_json?: string; media_type?: string; url?: string }>; usage?: unknown; model?: string }>('/images', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildImageGenerationRequest({ ...input, model }, { allowDiscoveredModel: !isRegisteredModelId(model) })) }, options, 'IMAGE_GENERATION', model);
             const images = (response.body.data || []).map((image) => ({ b64Json: image.b64_json, mediaType: image.media_type, url: image.url }));
             if (!images.some((image) => image.b64Json || image.url)) throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no image output.', provider: 'openrouter', capability: 'IMAGE_GENERATION', model, retryable: false, details: response.body });
             const first = images[0];
@@ -488,7 +644,7 @@ export async function generateImage(input: ImageGenerationRequest, options: Open
     throw lastError || new AICapabilityError({ code: 'PROVIDER_ERROR', message: 'OpenRouter image generation failed.', provider: 'openrouter', capability: 'IMAGE_GENERATION', retryable: false });
 }
 
-export function buildVideoGenerationRequest(input: VideoGenerationRequest): Record<string, unknown> {
+export function buildVideoGenerationRequest(input: VideoGenerationRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.model?.trim() || !input.prompt?.trim()) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Video model and prompt are required.', provider: 'openrouter', capability: 'VIDEO_GENERATION', retryable: false });
     assertCapabilityRequest({ capability: 'VIDEO_GENERATION', model: input.model, parameters: [
         ...(input.aspectRatio ? ['aspect_ratio' as const] : []),
@@ -496,7 +652,7 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest): Reco
         ...(input.resolution ? ['resolution' as const] : []),
         ...(input.inputReferences || input.frameImages ? ['input_references' as const] : []),
         ...(input.providerOptions ? ['provider_options' as const] : []),
-    ] });
+    ], allowDiscoveredModel: options.allowDiscoveredModel });
     return {
         model: input.model,
         prompt: input.prompt,
@@ -516,9 +672,9 @@ export async function generateVideo(input: VideoGenerationRequest, options: Open
     let lastError: AICapabilityError | undefined;
     for (const candidate of candidates) {
         try {
-            const model = await resolveMediaModel('VIDEO_GENERATION', candidate, 'video', options);
+            const model = await resolveCatalogModel('VIDEO_GENERATION', candidate, 'video', options);
             const request = { ...input, model };
-            const response = await requestJson<{ id: string; polling_url?: string; status: string; generation_id?: string; usage?: unknown; model?: string }>('/videos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildVideoGenerationRequest(request)) }, options, 'VIDEO_GENERATION', model);
+            const response = await requestJson<{ id: string; polling_url?: string; status: string; generation_id?: string; usage?: unknown; model?: string }>('/videos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildVideoGenerationRequest(request, { allowDiscoveredModel: !isRegisteredModelId(model) })) }, options, 'VIDEO_GENERATION', model);
             if (!response.body.id) throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no video task ID.', provider: 'openrouter', capability: 'VIDEO_GENERATION', model, retryable: false, details: response.body });
             return { id: response.body.id, pollingUrl: response.body.polling_url, polling_url: response.body.polling_url, status: response.body.status, generationId: response.body.generation_id, generation_id: response.body.generation_id, modelUsed: response.body.model || model, ...extractUsageAndCost(response.body), requestId: response.requestId, raw: response.body };
         } catch (cause) {
@@ -538,7 +694,17 @@ export async function pollVideo(jobId: string, options: OpenRouterTransportOptio
     return { ...response.body, requestId: response.requestId, ...extractUsageAndCost(response.body) };
 }
 
-async function requestBinary(path: string, init: RequestInit, options: OpenRouterTransportOptions, capability: string, model?: string): Promise<{ response: Response; requestId?: string }> {
+function usageFromHeaders(headers: Headers): { usage?: NormalizedUsage; costUsd?: number } {
+    const raw = headers.get('x-openrouter-usage') || headers.get('x-usage');
+    if (!raw) return {};
+    try {
+        return extractUsageAndCost(JSON.parse(raw) as unknown);
+    } catch {
+        return {};
+    }
+}
+
+async function requestBinary(path: string, init: RequestInit, options: OpenRouterTransportOptions, capability: string, model?: string): Promise<{ response: Response; requestId?: string; usage?: NormalizedUsage; costUsd?: number }> {
     requireKey(options, capability, model);
     const fetcher = getFetch(options);
     const retry = retryOptions(options);
@@ -554,9 +720,10 @@ async function requestBinary(path: string, init: RequestInit, options: OpenRoute
         }
         try {
             const response = await fetcher(`${(options.baseUrl || BASE_URL).replace(/\/+$/, '')}${path}`, { ...init, method, signal: controller.signal, headers: requestHeaders(options, init, method, idempotencyKey) });
-            if (response.ok) return { response, requestId: response.headers.get('x-request-id') || undefined };
+            if (response.ok) return { response, requestId: response.headers.get('x-request-id') || undefined, ...usageFromHeaders(response.headers) };
+            const body = await response.clone().json().catch(() => null) as unknown;
             const classification = classifyOpenRouterError(response.status);
-            const error = new AICapabilityError({ code: classification.code, message: `OpenRouter ${capability} request failed (${response.status}).`, provider: 'openrouter', capability, model, status: response.status, requestId: response.headers.get('x-request-id') || undefined, retryable: classification.retryable });
+            const error = new AICapabilityError({ code: classification.code, message: responseMessage(body, `OpenRouter ${capability} request failed (${response.status}).`), provider: 'openrouter', capability, model, status: response.status, requestId: response.headers.get('x-request-id') || undefined, retryable: classification.retryable, details: normalizedProviderDetails(body) });
             if (!error.retryable || attempt >= retry.maxRetries) throw error;
             const wait = delayForAttempt(response, attempt, options);
             if (retry.sleep) await retry.sleep(wait); else if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
@@ -583,37 +750,65 @@ export async function downloadVideo(jobId: string, options: OpenRouterTransportO
     return { body: await result.response.arrayBuffer(), contentType: result.response.headers.get('content-type') || 'video/mp4', requestId: result.requestId };
 }
 
-export function buildSpeechSynthesisRequest(input: SpeechSynthesisRequest): Record<string, unknown> {
+export function buildSpeechSynthesisRequest(input: SpeechSynthesisRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.model?.trim() || !input.input?.trim() || !input.voice?.trim()) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Speech model, input and voice are required.', provider: 'openrouter', capability: 'TEXT_TO_SPEECH', retryable: false });
     assertCapabilityRequest({ capability: 'TEXT_TO_SPEECH', model: input.model, parameters: [
         ...(input.responseFormat ? ['response_format' as const] : []),
         ...(input.speed === undefined ? [] : ['speed' as const]),
         ...(input.instructions ? ['instructions' as const] : []),
         ...(input.providerOptions ? ['provider_options' as const] : []),
-    ] });
+    ], allowDiscoveredModel: options.allowDiscoveredModel });
     return { model: input.model, input: input.input, voice: input.voice, ...(input.responseFormat ? { response_format: input.responseFormat } : {}), ...(input.speed === undefined ? {} : { speed: input.speed }), ...(input.instructions ? { instructions: input.instructions } : {}), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
 }
 
 export async function synthesizeSpeech(input: SpeechSynthesisRequest, options: OpenRouterTransportOptions = {}) {
-    const result = await requestBinary('/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json', Accept: 'audio/*' }, body: JSON.stringify(buildSpeechSynthesisRequest(input)) }, options, 'TEXT_TO_SPEECH', input.model);
-    const audio = await result.response.arrayBuffer();
-    return { audio, body: audio, contentType: result.response.headers.get('content-type') || 'audio/mpeg', modelUsed: input.model, requestId: result.requestId };
+    const config = getModelForCapability('TEXT_TO_SPEECH');
+    const candidates = Array.from(new Set([input.model || config.id, ...(input.model ? (options.fallbackModels || []) : options.fallbackModels || getFallbackModelsForCapability('TEXT_TO_SPEECH'))])).filter(Boolean);
+    let lastError: AICapabilityError | undefined;
+    for (const candidate of candidates) {
+        try {
+            const model = await resolveCatalogModel('TEXT_TO_SPEECH', candidate, 'audio', options, ['voice']);
+            const request = { ...input, model };
+            const result = await requestBinary('/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json', Accept: 'audio/*' }, body: JSON.stringify(buildSpeechSynthesisRequest(request, { allowDiscoveredModel: !isRegisteredModelId(model) })) }, options, 'TEXT_TO_SPEECH', model);
+            const audio = await result.response.arrayBuffer();
+            return { audio, body: audio, contentType: result.response.headers.get('content-type') || 'audio/mpeg', modelUsed: model, requestId: result.requestId, usage: result.usage, costUsd: result.costUsd };
+        } catch (cause) {
+            const error = cause instanceof AICapabilityError ? cause : new AICapabilityError({ code: 'PROVIDER_ERROR', message: 'OpenRouter speech synthesis failed.', provider: 'openrouter', capability: 'TEXT_TO_SPEECH', model: candidate, retryable: false });
+            lastError = error;
+            if (!isFallbackEligible(error) || candidate === candidates[candidates.length - 1]) throw error;
+        }
+    }
+    throw lastError || new AICapabilityError({ code: 'PROVIDER_ERROR', message: 'OpenRouter speech synthesis failed.', provider: 'openrouter', capability: 'TEXT_TO_SPEECH', retryable: false });
 }
 
-export function buildTranscriptionRequest(input: TranscriptionRequest): Record<string, unknown> {
+export function buildTranscriptionRequest(input: TranscriptionRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.model?.trim() || !input.audio?.data || !input.audio.format) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Transcription model and base64 audio are required.', provider: 'openrouter', capability: 'TRANSCRIPTION', retryable: false });
     assertCapabilityRequest({ capability: 'TRANSCRIPTION', model: input.model, inputModality: 'audio', parameters: [
         ...(input.language ? ['language' as const] : []),
         ...(input.temperature === undefined ? [] : ['temperature' as const]),
         ...(input.providerOptions ? ['provider_options' as const] : []),
-    ] });
+    ], allowDiscoveredModel: options.allowDiscoveredModel });
     return { model: input.model, input_audio: input.audio, ...(input.language ? { language: input.language } : {}), ...(input.temperature === undefined ? {} : { temperature: input.temperature }), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
 }
 
 export async function transcribeAudio(input: TranscriptionRequest, options: OpenRouterTransportOptions = {}) {
-    const response = await requestJson<{ text: string; usage?: unknown }>('/audio/transcriptions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildTranscriptionRequest(input)) }, options, 'TRANSCRIPTION', input.model);
-    if (typeof response.body.text !== 'string') throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no transcription text.', provider: 'openrouter', capability: 'TRANSCRIPTION', model: input.model, retryable: false, details: response.body });
-    return { text: response.body.text, modelUsed: input.model, ...extractUsageAndCost(response.body), requestId: response.requestId, raw: response.body };
+    const config = getModelForCapability('TRANSCRIPTION');
+    const candidates = Array.from(new Set([input.model || config.id, ...(input.model ? (options.fallbackModels || []) : options.fallbackModels || getFallbackModelsForCapability('TRANSCRIPTION'))])).filter(Boolean);
+    let lastError: AICapabilityError | undefined;
+    for (const candidate of candidates) {
+        try {
+            const model = await resolveCatalogModel('TRANSCRIPTION', candidate, 'transcription', options);
+            const request = { ...input, model };
+            const response = await requestJson<{ text: string; segments?: unknown[]; words?: unknown[]; usage?: unknown }>('/audio/transcriptions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(buildTranscriptionRequest(request, { allowDiscoveredModel: !isRegisteredModelId(model) })) }, options, 'TRANSCRIPTION', model);
+            if (typeof response.body.text !== 'string') throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no transcription text.', provider: 'openrouter', capability: 'TRANSCRIPTION', model, retryable: false, details: normalizedProviderDetails(response.body) });
+            return { text: response.body.text, segments: response.body.segments || [], words: response.body.words || [], modelUsed: model, ...extractUsageAndCost(response.body), requestId: response.requestId, raw: response.body };
+        } catch (cause) {
+            const error = cause instanceof AICapabilityError ? cause : new AICapabilityError({ code: 'PROVIDER_ERROR', message: 'OpenRouter transcription failed.', provider: 'openrouter', capability: 'TRANSCRIPTION', model: candidate, retryable: false });
+            lastError = error;
+            if (!isFallbackEligible(error) || candidate === candidates[candidates.length - 1]) throw error;
+        }
+    }
+    throw lastError || new AICapabilityError({ code: 'PROVIDER_ERROR', message: 'OpenRouter transcription failed.', provider: 'openrouter', capability: 'TRANSCRIPTION', retryable: false });
 }
 
 export const requestImageGeneration = generateImage;

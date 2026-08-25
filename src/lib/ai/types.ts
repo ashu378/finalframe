@@ -96,27 +96,73 @@ export type AIErrorCode =
     | 'REQUEST_TIMEOUT'
     | 'NETWORK_ERROR';
 
-/**
- * Customer-facing creation inputs. Voice is deliberately optional: a user
- * can start from an idea or script and let the platform create the voices, or
- * bring a performance recording that becomes the timing source.
- */
+/** Customer-facing planning vocabulary. Provider/model names do not belong in these contracts. */
 export type WorkflowPreset =
-    | '2D_ANIMATION'
-    | 'REALISTIC_SKIT'
+    | 'ANIMATED_COMEDY_2D'
+    | 'REALISTIC_AI_SKIT'
     | 'VOICEOVER_STORY'
-    | 'PRODUCT_AD'
+    | 'AI_PRODUCT_AD'
     | 'FACELESS_EXPLAINER'
     | 'SHORT_FILM';
 
-export type InputMode = 'IDEA' | 'SCRIPT' | 'VOICE' | 'MIXED_MEDIA';
+export type InputMode =
+    | 'IDEA'
+    | 'SCRIPT'
+    | 'VOICE'
+    | 'CAST_REFERENCES'
+    | 'FOOTAGE'
+    | 'AD_BRIEF'
+    | 'MIXED_MEDIA';
 
+export type WorkflowStage =
+    | 'BRIEF'
+    | 'PERFORMANCE'
+    | 'PLAN'
+    | 'BIBLE'
+    | 'SHOTS'
+    | 'MAKE'
+    | 'FINISH'
+    | 'REVIEW'
+    | 'EXPORT';
+
+export type ApprovalStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+
+export type QualityGateStatus =
+    | 'NOT_RUN'
+    | 'PASS'
+    | 'PASS_WITH_WARNINGS'
+    | 'BLOCKED'
+    | 'REQUIRES_HUMAN_REVIEW';
+
+export type QualityEvidenceResult = 'PASS' | 'WARN' | 'FAIL';
+
+export interface QualityEvidence {
+    rule: string;
+    result: QualityEvidenceResult;
+    explanation: string;
+}
+
+export interface QualityGateResult {
+    status: QualityGateStatus;
+    continuityScore?: number;
+    audioAlignmentScore?: number;
+    captionAccuracyScore?: number;
+    evidence: QualityEvidence[];
+}
+
+/**
+ * A user can begin with an idea, script, recording, references, footage, or
+ * any combination. Voice is never mandatory for idea/script creation.
+ */
 export interface CreateIntent {
     preset: WorkflowPreset;
     inputMode: InputMode;
+    /** Empty is allowed for voice-only and reference-only intake; the validator enforces mode-specific requirements. */
     brief: string;
     script?: string;
     inputAssetIds: string[];
+    performanceAssetIds?: string[];
+    referenceAssetIds?: string[];
     language: string;
     platform: string;
     aspectRatio: string;
@@ -127,12 +173,26 @@ export interface CreateIntent {
 export interface SpeakerSegment {
     id: string;
     speakerLabel: string;
-    characterId: string | null;
+    characterId?: string;
     startSeconds: number;
     endSeconds: number;
     text: string;
-    confidence: number | null;
+    confidence?: number;
     reviewed: boolean;
+}
+
+export interface CreativeGuide {
+    visualStyle: string;
+    palette: string[];
+    lighting?: string;
+    cameraLanguage?: string;
+    typography?: string;
+    continuityRules: string[];
+    characterRules?: string[];
+    locationRules?: string[];
+    productRules?: string[];
+    audioDirection: string;
+    culturalContext?: string;
 }
 
 export interface ShotSpec {
@@ -149,13 +209,15 @@ export interface ShotSpec {
     camera: Record<string, unknown>;
     action: string;
     prompt: string;
-    negativePrompt: string | null;
+    negativePrompt?: string;
     providerCapability: CapabilityId;
 }
 
 export interface DirectorPlan {
+    planVersion: number;
     intentSummary: string;
     preset: WorkflowPreset;
+    inputMode: InputMode;
     language: string;
     platform: string;
     durationSeconds: number;
@@ -163,14 +225,13 @@ export interface DirectorPlan {
     script: string;
     speakers: SpeakerSegment[];
     shots: ShotSpec[];
-    creativeGuide: {
-        visualStyle: string;
-        palette: string[];
-        continuityRules: string[];
-        audioDirection: string;
-    };
+    creativeGuide: CreativeGuide;
     riskFlags: string[];
     estimatedCredits: number;
+    approvalStatus: ApprovalStatus;
+    currentStage: WorkflowStage;
+    qualityGateStatus: QualityGateStatus;
+    qualityGates: QualityGateResult[];
 }
 
 export interface AnchorPack {

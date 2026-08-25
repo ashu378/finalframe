@@ -54,6 +54,11 @@ function asStringArray(value: unknown): string[] {
     return [];
 }
 
+function normalizeModalities(value: unknown): Modality[] {
+    const allowed: Modality[] = ['text', 'image', 'video', 'audio', 'file', 'transcription'];
+    return asStringArray(value).filter((item): item is Modality => allowed.includes(item as Modality));
+}
+
 function asNumber(value: unknown): number | undefined {
     const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
     return Number.isFinite(number) ? number : undefined;
@@ -74,8 +79,8 @@ export function normalizeDiscoveredModel(value: unknown): DiscoveredModel | null
         name: asString(item.name),
         description: asString(item.description),
         contextLength: asNumber(item.context_length),
-        inputModalities: asStringArray(architecture.input_modalities) as Modality[],
-        outputModalities: asStringArray(architecture.output_modalities) as Modality[],
+        inputModalities: normalizeModalities(architecture.input_modalities),
+        outputModalities: normalizeModalities(architecture.output_modalities),
         supportedParameters: asStringArray(item.supported_parameters),
         pricing: {
             input: asNumber(pricing.prompt),
@@ -195,7 +200,7 @@ export async function selectOpenRouterModel(input: {
         if (input.outputModality && !model.outputModalities.includes(input.outputModality)) return false;
         return (input.requiredParameters || []).every((parameter) => model.supportedParameters.includes(parameter));
     });
-    const result = candidates[0];
+    const result = candidates.sort((left, right) => left.id.localeCompare(right.id))[0];
     if (!result) {
         throw new AICapabilityError({
             code: input.model ? 'UNSUPPORTED_MODEL' : 'UNSUPPORTED_CAPABILITY',

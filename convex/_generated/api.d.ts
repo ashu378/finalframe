@@ -21,6 +21,7 @@ import type * as generation from "../generation.js";
 import type * as http from "../http.js";
 import type * as identity from "../identity.js";
 import type * as payments from "../payments.js";
+import type * as planning from "../planning.js";
 import type * as productions from "../productions.js";
 import type * as projects from "../projects.js";
 import type * as secureJobs from "../secureJobs.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   identity: typeof identity;
   payments: typeof payments;
+  planning: typeof planning;
   productions: typeof productions;
   projects: typeof projects;
   secureJobs: typeof secureJobs;
