@@ -8,7 +8,6 @@ export type PlanQualityIssue = {
         | 'GENERIC_SHOT'
         | 'UNKNOWN_DIALOGUE_SEGMENT'
         | 'EMPTY_SHOT_PURPOSE'
-        | 'GENERIC_SHOT'
         | 'MISSING_CONTINUITY_RULES'
         | 'APPROVAL_WITHOUT_COST'
         | 'PREMATURE_GENERATION';
@@ -96,16 +95,6 @@ export function inspectPlanQuality(plan: DirectorPlan, intent?: CreateIntent): P
             });
         }
 
-        const genericText = `${normalized(shot.purpose)} ${normalized(shot.action)} ${normalized(shot.prompt)}`;
-        if (
-            genericText.includes('things happen') ||
-            genericText.includes('show the scene') ||
-            genericText.includes('nice lighting') ||
-            genericText.includes('interesting visuals') ||
-            genericText.includes('cinematic scene')
-        ) {
-            issues.push({ code: 'GENERIC_SHOT', severity: 'ERROR', message: `Shot ${index + 1} is too generic; describe the specific story beat, action, and visual evidence.`, path: `shots[${index}]` });
-        }
     });
 
     const speakerIds = new Set(plan.speakers.map((segment) => segment.id));
