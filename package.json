@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:planning": "node tests/planning/run-contract-tests.cjs",
+    "test:generation": "node tests/generation/run-generation-tests.cjs",
+    "audit:generation": "node scripts/generation-audit.mjs",
     "test:audit": "node scripts/production-audit.mjs",
     "test:contracts": "pnpm --dir renderer build && node scripts/contract-check.mjs"
   },

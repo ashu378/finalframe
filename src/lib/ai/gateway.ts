@@ -5,6 +5,8 @@ import {
     generateVideo,
     synthesizeSpeech,
     transcribeAudio,
+    waitForVideo,
+    downloadVideo,
     type OpenRouterChatOptions,
     type OpenRouterTransportOptions,
 } from '@/lib/adapters/openrouter-adapter';
@@ -24,7 +26,9 @@ export type ProviderCapabilityInput =
     | { kind: 'image'; request: ImageGenerationRequest; options?: OpenRouterTransportOptions }
     | { kind: 'video'; request: VideoGenerationRequest; options?: OpenRouterTransportOptions }
     | { kind: 'speech'; request: SpeechSynthesisRequest; options?: OpenRouterTransportOptions }
-    | { kind: 'transcription'; request: TranscriptionRequest; options?: OpenRouterTransportOptions };
+    | { kind: 'transcription'; request: TranscriptionRequest; options?: OpenRouterTransportOptions }
+    | { kind: 'video_poll'; jobId: string; options?: OpenRouterTransportOptions; polling?: { maxAttempts?: number; intervalMs?: number } }
+    | { kind: 'video_download'; jobId: string; index?: number; options?: OpenRouterTransportOptions };
 
 /**
  * Provider-neutral execution boundary. The rest of the application selects a
@@ -49,6 +53,10 @@ export async function executeProviderCapability(input: ProviderCapabilityInput) 
                 return synthesizeSpeech(withConfiguredModel('TEXT_TO_SPEECH', input.request), input.options);
             case 'transcription':
                 return transcribeAudio(withConfiguredModel('TRANSCRIPTION', input.request), input.options);
+            case 'video_poll':
+                return waitForVideo(input.jobId, input.options, input.polling);
+            case 'video_download':
+                return downloadVideo(input.jobId, input.options, input.index);
         }
     } catch (cause) {
         throw normalizeGatewayError(cause, input.kind);

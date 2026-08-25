@@ -37,3 +37,16 @@ export const finalize = mutation({
     return args.outcome === "COMMIT" ? "COMMITTED" : "RELEASED";
   },
 });
+
+export const getReservationForJob = query({
+  args: { generationJobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.generationJobId);
+    if (!job) throw new Error("Generation job not found");
+    await requireStudio(ctx, job.studioExternalId);
+    const reservations = await ctx.db.query("creditReservations")
+      .withIndex("by_generation_job", (q) => q.eq("generationJobId", args.generationJobId))
+      .collect();
+    return reservations.sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
+  },
+});

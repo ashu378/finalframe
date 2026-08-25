@@ -408,7 +408,7 @@ export default defineSchema({
   creditReservations: defineTable({
     studioExternalId: v.string(), generationJobId: v.optional(v.id("generationJobs")), amount: v.number(), idempotencyKey: v.string(), status, expiresAt: timestamp, createdAt: timestamp,
     committedAt: v.optional(timestamp), releasedAt: v.optional(timestamp), actualAmount: v.optional(v.number()),
-  }).index("by_idempotency", ["idempotencyKey"]).index("by_studio", ["studioExternalId"]),
+  }).index("by_idempotency", ["idempotencyKey"]).index("by_studio", ["studioExternalId"]).index("by_generation_job", ["generationJobId"]),
   creditTransactions: defineTable({
     studioExternalId: v.string(), delta: v.number(), transactionType: v.string(), source: v.string(), referenceId: v.optional(v.string()), metadata: json, createdAt: timestamp,
   }).index("by_studio", ["studioExternalId"]),

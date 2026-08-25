@@ -1,17 +1,31 @@
 import Link from 'next/link';
-import { ArrowLeft, Check, Film, Layers3, Sparkles } from 'lucide-react';
+import { ArrowLeft, Film } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/guards';
 import { getProductionWorkspace } from '@/lib/production/actions';
-import { GenerateShotButton } from '@/components/production/generate-shot-button';
+import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { AssembleButton } from '@/components/production/assemble-button';
+import { GenerationPanel } from '@/components/production/generation';
 
 interface ProductionPageProps { params: Promise<{ id: string }> }
 
 export default async function ProductionPage({ params }: ProductionPageProps) {
-  await requireAuth();
-  const { id } = await params;
-  const result = await getProductionWorkspace(id);
-  if (!result.success) notFound();
-  return <div className="mx-auto max-w-6xl space-y-9 py-5 sm:py-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"><ArrowLeft className="size-4" /> Back to project</Link><p className="ff-eyebrow mt-9">Make your video</p><h1 className="public-heading-section mt-4">Make each part, then put it together.</h1><p className="public-body-text mt-5 max-w-2xl">Generate one take at a time, keep the versions you like, and return whenever you are ready.</p></div>{result.production && <AssembleButton productionId={result.production._id} />}</div>{!result.production ? <div className="ff-card flex flex-col items-center p-10 text-center"><span className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1]"><Film className="size-5" /></span><h2 className="ff-display mt-6 text-2xl font-semibold">Your plan is not approved yet.</h2><p className="mt-3 max-w-md leading-7 text-muted-foreground">Review the plan and approve the credit estimate before you start making takes.</p><Link href={`/dashboard/projects/${id}/blueprint`} className="ff-button-primary mt-7">Open my plan</Link></div> : <div className="space-y-6">{result.sequences.length === 0 ? <div className="ff-card p-10 text-center text-muted-foreground">Your approved plan is being prepared. Check back in a moment.</div> : result.sequences.map((sequence: any) => <section key={sequence._id} className="ff-card overflow-hidden"><div className="flex flex-col justify-between gap-4 border-b border-border/70 bg-[#f4ead6] p-6 sm:flex-row sm:items-center sm:p-8"><div><p className="ff-eyebrow">Part group {sequence.orderIndex + 1}</p><h2 className="ff-display mt-3 text-2xl font-semibold">{sequence.title}</h2><p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{sequence.description}</p></div><span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><Layers3 className="size-4" /> {sequence.scenes.reduce((count: number, scene: any) => count + scene.shots.length, 0)} takes</span></div><div className="divide-y divide-border/70">{sequence.scenes.map((scene: any) => <div key={scene._id} className="p-6 sm:p-8"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="ff-eyebrow">Part {scene.orderIndex + 1}</p><h3 className="mt-2 text-lg font-semibold">{scene.title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{scene.purpose}</p></div><span className="text-sm text-muted-foreground">{scene.shots.length} takes</span></div><div className="mt-6 grid gap-3 lg:grid-cols-2">{scene.shots.map((shot: any) => <div key={shot._id} className="rounded-[1rem] border border-border/70 bg-secondary/25 p-4"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold">{shot.title}</p><p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{shot.prompt}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${shot.status === 'COMPLETED' ? 'bg-[#c8ddd5] text-[hsl(var(--success))]' : 'bg-secondary text-muted-foreground'}`}>{shot.status === 'COMPLETED' ? <Check className="inline size-3 mr-1" /> : null}{shot.status === 'COMPLETED' ? 'Ready' : shot.status?.toLowerCase() || 'Not made'}</span></div><div className="mt-5 flex items-center justify-between gap-3 border-t border-border/70 pt-4"><span className="text-xs text-muted-foreground">{shot.durationSeconds}s · credits shown before making</span>{shot.status !== 'COMPLETED' && <GenerateShotButton productionId={result.production._id} shotId={shot._id} />}</div></div>)}</div></div>)}</div></section>)}</div>}</div>;
+    await requireAuth();
+    const { id } = await params;
+    const result = await getProductionWorkspace(id);
+    if (!result.success) notFound();
+    const generationEnabled = isFeatureEnabled('openRouterMedia');
+
+    return <div className="mx-auto max-w-6xl space-y-9 py-5 sm:py-8">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"><ArrowLeft className="size-4" aria-hidden="true" /> Back to project</Link>
+                <p className="ff-eyebrow mt-9">{generationEnabled ? 'Make your video' : 'Production readiness'}</p>
+                <h1 className="public-heading-section mt-4">{generationEnabled ? 'Make each part, then put it together.' : 'Your plan is ready for its making check.'}</h1>
+                <p className="public-body-text mt-5 max-w-2xl">{generationEnabled ? 'Make one take at a time, see what is ready, and try individual parts again without losing the rest.' : 'Your plan is saved. The making workflow is still being tested and is not available for this project yet.'}</p>
+            </div>
+            {generationEnabled && result.production && <AssembleButton productionId={result.production._id} />}
+        </div>
+        {!result.production ? <div className="ff-card flex flex-col items-center p-10 text-center"><span className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1]"><Film className="size-5" aria-hidden="true" /></span><h2 className="ff-display mt-6 text-2xl font-semibold">Your plan is not approved yet.</h2><p className="mt-3 max-w-md leading-7 text-muted-foreground">Review the plan and approve it before the making stage becomes available.</p><Link href={`/dashboard/projects/${id}/blueprint`} className="ff-button-primary mt-7">Open my plan</Link></div> : <GenerationPanel productionId={result.production._id} sequences={result.sequences || []} jobs={result.jobs || []} enabled={generationEnabled} />}
+    </div>;
 }

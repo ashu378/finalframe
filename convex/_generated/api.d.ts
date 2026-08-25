@@ -18,6 +18,7 @@ import type * as authorization from "../authorization.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as credits from "../credits.js";
 import type * as generation from "../generation.js";
+import type * as generationJobs from "../generationJobs.js";
 import type * as http from "../http.js";
 import type * as identity from "../identity.js";
 import type * as payments from "../payments.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   bootstrap: typeof bootstrap;
   credits: typeof credits;
   generation: typeof generation;
+  generationJobs: typeof generationJobs;
   http: typeof http;
   identity: typeof identity;
   payments: typeof payments;
