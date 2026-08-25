@@ -1,4 +1,4 @@
-import { AICapabilityError, type ApprovalStatus, type CapabilityId, type CreateIntent, type CreativeGuide, type DirectorPlan, type InputMode, type QualityEvidence, type QualityGateResult, type QualityGateStatus, type ShotSpec, type SpeakerSegment, type WorkflowPreset, type WorkflowStage } from './types';
+import { AICapabilityError, type AIProvider, type ApprovalStatus, type CapabilityId, type CreateIntent, type CreativeGuide, type DirectorPlan, type FeatureFlag, type FeatureFlagKey, type FeatureFlagSet, type GeneratedArtifactKind, type GenerationRequest, type InputMode, type Modality, type NormalizedGenerationOutput, type ProviderReference, type ProviderTask, type ProviderTaskStatus, type QCCheckName, type QCCheckResult, type QCResult, type QCStatus, type QualityEvidence, type QualityGateResult, type QualityGateStatus, type RetryClassification, type RetryDisposition, type RetryReasonCode, type ShotSpec, type SpeakerSegment, type WorkflowPreset, type WorkflowStage } from './types';
 import { assertPlanQuality } from './planning/quality';
 
 export interface StructuredSchemaDefinition {
@@ -15,6 +15,13 @@ const STAGES: readonly WorkflowStage[] = ['BRIEF', 'PERFORMANCE', 'PLAN', 'BIBLE
 const APPROVALS: readonly ApprovalStatus[] = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'];
 const QUALITY_STATUSES: readonly QualityGateStatus[] = ['NOT_RUN', 'PASS', 'PASS_WITH_WARNINGS', 'BLOCKED', 'REQUIRES_HUMAN_REVIEW'];
 const CAPABILITIES: readonly CapabilityId[] = ['AI_BRAIN', 'IMAGE_ENGINE', 'VIDEO_ENGINE', 'VALIDATOR_ENGINE', 'STRUCTURED_PLANNING', 'VALIDATION', 'VIDEO_GENERATION', 'IMAGE_GENERATION', 'TEXT_TO_SPEECH', 'TRANSCRIPTION'];
+const TASK_STATUSES: readonly ProviderTaskStatus[] = ['QUEUED', 'SUBMITTED', 'POLLING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'TIMED_OUT', 'RECONCILIATION_REQUIRED'];
+const RETRY_DISPOSITIONS: readonly RetryDisposition[] = ['RETRYABLE', 'NON_RETRYABLE', 'RECONCILIATION_REQUIRED', 'CANCELED', 'TIMED_OUT'];
+const RETRY_CODES: readonly RetryReasonCode[] = ['RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'NETWORK_ERROR', 'REQUEST_TIMEOUT', 'INVALID_REQUEST', 'UNSUPPORTED_CAPABILITY', 'AUTHENTICATION_FAILED', 'CONTENT_POLICY', 'UNKNOWN_PROVIDER_STATE', 'CANCELED_BY_USER'];
+const ARTIFACT_KINDS: readonly GeneratedArtifactKind[] = ['IMAGE', 'VIDEO', 'AUDIO', 'TRANSCRIPT', 'TEXT'];
+const QC_STATUSES: readonly QCStatus[] = ['PENDING', 'PASS', 'PASS_WITH_WARNINGS', 'FAIL', 'REQUIRES_HUMAN_REVIEW'];
+const QC_CHECKS: readonly QCCheckName[] = ['CONTENT_SAFETY', 'MEDIA_INTEGRITY', 'CONTINUITY', 'AUDIO_ALIGNMENT', 'CAPTION_ACCURACY', 'TEXT_ACCURACY', 'REFERENCE_MATCH'];
+const FEATURE_FLAG_KEYS: readonly FeatureFlagKey[] = ['generation.real_provider', 'generation.qc', 'generation.retry', 'capability.image_generation', 'capability.video_generation', 'capability.text_to_speech', 'capability.transcription', 'workflow.animated_comedy_2d', 'workflow.realistic_ai_skit', 'workflow.voiceover_story', 'workflow.ai_product_ad', 'workflow.faceless_explainer', 'workflow.short_film'];
 const cameraSchema = {
     type: 'object',
     additionalProperties: false,
@@ -74,6 +81,7 @@ function stringValue(value: unknown, field: string): string { if (typeof value !
 function numberValue(value: unknown, field: string, minimum = Number.NEGATIVE_INFINITY): number { if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum) fail(`${field} must be a finite number >= ${minimum}.`); return value; }
 function stringArrayValue(value: unknown, field: string): string[] { if (!Array.isArray(value)) fail(`${field} must be an array.`); return value.map((item, index) => stringValue(item, `${field}[${index}]`)); }
 function optionalString(value: unknown, field: string): string | undefined { return value === undefined || value === null ? undefined : stringValue(value, field); }
+function optionalNumber(value: unknown, field: string): number | undefined { return value === undefined || value === null ? undefined : numberValue(value, field, 0); }
 function enumValue<T extends string>(value: unknown, field: string, allowed: readonly T[]): T { if (typeof value !== 'string' || !allowed.includes(value as T)) fail(`${field} must be one of: ${allowed.join(', ')}.`); return value as T; }
 
 export function validateCreateIntent(input: CreateIntent): CreateIntent {
@@ -136,4 +144,89 @@ export function validateDirectorPlan(value: unknown): DirectorPlan {
     if (!Number.isInteger(planVersion)) fail('planVersion must be an integer.');
     const plan: DirectorPlan = { planVersion, intentSummary: stringValue(value.intentSummary, 'intentSummary'), preset: enumValue(value.preset, 'preset', PRESETS), inputMode: enumValue(value.inputMode, 'inputMode', INPUT_MODES), language: stringValue(value.language, 'language'), platform: stringValue(value.platform, 'platform'), durationSeconds: numberValue(value.durationSeconds, 'durationSeconds', 0.1), aspectRatio: stringValue(value.aspectRatio, 'aspectRatio'), script: typeof value.script === 'string' ? value.script : fail('script must be a string.'), speakers, shots, creativeGuide, riskFlags: stringArrayValue(value.riskFlags ?? [], 'riskFlags'), estimatedCredits: numberValue(value.estimatedCredits, 'estimatedCredits', 0), approvalStatus: enumValue(value.approvalStatus ?? 'DRAFT', 'approvalStatus', APPROVALS), currentStage: enumValue(value.currentStage ?? 'PLAN', 'currentStage', STAGES), qualityGateStatus: enumValue(value.qualityGateStatus ?? 'NOT_RUN', 'qualityGateStatus', QUALITY_STATUSES), qualityGates };
     try { return assertPlanQuality(plan); } catch (error) { fail(error instanceof Error ? error.message : 'Director plan quality validation failed.'); }
+}
+
+export const GENERATION_REQUEST_SCHEMA: StructuredSchemaDefinition = {
+    name: 'finalframe_generation_request',
+    description: 'Provider-neutral, idempotent request for one real generation task.',
+    strict: true,
+    schema: {
+        type: 'object', additionalProperties: false,
+        required: ['capability', 'prompt', 'parameters', 'idempotencyKey', 'productionId'],
+        properties: {
+            capability: { type: 'string', enum: CAPABILITIES }, prompt: { type: 'string', minLength: 1 }, model: { type: 'string' }, provider: { type: 'string' }, modality: { type: 'string' },
+            references: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { url: { type: 'string' }, data: { type: 'string' }, mediaType: { type: 'string' } } } }, parameters: { type: 'object' }, idempotencyKey: { type: 'string', minLength: 8 }, productionId: { type: 'string', minLength: 1 }, shotId: { type: 'string' }, reservationId: { type: 'string' }, requestHash: { type: 'string' }, correlationId: { type: 'string' },
+        },
+    },
+};
+
+function validateReferences(value: unknown): ProviderReference[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) fail('references must be an array.');
+    return value.map((item, index) => {
+        if (!isRecord(item)) fail(`references[${index}] must be an object.`);
+        const url = optionalString(item.url, `references[${index}].url`);
+        const data = optionalString(item.data, `references[${index}].data`);
+        if (!url && !data) fail(`references[${index}] must contain a url or data payload.`);
+        return { url, data, mediaType: optionalString(item.mediaType, `references[${index}].mediaType`) };
+    });
+}
+
+export function validateGenerationRequest(value: unknown): GenerationRequest {
+    if (!isRecord(value)) fail('Generation request must be an object.');
+    const request: GenerationRequest = {
+        capability: enumValue(value.capability, 'capability', CAPABILITIES), prompt: stringValue(value.prompt, 'prompt'), model: optionalString(value.model, 'model'), provider: optionalString(value.provider, 'provider') as AIProvider | undefined,
+        modality: optionalString(value.modality, 'modality') as Modality | undefined, references: validateReferences(value.references), parameters: isRecord(value.parameters) ? value.parameters : fail('parameters must be an object.'), idempotencyKey: stringValue(value.idempotencyKey, 'idempotencyKey'), productionId: stringValue(value.productionId, 'productionId'), shotId: optionalString(value.shotId, 'shotId'), reservationId: optionalString(value.reservationId, 'reservationId'), requestHash: optionalString(value.requestHash, 'requestHash'), correlationId: optionalString(value.correlationId, 'correlationId'),
+    };
+    if (request.idempotencyKey.length < 8) fail('idempotencyKey must contain at least 8 characters.');
+    return request;
+}
+
+export function validateRetryClassification(value: unknown): RetryClassification {
+    if (!isRecord(value)) fail('Retry classification must be an object.');
+    return { disposition: enumValue(value.disposition, 'retry.disposition', RETRY_DISPOSITIONS), reasonCode: enumValue(value.reasonCode, 'retry.reasonCode', RETRY_CODES), retryable: value.retryable === true, reason: stringValue(value.reason, 'retry.reason'), attempt: numberValue(value.attempt, 'retry.attempt', 1), maxAttempts: numberValue(value.maxAttempts, 'retry.maxAttempts', 1), retryAfterSeconds: optionalNumber(value.retryAfterSeconds, 'retry.retryAfterSeconds') };
+}
+
+function validateNormalizedOutput(value: unknown): NormalizedGenerationOutput {
+    if (!isRecord(value)) fail('Normalized generation output must be an object.');
+    const remoteUrl = optionalString(value.remoteUrl, 'output.remoteUrl');
+    const inlineData = optionalString(value.inlineData, 'output.inlineData');
+    if (!remoteUrl && !inlineData) fail('Output must contain a remoteUrl or inlineData payload.');
+    return { outputId: stringValue(value.outputId, 'output.outputId'), kind: enumValue(value.kind, 'output.kind', ARTIFACT_KINDS), provider: stringValue(value.provider, 'output.provider') as AIProvider, model: stringValue(value.model, 'output.model'), providerTaskId: stringValue(value.providerTaskId, 'output.providerTaskId'), contentType: stringValue(value.contentType, 'output.contentType'), remoteUrl, inlineData, checksum: optionalString(value.checksum, 'output.checksum'), byteSize: optionalNumber(value.byteSize, 'output.byteSize'), width: optionalNumber(value.width, 'output.width'), height: optionalNumber(value.height, 'output.height'), durationSeconds: optionalNumber(value.durationSeconds, 'output.durationSeconds'), frameRate: optionalNumber(value.frameRate, 'output.frameRate'), usage: value.usage as NormalizedGenerationOutput['usage'], metadata: isRecord(value.metadata) ? value.metadata : fail('output.metadata must be an object.') };
+}
+
+function validateQCCheck(value: unknown, index: number): QCCheckResult {
+    if (!isRecord(value)) fail(`qc.checks[${index}] must be an object.`);
+    return { check: enumValue(value.check, `qc.checks[${index}].check`, QC_CHECKS), status: enumValue(value.status, `qc.checks[${index}].status`, QC_STATUSES), score: optionalNumber(value.score, `qc.checks[${index}].score`), explanation: stringValue(value.explanation, `qc.checks[${index}].explanation`), evidence: value.evidence === undefined ? undefined : stringArrayValue(value.evidence, `qc.checks[${index}].evidence`) };
+}
+
+export function validateQCResult(value: unknown): QCResult {
+    if (!isRecord(value) || !Array.isArray(value.checks)) fail('QC result must contain checks.');
+    return { status: enumValue(value.status, 'qc.status', QC_STATUSES), checks: value.checks.map(validateQCCheck), qualityVersion: stringValue(value.qualityVersion, 'qc.qualityVersion'), checkedAt: stringValue(value.checkedAt, 'qc.checkedAt'), blockingReasons: stringArrayValue(value.blockingReasons, 'qc.blockingReasons') };
+}
+
+export function validateProviderTask(value: unknown): ProviderTask {
+    if (!isRecord(value)) fail('Provider task must be an object.');
+    const output = value.output === undefined ? undefined : validateNormalizedOutput(value.output);
+    const qc = value.qc === undefined ? undefined : validateQCResult(value.qc);
+    const retry = value.retry === undefined ? undefined : validateRetryClassification(value.retry);
+    return { taskId: stringValue(value.taskId, 'taskId'), provider: stringValue(value.provider, 'provider') as AIProvider, providerTaskId: stringValue(value.providerTaskId, 'providerTaskId'), capability: enumValue(value.capability, 'capability', CAPABILITIES), status: enumValue(value.status, 'status', TASK_STATUSES), idempotencyKey: stringValue(value.idempotencyKey, 'idempotencyKey'), requestHash: stringValue(value.requestHash, 'requestHash'), attempt: numberValue(value.attempt, 'attempt', 1), maxAttempts: numberValue(value.maxAttempts, 'maxAttempts', 1), createdAt: stringValue(value.createdAt, 'createdAt'), updatedAt: stringValue(value.updatedAt, 'updatedAt'), nextPollAt: optionalString(value.nextPollAt, 'nextPollAt'), submittedAt: optionalString(value.submittedAt, 'submittedAt'), completedAt: optionalString(value.completedAt, 'completedAt'), retry, output, qc, error: value.error as ProviderTask['error'] };
+}
+
+export function validateFeatureFlag(value: unknown): FeatureFlag {
+    if (!isRecord(value)) fail('Feature flag must be an object.');
+    const rolloutPercent = optionalNumber(value.rolloutPercent, 'flag.rolloutPercent');
+    if (rolloutPercent !== undefined && rolloutPercent > 100) fail('flag.rolloutPercent must be at most 100.');
+    return { key: enumValue(value.key, 'flag.key', FEATURE_FLAG_KEYS), state: enumValue(value.state, 'flag.state', ['DISABLED', 'INTERNAL', 'BETA', 'ENABLED'] as const), reason: optionalString(value.reason, 'flag.reason'), rolloutPercent, updatedAt: stringValue(value.updatedAt, 'flag.updatedAt'), expiresAt: optionalString(value.expiresAt, 'flag.expiresAt') };
+}
+
+export function validateFeatureFlagSet(value: unknown): FeatureFlagSet {
+    if (!isRecord(value)) fail('Feature flag set must be an object.');
+    const result: FeatureFlagSet = {};
+    for (const [key, flag] of Object.entries(value)) {
+        if (!FEATURE_FLAG_KEYS.includes(key as FeatureFlagKey)) fail(`Unknown feature flag: ${key}.`);
+        const normalized = validateFeatureFlag({ ...(isRecord(flag) ? flag : {}), key });
+        result[normalized.key] = normalized;
+    }
+    return result;
 }

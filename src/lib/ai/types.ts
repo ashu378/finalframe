@@ -254,12 +254,153 @@ export interface GenerationRequest {
     capability: CapabilityId;
     prompt: string;
     model?: string;
+    provider?: AIProvider;
+    modality?: Modality;
     references?: ProviderReference[];
     parameters: Record<string, unknown>;
     idempotencyKey: string;
     productionId: string;
     shotId?: string;
+    reservationId?: string;
+    requestHash?: string;
+    correlationId?: string;
 }
+
+export type ProviderTaskStatus =
+    | 'QUEUED'
+    | 'SUBMITTED'
+    | 'POLLING'
+    | 'SUCCEEDED'
+    | 'FAILED'
+    | 'CANCELED'
+    | 'TIMED_OUT'
+    | 'RECONCILIATION_REQUIRED';
+
+export type RetryDisposition =
+    | 'RETRYABLE'
+    | 'NON_RETRYABLE'
+    | 'RECONCILIATION_REQUIRED'
+    | 'CANCELED'
+    | 'TIMED_OUT';
+
+export type RetryReasonCode =
+    | 'RATE_LIMITED'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'NETWORK_ERROR'
+    | 'REQUEST_TIMEOUT'
+    | 'INVALID_REQUEST'
+    | 'UNSUPPORTED_CAPABILITY'
+    | 'AUTHENTICATION_FAILED'
+    | 'CONTENT_POLICY'
+    | 'UNKNOWN_PROVIDER_STATE'
+    | 'CANCELED_BY_USER';
+
+export interface RetryClassification {
+    disposition: RetryDisposition;
+    reasonCode: RetryReasonCode;
+    retryable: boolean;
+    reason: string;
+    attempt: number;
+    maxAttempts: number;
+    retryAfterSeconds?: number;
+}
+
+export type GeneratedArtifactKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TRANSCRIPT' | 'TEXT';
+
+export interface NormalizedGenerationOutput {
+    outputId: string;
+    kind: GeneratedArtifactKind;
+    provider: AIProvider;
+    model: string;
+    providerTaskId: string;
+    contentType: string;
+    remoteUrl?: string;
+    inlineData?: string;
+    checksum?: string;
+    byteSize?: number;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    frameRate?: number;
+    usage?: NormalizedUsage;
+    metadata: Record<string, unknown>;
+}
+
+export type QCStatus = 'PENDING' | 'PASS' | 'PASS_WITH_WARNINGS' | 'FAIL' | 'REQUIRES_HUMAN_REVIEW';
+
+export type QCCheckName =
+    | 'CONTENT_SAFETY'
+    | 'MEDIA_INTEGRITY'
+    | 'CONTINUITY'
+    | 'AUDIO_ALIGNMENT'
+    | 'CAPTION_ACCURACY'
+    | 'TEXT_ACCURACY'
+    | 'REFERENCE_MATCH';
+
+export interface QCCheckResult {
+    check: QCCheckName;
+    status: QCStatus;
+    score?: number;
+    explanation: string;
+    evidence?: string[];
+}
+
+export interface QCResult {
+    status: QCStatus;
+    checks: QCCheckResult[];
+    qualityVersion: string;
+    checkedAt: string;
+    blockingReasons: string[];
+}
+
+export interface ProviderTask {
+    taskId: string;
+    provider: AIProvider;
+    providerTaskId: string;
+    capability: CapabilityId;
+    status: ProviderTaskStatus;
+    idempotencyKey: string;
+    requestHash: string;
+    attempt: number;
+    maxAttempts: number;
+    createdAt: string;
+    updatedAt: string;
+    nextPollAt?: string;
+    submittedAt?: string;
+    completedAt?: string;
+    retry?: RetryClassification;
+    output?: NormalizedGenerationOutput;
+    qc?: QCResult;
+    error?: NormalizedAIErrorShape;
+}
+
+export type FeatureFlagKey =
+    | 'generation.real_provider'
+    | 'generation.qc'
+    | 'generation.retry'
+    | 'capability.image_generation'
+    | 'capability.video_generation'
+    | 'capability.text_to_speech'
+    | 'capability.transcription'
+    | 'workflow.animated_comedy_2d'
+    | 'workflow.realistic_ai_skit'
+    | 'workflow.voiceover_story'
+    | 'workflow.ai_product_ad'
+    | 'workflow.faceless_explainer'
+    | 'workflow.short_film';
+
+export type FeatureFlagState = 'DISABLED' | 'INTERNAL' | 'BETA' | 'ENABLED';
+
+export interface FeatureFlag {
+    key: FeatureFlagKey;
+    state: FeatureFlagState;
+    reason?: string;
+    rolloutPercent?: number;
+    updatedAt: string;
+    expiresAt?: string;
+}
+
+export type FeatureFlagSet = Partial<Record<FeatureFlagKey, FeatureFlag>>;
 
 export interface NormalizedAIErrorShape {
     name: 'AICapabilityError';
