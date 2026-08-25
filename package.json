@@ -13,6 +13,8 @@
     "test:planning": "node tests/planning/run-contract-tests.cjs",
     "test:generation": "node tests/generation/run-generation-tests.cjs",
     "audit:generation": "node scripts/generation-audit.mjs",
+    "test:finance": "node tests/finance/run-finance-tests.cjs",
+    "audit:finance": "node scripts/finance-audit.mjs",
     "test:render": "pnpm --dir renderer build && node tests/render/run-render-tests.cjs",
     "audit:render": "node scripts/render-audit.mjs",
     "test:audit": "node scripts/production-audit.mjs",

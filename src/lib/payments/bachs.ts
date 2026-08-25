@@ -67,6 +67,7 @@ export class BachsPaymentProvider implements PaymentProvider {
             body: {
                 pricing: { currency, amount: ensureAmount(input.amount) },
                 customer: { email: stringValue(input.customerEmail, 'customer email'), ...(input.customerName ? { name: input.customerName } : {}) },
+                reference,
                 success_url: ensureUrl(input.successUrl, 'successUrl'),
                 cancel_url: ensureUrl(input.cancelUrl, 'cancelUrl'),
             },

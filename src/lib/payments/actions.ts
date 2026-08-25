@@ -22,6 +22,6 @@ export async function createCreditCheckout(packId: string, currency: SupportedCu
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
     const provider = new BachsPaymentProvider();
     const checkout = await provider.createCheckout({ amount, currency, reference, idempotencyKey: `checkout_${reference}`, customerEmail: user.email || '', successUrl: `${siteUrl}/dashboard/settings`, cancelUrl: `${siteUrl}/dashboard/settings` });
-    await convex.mutation(api.payments.createPurchase, { studioExternalId: studio.externalId, provider: 'bachs', providerCheckoutId: checkout.checkoutId, amount, currency, credits: basePack.credits, reference, metadata: { packId, customerEmail: user.email } });
+    await convex.mutation(api.financial.createPurchase, { studioExternalId: studio.externalId, provider: 'bachs', providerCheckoutId: checkout.checkoutId, amount, currency, credits: basePack.credits, reference, idempotencyKey: `purchase_${reference}`, metadata: { packId, customerEmail: user.email } });
     return { success: true, checkoutUrl: checkout.checkoutUrl, checkoutId: checkout.checkoutId, reference };
 }

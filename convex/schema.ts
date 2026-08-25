@@ -365,9 +365,9 @@ export default defineSchema({
 
   purchases: defineTable({
     ...studioOwned, provider: v.string(), providerCheckoutId: v.optional(v.string()), providerPaymentId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(),
-    reference: v.string(), metadata: json, createdAt: timestamp, supersedesPurchaseId: v.optional(v.id("purchases")),
+    reference: v.string(), status: v.optional(status), idempotencyKey: v.optional(v.string()), metadata: json, createdAt: timestamp, completedAt: v.optional(timestamp), supersedesPurchaseId: v.optional(v.id("purchases")),
   }).index("by_reference", ["reference"]).index("by_checkout", ["providerCheckoutId"])
-    .index("by_provider_payment", ["provider", "providerPaymentId"]).index("by_studio", ["studioExternalId"]),
+    .index("by_provider_payment", ["provider", "providerPaymentId"]).index("by_idempotency", ["idempotencyKey"]).index("by_status", ["status"]).index("by_studio", ["studioExternalId"]),
 
   paymentEvents: defineTable({
     studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), provider: v.string(), providerEventId: v.string(), eventType: v.string(), payload: json,
@@ -376,8 +376,8 @@ export default defineSchema({
 
   refunds: defineTable({
     ...studioOwned, purchaseId: v.optional(v.id("purchases")), provider: v.string(), providerRefundId: v.optional(v.string()), amount: v.number(), currency: v.string(),
-    reason: v.string(), metadata: json, createdAt: timestamp, supersedesRefundId: v.optional(v.id("refunds")),
-  }).index("by_purchase", ["purchaseId"]).index("by_provider_refund", ["provider", "providerRefundId"]).index("by_studio", ["studioExternalId"]),
+    reason: v.string(), status: v.optional(status), idempotencyKey: v.optional(v.string()), metadata: json, createdAt: timestamp, completedAt: v.optional(timestamp), supersedesRefundId: v.optional(v.id("refunds")),
+  }).index("by_purchase", ["purchaseId"]).index("by_provider_refund", ["provider", "providerRefundId"]).index("by_idempotency", ["idempotencyKey"]).index("by_status", ["status"]).index("by_studio", ["studioExternalId"]),
 
   modelRegistry: defineTable({
     provider: v.string(), model: v.string(), version: v.optional(v.string()), modalities: v.array(v.string()), capabilities: json, pricing: json, enabled: v.boolean(), metadata: v.optional(json),
