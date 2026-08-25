@@ -30,6 +30,8 @@ export interface CallbackReceipt {
 
 export interface CallbackReceiptStore {
   get(eventId: string): Promise<CallbackReceipt | null>;
+  /** Optional lookup used to reject a second event ID for the same idempotency key. */
+  getByIdempotencyKey?(idempotencyKey: string): Promise<CallbackReceipt | null>;
   claim(receipt: CallbackReceipt): Promise<'claimed' | 'duplicate'>;
 }
 
@@ -78,6 +80,14 @@ export interface CallbackSenderOptions {
 /** Sends the exact signed body and never retries with a new event ID. */
 export async function sendRendererCallback(url: string, body: string, secret: string, options: CallbackSenderOptions = {}): Promise<void> {
   if (!/^https:\/\//i.test(url) && !/^http:\/\/localhost(?::\d+)?\//i.test(url)) throw new Error('Renderer callback URL must use HTTPS (localhost HTTP is allowed for development).');
+  if (url.length > 2_048) throw new Error('Renderer callback URL is too long.');
+  try {
+    const parsed = new URL(url);
+    if (parsed.username || parsed.password || parsed.hash) throw new Error('Renderer callback URL must not contain credentials or a fragment.');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('must not contain')) throw error;
+    throw new Error('Renderer callback URL is invalid.');
+  }
   if (!secret) throw new Error('Renderer callback secret is required.');
   const fetcher = options.fetch ?? globalThis.fetch;
   if (!fetcher) throw new Error('No fetch implementation is available for renderer callbacks.');
@@ -132,6 +142,10 @@ export async function handleRendererCallback(
 
   const existing = await receipts.get(envelope.eventId);
   if (existing) return { result: { status: 'accepted', duplicate: true }, envelope };
+  const existingForKey = await receipts.getByIdempotencyKey?.(envelope.idempotencyKey);
+  if (existingForKey && existingForKey.eventId !== envelope.eventId) {
+    return { result: { status: 'rejected', reason: 'A different callback event already claimed this idempotency key' }, envelope };
+  }
   const claimed = await receipts.claim({ eventId: envelope.eventId, idempotencyKey: envelope.idempotencyKey, receivedAt: new Date(now).toISOString(), status: 'processed' });
   if (claimed === 'duplicate') return { result: { status: 'accepted', duplicate: true }, envelope };
   return { result: { status: 'accepted', duplicate: false }, envelope };

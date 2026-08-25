@@ -5,7 +5,7 @@ function safeNextPath(value: string | null) {
 }
 
 /**
- * Convex Auth completes code exchange in its Next.js provider/middleware.
+ * Convex Auth completes code exchange in its Next.js provider/proxy.
  * This compatibility route only forwards the code to a same-origin page.
  */
 export async function GET(request: Request) {

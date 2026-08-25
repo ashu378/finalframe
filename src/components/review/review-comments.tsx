@@ -54,7 +54,7 @@ export function ReviewComments({
                     <input
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="STAKEHOLDER_IDENTITY..."
+                        placeholder="Your name"
                         required
                         className="w-full bg-transparent border-b border-white/5 pl-11 py-3 text-[11px] font-black text-white uppercase tracking-widest focus:border-primary/50 outline-none placeholder:text-zinc-800 transition-all"
                     />
@@ -64,7 +64,7 @@ export function ReviewComments({
                     <textarea
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
-                        placeholder="DEFINE_PRODUCTION_CRITIQUE..."
+                        placeholder="Leave a note about this moment…"
                         required
                         rows={3}
                         className="w-full bg-black/40 border border-white/5 rounded-sm p-4 text-[12px] font-bold text-white focus:border-primary/50 outline-none placeholder:text-zinc-800 transition-all resize-none uppercase tracking-widest leading-loose"
@@ -82,14 +82,14 @@ export function ReviewComments({
                     className="w-full h-12 gap-3 rounded-sm bg-primary text-black font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all"
                 >
                     {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Authorize Feedback
+                    Add note
                 </Button>
             </form>
 
             <div className="flex-1 space-y-4">
                 <div className="flex items-center gap-3 mb-4">
                     <MessageSquare className="w-3.5 h-3.5 text-zinc-700" />
-                    <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.25em]">Stakeholder Registry</h3>
+                    <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.25em]">Notes on this version</h3>
                 </div>
 
                 {comments.length === 0 ? (

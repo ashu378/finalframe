@@ -6,6 +6,8 @@ import { ReviewComments } from './review-comments';
 import { type ReviewComment } from '@/lib/types/database';
 import { MessageSquare, ListMusic, Layers, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
+import { ReviewDecisionPanel } from './review-decision-panel';
+import { ReviewStateCard } from './review-state-card';
 
 interface ReviewClientProps {
     project: any;
@@ -49,6 +51,7 @@ export function ReviewClient({
         <div className="review-theme grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
             {/* Left Column: Player & Meta */}
             <div className="lg:col-span-8 space-y-6">
+                <ReviewStateCard availability={videoUrl ? 'READY' : 'WAITING'} />
                 <div className="relative aspect-video rounded-3xl overflow-hidden bg-zinc-900 border border-white/5 shadow-2xl group">
                     <ReviewPlayer
                         url={videoUrl}
@@ -61,7 +64,7 @@ export function ReviewClient({
                     <div className="flex items-center justify-between">
                         <h2 className="text-xl font-semibold tracking-tight">About this video</h2>
                         <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black text-indigo-400 uppercase tracking-widest">
-                            {snapshot?.label || 'Current Snapshot'}
+                            {snapshot?.label || 'Current version'}
                         </div>
                     </div>
 
@@ -84,9 +87,12 @@ export function ReviewClient({
                         </div>
                     </div>
 
-                    <p className="text-zinc-400 text-sm leading-relaxed">
+                        <p className="text-zinc-400 text-sm leading-relaxed">
                         Watch the video, leave a note at the right moment, and approve it when it is ready. Your feedback stays attached to this version.
-                    </p>
+                        </p>
+                    <div className="border-t border-white/5 pt-6">
+                        <ReviewDecisionPanel canDecide={false} />
+                    </div>
                 </div>
             </div>
 

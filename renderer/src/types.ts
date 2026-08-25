@@ -110,6 +110,33 @@ export interface RenderManifest {
   metadata?: Record<string, unknown>;
 }
 
+/** Metadata written when the timeline/assembly manifest is approved for rendering. */
+export interface LockedManifestMetadata {
+  lockState: 'LOCKED';
+  lockId: string;
+  lockedAt: string;
+  lockedBy: string;
+  sourceVersionId?: string;
+}
+
+export type RenderMode = 'production' | 'fixture';
+
+export interface RenderArtifactVerification {
+  checkedBy: 'ffprobe';
+  checkedAt: string;
+  fileSizeBytes: number;
+  width: number;
+  height: number;
+  fps: number;
+  durationSeconds: number;
+  videoCodec: string;
+  audioCodec?: string;
+  hasAudio: boolean;
+  orderedItemIds: string[];
+  captionTrackCount: number;
+  captionMode: 'none' | 'burned-in' | 'subtitle';
+}
+
 export type RenderLifecycleState =
   | 'QUEUED'
   | 'RUNNING'

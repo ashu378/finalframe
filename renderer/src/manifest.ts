@@ -14,6 +14,7 @@ import {
   type ValidationResult,
   type Validated,
   type VideoRenderItem,
+  type LockedManifestMetadata,
 } from './types.js';
 import { SUPPORTED_MOTION_TEMPLATE_IDS } from './templates/contract.js';
 
@@ -48,6 +49,32 @@ function isSafeMediaSource(value: unknown): value is string {
   if (/(?:^|[/:._-])(mock|sample|placeholder)(?:[/:._-]|$)|example\.(?:com|test)(?:[/:?#]|$)/i.test(value)) return false;
   if (/^[a-z][a-z\d+.-]*:/i.test(value)) return /^(https?|file):/i.test(value);
   return true;
+}
+
+export function validateLockedManifest(input: unknown): ValidationResult {
+  const base = validateManifest(input);
+  if (!base.ok) return base;
+  const metadata = baseValue(input).metadata;
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(metadata)) {
+    issues.push({ path: '$.metadata', message: 'a locked production manifest requires metadata.lockState, lockId, lockedAt, and lockedBy' });
+  } else {
+    if (metadata.lockState !== 'LOCKED') issues.push({ path: '$.metadata.lockState', message: 'must equal LOCKED before production rendering' });
+    for (const key of ['lockId', 'lockedBy']) {
+      if (!isBoundedString(metadata[key], 256)) issues.push({ path: `$.metadata.${key}`, message: 'must be a non-empty bounded string' });
+    }
+    if (!isBoundedString(metadata.lockedAt, 64) || !Number.isFinite(Date.parse(metadata.lockedAt as string))) {
+      issues.push({ path: '$.metadata.lockedAt', message: 'must be an ISO timestamp' });
+    }
+    if (metadata.sourceVersionId !== undefined && !isBoundedString(metadata.sourceVersionId, 256)) {
+      issues.push({ path: '$.metadata.sourceVersionId', message: 'must be a bounded string when provided' });
+    }
+  }
+  return issues.length ? { ok: false, issues } : { ok: true, issues: [] };
+}
+
+function baseValue(input: unknown): RenderManifest {
+  return input as RenderManifest;
 }
 
 function validateTemplateProps(value: unknown, path: string, depth = 0): ValidationIssue[] {
@@ -262,4 +289,18 @@ export function assertValidManifest(input: unknown): RenderManifest {
     throw new Error(`Invalid render manifest:\n${result.issues.map((issue) => `- ${issue.path}: ${issue.message}`).join('\n')}`);
   }
   return result.value;
+}
+
+export function assertLockedManifest(input: unknown): RenderManifest {
+  const manifest = assertValidManifest(input);
+  const result = validateLockedManifest(manifest);
+  if (!result.ok) {
+    throw new Error(`Render manifest is not locked for production:\n${result.issues.map((issue) => `- ${issue.path}: ${issue.message}`).join('\n')}`);
+  }
+  return manifest;
+}
+
+export function getLockedManifestMetadata(manifest: RenderManifest): LockedManifestMetadata {
+  assertLockedManifest(manifest);
+  return manifest.metadata as unknown as LockedManifestMetadata;
 }

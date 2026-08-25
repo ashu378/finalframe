@@ -74,7 +74,12 @@ export async function normalizeWithFFmpeg(ffmpeg: FFmpegAdapter, inputPath: stri
   return ffmpeg.execute(buildNormalizeArgs(inputPath, outputPath, options), { timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
 }
 
-export async function probeAndValidateOutput(ffprobe: FFprobeAdapter, outputPath: string, expected: RenderOutputSpec, options: { requireAudio?: boolean; durationToleranceSeconds?: number; timeoutMs?: number } = {}): Promise<ValidationResult> {
+export async function probeAndValidateOutput(
+  ffprobe: FFprobeAdapter,
+  outputPath: string,
+  expected: RenderOutputSpec,
+  options: { requireAudio?: boolean; durationToleranceSeconds?: number; timeoutMs?: number; expectedCaptionTrackCount?: number; captionMode?: 'none' | 'burned-in' | 'subtitle' } = {},
+): Promise<ValidationResult & { value?: ReturnType<typeof validateOutputProbe>['value'] }> {
   const probe = await ffprobe.probe(outputPath, { timeoutMs: options.timeoutMs });
   return validateOutputProbe(probe, expected, options);
 }

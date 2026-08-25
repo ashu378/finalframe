@@ -1,3 +1,8 @@
+// Keep builds deterministic when the execution environment cannot refresh
+// Browserslist's caniuse-lite metadata. The dependency can be refreshed with
+// `pnpm dlx update-browserslist-db@latest` when registry access is available.
+process.env.BROWSERSLIST_IGNORE_OLD_DATA ??= 'true';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     // The Convex URL is public configuration, not a secret. Keep a safe

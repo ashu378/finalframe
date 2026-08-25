@@ -399,6 +399,45 @@ export default defineSchema({
     component: v.string(), check: v.string(), status, observedAt: timestamp, latencyMs: v.optional(v.number()), version: v.optional(v.string()), details: v.optional(json),
   }).index("by_component", ["component"]).index("by_status", ["status"]).index("by_observed_at", ["observedAt"]),
 
+  // Explicit graph edges are additive to the existing production hierarchy.
+  // They make upstream/downstream impact durable without making Canvas layout
+  // the source of truth for production meaning.
+  productionDependencies: defineTable({
+    studioExternalId: v.string(), studioId: v.optional(v.id("studios")), productionId: v.id("productions"),
+    productionVersionId: v.optional(v.id("productionVersions")), sourceType: v.string(), sourceId: v.string(),
+    sourceVersionId: v.optional(v.string()), targetType: v.string(), targetId: v.string(), targetVersionId: v.optional(v.string()),
+    kind: v.union(v.literal("contains"), v.literal("references"), v.literal("derivedFrom"), v.literal("feeds"), v.literal("placedOn"), v.literal("reviewedBy"), v.literal("rendersTo")),
+    state: v.union(v.literal("ACTIVE"), v.literal("OUTDATED"), v.literal("BROKEN")), reason: v.optional(v.string()),
+    createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_source", ["sourceType", "sourceId"])
+    .index("by_target", ["targetType", "targetId"]).index("by_version", ["productionVersionId"])
+    .index("by_studio", ["studioExternalId"]),
+
+  // Every user-facing Canvas/editor action is an auditable command. The
+  // operation record is intentionally separate from provider jobs so prompt
+  // edits and deterministic timeline edits share one recovery model.
+  productionOperations: defineTable({
+    studioExternalId: v.string(), studioId: v.optional(v.id("studios")), productionId: v.id("productions"),
+    productionVersionId: v.optional(v.id("productionVersions")), kind: v.string(), targetType: v.string(), targetId: v.string(),
+    targetVersionId: v.optional(v.string()), input: json, requestHash: v.optional(v.string()), idempotencyKey: v.string(),
+    status, actorUserId: v.optional(v.id("users")), actorExternalId: v.optional(v.string()), correlationId: v.optional(v.string()),
+    estimateId: v.optional(v.id("estimates")), reservationId: v.optional(v.id("reservations")), outputResourceIds: v.array(v.string()),
+    undoOfId: v.optional(v.id("productionOperations")), redoOfId: v.optional(v.id("productionOperations")),
+    userSafeError: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp, completedAt: v.optional(timestamp),
+  }).index("by_production", ["productionId"]).index("by_idempotency", ["idempotencyKey"])
+    .index("by_status", ["status"]).index("by_target", ["targetType", "targetId"])
+    .index("by_studio", ["studioExternalId"]),
+
+  // Canvas positions and collapsed groups are presentation preferences, not
+  // production state. Keeping them separate lets the graph remain portable.
+  canvasLayouts: defineTable({
+    studioExternalId: v.string(), studioId: v.optional(v.id("studios")), productionId: v.id("productions"),
+    productionVersionId: v.optional(v.id("productionVersions")), layoutVersion: v.number(), layout: json,
+    selectedNodeId: v.optional(v.string()), viewport: v.optional(json), mobileOrder: v.optional(v.array(v.string())),
+    createdByUserId: v.optional(v.id("users")), updatedAt: timestamp,
+  }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"])
+    .index("by_studio", ["studioExternalId"]),
+
   // Compatibility shims for untouched current functions. New code should use
   // the canonical tables above and migrate these records by ID.
   productionVersions: defineTable({

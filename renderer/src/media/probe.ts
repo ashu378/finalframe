@@ -8,6 +8,9 @@ export interface ValidatedMediaProbe {
   fps?: number;
   videoCodec?: string;
   audioCodec?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
+  subtitleStreamCount: number;
   hasVideo: boolean;
   hasAudio: boolean;
 }
@@ -26,6 +29,7 @@ function frameRate(value: unknown): number | undefined {
 export function normalizeProbe(probe: FFprobeResult): ValidatedMediaProbe {
   const video = probe.streams.find((stream) => stream.codec_type === 'video');
   const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
+  const subtitleStreamCount = probe.streams.filter((stream) => stream.codec_type === 'subtitle').length;
   return {
     width: numeric(video?.width),
     height: numeric(video?.height),
@@ -33,6 +37,9 @@ export function normalizeProbe(probe: FFprobeResult): ValidatedMediaProbe {
     fps: frameRate(video?.avg_frame_rate ?? video?.r_frame_rate),
     videoCodec: typeof video?.codec_name === 'string' ? video.codec_name : undefined,
     audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined,
+    audioSampleRate: numeric(audio?.sample_rate),
+    audioChannels: numeric(audio?.channels),
+    subtitleStreamCount,
     hasVideo: Boolean(video),
     hasAudio: Boolean(audio),
   };
@@ -41,7 +48,12 @@ export function normalizeProbe(probe: FFprobeResult): ValidatedMediaProbe {
 export function validateOutputProbe(
   probe: FFprobeResult,
   expected: RenderOutputSpec,
-  options: { durationToleranceSeconds?: number; requireAudio?: boolean } = {},
+  options: {
+    durationToleranceSeconds?: number;
+    requireAudio?: boolean;
+    expectedCaptionTrackCount?: number;
+    captionMode?: 'none' | 'burned-in' | 'subtitle';
+  } = {},
 ): ValidationResult & { value?: ValidatedMediaProbe } {
   const value = normalizeProbe(probe);
   const issues: ValidationIssue[] = [];
@@ -53,12 +65,22 @@ export function validateOutputProbe(
   else if (value.height !== expected.height) issues.push({ path: 'video.height', message: `expected ${expected.height}, received ${value.height}` });
   if (value.fps === undefined) issues.push({ path: 'video.fps', message: 'ffprobe did not report video frame rate' });
   else if (Math.abs(value.fps - expected.fps) > 0.01) issues.push({ path: 'video.fps', message: `expected ${expected.fps}, received ${value.fps}` });
+  const expectedCodec = expected.codec === 'h264' ? ['h264', 'avc1'] : expected.codec === 'vp9' ? ['vp9'] : ['prores', 'prores_ks'];
+  if (!value.videoCodec) issues.push({ path: 'video.codec', message: 'ffprobe did not report video codec' });
+  else if (!expectedCodec.includes(value.videoCodec)) issues.push({ path: 'video.codec', message: `expected ${expected.codec}, received ${value.videoCodec}` });
   if (value.durationSeconds === undefined) issues.push({ path: 'format.duration', message: 'ffprobe did not report output duration' });
   const expectedDuration = expected.durationInFrames / expected.fps;
   if (value.durationSeconds !== undefined && Math.abs(value.durationSeconds - expectedDuration) > tolerance) issues.push({ path: 'format.duration', message: `expected approximately ${expectedDuration.toFixed(3)} seconds, received ${value.durationSeconds.toFixed(3)}` });
   if (options.requireAudio || expected.audio) {
     if (!value.hasAudio) issues.push({ path: 'streams', message: 'rendered output must contain an audio stream' });
+    if (expected.audio && value.audioSampleRate !== undefined && value.audioSampleRate !== expected.audio.sampleRate) issues.push({ path: 'audio.sample_rate', message: `expected ${expected.audio.sampleRate}, received ${value.audioSampleRate}` });
+    if (expected.audio && value.audioChannels !== undefined && value.audioChannels !== expected.audio.channels) issues.push({ path: 'audio.channels', message: `expected ${expected.audio.channels}, received ${value.audioChannels}` });
   }
+  const expectedCaptions = options.expectedCaptionTrackCount ?? 0;
+  if (options.captionMode === 'subtitle' && value.subtitleStreamCount < expectedCaptions) {
+    issues.push({ path: 'streams.subtitle', message: `expected at least ${expectedCaptions} subtitle stream(s), received ${value.subtitleStreamCount}` });
+  }
+  if (options.captionMode === 'burned-in' && expectedCaptions < 1) issues.push({ path: 'captions', message: 'burned-in caption verification requires at least one manifest caption track' });
   return issues.length ? { ok: false, issues } : { ok: true, issues, value };
 }
 

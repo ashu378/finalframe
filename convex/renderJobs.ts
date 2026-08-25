@@ -8,6 +8,36 @@ import { now } from "./_shared";
 
 type RenderStatus = "QUEUED" | "PROCESSING" | "SUBMITTED" | "COMPLETED" | "RETRYING" | "FAILED" | "CANCELED";
 
+const callbackArgs = {
+  jobId: v.id("renderJobs"),
+  leaseId: v.optional(v.string()),
+  event: v.union(v.literal("SUBMITTED"), v.literal("PROGRESS"), v.literal("COMPLETED"), v.literal("FAILED")),
+  rendererJobId: v.optional(v.string()),
+  progress: v.optional(v.number()),
+  storageId: v.optional(v.id("_storage")),
+  checksum: v.optional(v.string()),
+  mimeType: v.optional(v.string()),
+  errorCode: v.optional(v.string()),
+  errorMessage: v.optional(v.string()),
+  retryable: v.optional(v.boolean()),
+  actualCost: v.optional(v.number()),
+};
+
+type CallbackInput = {
+  jobId: Id<"renderJobs">;
+  leaseId?: string;
+  event: "SUBMITTED" | "PROGRESS" | "COMPLETED" | "FAILED";
+  rendererJobId?: string;
+  progress?: number;
+  storageId?: Id<"_storage">;
+  checksum?: string;
+  mimeType?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  retryable?: boolean;
+  actualCost?: number;
+};
+
 function internalRef(name: string) {
   return (internal as unknown as Record<string, Record<string, import("convex/server").SchedulableFunctionReference>>).renderJobs[name];
 }

@@ -4,7 +4,7 @@
  * Reference: BUILD_PHASES.md — Phase 0 error handling
  * 
  * This page is shown when MAINTENANCE_MODE is enabled in environment.
- * Middleware redirects all traffic here during maintenance.
+ * The Next.js proxy redirects all traffic here during maintenance.
  */
 
 export const metadata = {

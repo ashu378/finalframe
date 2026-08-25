@@ -56,7 +56,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
     return (
         <div className="project-theme space-y-8 animate-in fade-in duration-500">
             <div className="flex justify-end">
-                <Link href={`/dashboard/projects/${id}/production`} className="ff-button-primary min-h-11">Open production workspace</Link>
+                <Link href={`/dashboard/projects/${id}/workspace/overview`} className="ff-button-primary min-h-11">Open video workspace</Link>
             </div>
             {/* Header */}
             <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -88,7 +88,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
                 <div className="flex flex-wrap gap-4 pb-1">
                     <ShareButton projectId={id} />
-                    <Link href={`/dashboard/projects/${id}/blueprint`}>
+                    <Link href={`/dashboard/projects/${id}/workspace/plan`}>
                         <Button
                             variant="primary"
                             size="md"
@@ -192,7 +192,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                     </div>
 
                     <div className="mt-8 pt-4 border-t border-zinc-800">
-                                <Link href={`/dashboard/projects/${id}/blueprint`} className="block">
+                                <Link href={`/dashboard/projects/${id}/workspace/plan`} className="block">
                             <Button variant="ghost" className="w-full text-metadata font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 py-6">
                                 Adjust Studio Defaults
                             </Button>
@@ -233,7 +233,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                                         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.05),transparent_70%)]" />
                                         <span className="text-zinc-600 font-black uppercase tracking-[0.3em] text-metadata">Your preview will appear here</span>
                                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/video:opacity-100 transition-all duration-500 flex items-center justify-center backdrop-blur-sm">
-                                            <Link href={`/dashboard/projects/${id}/editor`}>
+                                                <Link href={`/dashboard/projects/${id}/workspace/edit`}>
                                                 <Button size="lg" className="primary-cta px-10">
                                                     <Edit2 className="w-4 h-4" />
                                                     Open finishing studio
@@ -257,7 +257,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                                 FinalFrame has turned your idea into an ordered video plan. Review it before generation.
                             </p>
                             <div className="flex gap-4">
-                                <Link href={`/dashboard/projects/${project.id}/blueprint`}>
+                                <Link href={`/dashboard/projects/${project.id}/workspace/plan`}>
                                     <Button variant="primary" size="md" className="gap-3 px-10 h-12 rounded-sm font-black uppercase tracking-widest text-metadata italic">
                                         <Edit2 className="w-4 h-4" />
                                         Review the plan
@@ -280,7 +280,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                                     : 'This project is archived and can be viewed but not changed.'}
                             </p>
                             {project.state === 'draft' && (
-                                <Link href={`/dashboard/projects/${project.id}/blueprint`}>
+                                    <Link href={`/dashboard/projects/${project.id}/workspace/plan`}>
                                     <Button size="md" className="primary-cta px-12">
                                         Open the plan
                                     </Button>

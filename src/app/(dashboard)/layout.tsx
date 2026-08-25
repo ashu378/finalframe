@@ -3,7 +3,7 @@
  * Reference: MASTER_PRD.md § 5.II — User Dashboard
  * Reference: BUILD_PHASES.md — Phase 0 requires protected dashboard layout
  * 
- * Protected layout with sidebar. Auth guard enforced in middleware.
+ * Protected layout with sidebar. Auth guard enforced in the Next.js proxy.
  */
 
 import { Sidebar } from '@/components/layout/sidebar';
@@ -21,10 +21,10 @@ export default async function DashboardLayout({
     // Admin Access Control
     // If we're on a route starting with /admin, ensure the user is an admin
     // In a Server Layout, we can't easily see the current path without headers 
-    // or a client component, but we can rely on the page itself or middleware for the path-specific check.
-    // However, since we moved it from middleware, we should ideally check it here if possible,
+    // or a client component, but we can rely on the page itself or proxy for the path-specific check.
+    // However, since we moved it from proxy, we should ideally check it here if possible,
     // or just let the /admin/page fetch the profile.
-    // Given the middleware now allows it, we'll keep it simple: layout enforces onboarding, 
+    // Given the proxy now allows it, we'll keep it simple: layout enforces onboarding, 
     // and admin pages check their own permissions.
 
     return (

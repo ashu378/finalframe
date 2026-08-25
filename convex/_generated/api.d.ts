@@ -16,6 +16,7 @@ import type * as assetStorage from "../assetStorage.js";
 import type * as auth from "../auth.js";
 import type * as authorization from "../authorization.js";
 import type * as bootstrap from "../bootstrap.js";
+import type * as canvasLayouts from "../canvasLayouts.js";
 import type * as credits from "../credits.js";
 import type * as financial from "../financial.js";
 import type * as generation from "../generation.js";
@@ -25,11 +26,15 @@ import type * as identity from "../identity.js";
 import type * as paymentWebhook from "../paymentWebhook.js";
 import type * as payments from "../payments.js";
 import type * as planning from "../planning.js";
+import type * as productionGraph from "../productionGraph.js";
+import type * as productionOperations from "../productionOperations.js";
 import type * as productions from "../productions.js";
 import type * as projects from "../projects.js";
 import type * as renderJobs from "../renderJobs.js";
+import type * as reviewExport from "../reviewExport.js";
 import type * as secureJobs from "../secureJobs.js";
 import type * as timeline from "../timeline.js";
+import type * as timelineEditor from "../timelineEditor.js";
 
 import type {
   ApiFromModules,
@@ -46,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authorization: typeof authorization;
   bootstrap: typeof bootstrap;
+  canvasLayouts: typeof canvasLayouts;
   credits: typeof credits;
   financial: typeof financial;
   generation: typeof generation;
@@ -55,11 +61,15 @@ declare const fullApi: ApiFromModules<{
   paymentWebhook: typeof paymentWebhook;
   payments: typeof payments;
   planning: typeof planning;
+  productionGraph: typeof productionGraph;
+  productionOperations: typeof productionOperations;
   productions: typeof productions;
   projects: typeof projects;
   renderJobs: typeof renderJobs;
+  reviewExport: typeof reviewExport;
   secureJobs: typeof secureJobs;
   timeline: typeof timeline;
+  timelineEditor: typeof timelineEditor;
 }>;
 
 /**

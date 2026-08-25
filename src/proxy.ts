@@ -36,7 +36,7 @@ function isFastExit(pathname: string) {
  * Convex Auth owns auth-cookie refresh and /api/auth proxying. Route checks
  * only consume its verified session result and fail closed when unavailable.
  */
-export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
+export const proxy = convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
     const { pathname } = request.nextUrl;
 
     if (isFastExit(pathname)) return NextResponse.next();

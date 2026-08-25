@@ -5,6 +5,7 @@ export * from './renderer.js';
 export * from './media/command-runner.js';
 export * from './media/ffmpeg.js';
 export * from './media/probe.js';
+export * from './media/source-policy.js';
 export * from './contracts/callback.js';
 export * from './remotion/runtime.js';
 export { fixtureManifest } from './fixture.js';

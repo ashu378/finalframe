@@ -3,7 +3,7 @@
  * Reference: MASTER_PRD.md § 11 — Maintenance mode handling
  * Reference: BUILD_PHASES.md — Phase 0 requires maintenance mode support
  * 
- * Maintenance mode is middleware-enforced globally.
+ * Maintenance mode is enforced globally by the Next.js proxy.
  * When enabled, all routes except bypass paths redirect to /maintenance.
  */
 
