@@ -4,5 +4,7 @@ export * from './assembly/plan.js';
 export * from './renderer.js';
 export * from './media/command-runner.js';
 export * from './media/ffmpeg.js';
+export * from './media/probe.js';
 export * from './contracts/callback.js';
+export * from './remotion/runtime.js';
 export { fixtureManifest } from './fixture.js';

@@ -10,11 +10,25 @@ export async function submitExportJob(
     platform: ExportPlatform,
     resolution: ExportResolution
 ): Promise<{ success: boolean; jobId?: string; outputUrl?: string; error?: string }> {
-    void projectId;
-    void snapshotId;
-    void platform;
-    void resolution;
-    return { success: false, error: 'UNSUPPORTED_CONVEX_OPERATION: Export job creation is not exposed by the current Convex API.' };
+    try {
+        const client = await getAuthenticatedConvexClient();
+        const workspace = await client.query(api.productions.getWorkspaceByProject, { projectExternalId: projectId });
+        if (!workspace.production) return { success: false, error: 'We could not find this video project.' };
+        const assembly = await client.mutation(api.assembly.createJob, {
+            productionId: workspace.production._id,
+            idempotencyKey: `export-assembly:${projectId}:${snapshotId || 'current'}`,
+        });
+        const renderJob = await client.mutation(api.renderJobs.create, {
+            productionId: workspace.production._id,
+            manifestId: assembly.manifestId,
+            operation: 'EXPORT',
+            preset: `${platform}-${resolution}`,
+            idempotencyKey: `export:${projectId}:${snapshotId || 'current'}:${platform}:${resolution}`,
+        });
+        return { success: true, jobId: renderJob?._id?.toString() };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'We could not queue this export.' };
+    }
 }
 
 export async function getStudioCredits(projectId: string) {

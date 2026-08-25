@@ -7,6 +7,7 @@ export interface AssemblyPlan {
   fps: number;
   width: number;
   height: number;
+  outputCodec: RenderManifest['output']['codec'];
   durationInFrames: number;
   items: RenderItem[];
   shots: ShotManifestEntry[];
@@ -34,6 +35,7 @@ export function createAssemblyPlan(input: RenderManifest): AssemblyPlan {
     fps: manifest.output.fps,
     width: manifest.output.width,
     height: manifest.output.height,
+    outputCodec: manifest.output.codec,
     durationInFrames: manifest.output.durationInFrames,
     items,
     shots,

@@ -4,6 +4,7 @@ import {
   SUPPORTED_RENDER_MANIFEST_VERSIONS,
   type AudioTrack,
   type CaptionTrack,
+  type ImageRenderItem,
   type MotionGraphicsRenderItem,
   type PosterSpec,
   type RenderItem,
@@ -41,6 +42,14 @@ const isFiniteInteger = (value: unknown): value is number =>
 const isBoundedString = (value: unknown, max: number = RENDER_LIMITS.maxStringLength): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
 
+function isSafeMediaSource(value: unknown): value is string {
+  if (!isBoundedString(value, 2_048) || /[\u0000\r\n]/.test(value)) return false;
+  // Successful renders may only reference user/provider media, never test fixtures or placeholders.
+  if (/(?:^|[/:._-])(mock|sample|placeholder)(?:[/:._-]|$)|example\.(?:com|test)(?:[/:?#]|$)/i.test(value)) return false;
+  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return /^(https?|file):/i.test(value);
+  return true;
+}
+
 function validateTemplateProps(value: unknown, path: string, depth = 0): ValidationIssue[] {
   if (depth > RENDER_LIMITS.maxPropsDepth) return [{ path, message: `must not exceed ${RENDER_LIMITS.maxPropsDepth} nested levels` }];
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return [];
@@ -70,13 +79,18 @@ function validateItem(value: unknown, index: number, outputDuration: number): { 
     issues.push({ path: `${path}.opacity`, message: 'must be between 0 and 1' });
   }
 
-  if (value.kind === 'video') {
-    if (!isBoundedString(value.src, 2048)) issues.push({ path: `${path}.src`, message: 'must be a non-empty source URL or path' });
+  if (value.kind === 'video' || value.kind === 'image') {
+    if (!isSafeMediaSource(value.src)) issues.push({ path: `${path}.src`, message: 'must be a safe HTTP(S), file, or local source without control characters' });
     if (value.trimStartInFrames !== undefined && (!isFiniteInteger(value.trimStartInFrames) || value.trimStartInFrames < 0)) {
       issues.push({ path: `${path}.trimStartInFrames`, message: 'must be a non-negative integer' });
     }
-    if (value.volume !== undefined && (typeof value.volume !== 'number' || value.volume < 0 || value.volume > 1)) {
+    if (value.kind === 'video' && value.volume !== undefined && (typeof value.volume !== 'number' || value.volume < 0 || value.volume > 1)) {
       issues.push({ path: `${path}.volume`, message: 'must be between 0 and 1' });
+    }
+    if (value.kind === 'image') {
+      if (value.fit !== undefined && !['cover', 'contain', 'fill'].includes(value.fit as string)) issues.push({ path: `${path}.fit`, message: 'must be cover, contain, or fill' });
+      if (value.position !== undefined && !isBoundedString(value.position, 128)) issues.push({ path: `${path}.position`, message: 'must be a bounded position string' });
+      return issues.length ? { issues } : { item: value as unknown as ImageRenderItem, issues };
     }
     return issues.length ? { issues } : { item: value as unknown as VideoRenderItem, issues };
   }
@@ -91,7 +105,7 @@ function validateItem(value: unknown, index: number, outputDuration: number): { 
     return issues.length ? { issues } : { item: value as unknown as MotionGraphicsRenderItem, issues };
   }
 
-  issues.push({ path: `${path}.kind`, message: 'must be either video or motion-graphics' });
+  issues.push({ path: `${path}.kind`, message: 'must be video, image, or motion-graphics' });
   return { issues };
 }
 
@@ -100,7 +114,7 @@ function validateAudioTrack(value: unknown, index: number, outputDuration: numbe
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
   if (!isBoundedString(value.id, 128)) issues.push({ path: `${path}.id`, message: 'must be a non-empty bounded string' });
-  if (!isBoundedString(value.src, 2048)) issues.push({ path: `${path}.src`, message: 'must be a non-empty source URL or path' });
+  if (!isSafeMediaSource(value.src)) issues.push({ path: `${path}.src`, message: 'must be a safe HTTP(S), file, or local source without control characters' });
   if (!isFiniteInteger(value.startFrame) || value.startFrame < 0) issues.push({ path: `${path}.startFrame`, message: 'must be a non-negative integer' });
   if (!isFiniteInteger(value.durationInFrames) || value.durationInFrames <= 0) issues.push({ path: `${path}.durationInFrames`, message: 'must be a positive integer' });
   if (isFiniteInteger(value.startFrame) && isFiniteInteger(value.durationInFrames) && value.startFrame + value.durationInFrames > outputDuration) issues.push({ path, message: 'frame window must fit inside output.durationInFrames' });
@@ -141,7 +155,7 @@ function validatePoster(value: unknown): { value?: PosterSpec; issues: Validatio
   const path = 'poster';
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
-  if (!isBoundedString(value.src, 2048)) issues.push({ path: `${path}.src`, message: 'must be a non-empty source URL or path' });
+  if (!isSafeMediaSource(value.src)) issues.push({ path: `${path}.src`, message: 'must be a safe HTTP(S), file, or local source without control characters' });
   if (!isFiniteInteger(value.width) || value.width < 1 || value.width > RENDER_LIMITS.maxWidth) issues.push({ path: `${path}.width`, message: 'must be a positive bounded integer' });
   if (!isFiniteInteger(value.height) || value.height < 1 || value.height > RENDER_LIMITS.maxHeight) issues.push({ path: `${path}.height`, message: 'must be a positive bounded integer' });
   if (value.mimeType !== undefined && !['image/jpeg', 'image/png', 'image/webp'].includes(value.mimeType as string)) issues.push({ path: `${path}.mimeType`, message: 'must be jpeg, png, or webp' });

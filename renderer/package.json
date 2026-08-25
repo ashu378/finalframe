@@ -14,12 +14,15 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "build": "tsc --project tsconfig.json",
-    "check": "npm run typecheck"
+    "check": "npm run typecheck",
+    "test": "node tests/run-renderer-tests.cjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "remotion": "^4.0.0"

@@ -22,7 +22,7 @@ export function RenderButton({ projectId, disabled }: RenderButtonProps) {
             const result = await submitRenderJob(projectId);
 
             if (result.success) {
-                toast.success('MASTER_SIGNAL_AUTHORIZED: Output generation in progress.');
+                toast.success('Your video is queued for finishing.');
                 router.refresh();
             } else {
                 console.error('Render Authorization Failure:', JSON.stringify(result, null, 2));
@@ -51,7 +51,7 @@ export function RenderButton({ projectId, disabled }: RenderButtonProps) {
             ) : (
                 <>
                     <Wand2 className="mr-3 h-4 w-4" />
-                    Authorize Master Output
+                    Make the finished video
                 </>
             )}
         </Button>

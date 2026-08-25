@@ -43,6 +43,54 @@ export interface CallbackVerificationOptions {
   now?: () => number;
 }
 
+export interface CallbackRequestOptions {
+  eventId: string;
+  idempotencyKey: string;
+  jobId: string;
+  rendererVersion: string;
+  attempt: number;
+  eventType: RendererCallbackType;
+  payload: Record<string, unknown>;
+  occurredAt?: string;
+}
+
+export function createCallbackBody(options: CallbackRequestOptions): string {
+  const envelope: RendererCallbackEnvelope = {
+    version: RENDERER_CALLBACK_VERSION,
+    eventId: options.eventId,
+    eventType: options.eventType,
+    idempotencyKey: options.idempotencyKey,
+    jobId: options.jobId,
+    rendererVersion: options.rendererVersion,
+    occurredAt: options.occurredAt ?? new Date().toISOString(),
+    attempt: options.attempt,
+    payload: options.payload,
+  };
+  assertCallbackEnvelope(envelope);
+  return JSON.stringify(envelope);
+}
+
+export interface CallbackSenderOptions {
+  fetch?: typeof globalThis.fetch;
+  timeoutMs?: number;
+}
+
+/** Sends the exact signed body and never retries with a new event ID. */
+export async function sendRendererCallback(url: string, body: string, secret: string, options: CallbackSenderOptions = {}): Promise<void> {
+  if (!/^https:\/\//i.test(url) && !/^http:\/\/localhost(?::\d+)?\//i.test(url)) throw new Error('Renderer callback URL must use HTTPS (localhost HTTP is allowed for development).');
+  if (!secret) throw new Error('Renderer callback secret is required.');
+  const fetcher = options.fetch ?? globalThis.fetch;
+  if (!fetcher) throw new Error('No fetch implementation is available for renderer callbacks.');
+  const controller = new AbortController();
+  const timeout = options.timeoutMs ? setTimeout(() => controller.abort(), options.timeoutMs) : undefined;
+  try {
+    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-finalframe-renderer-signature': signCallbackBody(body, secret) }, body, signal: controller.signal });
+    if (!response.ok) throw new Error(`Renderer callback failed with HTTP ${response.status}.`);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export function signCallbackBody(rawBody: string, secret: string): string {
   return `${RENDERER_CALLBACK_SIGNATURE_PREFIX}${createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')}`;
 }

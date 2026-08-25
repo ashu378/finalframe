@@ -25,7 +25,9 @@ import type * as payments from "../payments.js";
 import type * as planning from "../planning.js";
 import type * as productions from "../productions.js";
 import type * as projects from "../projects.js";
+import type * as renderJobs from "../renderJobs.js";
 import type * as secureJobs from "../secureJobs.js";
+import type * as timeline from "../timeline.js";
 
 import type {
   ApiFromModules,
@@ -51,7 +53,9 @@ declare const fullApi: ApiFromModules<{
   planning: typeof planning;
   productions: typeof productions;
   projects: typeof projects;
+  renderJobs: typeof renderJobs;
   secureJobs: typeof secureJobs;
+  timeline: typeof timeline;
 }>;
 
 /**

@@ -6,6 +6,7 @@ import { getProductionWorkspace } from '@/lib/production/actions';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { AssembleButton } from '@/components/production/assemble-button';
 import { GenerationPanel } from '@/components/production/generation';
+import { AssemblyPanel } from '@/components/production/assembly';
 
 interface ProductionPageProps { params: Promise<{ id: string }> }
 
@@ -15,6 +16,9 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
     const result = await getProductionWorkspace(id);
     if (!result.success) notFound();
     const generationEnabled = isFeatureEnabled('openRouterMedia');
+    const allShots = (result.sequences || []).flatMap((sequence: any) => sequence.scenes.flatMap((scene: any) => scene.shots));
+    const completedShotIds = new Set((result.jobs || []).filter((job: any) => String(job.status || '').toUpperCase() === 'COMPLETED').map((job: any) => String(job.shotId)));
+    const readyTakes = allShots.filter((shot: any) => String(shot.status || '').toUpperCase() === 'COMPLETED' || completedShotIds.has(String(shot._id))).length;
 
     return <div className="mx-auto max-w-6xl space-y-9 py-5 sm:py-8">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -26,6 +30,6 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
             </div>
             {generationEnabled && result.production && <AssembleButton productionId={result.production._id} />}
         </div>
-        {!result.production ? <div className="ff-card flex flex-col items-center p-10 text-center"><span className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1]"><Film className="size-5" aria-hidden="true" /></span><h2 className="ff-display mt-6 text-2xl font-semibold">Your plan is not approved yet.</h2><p className="mt-3 max-w-md leading-7 text-muted-foreground">Review the plan and approve it before the making stage becomes available.</p><Link href={`/dashboard/projects/${id}/blueprint`} className="ff-button-primary mt-7">Open my plan</Link></div> : <GenerationPanel productionId={result.production._id} sequences={result.sequences || []} jobs={result.jobs || []} enabled={generationEnabled} />}
+        {!result.production ? <div className="ff-card flex flex-col items-center p-10 text-center"><span className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1]"><Film className="size-5" aria-hidden="true" /></span><h2 className="ff-display mt-6 text-2xl font-semibold">Your plan is not approved yet.</h2><p className="mt-3 max-w-md leading-7 text-muted-foreground">Review the plan and approve it before the making stage becomes available.</p><Link href={`/dashboard/projects/${id}/blueprint`} className="ff-button-primary mt-7">Open my plan</Link></div> : <div className="space-y-6"><GenerationPanel productionId={result.production._id} sequences={result.sequences || []} jobs={result.jobs || []} enabled={generationEnabled} /><AssemblyPanel productionId={result.production._id} totalTakes={allShots.length} readyTakes={readyTakes} enabled={generationEnabled} /></div>}
     </div>;
 }

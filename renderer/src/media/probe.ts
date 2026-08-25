@@ -47,9 +47,13 @@ export function validateOutputProbe(
   const issues: ValidationIssue[] = [];
   const tolerance = options.durationToleranceSeconds ?? Math.max(0.1, 1 / expected.fps);
   if (!value.hasVideo) issues.push({ path: 'streams', message: 'rendered output must contain a video stream' });
-  if (value.width !== undefined && value.width !== expected.width) issues.push({ path: 'video.width', message: `expected ${expected.width}, received ${value.width}` });
-  if (value.height !== undefined && value.height !== expected.height) issues.push({ path: 'video.height', message: `expected ${expected.height}, received ${value.height}` });
-  if (value.fps !== undefined && Math.abs(value.fps - expected.fps) > 0.01) issues.push({ path: 'video.fps', message: `expected ${expected.fps}, received ${value.fps}` });
+  if (value.width === undefined) issues.push({ path: 'video.width', message: 'ffprobe did not report video width' });
+  else if (value.width !== expected.width) issues.push({ path: 'video.width', message: `expected ${expected.width}, received ${value.width}` });
+  if (value.height === undefined) issues.push({ path: 'video.height', message: 'ffprobe did not report video height' });
+  else if (value.height !== expected.height) issues.push({ path: 'video.height', message: `expected ${expected.height}, received ${value.height}` });
+  if (value.fps === undefined) issues.push({ path: 'video.fps', message: 'ffprobe did not report video frame rate' });
+  else if (Math.abs(value.fps - expected.fps) > 0.01) issues.push({ path: 'video.fps', message: `expected ${expected.fps}, received ${value.fps}` });
+  if (value.durationSeconds === undefined) issues.push({ path: 'format.duration', message: 'ffprobe did not report output duration' });
   const expectedDuration = expected.durationInFrames / expected.fps;
   if (value.durationSeconds !== undefined && Math.abs(value.durationSeconds - expectedDuration) > tolerance) issues.push({ path: 'format.duration', message: `expected approximately ${expectedDuration.toFixed(3)} seconds, received ${value.durationSeconds.toFixed(3)}` });
   if (options.requireAudio || expected.audio) {
@@ -64,4 +68,3 @@ export function validatePosterSpec(poster: PosterSpec, expected: Pick<RenderOutp
   if (!poster.src.trim()) issues.push({ path: 'poster.src', message: 'poster source is required' });
   return { ok: issues.length === 0, issues };
 }
-

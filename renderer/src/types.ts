@@ -34,13 +34,20 @@ export interface VideoRenderItem extends RenderItemBase {
   volume?: number;
 }
 
+export interface ImageRenderItem extends RenderItemBase {
+  kind: 'image';
+  src: string;
+  fit?: 'cover' | 'contain' | 'fill';
+  position?: string;
+}
+
 export interface MotionGraphicsRenderItem extends RenderItemBase {
   kind: 'motion-graphics';
   templateId: string;
   props: Record<string, unknown>;
 }
 
-export type RenderItem = VideoRenderItem | MotionGraphicsRenderItem;
+export type RenderItem = VideoRenderItem | ImageRenderItem | MotionGraphicsRenderItem;
 
 export interface AudioTrack {
   id: string;
@@ -131,6 +138,16 @@ export interface RenderJobState {
   state: RenderLifecycleState;
   failure?: RenderFailure;
   nextRetryAt?: string;
+}
+
+export interface RenderResourceLimits {
+  maxDurationInFrames?: number;
+  maxItems?: number;
+  maxAudioTracks?: number;
+  maxCaptionCues?: number;
+  maxOutputBytes?: number;
+  maxConcurrency?: number;
+  commandTimeoutMs?: number;
 }
 
 export interface ValidationIssue {

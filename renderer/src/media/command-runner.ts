@@ -11,13 +11,13 @@ export interface CommandResult {
 export type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
 export interface CommandRunner {
-  run(command: string, args: readonly string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): Promise<CommandResult>;
+  run(command: string, args: readonly string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number }): Promise<CommandResult>;
 }
 
 export class MediaCommandError extends Error {
   constructor(
     message: string,
-    readonly details: { command: string; args: readonly string[]; exitCode?: number; stderr?: string } ,
+    readonly details: { command: string; args: readonly string[]; exitCode?: number; stderr?: string; timedOut?: boolean } ,
   ) {
     super(message);
     this.name = 'MediaCommandError';
@@ -27,7 +27,7 @@ export class MediaCommandError extends Error {
 export class ChildProcessCommandRunner implements CommandRunner {
   constructor(private readonly spawn: SpawnLike = nodeSpawn) {}
 
-  run(command: string, args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}): Promise<CommandResult> {
+  run(command: string, args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number } = {}): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
       let child: ChildProcess;
       try {
@@ -40,11 +40,13 @@ export class ChildProcessCommandRunner implements CommandRunner {
       let stdout = '';
       let stderr = '';
       let settled = false;
-      const timeout = options.timeoutMs ? setTimeout(() => child.kill('SIGKILL'), options.timeoutMs) : undefined;
+      let timedOut = false;
+      const maxOutputBytes = options.maxOutputBytes ?? 1_048_576;
+      const timeout = options.timeoutMs ? setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, options.timeoutMs) : undefined;
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-      child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+      child.stdout?.on('data', (chunk: string) => { if (Buffer.byteLength(stdout) < maxOutputBytes) stdout += chunk.slice(0, maxOutputBytes - Buffer.byteLength(stdout)); });
+      child.stderr?.on('data', (chunk: string) => { if (Buffer.byteLength(stderr) < maxOutputBytes) stderr += chunk.slice(0, maxOutputBytes - Buffer.byteLength(stderr)); });
       child.once('error', (error) => {
         if (settled) return;
         settled = true;
@@ -57,7 +59,7 @@ export class ChildProcessCommandRunner implements CommandRunner {
         if (timeout) clearTimeout(timeout);
         const result = { command, args, exitCode: exitCode ?? -1, stdout, stderr };
         if (result.exitCode !== 0) {
-          reject(new MediaCommandError(`Media command failed (${command}) with exit code ${result.exitCode}: ${stderr.trim() || 'no stderr output'}`, { command, args, exitCode: result.exitCode, stderr }));
+          reject(new MediaCommandError(timedOut ? `Media command timed out (${command}) after ${options.timeoutMs}ms` : `Media command failed (${command}) with exit code ${result.exitCode}: ${stderr.trim() || 'no stderr output'}`, { command, args, exitCode: result.exitCode, stderr, timedOut }));
         } else {
           resolve(result);
         }
