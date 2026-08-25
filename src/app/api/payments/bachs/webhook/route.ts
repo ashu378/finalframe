@@ -1,25 +1,30 @@
 import { NextResponse } from 'next/server';
 import { getConvexClient } from '@/lib/convex/server';
 import { api } from '../../../../../../convex/_generated/api';
-import { verifyBachsSignature } from '@/lib/payments/bachs';
+import { BachsPaymentProvider } from '@/lib/payments/bachs';
 
 export async function POST(request: Request) {
     const rawBody = await request.text();
-    if (!verifyBachsSignature(rawBody, request.headers.get('X-Bachs-Timestamp'), request.headers.get('X-Bachs-Signature'))) {
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-    }
-    let event: Record<string, any>;
+    const provider = new BachsPaymentProvider({
+        environment: process.env.BACHS_ENVIRONMENT === 'production' ? 'production' : 'sandbox',
+        baseUrl: process.env.BACHS_API_BASE_URL || (process.env.BACHS_ENVIRONMENT === 'production' ? 'https://api.bachs.io' : 'https://sandbox-api.bachs.io'),
+        apiKey: process.env.BACHS_API_KEY || '',
+        webhookSecret: process.env.BACHS_WEBHOOK_SECRET,
+        webhookToleranceSeconds: Number(process.env.BACHS_WEBHOOK_TOLERANCE_SECONDS || 300),
+        enabledCurrencies: (process.env.BACHS_ALLOWED_CURRENCIES || 'USD,NGN').split(',').map((currency) => currency.trim().toUpperCase()).filter(Boolean),
+    });
+    let event;
     try {
-        event = JSON.parse(rawBody) as Record<string, any>;
-    } catch {
-        return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+        event = provider.verifyWebhook({ rawBody, timestamp: request.headers.get('X-Bachs-Timestamp'), signature: request.headers.get('X-Bachs-Signature') });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid Bachs webhook.';
+        const status = message.includes('signature') ? 401 : 400;
+        return NextResponse.json({ error: status === 401 ? 'Invalid signature' : message }, { status });
     }
-    if (typeof event.id !== 'string' || typeof event.type !== 'string') {
-        return NextResponse.json({ error: 'Invalid event envelope' }, { status: 400 });
+    if (event.eventType === 'collection.succeeded' && (event.status !== 'succeeded' || !event.checkoutId || !event.chargeId || event.amount === undefined || !event.currency)) {
+        return NextResponse.json({ error: 'Incomplete collection event' }, { status: 400 });
     }
-    const reference = event.data?.reference || event.data?.metadata?.reference;
-    const amount = event.data?.amount === undefined ? undefined : Number(event.data.amount);
-    const result = await getConvexClient().mutation(api.payments.recordWebhook, { provider: 'bachs', providerEventId: event.id, eventType: event.type, payload: event, reference, providerCheckoutId: event.data?.checkout_id, providerChargeId: event.data?.charge_id, amount: Number.isFinite(amount) ? amount : undefined, currency: event.data?.currency });
+    const result = await getConvexClient().mutation(api.payments.recordWebhook, { provider: 'bachs', providerEventId: event.eventId, eventType: event.eventType, payload: event.raw, reference: event.reference, providerCheckoutId: event.checkoutId, providerChargeId: event.chargeId, amount: event.amount, currency: event.currency });
     if (result.duplicate) return NextResponse.json({ received: true, duplicate: true });
-    return NextResponse.json({ received: true });
+    return NextResponse.json({ received: true, quarantined: 'quarantined' in result && result.quarantined === true });
 }

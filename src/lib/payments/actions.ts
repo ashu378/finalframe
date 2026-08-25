@@ -16,10 +16,12 @@ export async function createCreditCheckout(packId: string, currency: SupportedCu
     if (!user || !studio) return { success: false, error: 'Studio not found' };
     const basePack = CREDIT_PACKS.find((pack) => pack.id === packId);
     if (!basePack) return { success: false, error: 'Credit pack not found' };
-    const reference = `ff_${studio.externalId.slice(0, 16)}_${Date.now()}_${packId}`;
     const amount = basePack.amounts[currency];
+    if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: `No ${currency} price is configured for this credit pack.` };
+    const reference = `ff_${studio.externalId.slice(0, 16)}_${Date.now()}_${packId}`;
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
     const provider = new BachsPaymentProvider();
-    const checkout = await provider.createCheckout({ amount, currency, reference, customerEmail: user.email || '', credits: basePack.credits, successUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/dashboard/settings`, cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/dashboard/settings` });
+    const checkout = await provider.createCheckout({ amount, currency, reference, idempotencyKey: `checkout_${reference}`, customerEmail: user.email || '', successUrl: `${siteUrl}/dashboard/settings`, cancelUrl: `${siteUrl}/dashboard/settings` });
     await convex.mutation(api.payments.createPurchase, { studioExternalId: studio.externalId, provider: 'bachs', providerCheckoutId: checkout.checkoutId, amount, currency, credits: basePack.credits, reference, metadata: { packId, customerEmail: user.email } });
     return { success: true, checkoutUrl: checkout.checkoutUrl, checkoutId: checkout.checkoutId, reference };
 }
