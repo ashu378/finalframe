@@ -62,11 +62,11 @@ export async function requireAuth(): Promise<{ user: { id: string; email: string
     return { user: { id: user.id, email: user.email } };
 }
 
-/** Require a verified session with a Convex-backed studio. */
+/** Require a verified session. Account provisioning creates a starter studio,
+ * while onboarding preferences remain optional and can be completed later. */
 export async function requireOnboardingComplete(): Promise<UserProfile> {
     const user = await getVerifiedUser();
     if (!user) redirect('/login');
-    if (!user.onboardingCompleted) redirect('/onboarding');
     return profileFromUser(user);
 }
 
