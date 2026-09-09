@@ -8,6 +8,12 @@ import { api } from '../../../convex/_generated/api';
 
 type Mode = 'signIn' | 'signUp';
 
+function safeAuthError(mode: Mode) {
+  return mode === 'signUp'
+    ? 'We couldn’t create your account. Check your details and try again.'
+    : 'We couldn’t log you in. Check your email and password and try again.';
+}
+
 export function ConvexAuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const { signIn } = useAuthActions();
@@ -31,8 +37,10 @@ export function ConvexAuthForm({ mode }: { mode: Mode }) {
       if (mode === 'signUp') await ensureAccount({ name: String(formData.get('fullName') || '').trim() });
       router.push('/dashboard');
       router.refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Authentication failed. Please try again.');
+    } catch {
+      // Convex errors can contain implementation details and request traces.
+      // Keep those in server logs; never render them to an end user.
+      setError(safeAuthError(mode));
       setPending(false);
     }
   }

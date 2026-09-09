@@ -26,8 +26,9 @@ export function ConvexVerificationForm() {
       await ensureAccount({});
       router.push('/dashboard');
       router.refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Verification failed. Please try again.');
+    } catch {
+      // Do not expose Convex/Auth stack traces or internal request details.
+      setError('We couldn’t verify this account yet. Please try again later.');
       setPending(false);
     }
   }
