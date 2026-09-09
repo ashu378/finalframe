@@ -16,6 +16,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY fixtures ./fixtures
 RUN pnpm build
 
 RUN useradd --create-home --uid 10001 appuser \
