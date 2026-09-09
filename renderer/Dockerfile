@@ -4,7 +4,7 @@ ENV NODE_ENV=production
 
 # Remotion uses these binaries when producing the final video.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg curl \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
   && corepack prepare pnpm@11.19.0 --activate
