@@ -53,18 +53,21 @@ async function render(payload: any) {
     const result = await renderer.render(request);
     if (payload.storageUploadUrl) {
       const file = await (await import('node:fs/promises')).readFile(result.outputPath);
-      const upload = await fetch(payload.storageUploadUrl, { method: 'PUT', headers: { 'content-type': 'video/mp4' }, body: file });
+      const upload = await fetch(payload.storageUploadUrl, { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: file });
       if (!upload.ok) throw new Error(`Storage upload failed with HTTP ${upload.status}.`);
+      const uploaded = await upload.json() as { storageId?: string };
+      if (!uploaded.storageId) throw new Error('Storage upload did not return a storageId.');
+      payload.storageId = uploaded.storageId;
     }
     if (payload.callbackUrl) {
       if (!payload.storageId) throw new Error('storageId is required when callbackUrl is supplied.');
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${result.manifestId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.completed', payload: { storageId: payload.storageId, mimeType: 'video/mp4', outputPath: result.outputPath, durationInFrames: result.durationInFrames } });
+      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${result.manifestId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.completed', payload: { storageId: payload.storageId, leaseId: payload.leaseId, mimeType: 'video/mp4', outputPath: result.outputPath, durationInFrames: result.durationInFrames } });
       await sendRendererCallback(payload.callbackUrl, callbackBody, secret);
     }
     return result;
   } catch (error) {
     if (payload.callbackUrl) {
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.failed', payload: { errorCode: 'RENDER_FAILED', errorMessage: error instanceof Error ? error.message : String(error), retryable: true } });
+      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.failed', payload: { leaseId: payload.leaseId, errorCode: 'RENDER_FAILED', errorMessage: error instanceof Error ? error.message : String(error), retryable: true } });
       await sendRendererCallback(payload.callbackUrl, callbackBody, secret).catch(() => undefined);
     }
     throw error;

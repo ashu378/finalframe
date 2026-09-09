@@ -1,5 +1,5 @@
 import { internal } from "./_generated/api";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -38,7 +38,7 @@ type CallbackInput = {
   actualCost?: number;
 };
 
-function internalRef(name: string) {
+function internalRef(name: string): any {
   return (internal as unknown as Record<string, Record<string, import("convex/server").SchedulableFunctionReference>>).renderJobs[name];
 }
 
@@ -90,7 +90,7 @@ export const create = mutation({
     }
     const timestamp = now();
     const jobId = await ctx.db.insert("renderJobs", { studioExternalId: member.studio.externalId, studioId: member.studio._id, productionId: args.productionId, timelineId: args.timelineId, manifestId: args.manifestId, operation: args.operation ?? "RENDER", preset: args.preset, status: "QUEUED", idempotencyKey, requestHash, progress: 0, estimatedCost: args.estimatedCost, createdAt: timestamp, updatedAt: timestamp });
-    await schedule(ctx, "wake", 0, { jobId });
+    await schedule(ctx, "dispatch", 0, { jobId });
     return await ctx.db.get(jobId);
   },
 });
@@ -186,7 +186,7 @@ export const retry = mutation({
     const { job } = await authorizedJob(ctx, args.jobId);
     if (job.status !== "FAILED" && job.status !== "RETRYING") throw new Error(`Render job cannot be retried from ${job.status}.`);
     await ctx.db.patch(job._id, { status: "QUEUED", progress: 0, errorCode: undefined, errorMessage: undefined, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now() });
-    await schedule(ctx, "wake", 0, { jobId: job._id });
+    await schedule(ctx, "dispatch", 0, { jobId: job._id });
     return await ctx.db.get(job._id);
   },
 });
@@ -208,7 +208,64 @@ export const wake = internalMutation({
     const job = await ctx.db.get(args.jobId);
     if (!job || job.status !== "RETRYING") return job;
     await ctx.db.patch(job._id, { status: "QUEUED", updatedAt: now() });
+    await schedule(ctx, "dispatch", 0, { jobId: job._id });
     return await ctx.db.get(job._id);
+  },
+});
+
+export const prepareForRenderer = internalMutation({
+  args: { jobId: v.id("renderJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || (job.status !== "QUEUED" && job.status !== "RETRYING")) return null;
+    if (!job.manifestId) throw new Error("Render job has no manifest.");
+    const manifest = await ctx.db.get(job.manifestId);
+    if (!manifest) throw new Error("Render manifest not found.");
+    const leaseId = `${job._id}:${now()}`;
+    const timestamp = now();
+    await ctx.db.patch(job._id, { status: "PROCESSING", progress: Math.max(job.progress, 5), leaseId, leaseExpiresAt: timestamp + 10 * 60 * 1000, startedAt: job.startedAt ?? timestamp, updatedAt: timestamp });
+    await schedule(ctx, "expireLease", 10 * 60 * 1000, { jobId: job._id, leaseId });
+    return { jobId: job._id, leaseId, idempotencyKey: job.idempotencyKey, manifest: manifest.manifest, uploadUrl: await ctx.storage.generateUploadUrl() };
+  },
+});
+
+export const applyRendererCallback = internalMutation({
+  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("COMPLETED"), v.literal("FAILED")), rendererJobId: v.optional(v.string()), storageId: v.optional(v.id("_storage")), mimeType: v.optional(v.string()), checksum: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("Render job not found.");
+    if (job.status === "COMPLETED") return job;
+    assertLease(job, args.leaseId);
+    const timestamp = now();
+    if (args.event === "FAILED") {
+      if (args.retryable) {
+        await ctx.db.patch(job._id, { status: "RETRYING", errorCode: args.errorCode ?? "RENDER_RETRYABLE_FAILURE", errorMessage: args.errorMessage ?? "Renderer failed and will retry.", leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
+        await schedule(ctx, "wake", 15_000, { jobId: job._id });
+      } else await ctx.db.patch(job._id, { status: "FAILED", errorCode: args.errorCode ?? "RENDER_FAILED", errorMessage: args.errorMessage ?? "Renderer failed.", leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
+      return await ctx.db.get(job._id);
+    }
+    if (!args.storageId) throw new Error("Renderer completion is missing storageId.");
+    const storage = await ctx.db.system.get("_storage", args.storageId);
+    if (!storage) throw new Error("Export storage object not found.");
+    const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).collect();
+    if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, preset: job.preset, status: "COMPLETED", storageId: args.storageId, checksum: args.checksum ?? storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp });
+    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    return await ctx.db.get(job._id);
+  },
+});
+
+export const dispatch = internalAction({
+  args: { jobId: v.id("renderJobs") },
+  handler: async (ctx, args): Promise<unknown> => {
+    const prepared = await ctx.runMutation(internalRef("prepareForRenderer"), { jobId: args.jobId });
+    if (!prepared) return null;
+    const rendererUrl = process.env.RENDER_WORKER_URL;
+    const secret = process.env.RENDER_WORKER_SHARED_SECRET;
+    if (!rendererUrl || !secret) throw new Error("Renderer URL and shared secret are not configured.");
+    const callbackUrl = `${process.env.CONVEX_SITE_URL ?? ""}/renderer/callback`;
+    const response = await fetch(`${rendererUrl.replace(/\/$/, "")}/render`, { method: "POST", headers: { "content-type": "application/json", "x-finalframe-worker-secret": secret }, body: JSON.stringify({ jobId: prepared.jobId, idempotencyKey: prepared.idempotencyKey, manifest: prepared.manifest, storageUploadUrl: prepared.uploadUrl, callbackUrl, leaseId: prepared.leaseId, attempt: 1 }) });
+    if (!response.ok) throw new Error(`Renderer submission failed with HTTP ${response.status}.`);
+    return { jobId: prepared.jobId };
   },
 });
 
