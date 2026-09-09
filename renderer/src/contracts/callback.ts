@@ -94,7 +94,7 @@ export async function sendRendererCallback(url: string, body: string, secret: st
   const controller = new AbortController();
   const timeout = options.timeoutMs ? setTimeout(() => controller.abort(), options.timeoutMs) : undefined;
   try {
-    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-finalframe-renderer-signature': signCallbackBody(body, secret) }, body, signal: controller.signal });
+    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-finalframe-renderer-signature': signCallbackBody(body, secret), 'x-finalframe-worker-secret': secret }, body, signal: controller.signal });
     if (!response.ok) throw new Error(`Renderer callback failed with HTTP ${response.status}.`);
   } finally {
     if (timeout) clearTimeout(timeout);
