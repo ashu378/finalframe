@@ -20,7 +20,7 @@ COPY fixtures ./fixtures
 RUN pnpm build
 
 RUN useradd --create-home --uid 10001 appuser \
-  && chown -R appuser:appuser /app
+  && chown -R appuser:appuser /app/dist /app/fixtures
 USER appuser
 
 EXPOSE 8080
