@@ -94,3 +94,18 @@ export async function saveFriendlyOnboarding(formData: FormData) {
   await convex.mutation(api.app.saveFriendlyOnboarding, { studioName, data });
   redirect('/dashboard/create');
 }
+
+/** Let a new creator enter the app immediately and complete preferences later. */
+export async function skipFriendlyOnboarding() {
+  const convex = await client();
+  await convex.mutation(api.app.saveFriendlyOnboarding, {
+    data: {
+      outcomeGoal: 'social_content',
+      platform: 'just_exploring',
+      creativeDNA: { visualStyle: 'expressive', brandEnergy: 'warm' },
+      mediaPreference: 'no_media_yet',
+      role: 'creator',
+    },
+  });
+  redirect('/dashboard');
+}

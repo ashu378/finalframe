@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowRight, Check } from 'lucide-react';
-import { saveFriendlyOnboarding } from '@/lib/onboarding/actions';
+import { saveFriendlyOnboarding, skipFriendlyOnboarding } from '@/lib/onboarding/actions';
 
 const options = {
   goal: [['social_content', 'Social content'], ['business_video', 'Business video'], ['cartoon_story', 'Cartoon or story'], ['product_demo', 'Product demo']],
@@ -47,5 +47,6 @@ export function FriendlyOnboardingForm() {
     <ChoiceGroup name="media" label="Do you have media to bring?" value={values.media} onChange={set('media')} items={options.media} />
     {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
     <button type="submit" disabled={!ready || pending} className="ff-button-primary min-h-12 w-full">{pending ? 'Saving your studio…' : 'Start my first video'} <ArrowRight className="size-4" /></button>
+    <button type="button" disabled={pending} onClick={() => { setPending(true); void skipFriendlyOnboarding().catch((cause) => { if (cause instanceof Error && cause.message.includes('NEXT_REDIRECT')) return; setError('We couldn’t open your dashboard yet. Please try again.'); setPending(false); }); }} className="w-full text-sm font-semibold text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Skip setup and go to my dashboard</button>
   </form>;
 }
