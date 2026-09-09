@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production
 
@@ -24,5 +24,5 @@ USER appuser
 
 EXPOSE 8080
 
-# The HTTP worker entrypoint will be added before the first deployment.
+# Start the HTTP worker entrypoint.
 CMD ["node", "dist/server.js"]
