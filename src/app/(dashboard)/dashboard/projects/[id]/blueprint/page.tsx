@@ -49,7 +49,7 @@ export default async function BlueprintPage({ params }: BlueprintPageProps) {
                 <Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground">
                     <ArrowLeft className="size-4" /> Back to project
                 </Link>
-                <div className="rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10"><p className="ff-eyebrow flex items-center gap-2"><Sparkles className="size-4 text-accent" /> Your video plan</p><h1 className="public-heading-section mt-4">{project.name}</h1><p className="public-body-text mt-4 max-w-2xl">Read the story, adjust the parts that matter, and approve the plan when it feels right.</p></div>
+                <div className="rounded-[1.5rem] bg-[#0f141c] p-7 sm:p-10"><p className="ff-eyebrow flex items-center gap-2"><Sparkles className="size-4 text-accent" /> Your video plan</p><h1 className="public-heading-section mt-4">{project.name}</h1><p className="public-body-text mt-4 max-w-2xl">Read the story, adjust the parts that matter, and approve the plan when it feels right.</p></div>
             </header>
 
             <BlueprintEditor project={project} scenes={scenes} studioAssets={assets} />

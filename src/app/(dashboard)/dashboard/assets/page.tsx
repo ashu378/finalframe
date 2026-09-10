@@ -31,10 +31,10 @@ export default async function AssetsPage() {
     return (
         <div className="flex flex-1 flex-col space-y-10 animate-in fade-in duration-700">
             {/* Header */}
-            <div className="flex flex-col justify-between gap-8 rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10 md:flex-row md:items-end">
+            <div className="flex flex-col justify-between gap-8 rounded-[1.5rem] bg-[#0f141c] p-7 sm:p-10 md:flex-row md:items-end">
                 <div className="space-y-6">
                     <div className="flex items-center gap-4">
-                        <div className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1] text-foreground">
+                        <div className="grid size-12 place-items-center rounded-2xl bg-[#86a7ff] text-foreground">
                             <FolderOpen className="w-8 h-8" />
                         </div>
                         <div className="space-y-1">

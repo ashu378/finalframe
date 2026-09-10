@@ -9,10 +9,10 @@ interface ReviewStateCardProps {
 }
 
 const content: Record<ReviewAvailability, { title: string; description: string; icon: typeof Clock3; className: string }> = {
-  READY: { title: 'Ready for your review', description: 'Watch this verified version, leave notes, or approve it when it feels right.', icon: CheckCircle2, className: 'border-[#8fbda8]/60 bg-[#f0faf5]' },
-  WAITING: { title: 'Review opens after the video is ready', description: 'The finishing step is still working. Your source takes remain safe while we wait.', icon: Loader2, className: 'border-primary/25 bg-[#fff8e9]' },
+  READY: { title: 'Ready for your review', description: 'Watch this verified version, leave notes, or approve it when it feels right.', icon: CheckCircle2, className: 'border-[#9be3c3]/60 bg-[#10221b]' },
+  WAITING: { title: 'Review opens after the video is ready', description: 'The finishing step is still working. Your source takes remain safe while we wait.', icon: Loader2, className: 'border-primary/25 bg-[#151b25]' },
   UNAVAILABLE: { title: 'Review is not connected yet', description: 'A verified video is not available in this environment, so no approval or download is shown.', icon: FileVideo, className: 'border-border/70 bg-secondary/45' },
-  ERROR: { title: 'We could not load this review', description: 'Try again, or return to the project and check the latest finishing status.', icon: AlertTriangle, className: 'border-[#d88f79]/45 bg-[#fff4ef]' },
+  ERROR: { title: 'We could not load this review', description: 'Try again, or return to the project and check the latest finishing status.', icon: AlertTriangle, className: 'border-[#ff9e9e]/45 bg-[#26171a]' },
 };
 
 export function ReviewStateCard({ availability, title, description, action }: ReviewStateCardProps) {

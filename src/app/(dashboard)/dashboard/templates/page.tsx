@@ -27,10 +27,10 @@ export default async function TemplatesPage() {
     return (
         <div className="flex-1 flex flex-col space-y-10 animate-in fade-in duration-700">
             {/* Header */}
-            <div className="flex flex-col gap-8 rounded-[1.5rem] bg-[#f4ead6] p-7 sm:p-10 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-8 rounded-[1.5rem] bg-[#0f141c] p-7 sm:p-10 md:flex-row md:items-end md:justify-between">
                 <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                        <div className="grid size-12 place-items-center rounded-2xl bg-[#f6dfb1] text-foreground">
+                        <div className="grid size-12 place-items-center rounded-2xl bg-[#86a7ff] text-foreground">
                             <LayoutTemplate className="w-7 h-7" />
                         </div>
                         <div className="space-y-1">

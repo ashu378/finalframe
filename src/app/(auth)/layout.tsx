@@ -7,7 +7,7 @@ export default function AuthLayout({
     children: React.ReactNode;
 }) {
     return (
-        <div className="ff-noise flex min-h-dvh w-full items-center justify-center overflow-hidden bg-[#f4ead6] px-5 py-12 text-foreground">
+        <div className="ff-noise flex min-h-dvh w-full items-center justify-center overflow-hidden bg-[#0f141c] px-5 py-12 text-foreground">
             <div className="relative z-10 w-full max-w-md animate-in fade-in zoom-in-95 duration-500">
 
                 {/* Logo Area */}

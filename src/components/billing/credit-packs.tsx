@@ -55,9 +55,9 @@ export function CreditPacks({ balance }: { balance: number }) {
 
     return (
         <div className="space-y-5" aria-busy={busy}>
-            <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-[#f4ead6] p-5 sm:flex-row sm:items-center">
+            <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-[#0f141c] p-5 sm:flex-row sm:items-center">
                 <div className="flex items-center gap-3">
-                    <span className="grid size-10 place-items-center rounded-xl bg-[#f6dfb1]">
+                    <span className="grid size-10 place-items-center rounded-xl bg-[#86a7ff]">
                         <WalletCards className="size-5" aria-hidden="true" />
                     </span>
                     <div>
@@ -85,7 +85,7 @@ export function CreditPacks({ balance }: { balance: number }) {
             </div>
 
             {purchaseState.kind === 'redirecting' && (
-                <div className="flex items-start gap-3 rounded-2xl border border-[#8fbda8]/60 bg-[#f0faf5] p-4 text-sm" role="status" aria-live="polite">
+                <div className="flex items-start gap-3 rounded-2xl border border-[#9be3c3]/60 bg-[#10221b] p-4 text-sm" role="status" aria-live="polite">
                     <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-[hsl(var(--success))]" aria-hidden="true" />
                     <div>
                         <p className="font-semibold">Opening secure checkout…</p>
@@ -95,8 +95,8 @@ export function CreditPacks({ balance }: { balance: number }) {
             )}
 
             {(purchaseState.kind === 'unavailable' || purchaseState.kind === 'failed') && (
-                <div className={`flex items-start gap-3 rounded-2xl border p-4 text-sm ${purchaseState.kind === 'unavailable' ? 'border-border bg-secondary/45' : 'border-[#d88f79]/45 bg-[#fff4ef]'}`} role="alert" aria-live="assertive">
-                    <AlertTriangle className={`mt-0.5 size-4 shrink-0 ${purchaseState.kind === 'unavailable' ? 'text-muted-foreground' : 'text-[#8d3f2c]'}`} aria-hidden="true" />
+                <div className={`flex items-start gap-3 rounded-2xl border p-4 text-sm ${purchaseState.kind === 'unavailable' ? 'border-border bg-secondary/45' : 'border-[#ff9e9e]/45 bg-[#26171a]'}`} role="alert" aria-live="assertive">
+                    <AlertTriangle className={`mt-0.5 size-4 shrink-0 ${purchaseState.kind === 'unavailable' ? 'text-muted-foreground' : 'text-[#ff9e9e]'}`} aria-hidden="true" />
                     <div>
                         <p className="font-semibold">{purchaseState.kind === 'unavailable' ? 'Credit purchases are unavailable here.' : 'We could not start checkout.'}</p>
                         <p className="mt-1 text-muted-foreground">{purchaseState.message}</p>
@@ -108,7 +108,7 @@ export function CreditPacks({ balance }: { balance: number }) {
                 {CREDIT_PACKS.map((pack, index) => {
                     const isLoading = loading === pack.id;
                     return (
-                        <div key={pack.id} className={`rounded-[1.1rem] border p-5 ${index === 1 ? 'border-primary bg-[#fff8e9]' : 'border-border bg-card'}`}>
+                        <div key={pack.id} className={`rounded-[1.1rem] border p-5 ${index === 1 ? 'border-primary bg-[#151b25]' : 'border-border bg-card'}`}>
                             <p className="ff-eyebrow">{pack.label}</p>
                             <p className="mt-4 text-xl font-semibold">{pack.credits.toLocaleString()} credits</p>
                             <p className="mt-1 text-sm text-muted-foreground">{pack.amounts[currency].toLocaleString()} {currency}</p>

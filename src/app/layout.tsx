@@ -13,7 +13,7 @@ import { FinalFrameProviders } from '@/components/providers/convex-auth-provider
 import { ConvexAuthNextjsServerProvider } from '@convex-dev/auth/nextjs/server';
 
 function siteUrl(value?: string) {
-    const candidate = value?.trim() || 'https://finalframe.ai';
+    const candidate = value?.trim() || 'https://usefinalframe.xyz';
     return new URL(/^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`);
 }
 
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     openGraph: {
         type: 'website',
         locale: 'en_US',
-        url: 'https://finalframe.ai',
+        url: 'https://usefinalframe.xyz',
         siteName: 'FinalFrame',
         title: 'FinalFrame — Make the video in your head',
         description: 'Turn an idea, script, or your own media into a finished video with FinalFrame.',
@@ -68,7 +68,7 @@ export default async function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body className="min-h-dvh bg-background font-sans antialiased" suppressHydrationWarning>
                 <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-foreground focus:px-4 focus:py-3 focus:text-background">Skip to content</a>
-                <Toaster position="top-right" theme="light" richColors />
+                <Toaster position="top-right" theme="dark" richColors />
                 <ConvexAuthNextjsServerProvider>
                     <FinalFrameProviders>{children}</FinalFrameProviders>
                 </ConvexAuthNextjsServerProvider>

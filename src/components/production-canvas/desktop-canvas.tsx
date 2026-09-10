@@ -148,7 +148,7 @@ export function DesktopCanvas({ nodes, edges, onSelect }: DesktopCanvasProps) {
       <div className="flex flex-col gap-5 border-b border-border/70 p-5 sm:p-7 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-2xl bg-[#f6dfb1] text-foreground">
+            <span className="grid size-10 place-items-center rounded-2xl bg-[#86a7ff] text-foreground">
               <Crosshair className="size-5" aria-hidden="true" />
             </span>
             <div>

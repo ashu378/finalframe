@@ -95,7 +95,7 @@ export default async function EditorPage({
                     </Link>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-[0.2em] text-zinc-50 italic">{project.name}</h1>
-                        <p className="text-sm text-[#cbb7a4] mt-0.5">Finishing studio · {snapshots?.length || 0} versions</p>
+                        <p className="text-sm text-[#91a0b8] mt-0.5">Finishing studio · {snapshots?.length || 0} versions</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">

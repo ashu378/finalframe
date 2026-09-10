@@ -86,7 +86,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
         return (
             <section className="ff-card p-6 sm:p-8" aria-labelledby="assembly-waiting-title">
                 <div className="flex items-start gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f6dfb1]">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#86a7ff]">
                         <PackageCheck className="size-5" aria-hidden="true" />
                     </span>
                     <div>
@@ -136,7 +136,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
             <section className="ff-card p-6 sm:p-8" aria-labelledby="assembly-title" aria-live="polite">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-start gap-3">
-                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#c8ddd5]">
+                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#9be3c3]">
                             <Sparkles className="size-5 text-[hsl(var(--success))]" aria-hidden="true" />
                         </span>
                         <div>
@@ -163,7 +163,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                     </div>
                 )}
                 {state === 'ASSEMBLED' && (
-                    <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#c8ddd5]/60 px-3 py-2 text-xs font-semibold text-[hsl(var(--success))]">
+                    <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#9be3c3]/60 px-3 py-2 text-xs font-semibold text-[hsl(var(--success))]">
                         <Check className="size-4" aria-hidden="true" /> Ready for finishing
                     </div>
                 )}

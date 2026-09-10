@@ -10,7 +10,7 @@ export default async function OnboardingLayout({
     await requireAuth();
 
     return (
-        <div className="onboarding-theme ff-noise flex min-h-dvh items-center justify-center overflow-hidden bg-[#f4ead6] py-10">
+        <div className="onboarding-theme ff-noise flex min-h-dvh items-center justify-center overflow-hidden bg-[#0f141c] py-10">
             <main className="relative z-10 w-full max-w-2xl px-5 sm:px-6">
                 <div className="mb-10 flex items-center justify-between gap-4"><Link href="/" className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-foreground text-background"><Film className="size-5" /></span><span className="ff-display text-xl font-semibold">FinalFrame</span></Link><span className="text-right text-sm text-muted-foreground">You can change this later</span></div>
 
