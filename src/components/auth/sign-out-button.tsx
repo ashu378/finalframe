@@ -2,9 +2,10 @@
 
 import { useRouter } from 'next/navigation';
 import { useAuthActions } from '@convex-dev/auth/react';
+import { LogOut } from 'lucide-react';
 
 export function SignOutButton() {
   const router = useRouter();
   const { signOut } = useAuthActions();
-  return <button onClick={async () => { await signOut(); router.push('/'); router.refresh(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground transition hover:bg-red-50 hover:text-red-700">Log out</button>;
+  return <button type="button" aria-label="Sign out of FinalFrame" onClick={async () => { await signOut(); router.push('/'); router.refresh(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-border/70 bg-secondary/45 px-3 text-sm font-semibold text-foreground transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"><LogOut className="size-4" /> Sign out</button>;
 }

@@ -71,6 +71,25 @@
   .ff-ambient-fallback { @apply relative h-full w-full overflow-hidden bg-[#0b0d12]; }
   .ff-ambient-fallback__grid { @apply absolute inset-[-30%] rotate-[-12deg] opacity-40; background-image: linear-gradient(rgba(134,167,255,.15) 1px, transparent 1px), linear-gradient(90deg, rgba(134,167,255,.15) 1px, transparent 1px); background-size: 44px 44px; mask-image: radial-gradient(circle at center, black, transparent 72%); }
   .ff-ambient-fallback__orb { @apply absolute left-1/2 top-1/2 size-56 -translate-x-1/2 -translate-y-1/2 rounded-full; background: radial-gradient(circle at 35% 30%, rgba(255,199,102,.8), rgba(134,167,255,.2) 32%, transparent 68%); filter: blur(10px); }
+  .ff-interactive-reel { @apply relative min-h-[390px] w-full select-none overflow-visible; perspective: 1200px; touch-action: none; }
+  .ff-reel-glow { @apply pointer-events-none absolute left-1/2 top-1/2 size-72 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl; background: radial-gradient(circle, hsl(var(--primary) / .26), hsl(var(--accent) / .12) 42%, transparent 72%); }
+  .ff-reel-stage { @apply relative mx-auto h-[390px] w-full max-w-[560px]; transform-style: preserve-3d; transform: rotateX(calc(var(--reel-y) * -3deg)) rotateY(calc(var(--reel-x) * 5deg)); transition: transform .65s cubic-bezier(.2,.75,.2,1); }
+  .ff-reel-card { @apply absolute overflow-hidden rounded-[1.35rem] border border-white/20 bg-[#111822] p-2 shadow-[0_35px_70px_-30px_rgba(0,0,0,.95)]; transform-style: preserve-3d; transition: transform .65s cubic-bezier(.2,.75,.2,1), filter .65s ease; }
+  .ff-reel-card::after { content: ""; @apply pointer-events-none absolute inset-0 rounded-[1.1rem] border border-white/10; }
+  .ff-reel-card__image { @apply relative aspect-[.82] overflow-hidden rounded-[1.05rem] bg-[#1a2433]; }
+  .ff-reel-card__image img { @apply object-cover; }
+  .ff-reel-card__shine { @apply pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300; background: linear-gradient(120deg, transparent 20%, rgba(255,255,255,.3) 45%, transparent 66%); transform: translateX(calc(var(--reel-x) * 24%)); }
+  .ff-interactive-reel.is-interacting .ff-reel-card__shine { @apply opacity-100; }
+  .ff-reel-card__meta { @apply flex items-center justify-between gap-2 px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[.12em] text-[#aebbd0]; }
+  .ff-reel-card__dot { @apply size-1.5 rounded-full bg-accent shadow-[0_0_12px_hsl(var(--accent)/.9)]; }
+  .ff-reel-card--center { @apply left-1/2 top-4 z-20 w-[54%] -translate-x-1/2; transform: translate3d(calc(var(--reel-x) * 16px), calc(var(--reel-y) * 12px), 55px) rotateX(calc(var(--reel-y) * -3deg)) rotateY(calc(var(--reel-x) * 7deg)); }
+  .ff-reel-card--left { @apply left-[4%] top-16 z-10 w-[39%] opacity-90; transform: translate3d(calc(var(--reel-x) * -12px), calc(var(--reel-y) * 8px), 0) rotateX(calc(var(--reel-y) * -2deg)) rotateY(calc(-10deg + var(--reel-x) * 5deg)) rotateZ(-9deg); filter: saturate(.8); }
+  .ff-reel-card--right { @apply right-[4%] top-24 z-10 w-[39%] opacity-90; transform: translate3d(calc(var(--reel-x) * 12px), calc(var(--reel-y) * 8px), 0) rotateX(calc(var(--reel-y) * -2deg)) rotateY(calc(10deg + var(--reel-x) * 5deg)) rotateZ(9deg); filter: saturate(.8); }
+  .ff-reel-status { @apply absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-white/15 bg-[#101722]/90 px-3 py-2 text-[#eaf0fa] shadow-2xl backdrop-blur-xl; transform: translateX(-50%) translate3d(calc(var(--reel-x) * -8px), calc(var(--reel-y) * -6px), 80px); }
+  .ff-reel-status strong, .ff-reel-status small { @apply block whitespace-nowrap; }
+  .ff-reel-status strong { @apply text-xs font-semibold; }
+  .ff-reel-status small { @apply mt-0.5 text-[10px] text-[#91a0b8]; }
+  .ff-reel-hint { @apply absolute bottom-0 right-1 z-40 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground; }
 }
 
 @layer utilities {
@@ -117,4 +136,15 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .ff-reel-stage, .ff-reel-card, .ff-reel-status { transform: none !important; }
+}
+
+@media (max-width: 640px) {
+  .ff-interactive-reel { min-height: 320px; }
+  .ff-reel-stage { height: 320px; }
+  .ff-reel-card--center { top: 0; width: 58%; }
+  .ff-reel-card--left { left: 0; top: 54px; width: 42%; }
+  .ff-reel-card--right { right: 0; top: 72px; width: 42%; }
+  .ff-reel-status { bottom: 16px; }
+  .ff-reel-hint { bottom: 0; right: 0; }
 }

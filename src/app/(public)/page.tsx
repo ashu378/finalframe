@@ -6,6 +6,7 @@ import { StoryboardDemo } from '@/components/finalframe/storyboard-demo';
 import { creationModes } from '@/lib/ui/labels';
 import { faqs, showcaseItems } from '@/content/marketing';
 import { ThreeUIAmbient } from '@/components/threeui/ambient';
+import { InteractiveShowcase } from '@/components/threeui/interactive-showcase';
 
 export default function HomePage() {
   return (
@@ -22,7 +23,8 @@ export default function HomePage() {
           </div>
           <div className="relative lg:-mr-24">
             <div className="absolute -left-8 -top-8 size-28 rounded-full bg-[#38538f]/45 blur-2xl" />
-            <div className="relative rounded-[2rem] border border-[#6a4a32]/15 bg-[#1d2939]/60 p-3 shadow-[0_35px_80px_-45px_rgba(54,35,20,.75)] sm:p-5">
+            <InteractiveShowcase />
+            <div className="relative mt-[-3.5rem] rounded-[2rem] border border-[#6a4a32]/15 bg-[#1d2939]/60 p-3 shadow-[0_35px_80px_-45px_rgba(54,35,20,.75)] sm:mt-[-4.5rem] sm:p-5">
               <div className="grid grid-cols-1 gap-3 rounded-[1.4rem] bg-[#0b0d12] p-3 text-[#eaf0fa] sm:grid-cols-[.27fr_1fr] sm:p-4">
                 <div className="flex gap-2 overflow-x-auto rounded-[.9rem] bg-[#151b25] p-2 sm:block sm:space-y-2"><div className="mb-0 flex shrink-0 items-center gap-2 px-1 sm:mb-4"><span className="size-5 rounded-md bg-[#86a7ff]" /><span className="text-[9px] font-semibold">FinalFrame</span></div>{['Idea', 'Plan', 'Make', 'Review'].map((step, index) => <div key={step} className={`flex min-h-9 shrink-0 items-center rounded-lg px-3 py-2 text-[10px] sm:min-h-0 sm:px-2 sm:py-3 ${index === 1 ? 'bg-[#86a7ff] font-semibold text-[#0b0d12]' : 'text-[#91a0b8]'}`}>{step}</div>)}</div>
                 <div className="min-w-0 space-y-3"><div className="flex flex-col items-start gap-2 rounded-xl bg-[#1c2533] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs font-semibold">A short story about a brave pigeon</span><span className="rounded-full bg-[#86a7ff] px-2 py-1 text-[9px] font-semibold text-[#0b0d12]">Plan ready</span></div><div className="relative aspect-[1.25] overflow-hidden rounded-xl bg-[#24345e]"><Image src="/images/gallery/frame_1.png" alt="Storyboard preview of a colorful cartoon scene" fill className="object-cover" sizes="(max-width: 1024px) 90vw, 45vw" /><div className="absolute bottom-3 left-3 rounded-lg bg-[#0b0d12]/80 px-3 py-2 text-[10px]">Part 2 · The surprise</div></div><div className="grid grid-cols-3 gap-2">{['/images/gallery/frame_2.png','/images/gallery/frame_3.png','/images/gallery/frame_4.png'].map((src, index) => <div key={src} className={`relative aspect-video overflow-hidden rounded-lg ${index === 0 ? 'ring-2 ring-[#86a7ff]' : ''}`}><Image src={src} alt={`Storyboard thumbnail ${index + 1}`} fill className="object-cover" sizes="15vw" /></div>)}</div></div>

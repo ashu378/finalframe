@@ -53,6 +53,23 @@ test.describe('FinalFrame visual smoke', () => {
     await expect(page.locator('.ff-ambient__fallback').first()).toBeVisible();
     await expect(page.locator('.ff-ambient__canvas canvas')).toHaveCount(0);
   });
+
+  test('home storyboard reel responds to pointer movement', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'networkidle' });
+    const reel = page.locator('.ff-interactive-reel');
+    const stage = page.locator('.ff-reel-stage');
+    await expect(reel).toBeVisible();
+    const before = await stage.evaluate((node) => getComputedStyle(node).transform);
+    const bounds = await reel.boundingBox();
+    expect(bounds).not.toBeNull();
+    await reel.dispatchEvent('pointermove', {
+      bubbles: true,
+      clientX: bounds!.x + bounds!.width * 0.2,
+      clientY: bounds!.y + bounds!.height * 0.35,
+      pointerType: 'touch',
+    });
+    await expect.poll(() => stage.evaluate((node) => getComputedStyle(node).transform)).not.toBe(before);
+  });
 });
 
 const testEmail = process.env.E2E_TEST_EMAIL;
