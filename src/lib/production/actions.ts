@@ -145,11 +145,12 @@ function fallbackPlan(intent: CreateIntent): DirectorPlan {
 }
 
 function parsePlan(content: string | null, intent: CreateIntent): DirectorPlan {
-    if (!content) return fallbackPlan(intent);
+    if (!content) throw new Error('The planning provider returned no plan content.');
     try {
         const parsed = JSON.parse(content) as Partial<DirectorPlan>;
-        return parsed.sequences?.length && parsed.summary ? { ...fallbackPlan(intent), ...parsed } as DirectorPlan : fallbackPlan(intent);
-    } catch { return fallbackPlan(intent); }
+        if (!parsed.sequences?.length || !parsed.summary) throw new Error('The planning provider returned an incomplete plan.');
+        return { ...fallbackPlan(intent), ...parsed } as DirectorPlan;
+    } catch (error) { throw error instanceof Error ? error : new Error('The planning provider returned invalid plan JSON.'); }
 }
 
 async function authenticatedStudio() {
@@ -167,12 +168,14 @@ export async function createDirectorPlan(intent: CreateIntent): Promise<CreateDi
         if (!normalized.projectId) return { success: false, error: 'A project is required before creating a production plan' };
         const projects = await context.convex.query(api.projects.list, { studioExternalId: context.studio.externalId });
         if (!projects.some((project) => project.externalId === normalized.projectId || project._id === normalized.projectId)) return { success: false, error: 'Project not found' };
-        let plan = fallbackPlan(normalized);
-        if (process.env.OPENROUTER_API_KEY) {
-            try {
-                const response = await executeAITask('AI_BRAIN', [{ role: 'system', content: 'You are FinalFrame AI Director. Return only valid JSON matching DirectorPlan. Keep every shot independently generatable.' }, { role: 'user', content: JSON.stringify({ intent: normalized, requiredKeys: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations'] }) }], { jsonMode: true, temperature: 0.4 });
-                plan = parsePlan(response.content, normalized);
-            } catch (error) { console.warn('[Director] Using validated fallback plan:', error); }
+        if (!process.env.OPENROUTER_API_KEY?.trim()) return { success: false, error: 'OpenRouter is not configured for planning. Add OPENROUTER_API_KEY before running the LLM test.' };
+        let plan: DirectorPlan;
+        try {
+            const response = await executeAITask('AI_BRAIN', [{ role: 'system', content: 'You are FinalFrame AI Director. Return only valid JSON matching DirectorPlan. Keep every shot independently generatable.' }, { role: 'user', content: JSON.stringify({ intent: normalized, requiredKeys: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations'] }) }], { jsonMode: true, temperature: 0.4 });
+            plan = parsePlan(response.content, normalized);
+        } catch (error) {
+            console.error('[Director] OpenRouter planning failed:', error);
+            return { success: false, error: 'The planning provider could not create a plan. No fallback or fake plan was used.' };
         }
         const totalShots = plan.sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sum, scene) => sum + scene.shots.length, 0), 0);
         const totalSeconds = plan.sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sum, scene) => sum + scene.shots.reduce((shotSum, shot) => shotSum + shot.durationSeconds, 0), 0), 0);

@@ -34,6 +34,7 @@ const baseManifest = {
     { id: 'cue-1', startFrame: 15, durationInFrames: 45, text: 'The setup.' },
   ] }],
   poster: { src: 'file:///fixtures/poster.jpg', width: 1080, height: 1920, mimeType: 'image/jpeg' },
+  metadata: { lockState: 'LOCKED', lockId: 'render-qa-lock', lockedAt: '2026-08-25T10:00:00.000Z', lockedBy: 'render-qa' },
 };
 
 const failures = [];
@@ -107,7 +108,7 @@ async function main() {
     const calls = [];
     const runtime = { render: async (plan, request) => { calls.push({ manifestId: plan.manifestId, jobId: request.jobId }); fs.mkdirSync(path.dirname(request.outputPath), { recursive: true }); fs.writeFileSync(request.outputPath, 'deterministic-render-fixture'); return { outputPath: request.outputPath, durationInFrames: plan.durationInFrames }; } };
     const render = new BoundedDeterministicRenderer(runtime);
-    const request = { jobId: 'render-job-idempotency', manifest: baseManifest, outputPath: '/exports/render-job-idempotency.mp4' };
+    const request = { jobId: 'render-job-idempotency', manifest: baseManifest, outputPath: '/tmp/finalframe-render-tests/render-job-idempotency.mp4', mode: 'fixture' };
     const first = await render.render(request);
     const second = await render.render(structuredClone(request));
     assert.deepEqual(first, second);

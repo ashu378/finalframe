@@ -15,4 +15,5 @@ export {
   getReservationForJob,
   listReservations,
   getLedger,
+  grantTestCredits,
 } from "./financial";

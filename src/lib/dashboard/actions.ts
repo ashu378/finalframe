@@ -5,9 +5,10 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import type { FullProject } from '@/lib/types/database';
 
 export async function getDashboardOverview() {
-  const convex = await getAuthenticatedConvexClient();
-  const data = await convex.query(api.app.dashboard, {});
-  const recentProjects = data.projects.map((project: any) => ({
+  try {
+    const convex = await getAuthenticatedConvexClient();
+    const data = await convex.query(api.app.dashboard, {});
+    const recentProjects = data.projects.map((project: any) => ({
     id: project.externalId,
     studio_id: project.studioExternalId,
     name: project.name,
@@ -31,7 +32,11 @@ export async function getDashboardOverview() {
     updated_at: new Date(project.updatedAt).toISOString(),
     archived_at: null,
     deleted_at: null,
-  })) as FullProject[];
-  const activities = recentProjects.slice(0, 4).map(project => ({ id: project.id, type: 'project' as const, label: project.name, description: `Video project updated`, timestamp: project.updated_at }));
-  return { stats: data.stats, recentProjects, activities };
+    })) as FullProject[];
+    const activities = recentProjects.slice(0, 4).map(project => ({ id: project.id, type: 'project' as const, label: project.name, description: `Video project updated`, timestamp: project.updated_at }));
+    return { stats: data.stats, recentProjects, activities };
+  } catch (error) {
+    console.error('Convex dashboard overview failed:', error);
+    return { stats: { totalProjects: 0, activeJobs: 0, totalAssets: 0, creditsRemaining: 0 }, recentProjects: [], activities: [] };
+  }
 }

@@ -3,8 +3,10 @@
  * Reference: HARD CONSTRAINT DOCUMENT § 3
  * Reference: HARD CONSTRAINT DOCUMENT § 4 — Execution Profile Rule
  * 
- * This adapter is the ONLY location for video model selection.
- * Veo models are accessed THROUGH Runway (not a separate provider).
+ * Legacy adapter retained for backwards compatibility only. Production video
+ * generation routes through the centralized OpenRouter gateway. Runway calls
+ * require an explicit opt-in so a stale feature path cannot send production
+ * traffic to this provider accidentally.
  * 
  * API Version: 2024-11-06
  */
@@ -150,6 +152,9 @@ async function submitTask(
         studioAssets?: StudioAsset[];
     }
 ): Promise<{ taskId: string }> {
+    if (process.env.RUNWAY_LEGACY_ENABLED !== 'true') {
+        throw new Error('Legacy Runway adapter is disabled; use the OpenRouter video gateway.');
+    }
     if (!RUNWAY_API_KEY) {
         throw new Error('RUNWAY_API_KEY environment variable is not set');
     }

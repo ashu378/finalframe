@@ -88,6 +88,67 @@ export const getBalance = query({
   },
 });
 
+/**
+ * Development-only credit grant for one explicitly selected studio. This is
+ * never a payment, is owner/admin protected, and is disabled unless the
+ * deployment explicitly opts in with FINALFRAME_TEST_CREDITS_ENABLED=true.
+ */
+export const grantTestCredits = mutation({
+  args: {
+    studioExternalId: v.string(),
+    amount: v.number(),
+    idempotencyKey: v.string(),
+    reason: v.string(),
+  },
+  returns: v.object({
+    studioExternalId: v.string(),
+    amount: v.number(),
+    balance: v.number(),
+    ledgerId: v.id("ledger"),
+  }),
+  handler: async (ctx, args) => {
+    if (process.env.FINALFRAME_TEST_CREDITS_ENABLED !== "true") {
+      throw new Error("Development test credits are disabled on this deployment.");
+    }
+    const member = await requireAdmin(ctx, args.studioExternalId);
+    if (!Number.isInteger(args.amount) || args.amount <= 0 || args.amount > 10000) {
+      throw new Error("Test credit amount must be an integer between 1 and 10000.");
+    }
+    const reason = args.reason.trim();
+    if (reason.length < 3 || reason.length > 240) throw new Error("A short test-credit reason is required.");
+    const idempotencyKey = `test-credit:${requireKey(args.idempotencyKey)}`;
+    const existing = await ctx.db.query("ledger").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
+    if (existing) {
+      if (existing.studioExternalId !== member.studio.externalId || existing.amount !== args.amount) throw new Error("Test-credit idempotency key is already used for a different grant.");
+      const current = await wallet(ctx, member);
+      return { studioExternalId: member.studio.externalId, amount: existing.amount, balance: current?.balance ?? member.studio.credits, ledgerId: existing._id };
+    }
+    const updated = await changeWallet(ctx, member, args.amount, 0);
+    const ledger = await appendLedger(ctx, {
+      studioExternalId: member.studio.externalId,
+      studioId: member.studio._id,
+      entryType: "TEST_CREDIT_GRANT",
+      amount: args.amount,
+      sourceType: "DEVELOPMENT_TEST",
+      sourceId: member.identity.externalId,
+      idempotencyKey,
+      metadata: { reason, actorExternalId: member.identity.externalId },
+    });
+    await ctx.db.insert("audit", {
+      studioExternalId: member.studio.externalId,
+      studioId: member.studio._id,
+      actorExternalId: member.identity.externalId,
+      actorUserId: member.user._id,
+      action: "TEST_CREDITS_GRANTED",
+      entityType: "studio",
+      entityId: member.studio.externalId,
+      metadata: { amount: args.amount, reason, idempotencyKey },
+      createdAt: now(),
+    });
+    return { studioExternalId: member.studio.externalId, amount: args.amount, balance: updated.balance, ledgerId: ledger!._id };
+  },
+});
+
 export const reserve = mutation({
   args: { studioExternalId: v.string(), amount: v.number(), idempotencyKey: v.string(), generationJobId: v.optional(v.id("generationJobs")), renderJobId: v.optional(v.id("renderJobs")), estimateId: v.optional(v.id("estimates")), expiresInMs: v.optional(v.number()), metadata: v.optional(v.any()) },
   handler: async (ctx, args) => {
