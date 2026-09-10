@@ -39,7 +39,7 @@ export default async function DashboardLayout({
                     <Link href="/dashboard/create" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground" aria-label="Create a video"><Plus className="size-4" /></Link>
                     <Link href="/dashboard/assets" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Media library"><FolderOpen className="size-4" /></Link>
                     <Link href="/dashboard/settings" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Settings and credits"><Settings className="size-4" /></Link>
-                    <div className="ml-1"><SignOutButton /></div>
+                    <div className="ml-1"><SignOutButton compact /></div>
                 </div>
             </nav>
             <main id="main-content" className="min-h-dvh md:ml-64">
