@@ -7,6 +7,8 @@ const ts = require('../../node_modules/typescript');
 const repoRoot = path.resolve(__dirname, '../..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'finalframe-generation-contracts-'));
 process.env.OPENROUTER_IMAGE_MODEL = 'test/registered-image';
+process.env.OPENROUTER_PLANNER_MODEL = 'test/planner-primary';
+process.env.OPENROUTER_PLANNER_FALLBACK_MODELS = 'test/planner-fallback';
 
 function compile(relativePath, outputName) {
   const sourcePath = path.join(repoRoot, relativePath);
@@ -121,6 +123,29 @@ async function main() {
     assert.deepEqual(adapter.classifyOpenRouterError(408), { code: 'REQUEST_TIMEOUT', retryable: true });
     assert.deepEqual(adapter.classifyOpenRouterError(429), { code: 'PROVIDER_RATE_LIMIT', retryable: true });
     assert.deepEqual(adapter.classifyOpenRouterError(422), { code: 'INVALID_REQUEST', retryable: false });
+  });
+
+  await check('incompatible model responses try the next planning model', async () => {
+    const attempted = [];
+    const result = await adapter.executeAITask(
+      'STRUCTURED_PLANNING',
+      [{ role: 'user', content: 'planning fixture' }],
+      {
+        apiKey: 'local-test-only',
+        jsonMode: true,
+        retry: { maxRetries: 0 },
+        mock: {
+          seed: 'planning-fallback',
+          handler: async (request) => {
+            attempted.push(request.body.model);
+            if (attempted.length === 1) return { status: 422, body: { error: { message: 'No compatible planning model was available.' } } };
+            return { body: { model: request.body.model, choices: [{ message: { role: 'assistant', content: '{"ok":true}' } }] } };
+          },
+        },
+      },
+    );
+    assert.equal(result.modelUsed, 'test/planner-fallback');
+    assert.deepEqual(attempted, ['test/planner-primary', 'test/planner-fallback']);
   });
 
   await check('generation request requires a stable idempotency key contract', async () => {

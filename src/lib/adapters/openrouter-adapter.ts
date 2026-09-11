@@ -220,7 +220,12 @@ export function classifyOpenRouterError(status: number): { code: AICapabilityErr
 }
 
 function isFallbackEligible(error: AICapabilityError): boolean {
-    return error.code === 'UNSUPPORTED_MODEL' || error.retryable;
+    if (error.code === 'UNSUPPORTED_MODEL' || error.retryable) return true;
+    // OpenRouter sometimes reports an unavailable/incompatible model as a
+    // 400/422 request error. Treat only those explicit availability messages
+    // as model failures so ordinary malformed requests still fail fast.
+    const providerMessage = asString(asRecord(error.details).providerMessage) || '';
+    return /no compatible .* model|model .* (?:not available|unavailable|not found)|no endpoints? found|does not support (?:the )?requested/i.test(`${error.message} ${providerMessage}`);
 }
 
 function retryOptions(options: OpenRouterTransportOptions): Required<Pick<OpenRouterRetryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs'>> & Pick<OpenRouterRetryOptions, 'sleep'> {
