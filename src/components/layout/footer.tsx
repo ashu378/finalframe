@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Film, Mail } from 'lucide-react';
+import Image from 'next/image';
+import { Mail } from 'lucide-react';
 
 export function Footer() {
   return (
@@ -8,7 +9,7 @@ export function Footer() {
         <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Link href="/" className="flex items-center gap-3">
-              <span className="grid size-9 place-items-center rounded-xl bg-foreground text-background"><Film className="size-4" /></span>
+              <span className="grid size-9 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={36} height={36} className="size-full object-cover" /></span>
               <span className="ff-display text-lg font-semibold">FinalFrame</span>
             </Link>
             <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">A friendly production studio for turning ideas, scripts, footage, and brand assets into finished video.</p>

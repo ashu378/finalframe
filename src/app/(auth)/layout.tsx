@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Film } from 'lucide-react';
+import Image from 'next/image';
 
 export default function AuthLayout({
     children,
@@ -13,7 +13,7 @@ export default function AuthLayout({
                 {/* Logo Area */}
                 <div className="mb-8 flex flex-col items-center">
                     <Link href="/" className="group mb-2 flex items-center gap-3 transition-transform hover:scale-105">
-                        <span className="grid size-10 place-items-center rounded-xl bg-foreground text-background"><Film className="size-5" /></span>
+                        <span className="grid size-10 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={40} height={40} className="size-full object-cover" priority /></span>
                         <span className="ff-display text-2xl font-semibold">FinalFrame</span>
                     </Link>
                     <p className="text-sm text-muted-foreground">A calmer way to make video</p>

@@ -50,8 +50,8 @@ export const metadata: Metadata = {
         images: ['/og-image.png'],
     },
     icons: {
-        icon: '/icon.svg',
-        apple: '/icon.svg',
+        icon: '/brand/finalframe-mark-small.png',
+        apple: '/brand/finalframe-mark-small.png',
     },
     robots: {
         index: true,

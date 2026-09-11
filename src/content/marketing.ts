@@ -1,8 +1,8 @@
 export const showcaseItems = [
-  { title: 'Pigeon wahala at the roadside kiosk', type: 'Nigerian 2D comedy', image: '/images/showcase/nigerian-comedy-storyboard.png', description: 'Big expressions, local places, and a story people can feel immediately.' },
-  { title: 'A product demo that feels human', type: 'Website content', image: '/images/templates/saas_walkthrough.png', description: 'Explain what you do without making people work for it.' },
-  { title: 'A review from a real point of view', type: 'UGC video', image: '/images/templates/ugc_review.png', description: 'Turn a talking point, testimonial, or phone clip into a polished video.' },
-  { title: 'Make the launch feel like a moment', type: 'Motion graphics', image: '/images/templates/motion_hype.png', description: 'Build energy around a new product, event, or announcement.' },
+  { title: 'Pigeon wahala at the roadside kiosk', type: 'Nigerian 2D comedy', image: '/images/generated/finalframe-3d-studio.webp', description: 'Big expressions, local places, and a story people can feel immediately.' },
+  { title: 'A product demo that feels human', type: 'Website content', image: '/images/generated/finalframe-3d-blueprint.webp', description: 'Explain what you do without making people work for it.' },
+  { title: 'A review from a real point of view', type: 'UGC video', image: '/images/generated/finalframe-3d-review.webp', description: 'Turn a talking point, testimonial, or phone clip into a polished video.' },
+  { title: 'Make the launch feel like a moment', type: 'Motion graphics', image: '/images/generated/finalframe-3d-studio.webp', description: 'Build energy around a new product, event, or announcement.' },
 ];
 
 export const faqs = [

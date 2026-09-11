@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Film } from 'lucide-react';
+import Image from 'next/image';
 import { requireAuth } from '@/lib/guards';
 
 export default async function OnboardingLayout({
@@ -12,7 +12,7 @@ export default async function OnboardingLayout({
     return (
         <div className="onboarding-theme ff-noise flex min-h-dvh items-center justify-center overflow-hidden bg-[#0f141c] py-10">
             <main className="relative z-10 w-full max-w-2xl px-5 sm:px-6">
-                <div className="mb-10 flex items-center justify-between gap-4"><Link href="/" className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-foreground text-background"><Film className="size-5" /></span><span className="ff-display text-xl font-semibold">FinalFrame</span></Link><span className="text-right text-sm text-muted-foreground">You can change this later</span></div>
+                <div className="mb-10 flex items-center justify-between gap-4"><Link href="/" className="flex items-center gap-3"><span className="grid size-10 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={40} height={40} className="size-full object-cover" priority /></span><span className="ff-display text-xl font-semibold">FinalFrame</span></Link><span className="text-right text-sm text-muted-foreground">You can change this later</span></div>
 
                 {/* Card */}
                 <div className="ff-card w-full p-6 sm:p-10 animate-in zoom-in-95 fade-in duration-700 delay-200">

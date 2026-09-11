@@ -7,9 +7,9 @@ import { CSSProperties, PointerEvent, useCallback, useState } from 'react';
 type Tilt = { x: number; y: number };
 
 const frames = [
-  { src: '/images/gallery/frame_2.png', label: '01 · Opening beat', className: 'ff-reel-card--left' },
-  { src: '/images/gallery/frame_1.png', label: '02 · Hero frame', className: 'ff-reel-card--center' },
-  { src: '/images/gallery/frame_3.png', label: '03 · Turning point', className: 'ff-reel-card--right' },
+  { src: '/images/generated/finalframe-3d-blueprint.webp', label: '01 · Build the blueprint', className: 'ff-reel-card--left' },
+  { src: '/images/generated/finalframe-3d-studio.webp', label: '02 · Shape the scene', className: 'ff-reel-card--center' },
+  { src: '/images/generated/finalframe-3d-review.webp', label: '03 · Review the final frame', className: 'ff-reel-card--right' },
 ];
 
 export function InteractiveShowcase() {

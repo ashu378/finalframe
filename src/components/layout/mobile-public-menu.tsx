@@ -24,7 +24,7 @@ export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) 
   }, [open]);
 
   return (
-    <div className="md:hidden">
+    <div className="lg:hidden">
       <button
         type="button"
         className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-border/70 text-foreground transition hover:bg-secondary focus-visible:outline-none"
@@ -46,7 +46,7 @@ export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) 
         >
           <nav className="grid gap-1" aria-label="Mobile main navigation">
             {links.map((link) => (
-              <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className="flex min-h-12 items-center rounded-xl px-4 text-base font-semibold transition hover:bg-secondary">
+                <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className="flex min-h-12 items-center whitespace-nowrap rounded-xl px-4 text-base font-semibold transition hover:bg-secondary">
                 {link.label}
               </Link>
             ))}
