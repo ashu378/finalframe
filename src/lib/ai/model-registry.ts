@@ -40,15 +40,21 @@ export interface AIModelConfig {
 
 function configuredModel(name: string, fallback: string): string {
     const value = process.env[name]?.trim();
-    return value || fallback;
+    // OpenRouter's auto router cannot guarantee strict structured output and
+    // must never be used for a capability that declares a schema.
+    return value && !isUnsafeAutoModel(value) ? value : fallback;
 }
 
 function configuredFallbacks(name: string, defaults: readonly string[] = []): string[] {
     const configured = (process.env[name] || '')
         .split(',')
         .map((value) => value.trim())
-        .filter(Boolean);
+        .filter((value) => value && !isUnsafeAutoModel(value));
     return configured.length ? configured : [...defaults];
+}
+
+function isUnsafeAutoModel(value: string): boolean {
+    return value === 'auto' || value === 'openrouter/auto' || value === 'openrouter/auto-beta';
 }
 
 /**
@@ -95,13 +101,13 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         fallbackIds: configuredFallbacks('OPENROUTER_VALIDATOR_FALLBACK_MODELS', ['openai/gpt-6-astra']),
     },
     STRUCTURED_PLANNING: {
-        id: configuredModel('OPENROUTER_PLANNER_MODEL', configuredModel('OPENROUTER_AI_BRAIN_MODEL', 'openai/gpt-6-astra')),
+        id: configuredModel('OPENROUTER_PLANNER_MODEL', 'google/gemini-2.5-flash'),
         provider: 'openrouter',
         capability: 'STRUCTURED_PLANNING',
         contextWindow: 200000,
         description: 'Strict structured production planning',
         costTier: 'premium', inputModalities: ['text', 'image', 'audio', 'video', 'file'], outputModalities: ['text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_PLANNER_FALLBACK_MODELS', ['anthropic/claude-fable-5.1']),
+        fallbackIds: configuredFallbacks('OPENROUTER_PLANNER_FALLBACK_MODELS', ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini']),
     },
     VALIDATION: {
         id: configuredModel('OPENROUTER_VALIDATION_MODEL', configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-3.8-flash')),
