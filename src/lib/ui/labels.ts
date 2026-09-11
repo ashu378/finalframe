@@ -59,12 +59,12 @@ export type CreationModeDefinition = {
 };
 
 export const creationModes = [
-  { id: 'IDEA', title: 'Start with an idea', description: 'Describe a story, ad, cartoon, or product video in your own words.', accent: 'bg-[#f6dfb1]' },
-  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring dialogue or a rough outline and we will shape the visuals.', accent: 'bg-[#f1c7b7]' },
-  { id: 'VOICE', title: 'Bring a voice recording', description: 'Use your performance as an optional timing and feeling guide.', accent: 'bg-[#c8ddd5]' },
-  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-[#d8cee8]' },
-  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or references.', accent: 'bg-[#e8c7a8]' },
-  { id: 'AD', title: 'Make an ad', description: 'Start with a product, service, audience, or offer.', accent: 'bg-[#d7d0e9]' },
+  { id: 'IDEA', title: 'Start with an idea', description: 'Describe a story, ad, cartoon, or product video in your own words.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
+  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring dialogue or a rough outline and we will shape the visuals.', accent: 'bg-card border border-accent/35 shadow-[0_20px_55px_-38px_hsl(39_100%_67%_/_0.75)] hover:border-accent/75 hover:bg-secondary/80' },
+  { id: 'VOICE', title: 'Bring a voice recording', description: 'Use your performance as an optional timing and feeling guide.', accent: 'bg-card border border-[hsl(var(--success)/.45)] shadow-[0_20px_55px_-38px_hsl(var(--success)/.85)] hover:border-[hsl(var(--success)/.85)] hover:bg-secondary/80' },
+  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
+  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or references.', accent: 'bg-card border border-accent/35 shadow-[0_20px_55px_-38px_hsl(39_100%_67%_/_0.75)] hover:border-accent/75 hover:bg-secondary/80' },
+  { id: 'AD', title: 'Make an ad', description: 'Start with a product, service, audience, or offer.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
 ] satisfies readonly CreationModeDefinition[];
 
 export function getCreationMode(mode: CreationMode): CreationModeDefinition {
