@@ -82,8 +82,13 @@ export async function createProject(options: {
     identityPresence?: string;
 }): Promise<{ success: boolean; projectId?: string; error?: string }> {
     try {
-        const { convex, studio } = await currentStudio();
-        if (!studio) return { success: false, error: 'Studio setup is required before creating a project' };
+        const convex = await getAuthenticatedConvexClient();
+        // Existing accounts may predate automatic studio provisioning. Repair
+        // that record before resolving ownership so project creation is safe
+        // without forcing users through the preference questionnaire.
+        await convex.mutation(api.account.ensureAccount, {});
+        const current = await convex.query(api.account.current, {});
+        if (!current.studio) return { success: false, error: 'We could not prepare your workspace yet. Please try again.' };
         const project = await convex.mutation(api.projects.create, {
             name: options.name.trim(),
             description: options.description.trim(),

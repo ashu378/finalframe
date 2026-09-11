@@ -13,6 +13,8 @@ import Image from 'next/image';
 import { FolderOpen, Plus, Settings } from 'lucide-react';
 import { SignOutButton } from '@/components/auth/sign-out-button';
 import { ScrollRevealRoot } from '@/components/threeui/scroll-reveal-root';
+import { api } from '@/../convex/_generated/api';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
 export default async function DashboardLayout({
     children,
@@ -20,6 +22,9 @@ export default async function DashboardLayout({
     children: React.ReactNode;
 }) {
     await requireOnboardingComplete();
+    // Repair accounts created before automatic starter-studio provisioning.
+    // This is idempotent and keeps the project flow independent of onboarding.
+    await (await getAuthenticatedConvexClient()).mutation(api.account.ensureAccount, {});
 
     // Admin Access Control
     // If we're on a route starting with /admin, ensure the user is an admin

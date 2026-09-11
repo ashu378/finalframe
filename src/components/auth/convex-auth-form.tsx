@@ -34,7 +34,7 @@ export function ConvexAuthForm({ mode }: { mode: Mode }) {
         router.push(`/verify-email?email=${encodeURIComponent(String(formData.get('email') || ''))}`);
         return;
       }
-      if (mode === 'signUp') await ensureAccount({ name: String(formData.get('fullName') || '').trim() });
+      await ensureAccount(mode === 'signUp' ? { name: String(formData.get('fullName') || '').trim() } : {});
       router.push('/dashboard');
       router.refresh();
     } catch {
