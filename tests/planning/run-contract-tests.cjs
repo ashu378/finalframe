@@ -30,6 +30,9 @@ const qualityPath = compileModule('src/lib/ai/planning/quality.ts');
 const { inspectPlanQuality, assertPlanQuality, hasBlockingQualityGate } = require(qualityPath);
 const fixturePath = compileModule('tests/planning/fixtures.ts');
 const { validCreateIntent, validDirectorPlan, genericShot } = require(fixturePath);
+const productionSchemaPath = compileModule('src/lib/production/planning-schema.ts');
+const { LEGACY_DIRECTOR_PLAN_SCHEMA } = require(productionSchemaPath);
+const productionActionsSource = fs.readFileSync(path.join(repoRoot, 'src/lib/production/actions.ts'), 'utf8');
 
 // This suite deliberately does not import an adapter or call fetch.
 global.fetch = async () => { throw new Error('Live provider access is forbidden in planning contract tests'); };
@@ -82,6 +85,16 @@ expectThrow('duration mismatch is rejected', () => assertPlanQuality({ ...validD
 expectThrow('generic shots must be rejected before generation', () => assertPlanQuality({ ...validDirectorPlan, shots: [genericShot], durationSeconds: genericShot.durationSeconds }), /generic|specific|purpose|action|prompt/i);
 assert.equal(hasBlockingQualityGate({ status: 'BLOCKED', evidence: [] }), true, 'blocked quality gates must stop generation');
 assert.equal(hasBlockingQualityGate({ status: 'PASS', evidence: [{ rule: 'continuity', result: 'FAIL', explanation: 'mismatch' }] }), true, 'failed quality evidence must stop generation');
+
+// The form must use the legacy sequence/scene contract that Convex persists,
+// with a strict structured-output request. This prevents valid provider output
+// from being parsed against a different shot-only contract.
+assert.match(productionActionsSource, /executeAITask\('STRUCTURED_PLANNING'/, 'production planning must use the structured planning capability');
+assert.match(productionActionsSource, /LEGACY_DIRECTOR_PLAN_SCHEMA/, 'production planning must send the persistence schema to the provider');
+assert.doesNotMatch(productionActionsSource, /No fallback or fake plan was used/, 'provider failures must not expose the old misleading fallback message');
+assert.equal(LEGACY_DIRECTOR_PLAN_SCHEMA.strict, true, 'legacy production schema must be strict');
+assert.equal(LEGACY_DIRECTOR_PLAN_SCHEMA.schema.additionalProperties, false, 'legacy production schema must close the root object');
+assert.ok(LEGACY_DIRECTOR_PLAN_SCHEMA.schema.required.includes('sequences'), 'legacy production schema must require sequences');
 
 // Idempotency is a planning boundary: the same production/shot identity must
 // yield the same key, while a different shot must yield a different key.

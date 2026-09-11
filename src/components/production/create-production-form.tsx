@@ -80,6 +80,7 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
             if (!result.success) throw new Error(result.error || 'Could not create your plan');
             setPlan({ ...result, projectId, inputAssetIds });
             toast.success(options?.revision ? 'Your revised plan is ready to review.' : 'Your plan is ready to review.');
+            if (result.warning) toast.info(result.warning);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Something went wrong');
         } finally {
