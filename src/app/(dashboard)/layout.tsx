@@ -12,6 +12,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { FolderOpen, Plus, Settings } from 'lucide-react';
 import { SignOutButton } from '@/components/auth/sign-out-button';
+import { ScrollRevealRoot } from '@/components/threeui/scroll-reveal-root';
 
 export default async function DashboardLayout({
     children,
@@ -43,6 +44,7 @@ export default async function DashboardLayout({
                     <div className="ml-1"><SignOutButton compact /></div>
                 </div>
             </nav>
+            <ScrollRevealRoot selector="#main-content > div > *" />
             <main id="main-content" className="min-h-dvh md:ml-64">
                 <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-8 sm:py-8">
                     {children}

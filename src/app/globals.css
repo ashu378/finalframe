@@ -71,7 +71,13 @@
   .ff-ambient-fallback { @apply relative h-full w-full overflow-hidden bg-[#0b0d12]; }
   .ff-ambient-fallback__grid { @apply absolute inset-[-30%] rotate-[-12deg] opacity-40; background-image: linear-gradient(rgba(134,167,255,.15) 1px, transparent 1px), linear-gradient(90deg, rgba(134,167,255,.15) 1px, transparent 1px); background-size: 44px 44px; mask-image: radial-gradient(circle at center, black, transparent 72%); }
   .ff-ambient-fallback__orb { @apply absolute left-1/2 top-1/2 size-56 -translate-x-1/2 -translate-y-1/2 rounded-full; background: radial-gradient(circle at 35% 30%, rgba(255,199,102,.8), rgba(134,167,255,.2) 32%, transparent 68%); filter: blur(10px); }
+  .ff-scroll-reveal { opacity: 0; transform: translate3d(0, 42px, 0) scale(.985); filter: blur(7px); transition: opacity .8s ease, transform .8s cubic-bezier(.2,.75,.2,1), filter .8s ease; transition-delay: var(--reveal-delay, 0ms); will-change: opacity, transform, filter; }
+  .ff-scroll-reveal.is-visible { opacity: 1; transform: none; filter: none; }
   .ff-interactive-reel { @apply relative min-h-[390px] w-full select-none overflow-visible; perspective: 1200px; touch-action: none; }
+  .ff-reel-canvas { @apply pointer-events-none absolute inset-0 z-10 h-full w-full; display: block; }
+  .ff-interactive-reel[data-webgl="enabled"] .ff-reel-stage { opacity: .16; }
+  .ff-interactive-reel[data-webgl="enabled"] .ff-reel-glow { opacity: .45; }
+  .ff-interactive-reel[data-webgl="fallback"] .ff-reel-canvas { display: none; }
   .ff-reel-glow { @apply pointer-events-none absolute left-1/2 top-1/2 size-72 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl; background: radial-gradient(circle, hsl(var(--primary) / .26), hsl(var(--accent) / .12) 42%, transparent 72%); }
   .ff-reel-stage { @apply relative mx-auto h-[390px] w-full max-w-[560px]; transform-style: preserve-3d; transform: rotateX(calc(var(--reel-y) * -3deg)) rotateY(calc(var(--reel-x) * 5deg)); transition: transform .65s cubic-bezier(.2,.75,.2,1); }
   .ff-reel-card { @apply absolute overflow-hidden rounded-[1.35rem] border border-white/20 bg-[#111822] p-2 shadow-[0_35px_70px_-30px_rgba(0,0,0,.95)]; transform-style: preserve-3d; transition: transform .65s cubic-bezier(.2,.75,.2,1), filter .65s ease; }
@@ -130,6 +136,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ff-scroll-reveal, .ff-scroll-reveal.is-visible { opacity: 1; transform: none; filter: none; transition: none; }
   .ff-ambient__canvas { display: none; }
   .ff-ambient__fallback { opacity: 1; }
 }

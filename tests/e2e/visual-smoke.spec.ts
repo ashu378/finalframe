@@ -70,6 +70,17 @@ test.describe('FinalFrame visual smoke', () => {
     });
     await expect.poll(() => stage.evaluate((node) => getComputedStyle(node).transform)).not.toBe(before);
   });
+
+  test('homepage sections reveal as they enter the viewport', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'networkidle' });
+    const sections = page.locator('#main-content section.ff-scroll-reveal');
+    await expect(sections.first()).toHaveClass(/is-visible/);
+    const laterSection = sections.nth(3);
+    await expect(laterSection).toBeAttached();
+    await expect(laterSection).not.toHaveClass(/is-visible/);
+    await laterSection.scrollIntoViewIfNeeded();
+    await expect(laterSection).toHaveClass(/is-visible/);
+  });
 });
 
 const testEmail = process.env.E2E_TEST_EMAIL;

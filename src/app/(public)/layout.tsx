@@ -6,6 +6,7 @@
 
 import { Header } from '@/components/layout/header';
 import { Footer } from '@/components/layout/footer';
+import { ScrollRevealRoot } from '@/components/threeui/scroll-reveal-root';
 
 export default function PublicLayout({
     children,
@@ -18,6 +19,7 @@ export default function PublicLayout({
                 Early access is open — bring an idea and make your first video.
             </div>
             <Header />
+            <ScrollRevealRoot selector="#main-content > section, #main-content > div > section, #main-content > .legal-document-container, #main-content > div > .legal-document-container, #main-content > div > main" />
             <main id="main-content">{children}</main>
             <Footer />
         </>
