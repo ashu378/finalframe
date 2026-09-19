@@ -16,6 +16,20 @@ export type AICapability =
     | 'STRUCTURED_PLANNING'
     | 'VALIDATION';
 
+/** Product-facing capability names. Provider and model IDs stay hidden. */
+export type LogicalCapabilityId =
+    | 'planner'
+    | 'writer'
+    | 'director'
+    | 'orchestrator'
+    | 'validator'
+    | 'vision_qc'
+    | 'video_preview'
+    | 'video_final'
+    | 'tts'
+    | 'stt'
+    | 'image';
+
 export type ExecutionProfile =
     | 'FAST_SOCIAL'
     | 'COMMERCIAL'
@@ -47,7 +61,6 @@ const RETIRED_MODEL_IDS = new Set([
     'openai/gpt-4o-mini',
     'google/veo-3.1-fast',
     'bytedance/seedance-2.0-fast',
-    'kwaivgi/kling-v3.0-std',
 ]);
 
 function configuredModel(name: string, fallback: string): string {
@@ -106,6 +119,26 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FALLBACK_MODELS', ['google/veo-3.1', 'openai/sora-2-pro', 'kwaivgi/kling-v3.0-pro']),
         selectFromCatalog: false,
     },
+    VIDEO_PREVIEW: {
+        id: configuredModel('OPENROUTER_VIDEO_PREVIEW_MODEL', 'bytedance/seedance-2.0-mini'),
+        provider: 'openrouter',
+        capability: 'VIDEO_PREVIEW',
+        contextWindow: 128000,
+        description: 'Fast, low-cost preview video generation',
+        costTier: 'standard', inputModalities: ['text', 'image', 'video'], outputModalities: ['video'],
+        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_PREVIEW_FALLBACK_MODELS', ['google/veo-3.1-lite', 'kwaivgi/kling-v3.0-std']),
+        selectFromCatalog: false,
+    },
+    VIDEO_FINAL: {
+        id: configuredModel('OPENROUTER_VIDEO_FINAL_MODEL', configuredModel('OPENROUTER_VIDEO_MODEL', 'bytedance/seedance-2.5')),
+        provider: 'openrouter',
+        capability: 'VIDEO_FINAL',
+        contextWindow: 128000,
+        description: 'High-quality final video generation',
+        costTier: 'premium', inputModalities: ['text', 'image', 'video'], outputModalities: ['video'],
+        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FINAL_FALLBACK_MODELS', ['google/veo-3.1', 'openai/sora-2-pro', 'kwaivgi/kling-v3.0-pro']),
+        selectFromCatalog: false,
+    },
     VALIDATOR_ENGINE: {
         id: configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-3.8-flash'),
         provider: 'openrouter',
@@ -157,13 +190,13 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         selectFromCatalog: false,
     },
     TEXT_TO_SPEECH: {
-        id: configuredModel('OPENROUTER_TTS_MODEL', 'openai/gpt-audio-mini'),
+        id: configuredModel('OPENROUTER_TTS_MODEL', 'google/gemini-3.1-flash-tts-preview'),
         provider: 'openrouter',
         capability: 'TEXT_TO_SPEECH',
         contextWindow: 32000,
         description: 'Text-to-speech generation',
         costTier: 'standard', inputModalities: ['text'], outputModalities: ['audio'],
-        fallbackIds: configuredFallbacks('OPENROUTER_TTS_FALLBACK_MODELS', ['openai/gpt-audio']),
+        fallbackIds: configuredFallbacks('OPENROUTER_TTS_FALLBACK_MODELS', ['x-ai/grok-voice-tts-1.0', 'microsoft/mai-voice-2']),
         selectFromCatalog: false,
     },
     TRANSCRIPTION: {
@@ -173,9 +206,36 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         contextWindow: 32000,
         description: 'Audio transcription',
         costTier: 'low', inputModalities: ['audio'], outputModalities: ['transcription'],
-        fallbackIds: configuredFallbacks('OPENROUTER_TRANSCRIPTION_FALLBACK_MODELS', ['microsoft/mai-transcribe-2', 'deepgram/nova-3']),
+        fallbackIds: configuredFallbacks('OPENROUTER_TRANSCRIPTION_FALLBACK_MODELS', ['microsoft/mai-transcribe-2', 'x-ai/grok-stt-1.0', 'deepgram/nova-3']),
         selectFromCatalog: false,
     },
+};
+
+export interface LogicalCapabilityConfig {
+    key: LogicalCapabilityId;
+    resolvesTo: CapabilityId;
+    model: AIModelConfig;
+}
+
+const logicalCapability = (key: LogicalCapabilityId, resolvesTo: CapabilityId): LogicalCapabilityConfig => ({
+    key,
+    resolvesTo,
+    model: MODEL_REGISTRY[resolvesTo],
+});
+
+/** One stable vocabulary for product workflows and operational reporting. */
+export const LOGICAL_CAPABILITY_REGISTRY: Record<LogicalCapabilityId, LogicalCapabilityConfig> = {
+    planner: logicalCapability('planner', 'STRUCTURED_PLANNING'),
+    writer: logicalCapability('writer', 'AI_BRAIN'),
+    director: logicalCapability('director', 'STRUCTURED_PLANNING'),
+    orchestrator: logicalCapability('orchestrator', 'AI_BRAIN'),
+    validator: logicalCapability('validator', 'VALIDATOR_ENGINE'),
+    vision_qc: logicalCapability('vision_qc', 'VALIDATION'),
+    video_preview: logicalCapability('video_preview', 'VIDEO_PREVIEW'),
+    video_final: logicalCapability('video_final', 'VIDEO_FINAL'),
+    tts: logicalCapability('tts', 'TEXT_TO_SPEECH'),
+    stt: logicalCapability('stt', 'TRANSCRIPTION'),
+    image: logicalCapability('image', 'IMAGE_GENERATION'),
 };
 
 export function getModelForCapability(capability: CapabilityId): AIModelConfig {
@@ -188,6 +248,16 @@ export function getModelForCapability(capability: CapabilityId): AIModelConfig {
 
 export function getFallbackModelsForCapability(capability: CapabilityId): readonly string[] {
     return getModelForCapability(capability).fallbackIds || [];
+}
+
+export function getModelForLogicalCapability(capability: LogicalCapabilityId): AIModelConfig {
+    const config = LOGICAL_CAPABILITY_REGISTRY[capability];
+    if (!config?.model) throw new Error(`No model is assigned for logical capability: ${capability}`);
+    return config.model;
+}
+
+export function getFallbackModelsForLogicalCapability(capability: LogicalCapabilityId): readonly string[] {
+    return getModelForLogicalCapability(capability).fallbackIds || [];
 }
 
 export function isCatalogSelectionModel(capability: CapabilityId, model: string): boolean {

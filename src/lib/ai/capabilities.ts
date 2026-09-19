@@ -1,4 +1,4 @@
-import { getModelForCapability, isRegisteredModelId, type AICapability } from './model-registry';
+import { getModelForCapability, getModelForLogicalCapability, isRegisteredModelId, type AICapability, type LogicalCapabilityId } from './model-registry';
 import { AICapabilityError, type CapabilityDescriptor, type CapabilityId, type CapabilityParameter, type Modality } from './types';
 
 /** Backwards-compatible shape used by generation job creation. */
@@ -41,6 +41,14 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
     }),
     VIDEO_ENGINE: descriptor('VIDEO_ENGINE', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references'], {
         model: modelId('VIDEO_ENGINE'),
+        discovery: 'videos',
+    }),
+    VIDEO_PREVIEW: descriptor('VIDEO_PREVIEW', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'provider_options'], {
+        model: modelId('VIDEO_PREVIEW'),
+        discovery: 'videos',
+    }),
+    VIDEO_FINAL: descriptor('VIDEO_FINAL', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'provider_options'], {
+        model: modelId('VIDEO_FINAL'),
         discovery: 'videos',
     }),
     VALIDATOR_ENGINE: descriptor('VALIDATOR_ENGINE', ['text', 'image', 'audio', 'video', 'file'], ['text'], ['temperature', 'top_p', 'max_tokens', 'response_format'], {
@@ -205,6 +213,12 @@ export function assertCapability(capability: CapabilityId, inputModality?: Modal
     return result;
 }
 
+/** Resolve a product-facing capability through the centralized model registry. */
+export function getLogicalCapability(capability: LogicalCapabilityId, inputModality?: Modality): GenerationCapability {
+    const config = getModelForLogicalCapability(capability);
+    return assertCapability(config.capability, inputModality);
+}
+
 export function getCapabilityDescriptor(capability: CapabilityId): CapabilityDescriptor {
     const result = CAPABILITY_REGISTRY[capability];
     if (!result) {
@@ -214,4 +228,5 @@ export function getCapabilityDescriptor(capability: CapabilityId): CapabilityDes
 }
 
 export type { CapabilityDescriptor, CapabilityId, Modality } from './types';
+export type { LogicalCapabilityId } from './model-registry';
 export type { AICapability } from './model-registry';

@@ -15,6 +15,8 @@ export type CapabilityId =
     | 'VALIDATOR_ENGINE'
     | 'STRUCTURED_PLANNING'
     | 'VALIDATION'
+    | 'VIDEO_PREVIEW'
+    | 'VIDEO_FINAL'
     | 'VIDEO_GENERATION'
     | 'IMAGE_GENERATION'
     | 'TEXT_TO_SPEECH'

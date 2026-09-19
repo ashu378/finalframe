@@ -155,6 +155,25 @@ async function main() {
     assert.match(generationJobs, /withIndex\("by_idempotency"/);
   });
 
+  await check('generation failures expose safe messages and preserve provider metadata', async () => {
+    const actions = fs.readFileSync(path.join(repoRoot, 'src/lib/generation/actions.ts'), 'utf8');
+    assert.match(actions, /userSafeGenerationError/);
+    assert.doesNotMatch(actions, /error:\s*error\.message/);
+    assert.match(actions, /providerRequestId/);
+    assert.match(actions, /providerCostUsd/);
+    assert.match(actions, /latencyMs/);
+    const schema = fs.readFileSync(path.join(repoRoot, 'convex/schema.ts'), 'utf8');
+    assert.match(schema, /providerRequestId:\s*v\.optional\(v\.string\(\)\)/);
+    assert.match(schema, /providerCostUsd:\s*v\.optional\(v\.number\(\)\)/);
+  });
+
+  await check('generation jobs record the same preview/final capability they execute', async () => {
+    const actions = fs.readFileSync(path.join(repoRoot, 'src/lib/generation/actions.ts'), 'utf8');
+    assert.match(actions, /capabilityId = executionProfile === 'FAST_SOCIAL' \? 'VIDEO_PREVIEW' : 'VIDEO_FINAL'/);
+    assert.match(actions, /request\.executionProfile/);
+    assert.match(actions, /executeVideoGeneration\('TEXT_TO_VIDEO', shot\.prompt, executionProfile/);
+  });
+
   await check('missing media blocks completion before charging success', async () => {
     const generationJobs = fs.readFileSync(path.join(repoRoot, 'convex/generationJobs.ts'), 'utf8');
     assert.match(generationJobs, /storageId|resolveAuthorizedMedia|media probe/i, 'completion must require canonical media metadata, not only a remote URL');

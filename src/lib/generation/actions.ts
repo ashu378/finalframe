@@ -7,6 +7,16 @@ import { estimateProductionCost } from '@/lib/credits/service';
 import { executeVideoGeneration } from '@/lib/ai/engine';
 import type { QualityTier } from '@/lib/types/database';
 
+function userSafeGenerationError(error: unknown): string {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+    if (code === 'MISSING_API_KEY') return 'Video generation is not configured yet.';
+    if (code === 'PROVIDER_RATE_LIMIT') return 'The video provider is busy. Please try again shortly.';
+    if (code === 'PROVIDER_PAYMENT_REQUIRED') return 'Video generation is temporarily unavailable.';
+    if (code === 'REQUEST_TIMEOUT' || code === 'NETWORK_ERROR') return 'The video provider did not respond. Please try again.';
+    if (code === 'UNSUPPORTED_MODEL' || code === 'UNSUPPORTED_CAPABILITY') return 'This video capability is not available right now.';
+    return 'We could not complete this video generation. Please try again.';
+}
+
 export async function createShotGenerationJob(input: { productionId: string; shotId: string; qualityTier?: QualityTier }) {
     try {
         const convex = await getAuthenticatedConvexClient();
@@ -17,7 +27,9 @@ export async function createShotGenerationJob(input: { productionId: string; sho
             productionId: input.productionId as any,
             shotId: input.shotId as any,
         });
-        const capability = assertCapability('VIDEO_GENERATION');
+        const executionProfile = input.qualityTier === 'PREMIUM' ? 'PREMIUM' : input.qualityTier === 'STANDARD' ? 'COMMERCIAL' : 'FAST_SOCIAL';
+        const capabilityId = executionProfile === 'FAST_SOCIAL' ? 'VIDEO_PREVIEW' : 'VIDEO_FINAL';
+        const capability = assertCapability(capabilityId);
         const estimate = await estimateProductionCost({
             shotCount: 1,
             videoSeconds: Math.ceil(Number(shot.durationSeconds)),
@@ -30,10 +42,10 @@ export async function createShotGenerationJob(input: { productionId: string; sho
             shotId: input.shotId as any,
             provider: capability.provider,
             model: capability.model,
-            request: { prompt: shot.prompt, duration: shot.durationSeconds, ratio: production.outputPreset },
+            request: { prompt: shot.prompt, duration: shot.durationSeconds, ratio: production.outputPreset, qualityTier: input.qualityTier || 'STANDARD', executionProfile },
             estimatedCost: estimate.totalCredits,
             idempotencyKey,
-            capability: 'VIDEO_GENERATION',
+            capability: capabilityId,
             modality: 'VIDEO',
             correlationId: `generation-${input.productionId}-${input.shotId}`,
         });
@@ -46,7 +58,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
         });
         return { success: true, jobId: jobId?.toString(), reservationId: reservation.reservationId.toString(), estimate };
     } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Unable to create generation job' };
+        return { success: false, error: userSafeGenerationError(error) };
     }
 }
 
@@ -69,7 +81,9 @@ export async function processShotGenerationJob(jobId: string) {
         const leaseId = processing.leaseId;
 
         const duration = Math.max(4, Math.min(8, Math.round(Number(shot.durationSeconds)))) as 4 | 6 | 8;
-        const result = await executeVideoGeneration('TEXT_TO_VIDEO', shot.prompt, 'FAST_SOCIAL', {
+        const request = job.request && typeof job.request === 'object' ? job.request as Record<string, unknown> : {};
+        const executionProfile = request.executionProfile === 'PREMIUM' || request.executionProfile === 'COMMERCIAL' || request.executionProfile === 'CINEMATIC' ? request.executionProfile : 'FAST_SOCIAL';
+        const result = await executeVideoGeneration('TEXT_TO_VIDEO', shot.prompt, executionProfile, {
             duration,
             ratio: production.outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : production.outputPreset === 'SQUARE' ? '1:1' : '16:9',
         });
@@ -100,6 +114,9 @@ export async function processShotGenerationJob(jobId: string) {
             leaseId,
             assetId: asset.assetId,
             providerJobId: result.taskId,
+            providerRequestId: result.requestId,
+            providerCostUsd: result.providerCostUsd,
+            latencyMs: result.latencyMs,
             response: result,
             qc: { status: 'PASS', qualityVersion: 'media-ingest-v1', checkedAt: new Date().toISOString(), blockingReasons: [], checks: [{ check: 'MEDIA_INTEGRITY', status: 'PASS', explanation: `${bytes.byteLength} bytes stored in Convex Storage.` }] },
         });
@@ -109,7 +126,7 @@ export async function processShotGenerationJob(jobId: string) {
         }
         return { success: true, assetId: completed.assetId?.toString(), storageId: uploaded.storageId };
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Generation failed';
+        const message = userSafeGenerationError(error);
         try {
             const retryable = Boolean((error as { retryable?: boolean }).retryable);
             const failed = await convex.mutation(api.generationJobs.fail, { jobId: jobId as any, errorMessage: message, errorCode: 'PROVIDER_ERROR', retryable });

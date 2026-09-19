@@ -107,8 +107,8 @@ export const grantTestCredits = mutation({
     ledgerId: v.id("ledger"),
   }),
   handler: async (ctx, args) => {
-    if (process.env.FINALFRAME_TEST_CREDITS_ENABLED !== "true") {
-      throw new Error("Development test credits are disabled on this deployment.");
+    if (process.env.FINALFRAME_TEST_CREDITS_ENABLED !== "true" || process.env.FINALFRAME_TEST_CREDITS_ENV !== "development") {
+        throw new Error("Development test credits are disabled on this deployment.");
     }
     const member = await requireAdmin(ctx, args.studioExternalId);
     if (!Number.isInteger(args.amount) || args.amount <= 0 || args.amount > 10000) {

@@ -171,7 +171,7 @@ export const renewLease = mutation({
 });
 
 export const submit = mutation({
-  args: { jobId: v.id("generationJobs"), leaseId: v.string(), providerJobId: v.string(), response: v.optional(v.any()) },
+  args: { jobId: v.id("generationJobs"), leaseId: v.string(), providerJobId: v.string(), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), response: v.optional(v.any()) },
   handler: async (ctx, args) => {
     const { job } = await authorizedJob(ctx, args.jobId);
     assertLease(job, args.leaseId);
@@ -179,28 +179,28 @@ export const submit = mutation({
     transition(job.status, "SUBMITTED");
     const current = await attempt(ctx, job._id, job.attemptCount);
     const timestamp = now();
-    if (current) await ctx.db.patch(current._id, { status: "SUBMITTED", providerJobId: args.providerJobId, response: args.response });
-    await ctx.db.patch(job._id, { status: "SUBMITTED", providerJobId: args.providerJobId, response: args.response, progress: Math.max(job.progress, 10), updatedAt: timestamp });
+    if (current) await ctx.db.patch(current._id, { status: "SUBMITTED", providerJobId: args.providerJobId, providerRequestId: args.providerRequestId, latencyMs: args.latencyMs, response: args.response });
+    await ctx.db.patch(job._id, { status: "SUBMITTED", providerJobId: args.providerJobId, providerRequestId: args.providerRequestId, latencyMs: args.latencyMs, response: args.response, progress: Math.max(job.progress, 10), updatedAt: timestamp });
     return await ctx.db.get(job._id);
   },
 });
 
 export const poll = mutation({
-  args: { jobId: v.id("generationJobs"), leaseId: v.string(), progress: v.optional(v.number()), response: v.optional(v.any()) },
+  args: { jobId: v.id("generationJobs"), leaseId: v.string(), progress: v.optional(v.number()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), response: v.optional(v.any()) },
   handler: async (ctx, args) => {
     const { job } = await authorizedJob(ctx, args.jobId);
     assertLease(job, args.leaseId);
     if (job.status !== "SUBMITTED" && job.status !== "PENDING") throw new Error(`Job cannot be polled from ${job.status}.`);
     const current = await attempt(ctx, job._id, job.attemptCount);
     const timestamp = now();
-    if (current) await ctx.db.patch(current._id, { status: "PENDING", response: args.response });
-    await ctx.db.patch(job._id, { status: "PENDING", progress: Math.min(95, Math.max(job.progress, args.progress ?? job.progress)), response: args.response ?? job.response, updatedAt: timestamp });
+    if (current) await ctx.db.patch(current._id, { status: "PENDING", providerRequestId: args.providerRequestId, latencyMs: args.latencyMs, response: args.response });
+    await ctx.db.patch(job._id, { status: "PENDING", providerRequestId: args.providerRequestId, latencyMs: args.latencyMs, progress: Math.min(95, Math.max(job.progress, args.progress ?? job.progress)), response: args.response ?? job.response, updatedAt: timestamp });
     return await ctx.db.get(job._id);
   },
 });
 
 export const succeed = mutation({
-  args: { jobId: v.id("generationJobs"), leaseId: v.optional(v.string()), assetId: v.optional(v.id("assets")), assetUrl: v.optional(v.string()), providerJobId: v.optional(v.string()), response: v.optional(v.any()), actualCost: v.optional(v.number()), qc: v.optional(v.any()) },
+  args: { jobId: v.id("generationJobs"), leaseId: v.optional(v.string()), assetId: v.optional(v.id("assets")), assetUrl: v.optional(v.string()), providerJobId: v.optional(v.string()), providerRequestId: v.optional(v.string()), providerCostUsd: v.optional(v.number()), latencyMs: v.optional(v.number()), response: v.optional(v.any()), actualCost: v.optional(v.number()), qc: v.optional(v.any()) },
   handler: async (ctx, args) => {
     const { job } = await authorizedJob(ctx, args.jobId);
     if (job.status === "COMPLETED") return { jobId: job._id, assetId: object(job.response).assetId };
@@ -214,17 +214,17 @@ export const succeed = mutation({
     if (qc.status !== "PASS" && qc.status !== "PASS_WITH_WARNINGS") throw new Error("Quality checks must pass before this take can be marked complete.");
     const current = await attempt(ctx, job._id, job.attemptCount);
     const timestamp = now();
-    const response = { ...object(args.response), assetId: args.assetId.toString(), providerJobId: args.providerJobId ?? job.providerJobId, actualCost: args.actualCost, qc };
-    if (current) await ctx.db.patch(current._id, { status: "COMPLETED", providerJobId: args.providerJobId ?? job.providerJobId, response, completedAt: timestamp });
+    const response = { ...object(args.response), assetId: args.assetId.toString(), providerJobId: args.providerJobId ?? job.providerJobId, providerRequestId: args.providerRequestId ?? job.providerRequestId, providerCostUsd: args.providerCostUsd ?? job.providerCostUsd, latencyMs: args.latencyMs ?? job.latencyMs, actualCost: args.actualCost, qc };
+    if (current) await ctx.db.patch(current._id, { status: "COMPLETED", providerJobId: args.providerJobId ?? job.providerJobId, providerRequestId: args.providerRequestId ?? job.providerRequestId, latencyMs: args.latencyMs ?? job.latencyMs, response, completedAt: timestamp });
     await ctx.db.patch(job.shotVersionId, { status: "COMPLETED", assetId: args.assetId, actualCost: args.actualCost });
     await ctx.db.patch(job.shotId, { status: "COMPLETED" });
-    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.providerJobId ?? job.providerJobId, response, actualCost: args.actualCost, completedAt: timestamp, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
+    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.providerJobId ?? job.providerJobId, providerRequestId: args.providerRequestId ?? job.providerRequestId, providerCostUsd: args.providerCostUsd ?? job.providerCostUsd, latencyMs: args.latencyMs ?? job.latencyMs, response, actualCost: args.actualCost, completedAt: timestamp, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
     return { jobId: job._id, assetId: args.assetId };
   },
 });
 
 export const fail = mutation({
-  args: { jobId: v.id("generationJobs"), errorCode: v.optional(v.string()), errorMessage: v.string(), retryable: v.optional(v.boolean()), retryAfterMs: v.optional(v.number()), leaseId: v.optional(v.string()) },
+  args: { jobId: v.id("generationJobs"), errorCode: v.optional(v.string()), errorMessage: v.string(), retryable: v.optional(v.boolean()), retryAfterMs: v.optional(v.number()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), leaseId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { job } = await authorizedJob(ctx, args.jobId);
     if (job.status === "FAILED" || job.status === "CANCELED" || job.status === "COMPLETED") return job;
@@ -233,15 +233,15 @@ export const fail = mutation({
     const retryable = args.retryable === true && job.attemptCount < MAX_ATTEMPTS;
     const timestamp = now();
     const current = await attempt(ctx, job._id, job.attemptCount);
-    if (current) await ctx.db.patch(current._id, { status: retryable ? "RETRYING" : "FAILED", errorCode: args.errorCode ?? "PROVIDER_ERROR", errorMessage: args.errorMessage, retryable, completedAt: timestamp });
+    if (current) await ctx.db.patch(current._id, { status: retryable ? "RETRYING" : "FAILED", providerRequestId: args.providerRequestId ?? job.providerRequestId, latencyMs: args.latencyMs ?? job.latencyMs, errorCode: args.errorCode ?? "PROVIDER_ERROR", errorMessage: args.errorMessage, retryable, completedAt: timestamp });
     if (retryable) {
       const delay = Math.min(Math.max(args.retryAfterMs ?? DEFAULT_RETRY_MS, 1_000), 60 * 60 * 1000);
-      await ctx.db.patch(job._id, { status: "RETRYING", progress: 0, errorCode: args.errorCode ?? "RETRYABLE_PROVIDER_ERROR", errorMessage: args.errorMessage, nextAttemptAt: timestamp + delay, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
+      await ctx.db.patch(job._id, { status: "RETRYING", progress: 0, providerRequestId: args.providerRequestId ?? job.providerRequestId, latencyMs: args.latencyMs ?? job.latencyMs, errorCode: args.errorCode ?? "RETRYABLE_PROVIDER_ERROR", errorMessage: args.errorMessage, nextAttemptAt: timestamp + delay, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
       await ctx.db.patch(job.shotVersionId, { status: "RETRYING" });
       await ctx.db.patch(job.shotId, { status: "RETRYING" });
       await scheduleWake(ctx, job._id, delay);
     } else {
-      await ctx.db.patch(job._id, { status: "FAILED", errorCode: args.errorCode ?? "PROVIDER_ERROR", errorMessage: args.errorMessage, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
+      await ctx.db.patch(job._id, { status: "FAILED", providerRequestId: args.providerRequestId ?? job.providerRequestId, latencyMs: args.latencyMs ?? job.latencyMs, errorCode: args.errorCode ?? "PROVIDER_ERROR", errorMessage: args.errorMessage, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
       await ctx.db.patch(job.shotVersionId, { status: "FAILED" });
       await ctx.db.patch(job.shotId, { status: "FAILED" });
     }

@@ -111,7 +111,13 @@ async function assertDependenciesAreCurrent(ctx: ReadCtx, production: Production
 
 async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: Timeline, preset: RenderPreset) {
   const tracks = await ctx.db.query("timelineTracks").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect();
-  const clips = (await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect()).sort((a, b) => a.startSeconds - b.startSeconds);
+  const clips = (await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect()).sort((a, b) => {
+    const startOrder = a.startSeconds - b.startSeconds;
+    if (startOrder !== 0) return startOrder;
+    const aOrder = numberValue(record(a.metadata).orderIndex) ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = numberValue(record(b.metadata).orderIndex) ?? Number.MAX_SAFE_INTEGER;
+    return aOrder - bOrder || a._id.toString().localeCompare(b._id.toString());
+  });
   if (!clips.length) throw new Error("The approved timeline has no clips to assemble.");
 
   const timelineMeta = timelineMetadata(timeline);

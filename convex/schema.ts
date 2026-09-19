@@ -258,14 +258,14 @@ export default defineSchema({
     response: v.optional(json), status, progress: v.number(), estimatedCost: v.number(), estimateId: v.optional(v.id("estimates")),
     idempotencyKey: v.string(), requestHash: v.optional(v.string()), reservationId: v.optional(v.id("creditReservations")), canonicalReservationId: v.optional(v.id("reservations")),
     correlationId: v.optional(v.string()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), nextAttemptAt: v.optional(timestamp),
-    actualCost: v.optional(v.number()), providerJobId: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()),
+    actualCost: v.optional(v.number()), providerCostUsd: v.optional(v.number()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), providerJobId: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()),
     attemptCount: v.number(), createdAt: timestamp, startedAt: v.optional(timestamp), completedAt: v.optional(timestamp), updatedAt: timestamp,
   }).index("by_idempotency", ["idempotencyKey"]).index("by_production", ["productionId"]).index("by_shot", ["shotId"])
     .index("by_status", ["status"]).index("by_studio", ["studioExternalId"]).index("by_provider_job", ["provider", "providerJobId"]),
 
   attempts: defineTable({
     ...studioOwned, generationJobId: v.id("generationJobs"), attemptNumber: v.number(), status, provider: v.string(),
-    providerJobId: v.optional(v.string()), requestHash: v.optional(v.string()), response: v.optional(json), errorCode: v.optional(v.string()),
+    providerJobId: v.optional(v.string()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), requestHash: v.optional(v.string()), response: v.optional(json), errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), startedAt: v.optional(timestamp), completedAt: v.optional(timestamp), createdAt: timestamp,
   }).index("by_job", ["generationJobId"]).index("by_job_attempt", ["generationJobId", "attemptNumber"]).index("by_studio", ["studioExternalId"]),
 

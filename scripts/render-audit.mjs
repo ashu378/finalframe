@@ -18,7 +18,7 @@ const assembly = read('convex/assembly.ts');
 const renderActions = read('src/lib/render/actions.ts');
 const exportActions = read('src/lib/export/actions.ts');
 
-if (/orderIndex/.test(plan) && /sort\(/.test(plan) && /\.sort\(/.test(assembly) && /for \(const sequence of sequences/.test(assembly)) pass('ordered shots', 'renderer and Convex assembly both sort deterministic sequence/scene/shot order');
+if (/orderIndex/.test(plan) && /sort\(/.test(plan) && /timelineClips[\s\S]*\.sort\(/.test(assembly) && /orderIndex/.test(assembly)) pass('ordered shots', 'renderer and Convex assembly both sort deterministic timeline order');
 else gap('ordered shots', 'ordered assembly is not provably stable at every layer');
 
 if (/audioTracks/.test(manifest) && /captionTracks/.test(manifest) && /frame window must fit/.test(manifest)) pass('audio/caption timing', 'audio and captions are validated against the output frame window');

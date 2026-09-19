@@ -7,9 +7,8 @@
  * It routes requests to the configured provider adapter.
  */
 
-import type { AICapability, ExecutionProfile } from './model-registry';
+import { getModelForCapability, type AICapability, type ExecutionProfile } from './model-registry';
 import { executeAITask as executeOpenRouter, generateVideo as submitOpenRouterVideo, pollVideo, type AIResponse, type OpenRouterChatOptions } from '@/lib/adapters/openrouter-adapter';
-import { getModelForCapability } from './model-registry';
 import type { CameraConfig, MotionConfig, RenderStrategy, SceneAsset, StudioAsset } from '@/lib/types/database';
 import type OpenAI from 'openai';
 
@@ -30,6 +29,9 @@ export interface VideoGenerationResult {
     provider: 'openrouter';
     model: string;
     usage?: unknown;
+    requestId?: string;
+    providerCostUsd?: number;
+    latencyMs?: number;
 }
 
 /**
@@ -71,8 +73,11 @@ export async function executeVideoGeneration(
         studioAssets?: StudioAsset[];
     }
 ): Promise<VideoGenerationResult> {
+    const startedAt = Date.now();
     const ratio = options.ratio || '16:9';
-    const model = getModelForCapability('VIDEO_ENGINE').id;
+    const videoCapability = executionProfile === 'FAST_SOCIAL' ? 'VIDEO_PREVIEW' : 'VIDEO_FINAL';
+    const videoConfig = getModelForCapability(videoCapability);
+    const model = videoConfig.id;
     const enrichedPrompt = [
         prompt,
         options.cameraConfig ? `Camera: ${JSON.stringify(options.cameraConfig)}` : '',
@@ -90,7 +95,7 @@ export async function executeVideoGeneration(
             ...(options.initImageUrl ? [{ url: options.initImageUrl }] : []),
             ...(options.initVideoUrl ? [{ url: options.initVideoUrl }] : []),
         ],
-    });
+    }, { fallbackModels: [...(videoConfig.fallbackIds || [])] });
 
     let current = await pollVideo(submitted.id);
     for (let attempt = 0; attempt < 60 && !['completed', 'succeeded', 'failed', 'error', 'canceled'].includes(String(current.status).toLowerCase()); attempt += 1) {
@@ -117,5 +122,8 @@ export async function executeVideoGeneration(
         provider: 'openrouter' as const,
         model: submitted.modelUsed,
         usage: current.usage,
+        requestId: current.requestId || submitted.requestId,
+        providerCostUsd: current.costUsd,
+        latencyMs: Date.now() - startedAt,
     };
 }
