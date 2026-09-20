@@ -26,5 +26,8 @@ USER appuser
 
 EXPOSE 8080
 
+# Coolify can restart an unhealthy worker without exposing its internals.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl --fail --silent http://127.0.0.1:8080/health || exit 1
+
 # Start the HTTP worker entrypoint.
 CMD ["node", "dist/server.js"]

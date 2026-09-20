@@ -9,7 +9,7 @@ import { createCallbackBody, sendRendererCallback } from './contracts/callback.j
 import type { RenderManifest, RenderMode } from './types.js';
 
 const port = Number(process.env.PORT ?? 8080);
-const secret = process.env.RENDER_WORKER_SHARED_SECRET ?? '';
+const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim() ?? '';
 const outputRoot = process.env.RENDER_OUTPUT_ROOT ?? '/tmp/finalframe-renders';
 const rendererVersion = process.env.RENDERER_VERSION ?? 'finalframe-renderer-v1';
 
@@ -43,7 +43,8 @@ const renderer = new BoundedDeterministicRenderer(runtime, {
 });
 
 async function render(payload: any) {
-  if (secret && payload.secret !== secret) throw new Error('Invalid worker secret.');
+  if (!secret) throw new Error('Renderer authentication is not configured.');
+  if (payload.secret !== secret) throw new Error('Invalid worker secret.');
   if (!payload.jobId || !payload.manifest) throw new Error('jobId and manifest are required.');
   const jobId = String(payload.jobId);
   const outputPath = join(outputRoot, `${jobId.replace(/[^a-zA-Z0-9._-]/g, '_')}.mp4`);
@@ -80,8 +81,9 @@ createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion });
     if (request.method !== 'POST' || request.url !== '/render') return json(response, 404, { error: 'Not found' });
+    if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
-    if (secret && headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
+    if (headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
     const payload = await body(request);
     return json(response, 202, await render({ ...payload, secret: headerSecret }));
   } catch (error) {
