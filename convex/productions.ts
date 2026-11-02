@@ -197,7 +197,7 @@ async function materializeApprovedPlan(ctx: MutationCtx, production: Doc<"produc
 
 /** Freeze the actual editable draft graph, including deliberate resource
  * bindings, rather than approving the stale original provider response. */
-async function draftSnapshot(ctx: MutationCtx, version: Doc<"productionVersions">, original: unknown) {
+export async function draftSnapshot(ctx: ReadCtx, version: Doc<"productionVersions">, original: unknown) {
   const sequences = await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", version._id)).take(201);
   if (sequences.length > 200) throw new Error("This production has too many sequences.");
   const result = [];

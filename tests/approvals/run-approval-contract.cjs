@@ -46,6 +46,9 @@ Module._load = function load(request, parent, isMain) {
     return { v: { union: (...values) => values, literal: (value) => value, id: (value) => value, optional: (value) => value, string: () => 'string' } };
   }
   if (request === './_generated/server') return { query: (definition) => definition, mutation: (definition) => definition };
+  // This legacy transition fixture has no beat source/grid records. Fail closed
+  // if routed there; actual canonical beat approval is exercised by the recipe backend suite.
+  if (request === './beatAnalysis') return { validateBeatVersionForApproval: async () => { throw new Error('Use the actual beat source/grid approval contract suite.'); } };
   if (request === './voices') return { validateVoiceForApproval: async () => { throw new Error('Voice lifecycle must use the online voice integration suite.'); } };
   if (request === './reviewLinkContracts') return { isReviewLinkActive: () => { throw new Error('Review links must use the dedicated review policy suite.'); } };
   if (request === './continuityContracts') return { validateBibleBindings: async () => {}, validateProjectResourceReferences: async () => {} };

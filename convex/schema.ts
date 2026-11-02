@@ -549,6 +549,36 @@ export default defineSchema({
     width: v.number(), height: v.number(), imageCodec: v.string(), probedAt: timestamp,
   }).index('by_asset', ['assetId']),
 
+  recipeProposals: defineTable({
+    projectId: v.id('projects'), productionId: v.id('productions'), sourcePlanId: v.id('directorPlans'), sourceDraftHash: v.string(), proposalVersion: v.literal(1), proposal: json,
+    logicalShots: v.array(v.object({ key: v.string(), sequenceOrderIndex: v.number(), sceneOrderIndex: v.number(), shotOrderIndex: v.number(), descriptorHash: v.string() })),
+    creationKey: v.string(), requestHash: v.string(), createdByUserId: v.id('users'), createdAt: timestamp,
+  }).index('by_creation_key', ['creationKey']).index('by_production', ['productionId', 'createdAt']),
+
+  recipeRuns: defineTable({
+    projectId: v.id('projects'), productionId: v.id('productions'), productionVersionId: v.id('productionVersions'), proposalId: v.id('recipeProposals'), sourcePlanId: v.id('directorPlans'),
+    directorSnapshotHash: v.string(), compiledPlanHash: v.string(), boundRecipe: json, canonicalContext: json,
+    status: v.union(v.literal('PREVIEW'), v.literal('INITIALIZING'), v.literal('READY'), v.literal('RUNNING'), v.literal('WAITING_APPROVAL'), v.literal('WAITING_ESTIMATE'), v.literal('BLOCKED'), v.literal('CANCELING'), v.literal('CANCELED'), v.literal('COMPLETED'), v.literal('NEEDS_ATTENTION')),
+    creationKey: v.string(), requestHash: v.string(), createdByUserId: v.id('users'), createdAt: timestamp, updatedAt: timestamp, nodeCount: v.number(), initializedNodeCount: v.number(),
+    reviewedEstimateHash: v.optional(v.string()), reviewedEstimateId: v.optional(v.id('recipeEstimates')), reviewedByUserId: v.optional(v.id('users')), reviewedAt: v.optional(timestamp), cancelRequestedAt: v.optional(timestamp), errorCode: v.optional(v.string()),
+    admittedMicros: v.optional(v.number()), admittedCredits: v.optional(v.number()),
+  }).index('by_creation_key', ['creationKey']).index('by_project', ['projectId', 'createdAt']).index('by_production', ['productionId', 'createdAt']).index('by_status', ['status', 'updatedAt']),
+
+  recipeRunNodes: defineTable({
+    runId: v.id('recipeRuns'), projectId: v.id('projects'), productionVersionId: v.id('productionVersions'), nodeId: v.string(), orderIndex: v.number(),
+    operation: v.union(v.literal('PREPARATION'), v.literal('NARRATION'), v.literal('GENERATION'), v.literal('GRAPHIC'), v.literal('SOURCE_RANGE'), v.literal('MUSIC_ANALYSIS'), v.literal('CAPTIONS'), v.literal('APPROVAL'), v.literal('TIMELINE'), v.literal('MANIFEST'), v.literal('EXPORT')),
+    effect: v.union(v.literal('PAID'), v.literal('LOCAL'), v.literal('HUMAN')), dependencies: v.array(v.string()), request: json, requestHash: v.string(), idempotencyKey: v.string(),
+    status: v.union(v.literal('WAITING'), v.literal('READY'), v.literal('QUEUED'), v.literal('RUNNING'), v.literal('ACCEPTED'), v.literal('WAITING_APPROVAL'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('RECONCILIATION_REQUIRED'), v.literal('CANCELED')),
+    approvalTarget: v.optional(v.string()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), attemptCount: v.number(), linkedGenerationJobId: v.optional(v.id('generationJobs')), linkedBeatJobId: v.optional(v.id('beatAnalysisJobs')), linkedRenderJobId: v.optional(v.id('renderJobs')),
+    resultId: v.optional(v.string()), resultHash: v.optional(v.string()), errorCode: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp,
+    allocationMicros: v.optional(v.number()), allocationCredits: v.optional(v.number()), admissionHash: v.optional(v.string()), admissionEstimateId: v.optional(v.id('recipeEstimates')), admissionModel: v.optional(v.string()), resolvedBindings: v.optional(json), resolvedRequestHash: v.optional(v.string()),
+  }).index('by_run_order', ['runId', 'orderIndex']).index('by_run_node', ['runId', 'nodeId']).index('by_idempotency', ['idempotencyKey']).index('by_status', ['status', 'updatedAt']).index('by_generation_job', ['linkedGenerationJobId']).index('by_project_request', ['projectId', 'operation', 'requestHash']),
+
+  recipeEstimates: defineTable({
+    runId: v.id('recipeRuns'), projectId: v.id('projects'), revision: v.number(), compiledPlanHash: v.string(), stageNodeIds: v.array(v.string()), quoteHash: v.string(), quotes: json,
+    providerCeilingMicros: v.number(), creditCeiling: v.number(), complete: v.boolean(), blockedNodeIds: v.array(v.string()), createdByUserId: v.id('users'), createdAt: timestamp, expiresAt: timestamp,
+  }).index('by_run_revision', ['runId', 'revision']).index('by_run_hash', ['runId', 'quoteHash']),
+
   movies: defineTable({
     projectId: v.id('projects'), title: v.string(), creationKey: v.string(), requestHash: v.string(), createdByUserId: v.id('users'), createdAt: timestamp, updatedAt: timestamp, archivedAt: v.optional(timestamp),
   }).index('by_project', ['projectId', 'createdAt']).index('by_creation_key', ['creationKey']),

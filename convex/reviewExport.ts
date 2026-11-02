@@ -2,8 +2,8 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { v } from "convex/values";
-import { requireProjectAccess, requireProjectRole } from "./authorization";
+import { v, type Infer } from "convex/values";
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 import { ensureResourceState, requireApprovedResource } from "./resourceStates";
 import { applyClientReviewDecision, transitionResourceState } from "./approvals";
 import { assertReviewToken, isReviewLinkActive, REVIEW_COMMENT_LIMIT, REVIEW_LINK_DEFAULT_AGE_MS, REVIEW_LINK_MAX_AGE_MS, validateReviewComment } from "./reviewLinkContracts";
@@ -38,11 +38,11 @@ async function authorizedReview(ctx: ReadCtx, reviewId: Id<"reviews">) {
   return { review, member };
 }
 
-async function authorizedProduction(ctx: ReadCtx, productionId: Id<"productions">) {
+async function authorizedProduction(ctx: ReadCtx, productionId: Id<"productions">,actorId?:Id<"users">) {
   const production = await ctx.db.get(productionId);
   if (!production) throw new Error("Production not found.");
   if (!production.projectId) throw new Error("Production project ownership must be migrated first.");
-  const member = await requireProjectAccess(ctx, production.projectId);
+  const member = actorId?await resolveProjectAccessForActor(ctx,production.projectId,actorId,["OWNER","EDITOR"]):await requireProjectAccess(ctx, production.projectId);
   if (member.project.studioExternalId !== production.studioExternalId) throw new Error("Production not found.");
   return { production, member };
 }
@@ -62,20 +62,20 @@ export const getState = query({
   },
 });
 
-export const requestReview = mutation({
-  args: { productionId: v.id("productions"), manifestId: v.id("manifests"), idempotencyKey: v.string(), correlationId: v.optional(v.string()) },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const { production, member } = await authorizedProduction(ctx, args.productionId);
+const requestReviewArgs={ productionId: v.id("productions"), manifestId: v.id("manifests"), idempotencyKey: v.string(), correlationId: v.optional(v.string()) };
+const requestReviewValidator=v.object(requestReviewArgs);
+export const requestReview=mutation({args:requestReviewArgs,returns:v.any(),handler:(ctx,args)=>requestCanonicalReview(ctx,args)});
+export async function requestCanonicalReview(ctx:MutationCtx,args:Infer<typeof requestReviewValidator>,actorId?:Id<'users'>){
+    const { production, member } = await authorizedProduction(ctx, args.productionId,actorId);
     const manifest = await ctx.db.get(args.manifestId);
     if (!manifest || manifest.productionId !== production._id || manifest.studioExternalId !== member.studio.externalId) throw new Error("Assembly manifest not found.");
     const manifestData = record(manifest.manifest);
     if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString() || !manifestData.timelineId || !Array.isArray(manifestData.items)) throw new Error("This assembly manifest is not ready for review.");
     const timeline = await ctx.db.get(String(manifestData.timelineId) as Id<"timelines">);
     if (!timeline || timeline.projectId !== production.projectId || timeline.productionId !== production._id) throw new Error("This timeline is outside this production.");
-    await requireApprovedResource(ctx, production.projectId, "timeline", timeline._id, production._id);
+    await requireApprovedResource(ctx, production.projectId, "timeline", timeline._id, production._id,actorId);
     const key = requiredKey(args.idempotencyKey, "Review request key");
-    if (production.projectId) await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
+    if (production.projectId) actorId?await resolveProjectAccessForActor(ctx,production.projectId,actorId,["OWNER","EDITOR"]):await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
     const existingMarker = (await ctx.db.query("approvals").withIndex("by_resource", (q) => q.eq("resourceType", "reviewRequest").eq("resourceId", key)).take(200)).find((approval) => approval.productionId === production._id);
     if (existingMarker?.note?.startsWith("reviewId:")) {
       const existing = await ctx.db.get(existingMarker.note.slice("reviewId:".length) as Id<"reviews">);
@@ -90,12 +90,11 @@ export const requestReview = mutation({
         resourceType: "review",
         resourceId: reviewId.toString(),
         initialState: "IN_REVIEW",
-      });
+      },actorId);
     }
     await ctx.db.insert("approvals", { studioExternalId: member.studio.externalId, studioId: member.studio._id, productionId: production._id, reviewId, resourceType: "reviewRequest", resourceId: key, decision: "REQUESTED", actorUserId: member.user._id, note: `reviewId:${reviewId.toString()}`, createdAt: timestamp });
     return await ctx.db.get(reviewId);
-  },
-});
+}
 
 export const addComment = mutation({
   args: { reviewId: v.id("reviews"), body: v.string(), timeSeconds: v.optional(v.number()), shotId: v.optional(v.id("shots")) },
@@ -110,6 +109,7 @@ export const addComment = mutation({
     if (review.status === "APPROVED") throw new Error("Approved reviews cannot receive new comments. Request a new revision instead.");
     if (args.timeSeconds !== undefined && (!Number.isFinite(args.timeSeconds) || args.timeSeconds < 0)) throw new Error("Comment time must be a valid positive timestamp.");
     if (args.shotId) { const shot = await ctx.db.get(args.shotId); if (!shot || shot.productionId !== review.productionId || shot.projectId !== review.projectId) throw new Error("Review shot is outside this project."); }
+    if(!("identity" in member))throw new Error("Verified session is required for comments.");
     const commentId = await ctx.db.insert("comments", { studioExternalId: member.studio.externalId, studioId: member.studio._id, reviewId: review._id, authorExternalId: member.identity.externalId, authorUserId: member.user._id, body: requiredBody(args.body), timeSeconds: args.timeSeconds, shotId: args.shotId, createdAt: now() });
     return await ctx.db.get(commentId);
   },
@@ -171,23 +171,23 @@ export const requestRevision = mutation({
   },
 });
 
-export const requestExport = mutation({
-  args: { productionId: v.id("productions"), manifestId: v.id("manifests"), reviewId: v.id("reviews"), preset: v.optional(v.string()), idempotencyKey: v.string(), correlationId: v.optional(v.string()) },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const { production, member } = await authorizedProduction(ctx, args.productionId);
+const requestExportArgs={ productionId: v.id("productions"), manifestId: v.id("manifests"), reviewId: v.id("reviews"), preset: v.optional(v.string()), idempotencyKey: v.string(), correlationId: v.optional(v.string()) };
+const requestExportValidator=v.object(requestExportArgs);
+export const requestExport=mutation({args:requestExportArgs,returns:v.any(),handler:(ctx,args)=>requestCanonicalExport(ctx,args)});
+export async function requestCanonicalExport(ctx:MutationCtx,args:Infer<typeof requestExportValidator>,actorId?:Id<'users'>){
+    const { production, member } = await authorizedProduction(ctx, args.productionId,actorId);
     const manifest = await ctx.db.get(args.manifestId);
     const review = await ctx.db.get(args.reviewId);
     if (!manifest || manifest.productionId !== production._id || manifest.studioExternalId !== member.studio.externalId) throw new Error("Assembly manifest not found.");
     if (!review || review.productionId !== production._id || review.studioExternalId !== member.studio.externalId || review.status !== "APPROVED") throw new Error("Approve the review before requesting an export.");
-    if (production.projectId) await requireApprovedResource(ctx, production.projectId, "review", review._id.toString(), production._id);
+    if (production.projectId) await requireApprovedResource(ctx, production.projectId, "review", review._id.toString(), production._id,actorId);
     const manifestData = record(manifest.manifest);
     if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion || !manifest.projectId || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString()) throw new Error("Only canonical manifest v4/v5 for this project can be exported.");
     if (!review.manifestId || review.manifestId !== manifest._id || review.timelineId !== manifestData.timelineId) throw new Error("This approval belongs to a different assembly version. Request a review of this exact manifest.");
-    await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
+    actorId?await resolveProjectAccessForActor(ctx,production.projectId,actorId,["OWNER","EDITOR"]):await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
     const reviewedTimeline = review.timelineId ? await ctx.db.get(review.timelineId) : null;
     if (!reviewedTimeline || reviewedTimeline.projectId !== production.projectId || reviewedTimeline.productionId !== production._id || reviewedTimeline.versionNumber !== review.timelineVersionNumber) throw new Error("The approved timeline version is unavailable.");
-    await requireApprovedResource(ctx, production.projectId, "timeline", reviewedTimeline._id, production._id);
+    await requireApprovedResource(ctx, production.projectId, "timeline", reviewedTimeline._id, production._id,actorId);
     const manifestPreset = record(manifestData.preset);
     const canonicalPreset = String(manifestPreset.name ?? production.outputPreset);
     const exportPreset = args.preset?.trim() || canonicalPreset;
@@ -205,8 +205,7 @@ export const requestExport = mutation({
     const exportId = await ctx.db.insert("exports", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId: production.projectId, productionId: production._id, renderJobId: jobId, manifestId: manifest._id, selectionScope, exportScope: String(record(manifestData.export).scope ?? selectionScope), preset: exportPreset, status: "QUEUED", progress: 0, createdAt: timestamp });
     await ctx.scheduler.runAfter(0, internal.renderJobs.dispatch, { jobId });
     return { job: publicRenderJob((await ctx.db.get(jobId))!), export: await ctx.db.get(exportId), replayed: false };
-  },
-});
+}
 
 export const getExport = query({
   args: { exportId: v.id("exports") },

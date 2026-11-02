@@ -9,6 +9,7 @@ const navigation = [
   [LayoutDashboard, 'Overview', '/admin'],
   [Users, 'People', '/admin/users'],
   [Users, 'Platform roles', '/admin/roles'],
+  [Users, 'Account requests', '/admin/account-requests'],
   [AlertTriangle, 'Moderation', '/admin/moderation'],
   [Activity, 'Jobs', '/admin/jobs'],
   [CreditCard, 'Credits', '/admin/credits'],
@@ -18,7 +19,7 @@ const navigation = [
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const role = await requirePlatformRole();
-  const kinds: Record<string, PlatformInventoryKind> = { '/admin/users': 'users', '/admin/roles': 'roles', '/admin/moderation': 'reports', '/admin/jobs': 'jobs', '/admin/credits': 'credits', '/admin/audit': 'audit', '/admin/video-routing': 'routing' };
+  const kinds: Record<string, PlatformInventoryKind> = { '/admin/users': 'users', '/admin/roles': 'roles', '/admin/account-requests': 'roles', '/admin/moderation': 'reports', '/admin/jobs': 'jobs', '/admin/credits': 'credits', '/admin/audit': 'audit', '/admin/video-routing': 'routing' };
   const permittedNavigation = navigation.filter(([, , href]) => href === '/admin' || PLATFORM_READ_ROLES[kinds[href]].includes(role.role));
   return <div className="min-h-dvh bg-[#0b0d12] text-[#eaf0fa]">
     <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-[#263143]/45 bg-[#151b25] p-5 lg:flex">
@@ -33,6 +34,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     </aside>
     <main id="admin-content" className="min-h-dvh lg:ml-64">
       <nav className="sticky top-0 z-20 flex gap-2 overflow-x-auto border-b border-[#263143]/45 bg-[#0b0d12]/95 px-5 py-3 backdrop-blur lg:hidden" aria-label="Mobile platform navigation">
+        <Link href="/dashboard" className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[#1c2533] px-3 py-2 text-xs font-semibold"><ArrowLeft className="size-4" /> Back to app</Link>
         {permittedNavigation.map(([, label, href]) => <Link key={href} href={href} className="shrink-0 whitespace-nowrap rounded-full bg-[#1c2533] px-3 py-2 text-xs font-semibold">{label}</Link>)}
       </nav>
       <ScrollRevealRoot selector="#admin-content > div > *" />

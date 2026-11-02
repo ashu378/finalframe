@@ -3,7 +3,8 @@ import { internalMutation, internalQuery, mutation, query } from './_generated/s
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { SchedulableFunctionReference, FunctionReference } from 'convex/server';
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
+import { recipeExecutionScope, resolveRecipeSlotGrants, assertRecipeAdmission, bindRecipeGenerationJob, assertRecipeGenerationFence } from './recipeAdmissions';
 import { requireProjectAccess, requireProjectRole } from './authorization';
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
@@ -14,10 +15,12 @@ import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
+import {freshMusicQuote,sameMusicQuote,MUSIC_LIMITS} from '../src/lib/ai/music';
+import {normalizeSha256,sha256Equal} from '../renderer/src/media/sha256';
 import { resolvePortraitSourceCertificate } from './imageCertificates';
 import { studioRoleForUser, userExternalKey } from './studioMemberships';
 import { validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '../src/lib/production/workspace-controls';
-import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
+import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, hasStoredMusicOutput, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Job = Doc<'generationJobs'>;
@@ -34,10 +37,13 @@ async function load(ctx: ReadCtx, jobId: Id<'generationJobs'>) {
   if (!job) throw new Error('Generation job not found.');
   return job;
 }
-async function productionAccess(ctx: ReadCtx, productionId: Id<'productions'>, write = false) {
+type RecipeExecution = { nodeId: Id<'recipeRunNodes'>; leaseId: string };
+async function productionAccess(ctx: ReadCtx, productionId: Id<'productions'>, write = false, execution?: RecipeExecution) {
   const production = await ctx.db.get(productionId);
   if (!production?.projectId) throw new Error('This production must belong to a project.');
-  const access = write ? await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']) : await requireProjectAccess(ctx, production.projectId);
+  const scope = execution ? await recipeExecutionScope(ctx, execution) : null;
+  if (scope && scope.production._id !== productionId) throw new Error('RECIPE_PRODUCTION_MISMATCH');
+  const access = scope?.access ?? (write ? await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']) : await requireProjectAccess(ctx, production.projectId));
   if (production.studioExternalId !== access.project.studioExternalId) throw new Error('Production is not owned by this project.');
   if (write && (access.project.archivedAt || access.project.status === 'ARCHIVED')) throw new Error('Restore this project before generating.');
   return { production, access };
@@ -94,11 +100,12 @@ function stable(value: unknown): string {
 }
 
 /** Creation, both reservations and the scheduled handoff share one transaction. */
-export const create = mutation({
-  args: { productionId: v.id('productions'), shotId: v.id('shots'), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), estimatedProviderCostUsd: v.optional(v.number()), idempotencyKey: v.string(), modality: v.optional(v.string()), capability: v.optional(v.string()), modelVersion: v.optional(v.string()), correlationId: v.optional(v.string()), reservationId: v.optional(v.id('creditReservations')), canonicalReservationId: v.optional(v.id('reservations')) },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const { production, access } = await productionAccess(ctx, args.productionId, true);
+const generationCreateArgs = { productionId: v.id('productions'), shotId: v.id('shots'), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), estimatedProviderCostUsd: v.optional(v.number()), idempotencyKey: v.string(), modality: v.optional(v.string()), capability: v.optional(v.string()), modelVersion: v.optional(v.string()), correlationId: v.optional(v.string()), reservationId: v.optional(v.id('creditReservations')), canonicalReservationId: v.optional(v.id('reservations')) };
+const generationCreateValidator = v.object(generationCreateArgs);
+type GenerationCreateArgs = Infer<typeof generationCreateValidator>;
+export const create = mutation({ args: generationCreateArgs, returns: v.any(), handler: (ctx,args) => createCanonicalGenerationJob(ctx,args) });
+export async function createCanonicalGenerationJob(ctx: MutationCtx, args: GenerationCreateArgs, execution?: RecipeExecution) {
+    const { production, access } = await productionAccess(ctx, args.productionId, true, execution);
     if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new generation.');
     const shot = await ctx.db.get(args.shotId);
     const scene = shot ? await ctx.db.get(shot.sceneId) : null;
@@ -106,15 +113,19 @@ export const create = mutation({
     if (!production.currentVersionId || shot.productionVersionId !== production.currentVersionId) throw new Error('Generate from the current production version.');
     const version = await ctx.db.get(production.currentVersionId);
     if (!version || version.productionId !== production._id || version.status !== 'APPROVED') throw new Error('Approve the canonical production plan before generating.');
-    const shotState = await getEffectiveResourceState(ctx, access.project._id, 'shot', shot._id, production._id);
+    const shotState = await getEffectiveResourceState(ctx, access.project._id, 'shot', shot._id, production._id, execution?access.user._id:undefined);
     if (shotState.currentState === 'LOCKED') throw new Error('Unlock the shot before making a new take.');
     await requireUnlockedGraph(ctx, access.project._id, shot, scene);
     const idempotencyKey = key(args.idempotencyKey);
     const requested = object(args.request);
+    if (!execution && (requested.recipeRunNodeId !== undefined || requested.recipeResolvedRequestHash !== undefined)) throw new Error('RECIPE_PRIVATE_AUTHORITY_REQUIRED');
+    const recipeNode = execution ? (await recipeExecutionScope(ctx,execution)).node : null;
+    const grants = recipeNode ? await resolveRecipeSlotGrants(ctx,recipeNode) : [];
+    const recipeMarkers = recipeNode ? {recipeRunNodeId:recipeNode._id,recipeResolvedRequestHash:recipeNode.resolvedRequestHash} : {};
     const metadata = object(shot.metadata);
-    const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: shot.requiredAssetIds || [] });
+    const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)] });
     const qualityTier = requested.qualityTier === 'ECONOMY' || requested.qualityTier === 'PREMIUM' ? requested.qualityTier : 'STANDARD';
-    const request = { ...requested, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
+    const request = { ...requested, ...recipeMarkers, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
     const requestHash = stable({ productionId: production._id, versionId: version._id, shotId: shot._id, model: args.model, provider: args.provider, request, shotMetadata: metadata });
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', (q) => q.eq('idempotencyKey', idempotencyKey)).unique();
     if (existing) {
@@ -137,7 +148,7 @@ export const create = mutation({
     for (const frameId of inputFrameIds) if (!sourceAssets.some((asset) => asset._id === frameId && asset.mimeType?.startsWith('image/'))) throw new Error('Required frames must be stored images in this project.');
     const operation = (typeof metadata.operation === 'string' ? metadata.operation : typeof metadata.videoTask === 'string' ? metadata.videoTask : 'GENERATE') as ShotOperationControls['operation'];
     const normalizedRequest: Record<string, unknown> = {
-      ...requested, ...object(requested.constraints), prompt: continuity.promptContext ? `${shot.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : shot.prompt, duration: shot.durationSeconds,
+      ...requested, ...object(requested.constraints), ...recipeMarkers, prompt: continuity.promptContext ? `${shot.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : shot.prompt, duration: shot.durationSeconds,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,
       durationSeconds: shot.durationSeconds, qualityTier,
       ratio: String(requested.ratio || '16:9'), aspectRatio: String(requested.ratio || '16:9'),
@@ -219,18 +230,24 @@ export const create = mutation({
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
     const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'LIP_SYNC' || operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
+    const recipeAdmission = execution ? await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:videoBudgetReservationUsd(estimatedProviderCostUsd),credits:estimatedCost}) : null;
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
-    await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId });
+    await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId },execution?access.user._id:undefined);
     const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
-    const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId });
+    const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
     const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: videoBudgetReservationUsd(estimatedProviderCostUsd), idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });
+    if (recipeAdmission) await bindRecipeGenerationJob(ctx,recipeAdmission,jobId);
     await schedule(ctx, jobId);
     return publicJob((await load(ctx, jobId)) as unknown as Record<string, unknown>);
-  },
-});
+}
+
+export const createForRecipe = internalMutation({ args: { nodeId:v.id('recipeRunNodes'),leaseId:v.string() }, returns:v.any(), handler:async(ctx,execution)=>{
+  const {node,run}=await recipeExecutionScope(ctx,execution);if(node.operation!=='GENERATION')throw new Error('RECIPE_NODE_OPERATION_MISMATCH');const saved=object(object(node.resolvedBindings).createArgs);const shotId=ctx.db.normalizeId('shots',String(object(object(node.request).shot).id??''));if(!shotId)throw new Error('RECIPE_SHOT_UNAVAILABLE');
+  return createCanonicalGenerationJob(ctx,{productionId:run.productionId,shotId,provider:'openrouter',model:String(saved.model??''),request:object(saved.request),estimatedCost:Number(saved.estimatedCost),estimatedProviderCostUsd:Number(saved.estimatedProviderCostUsd),idempotencyKey:node.idempotencyKey,capability:typeof saved.capability==='string'?saved.capability:undefined,modelVersion:typeof saved.modelVersion==='string'?saved.modelVersion:undefined},execution);
+} });
 
 export const get = query({ args: jobArgs, returns: v.any(), handler: async (ctx, args) => {
   const { job } = await authorizedJob(ctx, args.jobId);
@@ -266,6 +283,8 @@ export const cancel = mutation({ args: { ...jobArgs, reason: v.optional(v.string
   return { jobId: job._id, status: 'CANCELED' };
 } });
 
+async function resumeMusicQc(ctx:MutationCtx,job:Job,retryable:boolean){const response=object(job.response);const count=Number(response.musicQcRetries??0)+1;const retry=retryable&&count<=24;const delay=Math.min(count*10000,60000);await ctx.db.patch(job._id,{status:'PENDING',executionStage:retry?'AUDIO_QC':'RECONCILIATION_REQUIRED',response:{...response,musicQcRetries:count},errorCode:retry?'MUSIC_QC_PENDING':'RECONCILIATION_REQUIRED',leaseId:undefined,leaseExpiresAt:undefined,nextAttemptAt:retry?Date.now()+delay:undefined,updatedAt:Date.now()});if(retry)await schedule(ctx,job._id,delay);}
+async function musicReceipt(ctx:MutationCtx,job:Job){if(object(job.request).preparationKind==='MUSIC'&&/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??''))await ctx.scheduler.runAfter(0,ref('providerReceipts','reconcile'),{jobId:job._id});}
 /** No browser-visible function can claim leases or submit completion evidence. */
 export async function claimGenerationJob(ctx: MutationCtx, args: { jobId: Id<'generationJobs'> }, fixtureKey?: string) {
   const job = await load(ctx, args.jobId);
@@ -276,16 +295,16 @@ export async function claimGenerationJob(ctx: MutationCtx, args: { jobId: Id<'ge
   } else if (!workerEnabled() || job.provider !== 'openrouter') return { claimed: false };
   if (!canClaim(job, timestamp)) return { claimed: false };
   if (!job.providerBudgetReservationId || !job.canonicalReservationId || !job.projectId) return { claimed: false };
-  const stage = recoveryStage(job);
+  const musicOutput=hasStoredMusicOutput(job);const stage = musicOutput?'AUDIO_QC':recoveryStage(job);
   if (stage === 'RECONCILIATION_REQUIRED') {
     await ctx.db.patch(job._id, { executionStage: stage, errorCode: stage, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
     await settle(ctx, job, true);
     return { claimed: false };
   }
-  const attemptNumber = job.providerJobId ? Math.max(job.attemptCount, 1) : job.attemptCount + 1;
+  const attemptNumber = job.providerJobId||musicOutput ? Math.max(job.attemptCount, 1) : job.attemptCount + 1;
   const leaseId = `${job._id}:${timestamp}:${Math.random().toString(36).slice(2)}`;
   await ctx.db.patch(job._id, { status: stage === 'POLL' ? 'PENDING' : 'PROCESSING', executionStage: stage, attemptCount: attemptNumber, leaseId, leaseExpiresAt: timestamp + GENERATION_LEASE_MS, startedAt: job.startedAt ?? timestamp, nextPollAt: undefined, updatedAt: timestamp });
-  if (!job.providerJobId) await ctx.db.insert('attempts', { studioExternalId: job.studioExternalId, studioId: job.studioId, generationJobId: job._id, attemptNumber, status: 'PROCESSING', provider: job.provider, model: job.model, requestHash: job.requestHash, startedAt: timestamp, createdAt: timestamp });
+  if (!job.providerJobId&&!musicOutput) await ctx.db.insert('attempts', { studioExternalId: job.studioExternalId, studioId: job.studioId, generationJobId: job._id, attemptNumber, status: 'PROCESSING', provider: job.provider, model: job.model, requestHash: job.requestHash, startedAt: timestamp, createdAt: timestamp });
   await ctx.scheduler.runAfter(GENERATION_LEASE_MS + 1000, ref('generationJobs', 'expireLease'), { jobId: job._id, leaseId });
   return { claimed: true, jobId: job._id, leaseId };
 }
@@ -296,7 +315,7 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   const project = job.projectId ? await ctx.db.get(job.projectId) : null;
   if (!production || !project || production.projectId !== project._id) throw new Error('Generation ownership is invalid.');
   // Once accepted, retain and ingest the paid result even if a later draft becomes current.
-  if (!job.providerJobId && (project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId))) throw new Error('This project or production version is no longer available for generation.');
+  if (!job.providerJobId && !hasStoredMusicOutput(job) && (project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId))) throw new Error('This project or production version is no longer available for generation.');
   const request = object(job.request);
   const references: Array<{ assetId: string; url: string; kind: 'image' | 'video' | 'audio'; mimeType?: string }> = [];
   for (const rawId of job.providerJobId ? [] : Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds : []) {
@@ -311,7 +330,7 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   const outputAssetId = object(job.response).assetId;
   const output = typeof outputAssetId === 'string' ? await ctx.db.get(outputAssetId as Id<'assets'>) : null;
   const outputUrl = output?.projectId === project._id && output.storageId ? await ctx.storage.getUrl(output.storageId) : null;
-  return { job, request, references, outputAssetId: output?._id, outputUrl };
+  const musicOutput=hasStoredMusicOutput(job)?object(object(job.response).audioOutput):null;const musicStorage=musicOutput?await ctx.db.system.get('_storage',musicOutput.storageId as Id<'_storage'>):null;if(musicOutput&&(!musicStorage||musicStorage.size!==musicOutput.byteSize||!sha256Equal(musicStorage.sha256,musicOutput.checksum)))throw new Error('MUSIC_OUTPUT_CHANGED');return { job, request, references, outputAssetId: output?._id, outputUrl,...(musicOutput?{musicOutput:{...musicOutput,url:await ctx.storage.getUrl(musicOutput.storageId as Id<'_storage'>)}}:{}) };
 } });
 export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCatalogFingerprint: v.optional(v.string()), liveCatalogCheckedAt: v.optional(v.number()), livePreparationQuote: v.optional(v.any()), liveEndpointFingerprint: v.optional(v.string()) }, returns: v.any(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId); assertLease(job, args.leaseId);
@@ -345,6 +364,8 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     dispatchValidation = { fixtureOnly: true };
   } else if (job.operation === 'PREPARATION') {
     if (process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not enabled.');
+    if(request.preparationKind==='SFX')throw new Error('SFX_UNSUPPORTED');
+    if(request.preparationKind==='MUSIC'){if(process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true')throw new Error('MUSIC_DISABLED');const current=freshMusicQuote(object(args.livePreparationQuote).musicQuote);const frozen=freshMusicQuote({...object(object(request.quote).musicQuote),checkedAt:current.checkedAt});if(!sameMusicQuote(frozen,current)||current.model!==job.model||current.canonicalSlug!==job.modelVersion||current.reservedProviderUsd!==job.estimatedProviderCostUsd||object(args.livePreparationQuote).estimatedProviderCostUsd!==job.estimatedProviderCostUsd)throw new Error('MUSIC_QUOTE_CHANGED');}
     const bookedMicros=Math.ceil(Number(job.estimatedProviderCostUsd)*1_000_000);
     if(!Number.isFinite(bookedMicros)||bookedMicros<=0||bookedMicros>reserved.estimatedMicros)throw new Error('The preparation reservation no longer covers its provider quote.');
     const selected = preparationModel(request.preparationKind as PreparationKind, request.clone === true);
@@ -398,6 +419,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
       throw Object.assign(new Error('The reviewed route or provider quote has changed. Create a new estimate.'), { code: 'ROUTE_CHANGED' });
     }
   }
+  await assertRecipeGenerationFence(ctx,job,job.operation==='PREPARATION'?Number(dispatchValidation.estimatedCostUsd):videoBudgetReservationUsd(Number(dispatchValidation.estimatedCostUsd)));
   await ctx.db.patch(job._id, { submissionStartedAt: Date.now(), executionStage: 'SUBMITTING', progress: 5, response: { ...object(job.response), dispatchValidation: { ...dispatchValidation, checkedAt: Date.now() } }, updatedAt: Date.now() });
   return { allowed: true };
 } });
@@ -454,10 +476,11 @@ export const fail = internalMutation({ args: { ...leaseArgs, errorCode: v.string
   if (GENERATION_TERMINAL.has(job.status)) return null;
   assertLease(job, args.leaseId);
   const timestamp = Date.now();
+  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,args.retryable===true);return null;}
   const accepted = Boolean(job.providerJobId || args.ambiguous || (job.submissionStartedAt && !args.rejected));
   if (!job.providerJobId && accepted) {
     await ctx.db.patch(job._id, { status: 'PROCESSING', executionStage: 'RECONCILIATION_REQUIRED', errorCode: 'RECONCILIATION_REQUIRED', leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
-    await settle(ctx, job, true);
+    await settle(ctx, job, true);await musicReceipt(ctx,job);
     return null;
   }
   const retryable = args.retryable === true && job.providerJobId && Date.now() - (job.startedAt ?? job.createdAt) < 30 * 60 * 1000;
@@ -472,9 +495,10 @@ export const wake = internalMutation({ args: jobArgs, returns: v.null(), handler
 export const expireLease = internalMutation({ args: leaseArgs, returns: v.null(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId);
   if (job.leaseId !== args.leaseId || !job.leaseExpiresAt || job.leaseExpiresAt > Date.now() || GENERATION_TERMINAL.has(job.status)) return null;
+  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,true);return null;}
   if (recoveryStage(job) === 'RECONCILIATION_REQUIRED') {
     await ctx.db.patch(job._id, { executionStage: 'RECONCILIATION_REQUIRED', errorCode: 'RECONCILIATION_REQUIRED', leaseId: undefined, leaseExpiresAt: undefined, updatedAt: Date.now() });
-    await settle(ctx, job, true);
+    await settle(ctx, job, true);await musicReceipt(ctx,job);
   } else {
     await ctx.db.patch(job._id, { status: job.providerJobId ? 'PENDING' : 'QUEUED', executionStage: job.providerJobId ? 'POLL' : 'QUEUED', leaseId: undefined, leaseExpiresAt: undefined, updatedAt: Date.now() });
     await schedule(ctx, job._id);
@@ -514,7 +538,7 @@ export const reconcileAcceptedSubmission = internalMutation({
 });
 
 
-const preparationKindValidator = v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'));
+const preparationKindValidator = v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX'));
 export const preparationContext = internalQuery({
   args: { productionId: v.id('productions'), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')) }, returns: v.any(),
   handler: async (ctx, args) => {
@@ -527,10 +551,14 @@ export const preparationContext = internalQuery({
     return { productionId: production._id, projectId: access.project._id, voice, source: asset?.storageId && stored ? { assetId: asset._id,storageId:asset.storageId,checksum:stored.sha256,byteSize:stored.size,mimeType:asset.mimeType,url:await ctx.storage.getUrl(asset.storageId) } : null };
   },
 });
-export const createPreparation = internalMutation({
-  args: { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() }, returns: v.any(),
-  handler: async (ctx, args) => {
-    const { production, access } = await productionAccess(ctx, args.productionId, true);
+const preparationCreateArgs = { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() };
+type PreparationCreateArgs = Infer<ReturnType<typeof preparationArgsValidator>>;
+function preparationArgsValidator(){return v.object(preparationCreateArgs);}
+export const createPreparation=internalMutation({args:preparationCreateArgs,returns:v.any(),handler:(ctx,args)=>createCanonicalPreparationJob(ctx,args)});
+export async function createCanonicalPreparationJob(ctx:MutationCtx,args:PreparationCreateArgs,execution?:RecipeExecution){
+    const { production, access } = await productionAccess(ctx, args.productionId, true, execution);
+    if(args.kind==='SFX')throw new Error('SFX_UNSUPPORTED');
+    if(args.kind==='MUSIC'&&(process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true'||args.clone||args.durationSeconds!==undefined))throw new Error('MUSIC_DISABLED_OR_INVALID');
     if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new preparation.');
     if (!workerEnabled() || process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not enabled.');
     if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) && (args.targetVoiceId || args.primaryVoiceSampleAssetId) || args.kind !== 'TRANSCRIPT' && args.sourceAssetId) throw new Error('Choose only the sources used by this preparation type.');
@@ -547,6 +575,7 @@ export const createPreparation = internalMutation({
     } else if (args.primaryVoiceSampleAssetId || voice?.mode === 'REFERENCE_CLONE' || voice?.mode === 'RECORDED') throw new Error('Voice mode changed.');
     const config = preparationModel(args.kind, args.clone);
     if (args.model !== config.id || args.capability !== config.capability || !Number.isFinite(args.estimatedProviderCostUsd) || args.estimatedProviderCostUsd <= 0 || args.estimatedProviderCostUsd > 2) throw new Error('A verified preparation quote is required.');
+    const musicQuote=args.kind==='MUSIC'?freshMusicQuote(object(args.quote).musicQuote):undefined;if(musicQuote&&(musicQuote.model!==args.model||musicQuote.reservedProviderUsd!==args.estimatedProviderCostUsd||object(args.quote).estimatedProviderCostUsd!==args.estimatedProviderCostUsd))throw new Error('MUSIC_QUOTE_INVALID');
     let transcriptSource;
     if (args.kind === 'TRANSCRIPT') {
       const source = args.sourceAssetId ? await ctx.db.get(args.sourceAssetId) : null;
@@ -555,51 +584,73 @@ export const createPreparation = internalMutation({
       const quoted=object(args.quote);
       if(args.durationSeconds!==transcriptSource.durationSeconds||quoted.inputDurationSeconds!==transcriptSource.durationSeconds||quoted.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||quoted.billableInputSeconds!==Math.ceil(transcriptSource.durationSeconds+1/16000)||quoted.estimatedProviderCostUsd!==args.estimatedProviderCostUsd||quoted.model!==args.model||typeof quoted.checkedAt!=='number'||Date.now()-quoted.checkedAt>30000||quoted.checkedAt>Date.now()+1000)throw new Error('Obtain a fresh decoded transcription quote.');
     }
-    const request = { preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
-    const requestHash = stable({ productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource });
+    const recipeMarker=execution?{recipeRunNodeId:execution.nodeId,recipeResolvedRequestHash:(await recipeExecutionScope(ctx,execution)).node.resolvedRequestHash}:{};
+    const request = { ...recipeMarker, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
+    const requestHash = stable({ ...recipeMarker, productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}) });
     const idempotencyKey = key(args.idempotencyKey);
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
-    if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }
+    if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id||musicQuote&&existing.createdByUserId!==access.user._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }
+    const admission=execution?await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:args.estimatedProviderCostUsd,credits:1}):undefined;
     const timestamp = Date.now();
-    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, createdByUserId: access.user._id, operation: 'PREPARATION', capability: args.capability, modality: args.kind === 'CHARACTER_REFERENCE' ? 'IMAGE' : args.kind === 'TRANSCRIPT' ? 'TEXT' : 'AUDIO', provider: 'openrouter', model: args.model, request, requestHash, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost: 1, estimatedProviderCostUsd: args.estimatedProviderCostUsd, idempotencyKey, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
-    const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: 1, idempotencyKey: `generation:${jobId}`, generationJobId: jobId });
+    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, createdByUserId: access.user._id, operation: 'PREPARATION', capability: args.capability,...(musicQuote?{modelVersion:musicQuote.canonicalSlug}:{}), modality: args.kind === 'CHARACTER_REFERENCE' ? 'IMAGE' : args.kind === 'TRANSCRIPT' ? 'TEXT' : 'AUDIO', provider: 'openrouter', model: args.model, request, requestHash, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost: 1, estimatedProviderCostUsd: args.estimatedProviderCostUsd, idempotencyKey, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
+    const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: 1, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
     const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: args.estimatedProviderCostUsd, idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });
+    if(admission)await bindRecipeGenerationJob(ctx,admission,jobId);
     await schedule(ctx, jobId);
     return publicJob((await load(ctx, jobId)) as unknown as Record<string, unknown>);
-  },
-});
+}
+export const createPreparationForRecipe=internalMutation({args:{nodeId:v.id('recipeRunNodes'),leaseId:v.string()},returns:v.any(),handler:async(ctx,execution)=>{
+  const {run,node}=await recipeExecutionScope(ctx,execution);if(!['PREPARATION','NARRATION'].includes(node.operation)||node.effect!=='PAID')throw new Error('RECIPE_PREPARATION_NODE_REQUIRED');
+  const saved=object(object(node.resolvedBindings).createArgs);const estimate=run.reviewedEstimateId?await ctx.db.get(run.reviewedEstimateId):null;const quote=object(object(estimate?.quotes)[node.nodeId]);return createCanonicalPreparationJob(ctx,{...saved,quote:quote.preparationQuote,estimatedProviderCostUsd:Number(quote.baseProviderUsd),productionId:run.productionId,idempotencyKey:node.idempotencyKey} as PreparationCreateArgs,execution);
+}});
+
 export const completePreparation = internalMutation({
-  args: { ...leaseArgs, storageId: v.optional(v.id('_storage')), contentType: v.optional(v.string()), text: v.optional(v.string()), segments: v.optional(v.any()), providerRequestId: v.optional(v.string()), providerCostUsd: v.optional(v.number()), actualModel: v.string(), usage: v.optional(v.any()) }, returns: v.null(),
+  args: { ...leaseArgs, storageId: v.optional(v.id('_storage')), contentType: v.optional(v.string()), text: v.optional(v.string()), segments: v.optional(v.any()), providerRequestId: v.optional(v.string()), providerCostUsd: v.optional(v.number()), actualModel: v.string(),musicProbe:v.optional(v.any()), usage: v.optional(v.any()) }, returns: v.null(),
   handler: async (ctx, args) => {
     const job = await load(ctx, args.jobId);
     if (job.status === 'COMPLETED') return null;
     assertLease(job, args.leaseId);
     if (job.operation !== 'PREPARATION' || !job.submissionStartedAt || job.model !== args.actualModel || !job.projectId) throw new Error('Preparation completion is invalid.');
-    const request = object(job.request);
-    let assetId: Id<'assets'> | undefined;
+    const request = object(job.request);const recordedCost=args.providerCostUsd??job.providerCostUsd;
+    let assetId: Id<'assets'> | undefined;let transcriptId:Id<'transcripts'>|undefined;
     if (args.storageId) {
+      const music=request.preparationKind==='MUSIC';const proof=object(args.musicProbe);const saved=object(object(job.response).audioOutput);if(music&&(!hasStoredMusicOutput(job)||saved.storageId!==args.storageId||proof.hasVideo!==false||proof.audioCodec!=='mp3'||proof.channels!==2||![44100,48000].includes(Number(proof.sampleRate))||proof.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||proof.decodedSampleRate!==16000||!Number.isSafeInteger(proof.decodedSampleCount)||Number(proof.decodedSampleCount)<=0||proof.durationSeconds!==Number(proof.decodedSampleCount)/16000||Math.abs(Number(proof.durationSeconds)-30)>.1||proof.byteSize!==saved.byteSize||!sha256Equal(proof.checksum,saved.checksum)))throw new Error('MUSIC_OUTPUT_INVALID');
       const stored = await ctx.db.system.get('_storage', args.storageId);
       const expected = job.modality === 'IMAGE' ? 'image/' : 'audio/';
+      if(music&&(!stored||stored.size!==saved.byteSize||!sha256Equal(stored.sha256,saved.checksum)||stored.contentType!=='audio/mpeg'))throw new Error('MUSIC_OUTPUT_CHANGED');
       if (!stored || !args.contentType?.startsWith(expected) || !stored.contentType?.startsWith(expected) || stored.size <= 0 || stored.size > 15 * 1024 * 1024) throw new Error('Preparation output is invalid.');
-      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : 'NARRATION'], name: job.modality === 'AUDIO' ? `${request.preparationKind === 'VOICE_PREVIEW' ? 'Voice preview' : 'Narration'} · ${String(request.text || '').slice(0, 60)}` : undefined, storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, metadata: { generationJobId: job._id, technicalStatus: 'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
+      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : music?'MUSIC':'NARRATION'], name: job.modality === 'AUDIO' ? `${music?'Music clip':request.preparationKind === 'VOICE_PREVIEW' ? 'Voice preview' : 'Narration'} · ${String(request.text || '').slice(0, 60)}` : undefined, storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, ...(music?{durationSeconds:Number(proof.durationSeconds)}:{}),metadata: { generationJobId: job._id,...(music?{audioProbe:proof,generatedText:saved.generatedText}:{}), technicalStatus: music?'PASS':'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
+      if(music)await ctx.db.insert('audio',{studioExternalId:job.studioExternalId,studioId:job.studioId,projectId:job.projectId,productionId:job.productionId,assetId,kind:'MUSIC',durationSeconds:Number(proof.durationSeconds),sampleRate:Number(proof.sampleRate),channels:2,metadata:{generationJobId:job._id,nominalDurationSeconds:30,requiresHumanReview:true},createdAt:Date.now()});
     } else if (request.preparationKind === 'TRANSCRIPT') {
       if (typeof args.text !== 'string' || args.text.length > 100_000 || typeof request.sourceAssetId !== 'string') throw new Error('Transcript output is invalid.');
       const source = await ctx.db.get(request.sourceAssetId as Id<'assets'>);
       if (!source || source.projectId !== job.projectId) throw new Error('Transcript source is unavailable.');
       let audio = await ctx.db.query('audio').withIndex('by_asset', q => q.eq('assetId', source._id)).first();
       if (!audio) { const id = await ctx.db.insert('audio', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, assetId: source._id, kind: 'RECORDING', metadata: {}, createdAt: Date.now() }); audio = await ctx.db.get(id); }
-      await ctx.db.insert('transcripts', { studioExternalId: job.studioExternalId, studioId: job.studioId, audioId: audio!._id, productionId: job.productionId, language: 'und', provider: job.provider, model: job.model, status: 'COMPLETED', segments: { text: args.text, segments: args.segments ?? [], generationJobId: job._id }, createdAt: Date.now() });
+      transcriptId=await ctx.db.insert('transcripts', { studioExternalId: job.studioExternalId, studioId: job.studioId, audioId: audio!._id, productionId: job.productionId, language: 'und', provider: job.provider, model: job.model, status: 'COMPLETED', segments: { text: args.text, segments: args.segments ?? [], generationJobId: job._id }, createdAt: Date.now() });
     } else throw new Error('Preparation output is missing.');
     const timestamp = Date.now();
     const attempt = await currentAttempt(ctx, job);
     if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', providerRequestId: args.providerRequestId, completedAt: timestamp, latencyMs: timestamp - (job.startedAt ?? job.createdAt) });
-    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, providerRequestId: args.providerRequestId, providerCostUsd: args.providerCostUsd, actualCost: job.estimatedCost, response: { assetId, text: args.text, usage: args.usage, reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
-    await settle(ctx, job, true, args.providerCostUsd);
-    if (job.modality === 'AUDIO' && args.providerCostUsd === undefined && /^gen-tts-\d+-[A-Za-z0-9]+$/.test(args.providerRequestId ?? '')) {
+    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, providerRequestId: args.providerRequestId, providerCostUsd: recordedCost, actualCost: job.estimatedCost, response: {...object(job.response), assetId,transcriptId, text: args.text, usage: args.usage, reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    await settle(ctx, job, true, recordedCost);
+    if (job.modality === 'AUDIO' && recordedCost === undefined && (request.preparationKind==='MUSIC'?/^gen-[A-Za-z0-9._-]{1,180}$/:/^gen-tts-\d+-[A-Za-z0-9]+$/).test(args.providerRequestId ?? '')) {
       const receipts = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;
       await ctx.scheduler.runAfter(0, receipts.reconcile, { jobId: job._id });
     }
     return null;
   },
 });
+
+export const recordMusicAcceptance=internalMutation({args:{...leaseArgs,providerRequestId:v.string()},returns:v.null(),handler:async(ctx,args)=>{const job=await load(ctx,args.jobId);assertLease(job,args.leaseId);if(job.operation!=='PREPARATION'||object(job.request).preparationKind!=='MUSIC'||!job.submissionStartedAt||!/^gen-[A-Za-z0-9._-]{1,180}$/.test(args.providerRequestId)||job.providerRequestId&&job.providerRequestId!==args.providerRequestId)throw new Error('MUSIC_ACCEPTANCE_INVALID');await ctx.db.patch(job._id,{providerRequestId:args.providerRequestId,updatedAt:Date.now()});return null;}});
+export const recordMusicOutput=internalMutation({args:{...leaseArgs,storageId:v.id('_storage'),providerRequestId:v.string(),actualModel:v.string(),generatedText:v.string(),providerCostUsd:v.optional(v.number()),usage:v.optional(v.any())},returns:v.null(),handler:async(ctx,args)=>{const job=await load(ctx,args.jobId);assertLease(job,args.leaseId);if(job.operation!=='PREPARATION'||object(job.request).preparationKind!=='MUSIC'||!job.submissionStartedAt||job.providerRequestId!==args.providerRequestId||job.model!==args.actualModel||new TextEncoder().encode(args.generatedText).length>MUSIC_LIMITS.maxTextBytes||args.providerCostUsd!==undefined&&(!Number.isFinite(args.providerCostUsd)||args.providerCostUsd<.04))throw new Error('MUSIC_OUTPUT_INVALID');const stored=await ctx.db.system.get('_storage',args.storageId);if(!stored||stored.contentType!=='audio/mpeg'||stored.size<1||stored.size>MUSIC_LIMITS.maxDecodedBytes||!normalizeSha256(stored.sha256))throw new Error('MUSIC_OUTPUT_INVALID');const previous=object(object(job.response).audioOutput);if(previous.storageId){if(previous.storageId!==args.storageId||previous.providerRequestId!==args.providerRequestId||previous.generatedText!==args.generatedText)throw new Error('MUSIC_OUTPUT_CONFLICT');return null;}await ctx.db.patch(job._id,{executionStage:'AUDIO_QC',progress:75,...(args.providerCostUsd!==undefined?{providerCostUsd:args.providerCostUsd}:{}),response:{...object(job.response),audioOutput:{storageId:args.storageId,checksum:stored.sha256,byteSize:stored.size,contentType:'audio/mpeg',model:job.model,providerRequestId:args.providerRequestId,generatedText:args.generatedText,streamCompleted:true,storedAt:Date.now()},...(args.usage!==undefined?{usage:args.usage}:{})},updatedAt:Date.now()});return null;}});
+
+/** Cancel only an originating recipe job which has certainly not crossed the
+ * provider fence. A linked/reused job belongs to its original run. */
+export async function cancelUnsubmittedRecipeJob(ctx:MutationCtx,nodeId:Id<'recipeRunNodes'>){
+ const node=await ctx.db.get(nodeId);const run=node?await ctx.db.get(node.runId):null;const job=node?.linkedGenerationJobId?await ctx.db.get(node.linkedGenerationJobId):null;
+ if(!node||!run?.cancelRequestedAt||!job||job.projectId!==run.projectId||job.productionId!==run.productionId||object(job.request).recipeRunNodeId!==node._id)return;
+ if(job.providerJobId||job.providerRequestId||job.submissionStartedAt||hasStoredMusicOutput(job)||['COMPLETED','CANCELED','FAILED'].includes(job.status))return;
+ await ctx.db.patch(job._id,{status:'CANCELED',executionStage:'CANCELED',leaseId:undefined,leaseExpiresAt:undefined,completedAt:Date.now(),updatedAt:Date.now()});await settle(ctx,job,false);
+}

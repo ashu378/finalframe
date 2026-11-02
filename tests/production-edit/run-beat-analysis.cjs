@@ -1,7 +1,13 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {fixture,editor}=require('./run-finishing-v5.cjs');
-const beat=require(path.resolve(__dirname,'../../convex/beatAnalysis.ts'));
+// The new scheduler guard uses the actual canonical resolver, rather than a
+// permissive owner fixture. Public rendering/auth seams remain unchanged.
+const fs=require('node:fs'),Module=require('node:module'),ts=require('typescript');
+function loadActual(file,imports){const filename=path.resolve(__dirname,'../..',file);const m=new Module(filename,module);m.filename=filename;m.paths=Module._nodeModulePaths(path.dirname(filename));const normal=m.require.bind(m);m.require=name=>Object.prototype.hasOwnProperty.call(imports,name)?imports[name]:normal(name);m._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,filename);return m.exports;}
+const membership=loadActual('convex/studioMemberships.ts',{});const actualAuth=loadActual('convex/authorization.ts',{'./studioMemberships':membership,'./identity':{},'./auth':{ConvexAuthError:Error,ConvexAuthorizationError:Error}});const baseLoad=Module._load;
+Module._load=function(request,parent,isMain){const result=baseLoad.call(this,request,parent,isMain);return request==='./authorization'&&parent?.filename.endsWith('/convex/beatAnalysis.ts')?{...result,resolveProjectAccessForActor:actualAuth.resolveProjectAccessForActor}:result;};
+delete require.cache[path.resolve(__dirname,'../../convex/beatAnalysis.ts')];const beat=require(path.resolve(__dirname,'../../convex/beatAnalysis.ts'));
 const {planBeatCuts}=require(path.resolve(__dirname,'../../convex/beatCutContracts.ts'));
 const {getFunctionName}=require('convex/server');
 const algorithm='ff-beat-spectral-flux-v1';
@@ -15,7 +21,7 @@ function context(){
  const ctx=fixture();const project=ctx.rows.get('project_1');Object.assign(project,{studioId:'studio_1',ownerUserId:'user_1',status:'ACTIVE'});
  ctx.put('users',{_id:'user_1',status:'active',externalId:'owner'});ctx.put('studios',{_id:'studio_1',externalId:'studio',ownerUserId:'user_1',status:'active'});ctx.put('members',{_id:'member_1',studioId:'studio_1',userId:'user_1',role:'owner',status:'active'});ctx.put('projectMembers',{_id:'pm_1',projectId:'project_1',userId:'user_1',role:'OWNER',status:'ACTIVE'});
  for(const id of ['music','red','blue'])ctx.put('resourceStates',{_id:`state_${id}`,projectId:'project_1',resourceType:'asset',resourceId:`asset_${id}`,state:'APPROVED'});
- ctx.storageObjects.get('storage_music').sha256=sourceSha;ctx.storage.getUrl=async id=>`https://fixture.convex.cloud/api/storage/${id}`;
+ ctx.storageObjects.get('storage_music').sha256=sourceSha;ctx.rows.get('asset_music').checksum=sourceSha;ctx.storage.getUrl=async id=>`https://fixture.convex.cloud/api/storage/${id}`;
  ctx.scheduled=[];ctx.scheduler={runAfter:async(delay,ref,input)=>{ctx.scheduled.push({delay,name:getFunctionName(ref),input});}};
  ctx.runMutation=(ref,input)=>beat[getFunctionName(ref).split(':')[1]].handler(ctx,input);
  return ctx;
@@ -29,7 +35,7 @@ let checks=0;async function check(name,run){await run();checks++;console.log('PA
  await check('canonical online Storage base64 SHA binds the exact same worker digest without rewriting asset lineage',async()=>{
   const ctx=context();ctx.storageObjects.get('storage_music').sha256=Buffer.from(sourceSha,'hex').toString('base64');
   const originalAssetChecksum=ctx.rows.get('asset_music').checksum;
-  const made=await beat.request.handler(ctx,args());const claimed=await beat.claim.handler(ctx,{jobId:made.jobId});
+  await beat.activeActor(ctx,'project_1','user_1');const made=await beat.request.handler(ctx,args());const claimed=await beat.claim.handler(ctx,{jobId:made.jobId});
   assert.equal(claimed.sourceChecksum,sourceSha);assert.equal(claimed.assetChecksum,originalAssetChecksum);
   await beat.complete.handler(ctx,{jobId:made.jobId,leaseId:claimed.leaseId,result:goodResult()});
   assert.equal(ctx.rows.get(made.jobId).status,'COMPLETED');assert.equal(ctx.rows.get('asset_music').checksum,originalAssetChecksum);
@@ -38,7 +44,7 @@ let checks=0;async function check(name,run){await run();checks++;console.log('PA
  await check('request replay fences current source/user and cache reuse does not recompute',async()=>{
   const ctx=context();const input=args();const first=await beat.request.handler(ctx,input);const repeat=await beat.request.handler(ctx,input);assert.equal(first.jobId,repeat.jobId);assert.equal(repeat.replayed,true);assert.equal(ctx.count('beatAnalysisJobs'),1);
   const leased=await beat.claim.handler(ctx,{jobId:first.jobId});await beat.complete.handler(ctx,{jobId:first.jobId,leaseId:leased.leaseId,result:goodResult()});const cached=await beat.request.handler(ctx,args());assert.equal(ctx.rows.get(cached.jobId).status,'COMPLETED');assert.equal(ctx.count('beatAnalysisVersions'),1);
-  ctx.storageObjects.get('storage_music').sha256='b'.repeat(64);await assert.rejects(beat.request.handler(ctx,input),/another source/);
+  ctx.storageObjects.get('storage_music').sha256='b'.repeat(64);await assert.rejects(beat.request.handler(ctx,input),/another source|canonical audio/);
  });
  await check('leases serialize analysis, preserve attempts on media429, and recover bounded expiry',async()=>{
   const ctx=context();const first=await beat.request.handler(ctx,args());const second=await beat.request.handler(ctx,args());const lease=await beat.claim.handler(ctx,{jobId:first.jobId});assert.equal(await beat.claim.handler(ctx,{jobId:second.jobId}),null);
@@ -54,6 +60,12 @@ let checks=0;async function check(name,run){await run();checks++;console.log('PA
   const ctx=context();const job=await beat.request.handler(ctx,args());const lease=await beat.claim.handler(ctx,{jobId:job.jobId});ctx.storageObjects.get('storage_music').sha256='c'.repeat(64);await beat.complete.handler(ctx,{jobId:job.jobId,leaseId:lease.leaseId,result:goodResult()});assert.equal(ctx.rows.get(job.jobId).status,'FAILED');assert.equal(ctx.count('beatAnalysisVersions'),0);
   const bad=context();const pending=await beat.request.handler(bad,args());const claimed=await beat.claim.handler(bad,{jobId:pending.jobId});const invalid=goodResult();invalid.beatsSeconds=[1,.5];await beat.complete.handler(bad,{jobId:pending.jobId,leaseId:claimed.leaseId,result:invalid});assert.equal(bad.rows.get(pending.jobId).status,'FAILED');
   const legacy=context();legacy.rows.delete('pm_1');legacy.rows.delete('member_1');delete legacy.rows.get('project_1').ownerUserId;delete legacy.rows.get('project_1').createdByUserId;legacy.rows.get('project_1').createdByExternalId='owner';delete legacy.rows.get('studio_1').ownerUserId;legacy.rows.get('studio_1').ownerExternalId='owner';const retained=await beat.request.handler(legacy,args());assert.ok(await beat.claim.handler(legacy,{jobId:retained.jobId}),'verified saved actor retains canonical legacy owner fallback');
+ });
+ await check('claim and commit deny stale legacy aliases and foreign linked legacy identities through actual canonical resolver',async()=>{
+  for(const kind of ['stale','foreign'])for(const stage of ['claim','commit']){const ctx=context();const created=await beat.request.handler(ctx,args());const lease=stage==='commit'?await beat.claim.handler(ctx,{jobId:created.jobId}):null;ctx.rows.get('member_1').userId='other-user';ctx.rows.get('studio_1').ownerUserId='other-user';ctx.rows.get('studio_1').ownerId='other-user';
+   if(kind==='stale'){ctx.rows.get('user_1').authSubject='canonical|verified';ctx.rows.get('user_1').externalId='stale-owner';ctx.put('studioMembers',{_id:'stale-active',studioExternalId:'studio',userExternalId:'stale-owner',userId:'user_1',status:'active',role:'owner'});ctx.put('studioMembers',{_id:'canonical-removed',studioExternalId:'studio',userExternalId:'canonical',userId:'user_1',status:'removed',role:'owner'});}else ctx.put('studioMembers',{_id:'foreign-legacy',studioExternalId:'studio',userExternalId:'owner',userId:'other-user',status:'active',role:'owner'});
+   if(stage==='claim')assert.equal(await beat.claim.handler(ctx,{jobId:created.jobId}),null);else await beat.complete.handler(ctx,{jobId:created.jobId,leaseId:lease.leaseId,result:goodResult()});assert.equal(ctx.rows.get(created.jobId).status,'FAILED');assert.equal(ctx.count('beatAnalysisVersions'),0);
+  }
  });
  await check('manual correction appends immutable source-bound version, retains confidence and fences replay',async()=>{
   const ctx=context();const parentId=await completed(ctx);const original=structuredClone(ctx.rows.get(parentId));const input={parentVersionId:parentId,beatsSeconds:[.5,1.01,1.5,2],correctionNote:'Reviewed original click attacks.',idempotencyKey:'manual-beat-contract'};const made=await beat.manual.handler(ctx,input);const version=ctx.rows.get(made.analysisVersionId);assert.equal(version.origin,'MANUAL');assert.equal(version.confidence,original.confidence);assert.equal(version.parentVersionId,parentId);assert.deepEqual(ctx.rows.get(parentId),original);

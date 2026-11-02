@@ -108,3 +108,5 @@ export function publicJob(job: Record<string, unknown>) {
     request: { operation: request.operation, preparationKind: request.preparationKind, videoType: request.videoType, task: request.task, qualityTier: request.qualityTier, routeReason: request.routeReason, path: request.path },
   };
 }
+
+export function hasStoredMusicOutput(job:{operation?:string;request?:unknown;response?:unknown;model?:string;submissionStartedAt?:number;providerRequestId?:string}){const output=object(object(job.response).audioOutput);return job.operation==='PREPARATION'&&object(job.request).preparationKind==='MUSIC'&&Boolean(job.submissionStartedAt)&&output.streamCompleted===true&&typeof output.storageId==='string'&&typeof output.checksum==='string'&&Number.isSafeInteger(output.byteSize)&&Number(output.byteSize)>0&&Number(output.byteSize)<=3*1024*1024&&output.contentType==='audio/mpeg'&&output.model===job.model&&typeof output.providerRequestId==='string'&&output.providerRequestId===job.providerRequestId;}

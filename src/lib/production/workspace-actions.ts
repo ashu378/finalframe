@@ -6,6 +6,7 @@ import type { Doc, Id } from '../../../convex/_generated/dataModel';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { validateShotOperationControls, videoTaskForOperation, type ContinuationSourceView, type ShotOperationControls } from './workspace-controls';
 import type { ProjectResourceKind, ResourceVersionView, StorySnapshotView, WorkspaceControlData, WorkspaceResourceState } from './workspace-controls';
+import { validateAuthoringOutputSettings } from '../../../renderer/src/output-settings';
 
 function object(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -13,6 +14,7 @@ function object(value: unknown): Record<string, unknown> {
 
 function safeError(error: unknown) {
     const message = error instanceof Error ? error.message : '';
+    if (/OUTPUT_SETTINGS_INVALID/.test(message)) return 'Choose a supported output size with even dimensions, up to 1080p.';
     if (/immutable|new draft version/i.test(message)) return 'This production version is immutable. Create a revised plan before changing its shots.';
     if (/resource is.*locked|only a locked|unlocking/i.test(message)) return 'This resource is locked. An owner must unlock it with a reason before requesting changes.';
     if (/not authorized|access.denied|role.denied|permission/i.test(message)) return 'Your project role does not permit this change.';
@@ -265,14 +267,15 @@ export async function revokeWorkspaceVoiceConsent(input: { projectExternalId: st
     } catch { return { success: false as const, error: 'Consent could not be revoked. Provide a reason and verify that this voice has active consent.' }; }
 }
 
-export async function createWorkspaceTimeline(input: { projectExternalId: string; productionId: string; versionId: string; requestId: string; clips: import('./workspace-controls').CompositionClip[]; audioTracks: import('./workspace-controls').CompositionAudioTrack[] }) {
+export async function createWorkspaceTimeline(input: { projectExternalId: string; productionId: string; versionId: string; requestId: string; clips: import('./workspace-controls').CompositionClip[]; audioTracks: import('./workspace-controls').CompositionAudioTrack[]; outputSettings?: { width: number; height: number }; fps?: 24 | 25 | 30 | 50 | 60 }) {
     try {
         const { client, project } = await projectContext(input.projectExternalId);
         const workspace = await client.query(api.productions.getWorkspaceByProject, { projectExternalId: project.externalId, productionId: input.productionId as Id<'productions'> });
         if (workspace.production?.projectId !== project._id) throw new Error('Production does not belong to this project.');
         if (!/^[a-zA-Z0-9-]{16,100}$/.test(input.requestId)) throw new Error('Invalid request key.');
+        const outputSettings = input.outputSettings === undefined ? undefined : validateAuthoringOutputSettings(input.outputSettings);
         const clips = input.clips.map((clip) => clip.kind === 'TAKE' ? { ...clip, shotVersionId: clip.shotVersionId as Id<'shotVersions'> } : clip.kind === 'ASSET' ? { ...clip, assetId: clip.assetId as Id<'assets'> } : { ...clip, logoAssetId: clip.logoAssetId as Id<'assets'> | undefined });
-        const result = await client.mutation(api.timeline.createDraft, { productionId: input.productionId as Id<'productions'>, productionVersionId: input.versionId as Id<'productionVersions'>, idempotencyKey: `workspace-timeline:${input.requestId}`, clips, audioTracks: input.audioTracks.map((track) => ({ ...track, assetId: track.assetId as Id<'assets'> })) });
+        const result = await client.mutation(api.timeline.createDraft, { productionId: input.productionId as Id<'productions'>, productionVersionId: input.versionId as Id<'productionVersions'>, idempotencyKey: `workspace-timeline:${input.requestId}`, clips, audioTracks: input.audioTracks.map((track) => ({ ...track, assetId: track.assetId as Id<'assets'> })), ...(outputSettings ? { outputSettings } : {}), ...(input.fps === undefined ? {} : { fps: input.fps }) });
         revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
         return { success: true as const, timelineId: result.timelineId.toString() };
     } catch (error) { return { success: false as const, error: safeError(error) }; }

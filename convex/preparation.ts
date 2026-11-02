@@ -1,4 +1,4 @@
-import { action } from './_generated/server';
+import { action,query } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import type { FunctionReference } from 'convex/server';
@@ -6,9 +6,11 @@ import { quotePreparation, type PreparationKind } from '../src/lib/ai/preparatio
 const jobs: Record<string, FunctionReference<any, 'internal', any, any>> = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 
 export const create = action({
-  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string() },
+  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string() },
   returns: v.any(),
   handler: async (ctx, args): Promise<any> => {
+    if(args.kind==='SFX')throw new Error('Sound effect generation is not available through a verified route.');
+    if(args.kind==='MUSIC'&&process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true')throw new Error('Music generation is not enabled.');
     if (process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not configured yet.');
     if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) && (args.voiceId || args.primaryVoiceSampleAssetId) || args.kind !== 'TRANSCRIPT' && args.sourceAssetId) throw new Error('Choose only the sources used by this preparation type.');
     const context = await ctx.runQuery(jobs.preparationContext, { productionId: args.productionId, voiceId: args.voiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId });
@@ -38,3 +40,5 @@ export const create = action({
     return ctx.runMutation(jobs.createPreparation, { productionId: args.productionId, kind: args.kind, text, targetVoiceId: args.voiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, clone, durationSeconds, model: quote.model, capability: quote.capability, estimatedProviderCostUsd: quote.estimatedProviderCostUsd, quote, idempotencyKey: args.idempotencyKey });
   },
 });
+
+export const musicAvailability=query({args:{},returns:v.object({music:v.boolean(),sfx:v.literal(false)}),handler:async()=>({music:process.env.FINALFRAME_PREPARATION_ENABLED==='true'&&process.env.FINALFRAME_GENERATION_WORKER_ENABLED==='true'&&process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED==='true',sfx:false as const})});

@@ -1004,3 +1004,39 @@ export const requestImageGeneration = generateImage;
 export const requestVideoGeneration = generateVideo;
 export const requestSpeechSynthesis = synthesizeSpeech;
 export const requestTranscription = transcribeAudio;
+
+/** One fenced synchronous stream. An ambiguous failure is never retried here. */
+/** One fenced synchronous stream. An ambiguous failure is never retried here. */
+export async function generateMusic(input: {
+    model: string;
+    prompt: string;
+}, options: OpenRouterTransportOptions & {
+    onMusicAccepted?: (id: string) => Promise<void>;
+} = {}) {
+    const { MUSIC_LIMITS, parseMusicStream } = await import('../ai/music');
+    const contract = REVIEWED_OPERATION_CONTRACTS.music;
+    if (options.mock || options.signal?.aborted || input.model !== contract.modelId || !input.prompt.trim() || input.prompt.length > MUSIC_LIMITS.maxPromptCharacters || !options.beforeMediaSubmit || options.baseUrl && options.baseUrl !== BASE_URL)
+        throw new Error('MUSIC_REQUEST_INVALID');
+    assertCapabilityRequest({ capability: 'MUSIC_GENERATION', model: input.model, inputModality: 'text' });
+    requireKey(options, 'MUSIC_GENERATION', input.model);
+    await options.beforeMediaSubmit();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.min(options.timeoutMs ?? MUSIC_LIMITS.timeoutMs, MUSIC_LIMITS.timeoutMs));
+    const abort = () => controller.abort();
+    if (options.signal?.aborted)
+        controller.abort();
+    else
+        options.signal?.addEventListener('abort', abort, { once: true });
+    try {
+        const response = await (options.fetch ?? fetch)(BASE_URL + '/chat/completions', { method: 'POST', headers: requestHeaders(options, { headers: { 'content-type': 'application/json', accept: 'text/event-stream' } }, 'POST', options.idempotencyKey), body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: input.prompt.trim() }], modalities: ['text', 'audio'], audio: { format: 'mp3' }, stream: true, provider: { only: [contract.providerTag], allow_fallbacks: false } }), redirect: 'error', signal: controller.signal });
+        if (!response.ok) {
+            await response.body?.cancel();
+            throw Object.assign(new Error('MUSIC_HANDOFF_REJECTED'), { status: response.status });
+        }
+        return await parseMusicStream(response, options.onMusicAccepted);
+    }
+    finally {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', abort);
+    }
+}

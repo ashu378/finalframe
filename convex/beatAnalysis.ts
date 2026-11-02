@@ -4,9 +4,9 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import type { FunctionReference } from 'convex/server';
 import { v } from 'convex/values';
-import { requireProjectAccess, requireProjectRole } from './authorization';
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from './authorization';
 import { assertBeatAnalysisResult, BEAT_ANALYSIS_LIMITS, BEAT_ANALYSIS_VERSION } from '../renderer/src/media/beat-detector';
-import { normalizeSha256 } from '../renderer/src/media/sha256';
+import { normalizeSha256, sha256Equal } from '../renderer/src/media/sha256';
 
 type ReadCtx = MutationCtx | QueryCtx;
 type Job = Doc<'beatAnalysisJobs'>;
@@ -24,22 +24,9 @@ function inactive(value: unknown) { return ['DISABLED', 'SUSPENDED', 'REMOVED', 
 
 /** Scheduler execution rechecks the saved actor rather than assuming the
  * browser session or its project/studio membership remains authorized. */
-async function activeActor(ctx: ReadCtx, projectId: Id<'projects'>, userId: Id<'users'>) {
-  const project = await ctx.db.get(projectId); const user = await ctx.db.get(userId);
-  if (!project || project.deletedAt || project.archivedAt || inactive(project.status) || project.moderationStatus === 'RESTRICTED' || !user || inactive(user.status)) throw new Error('Beat-analysis project access changed.');
-  const membership = await ctx.db.query('projectMembers').withIndex('by_project_user', q => q.eq('projectId', projectId).eq('userId', userId)).unique();
-  const externalId = user.externalId ?? user.authSubject;
-  const owns = project.ownerUserId === userId || project.createdByUserId === userId || !!externalId && project.createdByExternalId === externalId;
-  if (membership ? membership.status !== 'ACTIVE' || !['OWNER', 'EDITOR'].includes(membership.role) : !owns) throw new Error('Beat-analysis project permission changed.');
-  const studio = project.studioId ? await ctx.db.get(project.studioId) : await ctx.db.query('studios').withIndex('by_external_id', q => q.eq('externalId', project.studioExternalId)).unique();
-  if (!studio || inactive(studio.status)) throw new Error('Beat-analysis studio is unavailable.');
-  const member = await ctx.db.query('members').withIndex('by_studio_user', q => q.eq('studioId', studio._id).eq('userId', userId)).unique();
-  if (member && member.status !== 'active') throw new Error('Beat-analysis studio membership changed.');
-  if (!member) {
-    const legacy = externalId ? await ctx.db.query('studioMembers').withIndex('by_studio_user', q => q.eq('studioExternalId', studio.externalId).eq('userExternalId', externalId)).unique() : null;
-    const ownerId = studio.ownerUserId ?? studio.ownerId;
-    if (legacy ? legacy.status !== 'active' : ownerId ? ownerId !== userId : !externalId || studio.ownerExternalId !== externalId) throw new Error('Beat-analysis studio permission changed.');
-  }
+export async function activeActor(ctx: ReadCtx, projectId: Id<'projects'>, userId: Id<'users'>) {
+  const {project}=await resolveProjectAccessForActor(ctx,projectId,userId,['OWNER','EDITOR']);
+  if(project.deletedAt||project.archivedAt||inactive(project.status)||project.moderationStatus==='RESTRICTED')throw new Error('Beat-analysis project access changed.');
   return project;
 }
 
@@ -50,7 +37,7 @@ export async function approvedBeatSource(ctx: ReadCtx, projectId: Id<'projects'>
   if (!approval || !['APPROVED', 'LOCKED'].includes(approval.state)) throw new Error('Approve this project audio before beat analysis.');
   const storage = await ctx.db.system.get('_storage', asset.storageId);
   const sourceChecksum = normalizeSha256(storage?.sha256);
-  if (!storage || !storage.contentType?.startsWith('audio/') || storage.size <= 0 || storage.size > BEAT_ANALYSIS_LIMITS.maxSourceBytes || !sourceChecksum) throw new Error('Choose canonical audio of at most 64 MiB.');
+  if (!storage || !storage.contentType?.startsWith('audio/') || storage.size <= 0 || storage.size > BEAT_ANALYSIS_LIMITS.maxSourceBytes || !sourceChecksum || !sha256Equal(asset.checksum, storage.sha256)) throw new Error('Choose canonical audio of at most 64 MiB.');
   return { project, asset, storage, projectId, assetId, storageId: asset.storageId, sourceChecksum, assetChecksum: asset.checksum, byteSize: storage.size };
 }
 
@@ -61,11 +48,11 @@ async function currentAuto(ctx: ReadCtx, source: Awaited<ReturnType<typeof appro
 }
 async function schedule(ctx: MutationCtx, jobId: Id<'beatAnalysisJobs'>, delay = 0) { if (workerEnabled()) await ctx.scheduler.runAfter(delay, refs.run, { jobId }); }
 
-export const request = mutation({
-  args: { projectId: v.id('projects'), assetId: v.id('assets'), idempotencyKey: v.string() }, returns: v.object({ jobId: v.id('beatAnalysisJobs'), analysisVersionId: v.optional(v.id('beatAnalysisVersions')), replayed: v.boolean() }),
-  handler: async (ctx, args) => {
+const beatRequestArgs={ projectId: v.id('projects'), assetId: v.id('assets'), idempotencyKey: v.string() };
+export const request=mutation({args:beatRequestArgs,returns:v.object({jobId:v.id('beatAnalysisJobs'),analysisVersionId:v.optional(v.id('beatAnalysisVersions')),replayed:v.boolean()}),handler:(ctx,args)=>requestCanonicalBeatAnalysis(ctx,args)});
+export async function requestCanonicalBeatAnalysis(ctx:MutationCtx,args:{projectId:Id<'projects'>;assetId:Id<'assets'>;idempotencyKey:string},actorId?:Id<'users'>) {
     if (!enabled()) throw new Error('Automatic beat analysis is not enabled yet.');
-    const access = await requireProjectRole(ctx, args.projectId, ['OWNER', 'EDITOR']);
+    const access = actorId ? await resolveProjectAccessForActor(ctx,args.projectId,actorId,['OWNER','EDITOR']) : await requireProjectRole(ctx, args.projectId, ['OWNER', 'EDITOR']);
     const source = await approvedBeatSource(ctx, args.projectId, args.assetId); const idempotencyKey = key(args.idempotencyKey);
     const requestHash = await hash(sourceFields(source));
     const existing = await ctx.db.query('beatAnalysisJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
@@ -77,8 +64,7 @@ export const request = mutation({
     const jobId = await ctx.db.insert('beatAnalysisJobs', { ...sourceFields(source), requestHash, idempotencyKey, createdByUserId: access.user._id, status: cached ? 'COMPLETED' : 'QUEUED', attemptCount: 0, createdAt: timestamp, updatedAt: timestamp, ...(cached ? { analysisVersionId: cached._id, completedAt: timestamp } : {}) });
     if (!cached) await schedule(ctx, jobId);
     return { jobId, ...(cached ? { analysisVersionId: cached._id } : {}), replayed: false };
-  },
-});
+}
 
 export const list = query({
   args: { projectId: v.id('projects'), assetId: v.id('assets') }, returns: v.any(),
@@ -200,3 +186,13 @@ export const run=internalAction({args:{jobId:v.id('beatAnalysisJobs')},returns:v
   }catch{await ctx.runMutation(refs.fail,{...lease,retryable:true,errorCode:'BEAT_TRANSFER_UNCERTAIN'});}
   return null;
 }});
+
+/** Canonical approval validates the exact observed/corrected grid and current
+ * source. A recipe never substitutes a node-local approval boolean. */
+export async function validateBeatVersionForApproval(ctx:ReadCtx,projectId:Id<'projects'>,id:Id<'beatAnalysisVersions'>){
+ const row=await ctx.db.get(id);if(!row||row.projectId!==projectId)throw new Error('Beat map belongs to another project.');
+ const source=await approvedBeatSource(ctx,projectId,row.assetId);if(!sameSource(source,row)||row.algorithmVersion!==BEAT_ANALYSIS_VERSION||!Number.isFinite(row.durationSeconds)||row.durationSeconds<=0||row.durationSeconds>BEAT_ANALYSIS_LIMITS.maxDurationSeconds||row.sampleRate!==BEAT_ANALYSIS_LIMITS.sampleRate||!Number.isFinite(row.confidence)||row.confidence<0||row.confidence>1||row.beatsSeconds.length>BEAT_ANALYSIS_LIMITS.maxBeats||!row.beatsSeconds.length)throw new Error('Beat map has no current bounded source/grid.');
+ let previous=-1;for(const beat of row.beatsSeconds){if(!Number.isFinite(beat)||beat<0||beat<=previous||beat>row.durationSeconds)throw new Error('Beat map is not a bounded monotonic grid.');previous=beat;}
+ if(row.origin==='AUTO'){assertBeatAnalysisResult(row);if(row.outcome!=='RELIABLE')throw new Error('Review a manual correction before approving an ambiguous beat map.');}else if(row.outcome!=='MANUAL'||!row.parentVersionId||!row.correctionNote?.trim())throw new Error('Manual beat map needs its exact reviewed parent and note.');
+ return row;
+}

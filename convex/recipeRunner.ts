@@ -1,0 +1,68 @@
+import {internalAction,internalMutation,mutation} from './_generated/server';
+import type {MutationCtx} from './_generated/server';
+import type {Doc,Id} from './_generated/dataModel';
+import {internal} from './_generated/api';
+import type {FunctionReference} from 'convex/server';
+import {v} from 'convex/values';
+import {requireProjectRole} from './authorization';
+import {recipeErrorCode} from './recipeErrors';
+import {recipeHash} from '../src/lib/production/recipes/compiler';
+import {assertRecipeSourcesCurrent,recipeEnabled,recipeWorkerEnabled,recipeObject,recipeRunScope} from './recipeAuthority';
+import {recipeDependencies} from './recipePlanning';
+import {createCanonicalGenerationJob,createCanonicalPreparationJob,cancelUnsubmittedRecipeJob} from './generationJobs';
+import {advanceRecipeApproval,completeRecipeNode,executeRecipeLocal} from './recipeLocal';
+import {recipeExecutionScope} from './recipeAdmissions';
+const refs=(internal as unknown as {recipeRunner:Record<string,FunctionReference<any,'internal',any,any>>}).recipeRunner;
+export const start=mutation({args:{runId:v.id('recipeRuns'),estimateId:v.id('recipeEstimates'),quoteHash:v.string(),reviewedProviderCeilingMicros:v.number(),reviewedCreditCeiling:v.number()},returns:v.null(),handler:async(ctx,args)=>{
+ if(!recipeEnabled()||!recipeWorkerEnabled())throw new Error('RECIPE_WORKER_DISABLED');const {run}=await recipeRunScope(ctx,args.runId);const access=await requireProjectRole(ctx,run.projectId,['OWNER','EDITOR']);const estimate=await ctx.db.get(args.estimateId);if(run.cancelRequestedAt||!estimate||estimate.runId!==run._id||estimate.projectId!==run.projectId||estimate.compiledPlanHash!==run.compiledPlanHash||estimate.quoteHash!==args.quoteHash||estimate.providerCeilingMicros!==args.reviewedProviderCeilingMicros||estimate.creditCeiling!==args.reviewedCreditCeiling||!estimate.complete||estimate.expiresAt<=Date.now())throw new Error('RECIPE_EXACT_REVIEWED_ESTIMATE_REQUIRED');await assertRecipeSourcesCurrent(ctx,run);if(run.status==='COMPLETED')return null;await ctx.db.patch(run._id,{status:'RUNNING',reviewedEstimateId:estimate._id,reviewedEstimateHash:estimate.quoteHash,reviewedByUserId:access.user._id,reviewedAt:Date.now(),errorCode:undefined,updatedAt:Date.now()});await ctx.scheduler.runAfter(0,refs.advance,{runId:run._id});return null;
+}});
+export const resume=mutation({args:{runId:v.id('recipeRuns')},returns:v.null(),handler:async(ctx,args)=>{if(!recipeEnabled()||!recipeWorkerEnabled())throw new Error('RECIPE_WORKER_DISABLED');const run=await ctx.db.get(args.runId);if(!run)throw new Error('RECIPE_RUN_UNAVAILABLE');await requireProjectRole(ctx,run.projectId,['OWNER','EDITOR']);if(!run.reviewedAt)throw new Error('RECIPE_OPT_IN_REQUIRED');if(['COMPLETED','CANCELED'].includes(run.status))return null;if(!run.cancelRequestedAt){await recipeRunScope(ctx,run._id);await ctx.db.patch(run._id,{status:'RUNNING',errorCode:undefined,updatedAt:Date.now()});const nodes=await ctx.db.query('recipeRunNodes').withIndex('by_run_order',q=>q.eq('runId',run._id)).take(193);if(nodes.length>192)throw new Error('RECIPE_NODE_LIMIT');for(const node of nodes)if(node.status==='WAITING_APPROVAL')await ctx.db.patch(node._id,{status:'WAITING',updatedAt:Date.now()});}await ctx.scheduler.runAfter(0,refs.advance,args);return null;}});
+async function observe(ctx:MutationCtx,run:Doc<'recipeRuns'>,node:Doc<'recipeRunNodes'>){
+ if(node.linkedGenerationJobId){const job=await ctx.db.get(node.linkedGenerationJobId);if(!job||job.projectId!==run.projectId||job.productionId!==run.productionId)throw new Error('RECIPE_LINKED_JOB_SCOPE_INVALID');if(job.status==='COMPLETED'){let id:string|undefined=job.shotVersionId??recipeObject(job.response).assetId??recipeObject(job.response).transcriptId;if(!id&&recipeObject(job.request).preparationKind==='TRANSCRIPT'){const rows=await ctx.db.query('transcripts').withIndex('by_production',q=>q.eq('productionId',run.productionId)).take(201);if(rows.length>200)throw new Error('RECIPE_TRANSCRIPT_HISTORY_LIMIT');id=rows.find(row=>recipeObject(row.segments).generationJobId===job._id)?._id;}if(!id)throw new Error('RECIPE_RESULT_RECEIPT_REQUIRED');await completeRecipeNode(ctx,node,id,{jobId:job._id,requestHash:job.requestHash,resultId:id});return true;}
+ if(job.executionStage==='RECONCILIATION_REQUIRED'){await ctx.db.patch(node._id,{status:'RECONCILIATION_REQUIRED',errorCode:'RECIPE_ACCEPTED_JOB_RECONCILIATION_REQUIRED',updatedAt:Date.now()});return false;}
+ if(job.status==='CANCELED'){await ctx.db.patch(node._id,{status:'CANCELED',updatedAt:Date.now()});return false;}
+ if(['FAILED','DEAD_LETTER'].includes(job.status)){await ctx.db.patch(node._id,{status:job.submissionStartedAt||job.providerJobId||job.providerRequestId?'RECONCILIATION_REQUIRED':'FAILED',errorCode:job.errorCode??'RECIPE_EXISTING_JOB_STOPPED',updatedAt:Date.now()});return false;}await ctx.db.patch(node._id,{status:job.providerJobId||job.providerRequestId||job.submissionStartedAt?'ACCEPTED':'QUEUED',updatedAt:Date.now()});return false;
+ }
+ if(node.linkedBeatJobId){const job=await ctx.db.get(node.linkedBeatJobId);if(!job||job.projectId!==run.projectId)throw new Error('RECIPE_BEAT_JOB_SCOPE_INVALID');if(job.status==='COMPLETED'&&job.analysisVersionId){await completeRecipeNode(ctx,node,job.analysisVersionId,{analysisVersionId:job.analysisVersionId});return true;}if(['FAILED','CANCELED'].includes(job.status))await ctx.db.patch(node._id,{status:'FAILED',errorCode:job.errorCode??'RECIPE_BEAT_STOPPED',updatedAt:Date.now()});return false;}
+ if(node.linkedRenderJobId){const job=await ctx.db.get(node.linkedRenderJobId);if(!job||job.projectId!==run.projectId||job.productionId!==run.productionId||job.manifestId!==((await ctx.db.query('recipeRunNodes').withIndex('by_run_node',q=>q.eq('runId',run._id).eq('nodeId','manifest')).unique())?.resultId))throw new Error('RECIPE_RENDER_JOB_SCOPE_INVALID');if(job.status==='COMPLETED'){const output=await ctx.db.query('exports').withIndex('by_render_job',q=>q.eq('renderJobId',job._id)).take(2);if(output.length!==1||output[0].projectId!==run.projectId||output[0].status!=='COMPLETED'||!output[0].storageId)throw new Error('RECIPE_EXPORT_RECEIPT_REQUIRED');await completeRecipeNode(ctx,node,output[0]._id,{jobId:job._id,storageId:output[0].storageId});return true;}if(['FAILED','CANCELED','DEAD_LETTER'].includes(job.status)||job.executionStage==='RECONCILIATION_REQUIRED')await ctx.db.patch(node._id,{status:'RECONCILIATION_REQUIRED',errorCode:'RECIPE_RENDER_NEEDS_ATTENTION',updatedAt:Date.now()});return false;}
+ return false;
+}
+/** Each tick is a bounded transaction. Existing accepted work is observed
+ * before authorizing new effects, so revocation/cancel never loses a receipt. */
+export const advance=internalMutation({args:{runId:v.id('recipeRuns')},returns:v.null(),handler:async(ctx,args)=>{
+ if(!recipeEnabled()||!recipeWorkerEnabled())return null;let run=await ctx.db.get(args.runId);if(!run||!run.reviewedAt||['COMPLETED','CANCELED'].includes(run.status))return null;let nodes=await ctx.db.query('recipeRunNodes').withIndex('by_run_order',q=>q.eq('runId',run!._id)).take(193);if(nodes.length>192)throw new Error('RECIPE_NODE_LIMIT');let waitingExisting=false;
+ for(const node of nodes){if(node.status==='COMPLETED'||node.status==='CANCELED')continue;if(node.linkedGenerationJobId||node.linkedBeatJobId||node.linkedRenderJobId){if(run.cancelRequestedAt&&node.linkedGenerationJobId)await cancelUnsubmittedRecipeJob(ctx,node._id);await observe(ctx,run,node);}}
+ nodes=await ctx.db.query('recipeRunNodes').withIndex('by_run_order',q=>q.eq('runId',run!._id)).take(193);
+ if(run.cancelRequestedAt){for(const node of nodes){if(['COMPLETED','CANCELED'].includes(node.status))continue;if(node.linkedGenerationJobId||node.linkedRenderJobId)waitingExisting=true;else await ctx.db.patch(node._id,{status:'CANCELED',leaseId:undefined,leaseExpiresAt:undefined,updatedAt:Date.now()});}await ctx.db.patch(run._id,{status:waitingExisting?'CANCELING':'CANCELED',updatedAt:Date.now()});if(waitingExisting&&Date.now()-run.createdAt<86400000)await ctx.scheduler.runAfter(5000,refs.advance,args);else if(waitingExisting)await ctx.db.patch(run._id,{status:'NEEDS_ATTENTION',errorCode:'RECIPE_RECONCILIATION_RETAINED',updatedAt:Date.now()});return null;}
+ if(['WAITING_APPROVAL','WAITING_ESTIMATE','NEEDS_ATTENTION','BLOCKED'].includes(run.status))return null;
+ let scope;try{scope=await recipeRunScope(ctx,run._id);await assertRecipeSourcesCurrent(ctx,run);}catch{await ctx.db.patch(run._id,{status:'BLOCKED',errorCode:'RECIPE_AUTHORITY_CHANGED',updatedAt:Date.now()});return null;}run=scope.run;const actorId=scope.access.user._id;let effects=0;let needsApproval=false;let needsEstimate=false;let attention=false;
+ for(const node of nodes){if(node.status==='COMPLETED'||node.status==='CANCELED')continue;if(node.linkedGenerationJobId||node.linkedBeatJobId||node.linkedRenderJobId){waitingExisting=true;if(node.status==='RECONCILIATION_REQUIRED'||node.status==='FAILED')attention=true;continue;}if(node.status==='FAILED'||node.status==='RECONCILIATION_REQUIRED'){attention=true;continue;}try{await recipeDependencies(ctx,node);}catch{continue;}if(++effects>8)break;
+ try{
+  if(node.status==='WAITING_APPROVAL'){needsApproval=true;continue;}
+  if(node.leaseId&&(node.leaseExpiresAt??0)>Date.now()){waitingExisting=true;continue;}
+  if(node.effect==='PAID'&&(!node.resolvedRequestHash||!run.reviewedEstimateId)){needsEstimate=true;continue;}
+  if(node.attemptCount>=3)throw new Error('RECIPE_ADMISSION_ATTEMPTS_EXHAUSTED');
+  const leaseId=crypto.randomUUID();await ctx.db.patch(node._id,{status:'READY',leaseId,leaseExpiresAt:Date.now()+120000,attemptCount:node.attemptCount+1,updatedAt:Date.now()});
+  await ctx.scheduler.runAfter(0,refs.dispatchNode,{nodeId:node._id,leaseId});waitingExisting=true;
+
+ }catch(error){const code=recipeErrorCode(error);await ctx.db.patch(node._id,{status:'WAITING',leaseId:undefined,leaseExpiresAt:undefined,errorCode:code,updatedAt:Date.now()});if(/ESTIMATE|QUOTE|CAP_EXCEEDED/.test(code))needsEstimate=true;else if(code==='CAPTION_TIMING_REVIEW_REQUIRED')needsApproval=true;else attention=true;}
+ }
+ const final=await ctx.db.query('recipeRunNodes').withIndex('by_run_order',q=>q.eq('runId',run!._id)).take(193);const completed=final.every(n=>n.status==='COMPLETED');const status=completed?'COMPLETED':attention?'NEEDS_ATTENTION':needsApproval?'WAITING_APPROVAL':needsEstimate?'WAITING_ESTIMATE':'RUNNING';await ctx.db.patch(run._id,{status,updatedAt:Date.now()});if(status==='RUNNING'){if(Date.now()-run.createdAt>=86400000)await ctx.db.patch(run._id,{status:'NEEDS_ATTENTION',errorCode:'RECIPE_RUN_AGE_LIMIT',updatedAt:Date.now()});else await ctx.scheduler.runAfter(waitingExisting?5000:0,refs.advance,args);}return null;
+}});
+
+/** Each canonical effect owns a separate transaction. Failures are recorded by
+ * the action after rollback; catching a factory exception inside its mutation
+ * would otherwise retain partial resource/reservation writes. */
+export const nodeFailure=internalMutation({args:{nodeId:v.id('recipeRunNodes'),leaseId:v.string(),code:v.string()},returns:v.null(),handler:async(ctx,args)=>{const node=await ctx.db.get(args.nodeId);if(!node||node.leaseId!==args.leaseId||node.linkedGenerationJobId||node.linkedBeatJobId||node.linkedRenderJobId||node.status==='COMPLETED')return null;const run=await ctx.db.get(node.runId);if(!run)return null;const code=recipeErrorCode(args.code);await ctx.db.patch(node._id,{status:'WAITING',leaseId:undefined,leaseExpiresAt:undefined,errorCode:code,updatedAt:Date.now()});await ctx.db.patch(run._id,{status:/ESTIMATE|QUOTE|CAP_EXCEEDED/.test(code)?'WAITING_ESTIMATE':code==='CAPTION_TIMING_REVIEW_REQUIRED'?'WAITING_APPROVAL':'NEEDS_ATTENTION',errorCode:code,updatedAt:Date.now()});return null;}});
+export const dispatchNode=internalAction({args:{nodeId:v.id('recipeRunNodes'),leaseId:v.string()},returns:v.null(),handler:async(ctx,args)=>{
+ try{await ctx.runMutation(refs.execute,args);}catch(error){await ctx.runMutation(refs.nodeFailure,{...args,code:recipeErrorCode(error)});}return null;
+}});
+export const execute=internalMutation({args:{nodeId:v.id('recipeRunNodes'),leaseId:v.string()},returns:v.null(),handler:async(ctx,args)=>{
+ const {node,run,access}=await recipeExecutionScope(ctx,args);
+ if(node.effect==='PAID'){
+  const saved=recipeObject(recipeObject(node.resolvedBindings).createArgs);
+  if(node.operation==='GENERATION')await createCanonicalGenerationJob(ctx,{productionId:run.productionId,shotId:recipeObject(recipeObject(node.request).shot).id,provider:'openrouter',model:saved.model,request:saved.request,estimatedCost:saved.estimatedCost,estimatedProviderCostUsd:saved.estimatedProviderCostUsd,idempotencyKey:node.idempotencyKey,capability:saved.capability},args);
+  else{const estimate=run.reviewedEstimateId?await ctx.db.get(run.reviewedEstimateId):null;const quote=recipeObject(recipeObject(estimate?.quotes)[node.nodeId]);await createCanonicalPreparationJob(ctx,{...saved,productionId:run.productionId,idempotencyKey:node.idempotencyKey,quote:quote.preparationQuote,estimatedProviderCostUsd:Number(quote.baseProviderUsd)} as Parameters<typeof createCanonicalPreparationJob>[1],args);}
+ }else if(node.effect==='HUMAN')await advanceRecipeApproval(ctx,node,run,access.user._id);else await executeRecipeLocal(ctx,node,run,access.user._id);
+ const current=await ctx.db.get(node._id);if(current?.status==='WAITING_APPROVAL')await ctx.db.patch(run._id,{status:'WAITING_APPROVAL',updatedAt:Date.now()});else await ctx.scheduler.runAfter(0,refs.advance,{runId:run._id});return null;
+}});

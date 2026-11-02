@@ -1,11 +1,15 @@
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
+import type { MutationCtx } from "./_generated/server";
+import { normalizeSha256, sha256Equal } from "../renderer/src/media/sha256";
+import { normalizeCaptionTrack } from "./finishingContracts";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireProjectAccess, requireProjectRole } from "./authorization";
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 import { now } from "./_shared";
 import { ensureResourceState, requireApprovedResource } from "./resourceStates";
 import { validateManifest } from "../renderer/src/manifest";
 import { finishingV5Enabled } from "./finishingContracts";
+import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -122,26 +126,30 @@ const graphicProps = v.object({
 });
 const draftClip = v.union(
   v.object({ kind: v.literal('TAKE'), shotVersionId: v.id('shotVersions') }),
-  v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number() }),
+  v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number(), trimStartSeconds:v.optional(v.number()), volume:v.optional(v.number()) }),
   v.object({ kind: v.literal('GRAPHIC'), templateId: v.union(v.literal('kinetic-title'), v.literal('brand-card'), v.literal('feature-callout'), v.literal('end-card')), durationSeconds: v.number(), props: graphicProps, logoAssetId: v.optional(v.id('assets')) }),
 );
 
 /** Bootstrap authoring from deliberate selections. A draft does not require a
  * previous manifest: assembly freezes its approved/locked content into v4.
  * This removes the timeline -> manifest -> timeline dependency loop. */
-export const createDraft = mutation({
-  args: { productionId: v.id('productions'), productionVersionId: v.id('productionVersions'), idempotencyKey: v.string(), clips: v.array(draftClip), audioTracks: v.optional(v.array(v.object({ assetId: v.id('assets'), startSeconds: v.number(), durationSeconds: v.number(), volume: v.optional(v.number()), trimStartSeconds: v.optional(v.number()), fadeInSeconds: v.optional(v.number()), fadeOutSeconds: v.optional(v.number()), role: v.optional(v.union(v.literal('dialogue'), v.literal('voiceover'), v.literal('music'), v.literal('ambience'), v.literal('sfx'))) }))) },
-  returns: v.object({ timelineId: v.id('timelines'), versionNumber: v.number(), replayed: v.boolean() }),
-  handler: async (ctx, args) => {
+const timelineDraftArgs={ productionId: v.id('productions'), productionVersionId: v.id('productionVersions'), idempotencyKey: v.string(), clips: v.array(draftClip), audioTracks: v.optional(v.array(v.object({ assetId: v.id('assets'), startSeconds: v.number(), durationSeconds: v.number(), volume: v.optional(v.number()), trimStartSeconds: v.optional(v.number()), fadeInSeconds: v.optional(v.number()), fadeOutSeconds: v.optional(v.number()), role: v.optional(v.union(v.literal('dialogue'), v.literal('voiceover'), v.literal('music'), v.literal('ambience'), v.literal('sfx'))) }))), fps:v.optional(v.union(v.literal(24),v.literal(25),v.literal(30),v.literal(50),v.literal(60))),captionId:v.optional(v.id('captions')) };
+const timelineOutputArgs={...timelineDraftArgs,outputSettings:v.optional(v.object({width:v.number(),height:v.number()}))};
+const timelineDraftValidator=v.object(timelineOutputArgs);
+export const createDraft=mutation({args:timelineOutputArgs,returns:v.object({timelineId:v.id('timelines'),versionNumber:v.number(),replayed:v.boolean()}),handler:(ctx,args)=>createCanonicalTimelineDraft(ctx,args)});
+export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<typeof timelineDraftValidator>,actorId?:Id<'users'>){
     const production = await ctx.db.get(args.productionId);
     if (!production?.projectId) throw new Error('Production project ownership is required.');
-    const access = await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']);
+    const access = actorId?await resolveProjectAccessForActor(ctx,production.projectId,actorId,['OWNER','EDITOR']):await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']);
     const projectId = access.project._id;
     const version = await ctx.db.get(args.productionVersionId);
     if (!version || version.productionId !== production._id || version.status !== 'APPROVED' || production.currentVersionId !== version._id) throw new Error('Choose the current approved production version before composing.');
     const key = args.idempotencyKey.trim();
     if (key.length < 8 || key.length > 200) throw new Error('A valid composition request key is required.');
-    const serialized = JSON.stringify({ productionId: args.productionId, productionVersionId: args.productionVersionId, clips: args.clips, audioTracks: args.audioTracks ?? [] });
+    const authoredOutput = args.outputSettings === undefined ? undefined : validateAuthoringOutputSettings(args.outputSettings);
+    // Preserve creation hashes for requests authored before optional finishing
+    // controls existed. Only explicit new controls change the request identity.
+    const serialized = JSON.stringify({ productionId: args.productionId, productionVersionId: args.productionVersionId, clips: args.clips, audioTracks: args.audioTracks ?? [],...(args.fps===undefined?{}:{fps:args.fps}),...(args.captionId===undefined?{}:{captionId:args.captionId}),...(authoredOutput?{outputSettings:authoredOutput}:{}) });
     if (new TextEncoder().encode(serialized).length > 64 * 1024) throw new Error('Composition settings are too large.');
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized)))).map(n => n.toString(16).padStart(2, '0')).join('');
     const previous = await ctx.db.query('timelines').withIndex('by_creation_key', q => q.eq('creationKey', key)).unique();
@@ -153,7 +161,7 @@ export const createDraft = mutation({
     async function assetFor(id: Id<'assets'>) {
       const asset = await ctx.db.get(id);
       if (!asset || asset.projectId !== projectId || asset.studioExternalId !== production!.studioExternalId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.checksum) throw new Error('Select active, checksummed project assets. Import global assets first.');
-      await requireApprovedResource(ctx, projectId, 'asset', id);
+      await requireApprovedResource(ctx, projectId, 'asset', id,undefined,actorId);
       return asset;
     }
     const clips: Array<{ kind: 'VIDEO' | 'IMAGE' | 'GRAPHIC' | 'AUDIO'; assetId?: Id<'assets'>; shotVersionId?: Id<'shotVersions'>; durationSeconds: number; startSeconds: number; trimStartSeconds?: number; volume?: number; metadata: Record<string, unknown> }> = [];
@@ -168,7 +176,7 @@ export const createDraft = mutation({
         const take = await ctx.db.get(input.shotVersionId);
         const shot = take ? await ctx.db.get(take.shotId) : null;
         if (!take || !shot || take.productionId !== production._id || take.productionVersionId !== version._id || shot.productionId !== production._id || !take.assetId || take.status !== 'COMPLETED') throw new Error('Choose completed takes from this approved production version.');
-        await requireApprovedResource(ctx, projectId, 'shotVersion', take._id, production._id);
+        await requireApprovedResource(ctx, projectId, 'shotVersion', take._id, production._id,actorId);
         asset = await assetFor(take.assetId);
         duration = shot.durationSeconds;
         takeId = take._id;
@@ -183,7 +191,7 @@ export const createDraft = mutation({
         kind = 'GRAPHIC'; duration = input.durationSeconds;
         if (!input.props.title.trim()) throw new Error('A designed title needs text.');
         for (const [name, value] of Object.entries(input.props)) {
-          if (typeof value !== 'string' || value.length > 2000 || (/Color$/.test(name) && !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value))) throw new Error('Use bounded title text and hexadecimal colors.');
+          if (typeof value !== 'string' || value.length > 2000 || (/Color$/.test(name) && !/^#[0-9a-f]{6}$/i.test(value))) throw new Error('Use bounded title text and hexadecimal colors.');
         }
         if (input.logoAssetId) {
           asset = await assetFor(input.logoAssetId);
@@ -193,7 +201,14 @@ export const createDraft = mutation({
       }
       if (!Number.isFinite(duration) || duration <= 0 || duration > 60 || elapsed + duration > 60) throw new Error('This composition must total at most 60 seconds.');
       if (kind === 'VIDEO' && asset?.durationSeconds !== undefined && duration > asset.durationSeconds + 0.05) throw new Error('Visual clip extends beyond its source media.');
-      clips.push({ kind, assetId: asset?._id, shotVersionId: takeId, startSeconds: elapsed, durationSeconds: duration, metadata });
+      const trimStartSeconds=input.kind==='ASSET'?(input.trimStartSeconds??0):0;const volume=input.kind==='ASSET'?(input.volume??1):undefined;
+      if(input.kind==='ASSET'&&(input.trimStartSeconds!==undefined||input.volume!==undefined)){
+        if(!Number.isFinite(trimStartSeconds)||trimStartSeconds<0||!Number.isFinite(volume)||volume!<0||volume!>1)throw new Error('Use a valid visual source range and volume.');
+        if(kind==='IMAGE'){if(trimStartSeconds!==0)throw new Error('Still images cannot be trimmed.');}
+        else{const storage=asset?.storageId?await ctx.db.system.get('_storage',asset.storageId):null;const probe=asset?await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',asset!._id)).unique():null;
+        if(!asset||!storage||!probe||probe.projectId!==projectId||probe.storageId!==asset.storageId||!normalizeSha256(storage.sha256)||!sha256Equal(asset.checksum,storage.sha256)||!sha256Equal(probe.checksum,storage.sha256)||probe.byteSize!==storage.size||!probe.videoCodec||!Number.isFinite(probe.durationSeconds)||trimStartSeconds+duration>probe.durationSeconds+0.000001)throw new Error('Measure the current project video and choose an in-bounds source range.');}
+      }
+      clips.push({ kind, trimStartSeconds,volume, assetId: asset?._id, shotVersionId: takeId, startSeconds: elapsed, durationSeconds: duration, metadata });
       elapsed += duration;
     }
     for (const audio of args.audioTracks ?? []) {
@@ -208,7 +223,7 @@ export const createDraft = mutation({
     const latest = await ctx.db.query('timelines').withIndex('by_production_version', q => q.eq('productionId', production._id)).order('desc').first();
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
     const timestamp = now();
-    const timelineId = await ctx.db.insert('timelines', { projectId, productionId: production._id, studioId: access.studio._id, studioExternalId: access.studio.externalId, versionNumber, creationKey: key, creationHash: hash, durationSeconds: elapsed, outputPreset: production.outputPreset, tracks: { metadata: { approvalStatus: 'DRAFT', productionVersionId: version._id }, productionVersionId: version._id }, status: 'DRAFT', createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
+    const timelineId = await ctx.db.insert('timelines', { projectId, productionId: production._id, studioId: access.studio._id, studioExternalId: access.studio.externalId, versionNumber, creationKey: key, creationHash: hash, durationSeconds: elapsed, outputPreset: production.outputPreset, tracks: { metadata: { approvalStatus: 'DRAFT', productionVersionId: version._id,fps:args.fps??30,...(authoredOutput?{authoredOutput}:{}) }, productionVersionId: version._id }, status: 'DRAFT', createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
     for (const [orderIndex, kind] of (finishingV5Enabled() ? ['PICTURE', 'AUDIO'] : ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO']).entries()) {
       const selected = clips.filter(clip => kind === 'PICTURE' ? clip.kind !== 'AUDIO' : clip.kind === kind);
       if (!selected.length) continue;
@@ -223,8 +238,8 @@ export const createDraft = mutation({
         }
       }
     }
-    await ensureResourceState(ctx, { projectId, productionId: production._id, resourceType: 'timeline', resourceId: timelineId });
+    if(args.captionId){if(!finishingV5Enabled())throw new Error('Caption export requires canonical finishing v5.');const caption=await ctx.db.get(args.captionId);if(!caption||caption.productionId!==production._id||caption.studioExternalId!==production.studioExternalId)throw new Error('Choose captions from this production.');await requireApprovedResource(ctx,projectId,'caption',caption._id,production._id,actorId);normalizeCaptionTrack({language:caption.language,style:caption.style??{},cues:caption.cues},elapsed,args.fps??30,String(caption._id));const trackId=await ctx.db.insert('timelineTracks',{timelineId,studioId:access.studio._id,studioExternalId:access.studio.externalId,kind:'CAPTIONS',name:'Reviewed captions',orderIndex:100});await ctx.db.insert('timelineClips',{timelineId,trackId,studioId:access.studio._id,studioExternalId:access.studio.externalId,startSeconds:0,durationSeconds:elapsed,metadata:{clipKind:'CAPTIONS',captionId:caption._id}});}
+    await ensureResourceState(ctx, { projectId, productionId: production._id, resourceType: 'timeline', resourceId: timelineId },actorId);
     await ctx.db.insert('productionOperations', { studioId: access.studio._id, studioExternalId: access.studio.externalId, productionId: production._id, kind: 'CREATE_TIMELINE', targetType: 'timeline', targetId: timelineId, targetVersionId: String(versionNumber), idempotencyKey: `compose:${key}`, input: { productionVersionId: version._id, clipCount: args.clips.length, audioCount: args.audioTracks?.length ?? 0 }, status: 'COMPLETED', actorUserId: access.user._id, outputResourceIds: [timelineId], createdAt: timestamp, updatedAt: timestamp, completedAt: timestamp });
     return { timelineId, versionNumber, replayed: false };
-  },
-});
+}

@@ -22,7 +22,8 @@ export type CapabilityId =
     | 'VIDEO_GENERATION'
     | 'IMAGE_GENERATION'
     | 'TEXT_TO_SPEECH'
-    | 'TRANSCRIPTION';
+    | 'TRANSCRIPTION'
+    | 'MUSIC_GENERATION';
 
 export type Modality = 'text' | 'image' | 'video' | 'audio' | 'file' | 'transcription';
 

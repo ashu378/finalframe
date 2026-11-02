@@ -1,7 +1,10 @@
+import {quoteMusic,type MusicQuoteCertificate} from './music';
 import { PREPARATION_MODELS, REVIEWED_OPERATION_CONTRACTS } from './model-registry';
 
-export type PreparationKind = 'CHARACTER_REFERENCE' | 'NARRATION' | 'VOICE_PREVIEW' | 'TRANSCRIPT';
+export type PreparationKind = 'CHARACTER_REFERENCE' | 'NARRATION' | 'VOICE_PREVIEW' | 'TRANSCRIPT' | 'MUSIC' | 'SFX';
 export function preparationModel(kind: PreparationKind, clone = false) {
+  if(kind==='SFX')throw new Error('Sound effect generation is not supported by a verified route.');
+  if(kind==='MUSIC')return PREPARATION_MODELS.music;
   return kind === 'CHARACTER_REFERENCE' ? PREPARATION_MODELS.image : kind === 'TRANSCRIPT' ? PREPARATION_MODELS.transcription : clone ? PREPARATION_MODELS.referenceVoice : PREPARATION_MODELS.narration;
 }
 function row(value: unknown): Record<string, any> { return value && typeof value === 'object' ? value as Record<string, any> : {}; }
@@ -33,9 +36,11 @@ export function assertReferenceVoiceQuote(value: unknown): ReferenceVoiceQuoteCe
 }
 /** Only server actions call this public, no-cost catalog endpoint. Every
  * endpoint is priced conservatively; unknown billing units fail closed. */
-export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1' }, fetcher: typeof fetch = fetch) {
+export interface PreparationQuote {model:string;capability:typeof PREPARATION_MODELS[keyof typeof PREPARATION_MODELS]['capability'];estimatedProviderCostUsd:number;checkedAt:number;billing:string;musicQuote?:MusicQuoteCertificate;referenceVoiceQuote?:ReferenceVoiceQuoteCertificate;billableInputSeconds?:number;durationMeasurement?:'DECODED_PCM_SAMPLES_V1';inputDurationSeconds?:number}
+export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1' }, fetcher: typeof fetch = fetch):Promise<PreparationQuote> {
   const config = preparationModel(input.kind, input.clone);
   if ('certifiedModel' in config && config.id !== config.certifiedModel) throw new Error('This preparation model needs a billing-unit review.');
+  if(input.kind==='MUSIC'){if(input.clone||!input.text?.trim()||input.text.length>4000||input.durationSeconds!==undefined)throw new Error('Music accepts a text prompt for one thirty-second clip.');const musicQuote=await quoteMusic(fetcher);return {model:config.id,capability:config.capability,estimatedProviderCostUsd:musicQuote.reservedProviderUsd,checkedAt:musicQuote.checkedAt,billing:config.billing,musicQuote};}
   const image = input.kind === 'CHARACTER_REFERENCE';
   const path = image ? `/images/models/${config.id}/endpoints` : `/models/${config.id}/endpoints`;
   const response = await fetcher(`https://openrouter.ai/api/v1${path}`, { signal: AbortSignal.timeout(15_000) });

@@ -77,6 +77,6 @@ export async function probeRemoteMedia(source: unknown, options: {
     if (!video || !Number.isFinite(durationSeconds) || durationSeconds <= 0 || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width > 7680 || height > 7680 || typeof video.codec_name !== 'string') {
       throw new Error('Media has no valid video stream.');
     }
-    return { durationSeconds, width, height, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize };
+    return { durationSeconds, width, height, hasVideo: true, checksum:options.expectedChecksum??checksum, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

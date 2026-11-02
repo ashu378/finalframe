@@ -12,18 +12,26 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
 const checksums = compile('renderer/src/media/sha256.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
 const registry = compile('src/lib/ai/model-registry.ts');
-const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry });
+const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
+const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music });
 const studioMemberships = compile('convex/studioMemberships.ts');
 const pricing = compile('src/lib/credits/pricing.ts');
 const routing = compile('src/lib/ai/video-routing.ts', { './model-registry': registry });
 const contracts = compile('convex/generationWorkerContracts.ts');
+const recipeContract = compile('src/lib/production/recipes/contract.ts');
+const recipeSchema = compile('src/lib/production/recipes/schema.ts', { './contract': recipeContract });
+const recipeCompiler = compile('src/lib/production/recipes/compiler.ts', { './contract': recipeContract, './schema': recipeSchema, '../../../../renderer/src/media/sha256': checksums });
+const recipeProposal = compile('src/lib/production/recipes/proposal.ts', { './schema': recipeSchema, './compiler': recipeCompiler });
+const recipeAuthority = compile('convex/recipeAuthority.ts', { './authorization': {}, '../renderer/src/media/sha256': checksums, '../src/lib/production/recipes/compiler': recipeCompiler, '../src/lib/production/recipes/proposal': recipeProposal, './generationContinuity': {}, './voices': {} });
+const recipeReuse = compile('convex/recipeReuse.ts', { '../src/lib/production/recipes/compiler': recipeCompiler, './recipeAuthority': recipeAuthority });
+const recipeAdmissions = compile('convex/recipeAdmissions.ts', { '../renderer/src/media/sha256': checksums, '../src/lib/production/recipes/compiler': recipeCompiler, './recipeAuthority': recipeAuthority, './recipeReuse':recipeReuse });
 const api = new Proxy({}, { get: (_, module) => new Proxy({}, { get: (_, fn) => String(module) + '.' + String(fn) }) });
 const providerJobId = 'gen-vid-123-abcdefghijklmnopqrst';
 const previousJobId = providerJobId;
@@ -114,9 +122,9 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   const v = new Proxy({}, { get: () => () => ({}) });
   const auth = async () => ({ project: state.rows.get('project'), user: state.rows.get('user') });
   const jobs = compile('convex/generationJobs.ts', {
-    './_generated/api': { internal: { generationWorker: { run: 'run' } } },
+    './_generated/api': { internal: { generationWorker: { run: 'run' },generationJobs:{expireLease:'expireLease'},providerReceipts:{reconcile:'receipt-reconcile'} } },
     './_generated/server': { query: value => value, mutation: value => value, internalQuery: value => value, internalMutation: value => value },
-    'convex/values': { v }, './authorization': { requireProjectAccess: auth, requireProjectRole: auth },
+    './recipeAdmissions': recipeAdmissions, 'convex/values': { v }, './authorization': { requireProjectAccess: auth, requireProjectRole: auth },
     './resourceStates': { ensureResourceState: async () => {}, getEffectiveResourceState: async (_, projectId, type, id) => ({ currentState: id === 'source-take' ? state.approval : 'DRAFT' }) },
     './financial': { estimateGenerationCredits: args => { state.creditEstimates.push(args); return pricing.estimateGenerationCredits(args); }, reserveGenerationCreditsInTransaction: async (_, args) => { state.creditReservations.push(args); return { reservationId: 'credit-hold' }; }, settleGenerationCreditsInTransaction: async () => {} },
     './providerBudget': { settleProviderBudget: async () => {}, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
@@ -131,6 +139,7 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   return state;
 }
 async function main() {
+  await check('public creation rejects private recipe authority markers before reserving', async () => { const state=backendFixture({operation:'GENERATE'},[]);await assert.rejects(state.create({request:{ratio:'16:9',recipeRunNodeId:'foreign-node'}}),/PRIVATE_AUTHORITY/);assert.equal(state.creditReservations.length,0); });
   await check('authoring requires a selected approved history source and validates upscale controls', () => {
     assert.throws(() => controls.validateShotOperationControls({ ...baseControls, operation: 'EXTEND', previousJobId }, assets), /approved completed/);
     assert.deepEqual(controls.validateShotOperationControls({ ...baseControls, operation: 'EXTEND', previousJobId }, assets, [{ providerJobId, model: 'test/reviewed' }]), []);
@@ -218,5 +227,5 @@ async function main() {
   });
   console.log('Operation control contracts: PASS (' + checks + '); actual application actions and Convex handlers with isolated in-memory seams. No database or provider calls.');
 }
-module.exports = { compile, checksums, registry, preparation, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
+module.exports = { compile, checksums, registry, preparation, music, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; }).finally(module.exports.cleanup);

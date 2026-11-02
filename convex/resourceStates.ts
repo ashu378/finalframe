@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireProjectAccess, requireProjectRole } from "./authorization";
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 
 export const RESOURCE_STATES = [
   "DRAFT",
@@ -18,7 +18,7 @@ export type ResourceStateDoc = Doc<"resourceStates">;
 export const RESOURCE_TYPES = [
   "production", "productionVersion", "productionBible", "character", "location", "product", "referencePack",
   "asset", "sequence", "scene", "shot", "shotVersion", "audio", "transcript", "caption", "timeline", "review", "export", "voice",
-  "projectResourceVersion", "continuityBible", "episodeStoryState", "movieVersion", "movieReview", "movieExport",
+  "projectResourceVersion", "continuityBible", "episodeStoryState", "movieVersion", "movieReview", "movieExport", "beatAnalysisVersion",
 ] as const;
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 
@@ -104,7 +104,7 @@ function record(value: unknown): Record<string, unknown> {
 type ResolvedResource = {
   projectId: Id<"projects">;
   productionId?: Id<"productions">;
-  resource: Doc<"projects"> | Doc<"productions"> | Doc<"productionVersions"> | Doc<"productionBibles"> | Doc<"characters"> | Doc<"locations"> | Doc<"products"> | Doc<"referencePacks"> | Doc<"assets"> | Doc<"sequences"> | Doc<"scenes"> | Doc<"shots"> | Doc<"shotVersions"> | Doc<"audio"> | Doc<"transcripts"> | Doc<"captions"> | Doc<"timelines"> | Doc<"reviews"> | Doc<"exports"> | Doc<"voices"> | Doc<"projectResourceVersions"> | Doc<"continuityBibles"> | Doc<"episodeStoryStates"> | Doc<"movieVersions"> | Doc<"movieReviews"> | Doc<"movieExports">;
+  resource: Doc<"projects"> | Doc<"productions"> | Doc<"productionVersions"> | Doc<"productionBibles"> | Doc<"characters"> | Doc<"locations"> | Doc<"products"> | Doc<"referencePacks"> | Doc<"assets"> | Doc<"sequences"> | Doc<"scenes"> | Doc<"shots"> | Doc<"shotVersions"> | Doc<"audio"> | Doc<"transcripts"> | Doc<"captions"> | Doc<"timelines"> | Doc<"reviews"> | Doc<"exports"> | Doc<"voices"> | Doc<"projectResourceVersions"> | Doc<"continuityBibles"> | Doc<"episodeStoryStates"> | Doc<"movieVersions"> | Doc<"movieReviews"> | Doc<"movieExports"> | Doc<"beatAnalysisVersions">;
 };
 
 /** Resolve a resource through its canonical project/production ownership. */
@@ -114,10 +114,11 @@ export async function resolveProjectResource(
   resourceType: string,
   resourceId: string,
   expectedProductionId?: Id<"productions">,
+  actorId?: Id<"users">,
 ): Promise<ResolvedResource> {
   const type = requireResourceType(resourceType);
   const identity = requireResourceIdentity(type, resourceId);
-  const access = await requireProjectAccess(ctx, projectId);
+  const access = actorId ? await resolveProjectAccessForActor(ctx,projectId,actorId) : await requireProjectAccess(ctx, projectId);
   void access;
   let resource: ResolvedResource["resource"] | null = null;
   let productionId: Id<"productions"> | undefined;
@@ -143,6 +144,7 @@ export async function resolveProjectResource(
       case "export": resource = await ctx.db.get(identity.resourceId as Id<"exports">); productionId = resource?.productionId; break;
       case "voice": resource = await ctx.db.get(identity.resourceId as Id<"voices">); productionId = resource?.productionId; break;
       case "projectResourceVersion": resource = await ctx.db.get(identity.resourceId as Id<"projectResourceVersions">); break;
+      case "beatAnalysisVersion": resource = await ctx.db.get(identity.resourceId as Id<"beatAnalysisVersions">); break;
       case "continuityBible": resource = await ctx.db.get(identity.resourceId as Id<"continuityBibles">); break;
       case "movieVersion": {
         resource = await ctx.db.get(identity.resourceId as Id<'movieVersions'>);
@@ -218,9 +220,11 @@ export async function ensureResourceState(
     resourceId: string;
     initialState?: ResourceState;
   },
+  actorId?: Id<"users">,
 ) {
   requireResourceIdentity(args.resourceType, args.resourceId);
-  await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
+  if(actorId&&args.initialState&&!["DRAFT","IN_REVIEW"].includes(args.initialState))throw new Error("Automation cannot approve a resource.");
+  if(actorId)await resolveProjectAccessForActor(ctx,args.projectId,actorId,["OWNER","EDITOR"]);else await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
   await requireProductionProject(ctx, args.projectId, args.productionId);
   const existing = await findState(ctx, args.projectId, args.resourceType, args.resourceId);
   if (existing) return existing;
@@ -246,8 +250,9 @@ export async function getEffectiveResourceState(
   resourceType: string,
   resourceId: string,
   productionId?: Id<"productions">,
+  actorId?: Id<"users">,
 ) {
-  const resolved = await resolveProjectResource(ctx, projectId, resourceType, resourceId, productionId);
+  const resolved = await resolveProjectResource(ctx, projectId, resourceType, resourceId, productionId, actorId);
   const state = await findState(ctx, projectId, resourceType, resourceId);
   const currentState = state?.state ?? legacyState(resolved.resource, requireResourceType(resourceType));
   return { ...resolved, state, currentState };
@@ -259,8 +264,9 @@ export async function requireApprovedResource(
   resourceType: string,
   resourceId: string,
   productionId?: Id<"productions">,
+  actorId?: Id<"users">,
 ) {
-  const result = await getEffectiveResourceState(ctx, projectId, resourceType, resourceId, productionId);
+  const result = await getEffectiveResourceState(ctx, projectId, resourceType, resourceId, productionId, actorId);
   if (!isResourceApproved(result.currentState)) throw new Error(`Resource must be approved before assembly; current state is ${result.currentState}.`);
   return result;
 }

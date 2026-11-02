@@ -6,13 +6,15 @@ import { v } from 'convex/values';
 import { settleProviderBudget } from './providerBudget';
 
 const refs = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;
+const music=(job:any)=>job.request?.preparationKind==='MUSIC';
+const validReceipt=(job:any)=>music(job)?/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??''):/^gen-tts-\d+-[A-Za-z0-9]+$/.test(job.providerRequestId??'');
 const args = { jobId: v.id('generationJobs') };
 
 export const context = internalQuery({
   args, returns: v.any(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || job.status !== 'COMPLETED' || job.providerCostUsd !== undefined || !job.providerBudgetReservationId || !/^gen-tts-\d+-[A-Za-z0-9]+$/.test(job.providerRequestId ?? '')) return null;
+    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerCostUsd !== undefined || !job.providerBudgetReservationId || !validReceipt(job)) return null;
     return { receiptId: job.providerRequestId, model: job.model };
   },
 });
@@ -21,7 +23,7 @@ export const record = internalMutation({
   args: { ...args, receiptId: v.string(), model: v.string(), costUsd: v.number() }, returns: v.null(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || job.status !== 'COMPLETED' || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(input.model === job.model || input.model.startsWith(job.model + '-'))) throw new Error('Provider receipt does not match the completed speech job.');
+    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(music(job)?(input.model===job.model||input.model===job.modelVersion)&&input.costUsd>=.04:(input.model === job.model || input.model.startsWith(job.model + '-')))) throw new Error('Provider receipt does not match the completed speech job.');
     if (job.providerCostUsd !== undefined) {
       if (job.providerCostUsd !== input.costUsd) throw new Error('Provider receipt cost conflicts with an already settled job.');
       return null;
@@ -44,7 +46,7 @@ export const reconcile = internalAction({
     try {
       const response = await fetch('https://openrouter.ai/api/v1/generation?id=' + encodeURIComponent(job.receiptId), { headers: { Authorization: 'Bearer ' + secret }, signal: AbortSignal.timeout(10_000) });
       if (response.ok) {
-        const body = await response.json() as { data?: { id?: string; model?: string; total_cost?: number } };
+        const reader=response.body?.getReader();if(!reader)throw new Error('Missing receipt.');const chunks:Uint8Array[]=[];let bytes=0;try{for(;;){const item=await reader.read();if(item.done)break;bytes+=item.value.length;if(bytes>65536)throw new Error('Receipt too large.');chunks.push(item.value);}}finally{await reader.cancel().catch(()=>undefined);}const raw=new Uint8Array(bytes);let position=0;for(const chunk of chunks){raw.set(chunk,position);position+=chunk.length;}const body = JSON.parse(new TextDecoder().decode(raw)) as { data?: { id?: string; model?: string; total_cost?: number } };
         const receipt = body.data;
         if (receipt && receipt.id === job.receiptId && typeof receipt.model === 'string' && typeof receipt.total_cost === 'number') {
           await ctx.runMutation(refs.record, { jobId: input.jobId, receiptId: receipt.id, model: receipt.model, costUsd: receipt.total_cost });

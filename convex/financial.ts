@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireAdmin, requireMember, requireProjectAccess } from "./authorization";
+import { requireAdmin, requireMember, requireProjectAccess, resolveProjectAccessForActor } from "./authorization";
 import { now } from "./_shared";
 export { estimateGenerationCredits } from "../src/lib/credits/pricing";
 
@@ -197,9 +197,10 @@ async function reserveCreditsInTransaction(ctx: MutationCtx, member: WalletOwner
  * mutation owns authorization and atomically reserves before scheduling work. */
 export async function reserveGenerationCreditsInTransaction(ctx: MutationCtx, args: {
   studioExternalId: string; amount: number; idempotencyKey: string; generationJobId: Id<"generationJobs">;
-}) {
-  const member = await requireMember(ctx, args.studioExternalId);
+},actorId?:Id<"users">) {
   const job = await ctx.db.get(args.generationJobId);
+  if(actorId&&(!job?.projectId||job.createdByUserId!==actorId))throw new Error("Stored reservation actor does not own the canonical job.");
+  const member = actorId&&job?.projectId?await resolveProjectAccessForActor(ctx,job.projectId,actorId,["OWNER","EDITOR"]):await requireMember(ctx, args.studioExternalId);
   if (!job || job.studioExternalId !== member.studio.externalId) throw new Error("Generation reservation ownership mismatch.");
   return await reserveCreditsInTransaction(ctx, member, args);
 }

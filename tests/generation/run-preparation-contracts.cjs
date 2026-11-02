@@ -5,7 +5,7 @@ const path = require('node:path');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-preparation-'));
-for (const name of ['model-registry', 'preparation']) fs.writeFileSync(path.join(temp, name + '.js'), ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/ai/' + name + '.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText);
+for (const name of ['model-registry', 'music','preparation']) fs.writeFileSync(path.join(temp, name + '.js'), ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/ai/' + name + '.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText);
 const { quotePreparation, preparationModel } = require(path.join(temp, 'preparation.js'));
 const checks = [];
 const referenceEndpoint = { name: 'Seed | bytedance-seed/seed-audio-1-0-20260630', tag: 'seed', model_id: 'bytedance-seed/seed-audio-1-0', status: 0, supports_voice_cloning: true, supports_multiple_audio_references: true, supports_image_reference: true, pricing: {prompt:'0',completion:'0.0025',discount:0} };

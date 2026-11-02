@@ -1,9 +1,10 @@
+import { validateBeatVersionForApproval } from './beatAnalysis';
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {sha256Equal} from '../renderer/src/media/sha256';
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireProjectAccess, requireProjectRole, type ProjectRole } from "./authorization";
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor, type ProjectRole } from "./authorization";
 import { validateBibleBindings, validateProjectResourceReferences } from "./continuityContracts";
 import { validateVoiceForApproval } from "./voices";
 import {
@@ -84,16 +85,19 @@ export async function transitionResourceState(
     note?: string;
     unlockReason?: string;
   },
+  actorId?: Id<"users">,
 ) {
+  if(actorId&&args.targetState!=="IN_REVIEW")throw new Error("Stored automation actors may request review only.");
   if (args.resourceType === "production" || args.resourceType === "productionVersion") {
     throw new Error("Production planning and approval must use the canonical productions.ts path.");
   }
   if (['movieVersion','movieReview','movieExport'].includes(args.resourceType) && process.env.FINALFRAME_MOVIE_ENABLED !== 'true') throw new Error('Movie approvals are not enabled yet.');
-  const access = await requireProjectRole(ctx, args.projectId, args.roles);
-  const effective = await getEffectiveResourceState(ctx, args.projectId, args.resourceType, args.resourceId, args.productionId);
+  const access = actorId?await resolveProjectAccessForActor(ctx,args.projectId,actorId,args.roles):await requireProjectRole(ctx, args.projectId, args.roles);
+  const effective = await getEffectiveResourceState(ctx, args.projectId, args.resourceType, args.resourceId, args.productionId,actorId);
   if (args.resourceType === "voice" && ["APPROVED", "LOCKED"].includes(args.targetState)) await validateVoiceForApproval(ctx, args.projectId, (effective.resource as Doc<"voices">)._id);
+  if(args.resourceType==='beatAnalysisVersion'&&['APPROVED','LOCKED'].includes(args.targetState))await validateBeatVersionForApproval(ctx,args.projectId,(effective.resource as Doc<'beatAnalysisVersions'>)._id);
   const productionId = args.productionId ?? effective.productionId;
-  if (!productionId && !["asset", "voice", "projectResourceVersion", "continuityBible", "movieVersion", "movieReview", "movieExport"].includes(args.resourceType)) throw new Error("Approval requires a production-owned or supported project-owned resource.");
+  if (!productionId && !["asset", "voice", "projectResourceVersion", "continuityBible", "movieVersion", "movieReview", "movieExport", "beatAnalysisVersion"].includes(args.resourceType)) throw new Error("Approval requires a production-owned or supported project-owned resource.");
   if (['APPROVED','LOCKED'].includes(args.targetState) && args.resourceType === 'movieVersion') {
     const version = effective.resource as Doc<'movieVersions'>;
     if (version.state !== 'READY' || !version.contentHash || !version.durationInFrames || version.validatedComponentCount !== version.componentCount) throw new Error('Validate the exact movie composition before approval or locking.');
@@ -122,7 +126,7 @@ export async function transitionResourceState(
     resourceType: args.resourceType,
     resourceId: args.resourceId,
     initialState: effective.currentState,
-  });
+  },actorId);
   if (!state) throw new Error("Unable to initialize resource state.");
   const timestamp = Date.now();
   const patch: Record<string, unknown> = { state: args.targetState, updatedAt: timestamp };

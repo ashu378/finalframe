@@ -28,7 +28,8 @@ export type LogicalCapabilityId =
     | 'video_final'
     | 'tts'
     | 'stt'
-    | 'image';
+    | 'image'
+    | 'music';
 
 export type ExecutionProfile =
     | 'FAST_SOCIAL'
@@ -199,6 +200,7 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         fallbackIds: configuredFallbacks('OPENROUTER_TTS_FALLBACK_MODELS', ['x-ai/grok-voice-tts-1.0', 'microsoft/mai-voice-2']),
         selectFromCatalog: false,
     },
+    MUSIC_GENERATION: {id:configuredModel('OPENROUTER_MUSIC_MODEL','google/lyria-3-clip-preview'),provider:'openrouter',capability:'MUSIC_GENERATION',contextWindow:1048576,description:'Reviewed thirty-second music generation',costTier:'low',inputModalities:['text'],outputModalities:['audio','text'],fallbackIds:[],selectFromCatalog:false},
     TRANSCRIPTION: {
         id: configuredModel('OPENROUTER_TRANSCRIPTION_MODEL', 'openai/gpt-transcribe'),
         provider: 'openrouter',
@@ -236,6 +238,7 @@ export const LOGICAL_CAPABILITY_REGISTRY: Record<LogicalCapabilityId, LogicalCap
     tts: logicalCapability('tts', 'TEXT_TO_SPEECH'),
     stt: logicalCapability('stt', 'TRANSCRIPTION'),
     image: logicalCapability('image', 'IMAGE_GENERATION'),
+    music:logicalCapability('music','MUSIC_GENERATION'),
 };
 
 export function getModelForCapability(capability: CapabilityId): AIModelConfig {
@@ -282,6 +285,7 @@ export function isRegisteredModelId(model: string): boolean {
 /** Production preparation uses conservative, documented billing units. Model
  * overrides remain central; unsupported model/unit combinations fail closed. */
 export const PREPARATION_MODELS = {
+    music:{id:configuredModel('OPENROUTER_MUSIC_MODEL','google/lyria-3-clip-preview'),capability:'MUSIC_GENERATION' as const,billing:'REVIEWED_FIXED_SONG' as const,certifiedModel:'google/lyria-3-clip-preview'},
     image: { id: configuredModel('OPENROUTER_REFERENCE_IMAGE_MODEL', 'sourceful/riverflow-v2.6-pro'), capability: 'IMAGE_GENERATION' as const, billing: 'ENDPOINT_IMAGE_SKUS' as const },
     narration: { id: configuredModel('OPENROUTER_NARRATION_MODEL', 'mistralai/voxtral-mini-tts-3-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'CHARACTER' as const, certifiedModel: 'mistralai/voxtral-mini-tts-3-0' },
     referenceVoice: { id: configuredModel('OPENROUTER_REFERENCE_VOICE_MODEL', 'bytedance-seed/seed-audio-1-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'OUTPUT_SECONDS' as const, certifiedModel: 'bytedance-seed/seed-audio-1-0', maxOutputSeconds: 120 },
@@ -292,6 +296,7 @@ export const PREPARATION_MODELS = {
  * a changed permanent model version, provider, price unit or control surface.
  * Evidence/conflicts: docs/creator-workflows/AVATAR-SEED-MOTION-MASK-RESEARCH-2026-11-02.md */
 export const REVIEWED_OPERATION_CONTRACTS = {
+    music:{version:'LYRIA3_CLIP_FIXED_SONG_V1',modelId:'google/lyria-3-clip-preview',canonicalSlug:'google/lyria-3-clip-preview-20260330',providerTag:'google-ai-studio',endpointName:'Google AI Studio | google/lyria-3-clip-preview-20260330',songUsd:.04,reservationUsd:.052,priceEvidencePrefix:'30 second duration clips are priced at $0.04 per clip.',nominalDurationSeconds:30,evidence:['https://openrouter.ai/google/lyria-3-clip-preview','https://openrouter.ai/docs/guides/overview/multimodal/audio','https://openrouter.ai/docs/api_reference/streaming'],reviewedAt:'2026-11-02'},
     referenceVoice: {
         version: 'SEED_AUDIO_ORIGINAL_SECONDS_120_V1',
         modelId: 'bytedance-seed/seed-audio-1-0',

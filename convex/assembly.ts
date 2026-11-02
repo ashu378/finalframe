@@ -1,8 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { v } from "convex/values";
-import { requireMember, requireProjectRole } from "./authorization";
+import { v, type Infer } from "convex/values";
+import { requireMember, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 import { getEffectiveResourceState, requireApprovedResource } from "./resourceStates";
 import { getProduction, now } from "./_shared";
 import { cropCaptionTrack, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
@@ -10,6 +10,7 @@ import { validateManifest } from '../renderer/src/manifest';
 import { serializeCaptionSidecars } from '../renderer/src/captions';
 import type { CaptionTrack } from '../renderer/src/types';
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
+import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Production = Doc<"productions">;
@@ -98,7 +99,7 @@ function outputPreset(name: string, metadata: Record<string, unknown>): RenderPr
         ? { width: 1920, height: 1080 }
         : null;
   const imported = record(metadata.importedOutput);
-  const exactDimensions = Number.isInteger(imported.width) && Number.isInteger(imported.height) && Number(imported.width) > 0 && Number(imported.width) <= 7680 && Number(imported.height) > 0 && Number(imported.height) <= 4320 ? { width: Number(imported.width), height: Number(imported.height) } : dimensions;
+  const exactDimensions = metadata.authoredOutput !== undefined ? validateAuthoringOutputSettings(metadata.authoredOutput) : Number.isInteger(imported.width) && Number.isInteger(imported.height) && Number(imported.width) > 0 && Number(imported.width) <= 7680 && Number(imported.height) > 0 && Number(imported.height) <= 4320 ? { width: Number(imported.width), height: Number(imported.height) } : dimensions;
   if (!exactDimensions) throw new Error(`Render preset “${name}” is not supported yet.`);
   if (imported.codec && imported.codec !== 'h264') throw new Error('This imported codec needs an explicit supported output conversion before re-export.');
   const fps = numberValue(metadata.fps) ?? 30;
@@ -119,13 +120,13 @@ function hasReviewedTake(version: Doc<"shotVersions">, approvedTakeIds: Set<stri
   return context.reviewed === true || String(context.reviewStatus ?? "").toUpperCase() === "APPROVED" || ["PASS", "PASS_WITH_WARNINGS"].includes(quality);
 }
 
-async function authorizedTimeline(ctx: ReadCtx, production: Production, requestedId?: Id<"timelines">) {
+async function authorizedTimeline(ctx: ReadCtx, production: Production, requestedId?: Id<"timelines">,actorId?:Id<"users">) {
   const candidates = requestedId
     ? [await ctx.db.get(requestedId)]
     : await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", production._id)).order("desc").take(200);
   const timeline = candidates.find((candidate) => candidate !== null && candidate.productionId === production._id && candidate.studioExternalId === production.studioExternalId);
   if (!timeline) throw new Error("Create a timeline version before assembling this video.");
-  await requireMember(ctx, timeline.studioExternalId);
+  if(!actorId)await requireMember(ctx, timeline.studioExternalId);else if(production.projectId)await resolveProjectAccessForActor(ctx,production.projectId,actorId,["OWNER","EDITOR"]);
   if (!production.projectId) throw new Error("Production is not attached to a project.");
   const tracks = record(timeline.tracks);
   let boundVersion = stringValue(tracks.productionVersionId) ?? stringValue(record(tracks.metadata).productionVersionId);
@@ -134,7 +135,7 @@ async function authorizedTimeline(ctx: ReadCtx, production: Production, requeste
     if (original?.productionId === production._id && original.projectId === production.projectId) boundVersion = stringValue(record(original.manifest).productionVersionId);
   }
   if (!boundVersion || boundVersion !== production.currentVersionId) throw new Error("Create a timeline for the current approved production version before assembly.");
-  const approval = await requireApprovedResource(ctx, production.projectId, "timeline", timeline._id.toString(), production._id);
+  const approval = await requireApprovedResource(ctx, production.projectId, "timeline", timeline._id.toString(), production._id,actorId);
   if (approval.currentState !== "LOCKED") throw new Error("Lock the approved timeline before building its canonical manifest.");
   return timeline;
 }
@@ -195,7 +196,7 @@ function scopeSourceItems(sources: SourceItem[], scope: SelectionScope): SourceI
   return selected.sort((a, b) => a.startSeconds - b.startSeconds || a.orderIndex - b.orderIndex).map((source, orderIndex) => ({ ...source, orderIndex }));
 }
 
-async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: Timeline, preset: RenderPreset, selectionScope: SelectionScope, selectedIds: Set<string>) {
+async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: Timeline, preset: RenderPreset, selectionScope: SelectionScope, selectedIds: Set<string>,actorId?:Id<"users">) {
   const tracks = await ctx.db.query("timelineTracks").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).take(501);
   const clips = (await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).take(501)).sort((a, b) => {
     const startOrder = a.startSeconds - b.startSeconds;
@@ -268,7 +269,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       const asset = await ctx.db.get(clip.assetId);
       if (!asset || asset.studioExternalId !== production.studioExternalId || asset.deletedAt || !asset.storageId) throw new Error("Assembly is blocked because a timeline media source is missing or unauthorized.");
       if (!production.projectId || asset.projectId !== production.projectId || asset.scope === "GLOBAL") throw new Error("Assembly is blocked because a media source is outside this project.");
-      await requireApprovedResource(ctx, production.projectId, "asset", asset._id.toString());
+      await requireApprovedResource(ctx, production.projectId, "asset", asset._id.toString(),undefined,actorId);
       if (!asset.checksum) throw new Error(`Media “${asset.name ?? asset._id}” has no checksum and cannot be exported safely.`);
       if (hasDeniedRights(asset.rights) || hasDeniedRights(asset.provenance)) throw new Error(`Media “${asset.name ?? asset._id}” is missing rights or consent approval.`);
       const sourceUrl = await ctx.storage.getUrl(asset.storageId);
@@ -286,7 +287,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       const shotVersion = await ctx.db.get(clip.shotVersionId);
       if (!shotVersion || shotVersion.productionId !== production._id || shotVersion.studioExternalId !== production.studioExternalId || shotVersion.status !== "COMPLETED") throw new Error("Assembly is blocked because a take failed or is incomplete.");
       if (!production.projectId) throw new Error("Production is not attached to a project.");
-      await requireApprovedResource(ctx, production.projectId, "shotVersion", shotVersion._id.toString(), production._id);
+      await requireApprovedResource(ctx, production.projectId, "shotVersion", shotVersion._id.toString(), production._id,actorId);
       const shot = await ctx.db.get(shotVersion.shotId);
       const scene = shot ? await ctx.db.get(shot.sceneId) : null;
       const sequence = scene ? await ctx.db.get(scene.sequenceId) : null;
@@ -305,7 +306,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
     if (captionId) {
       const caption = await ctx.db.get(captionId as Id<"captions">);
       if (!caption || caption.studioExternalId !== production.studioExternalId || caption.productionId !== production._id || ["FAILED", "REJECTED"].includes(String(caption.status))) throw new Error("Assembly is blocked because the selected caption version is unavailable.");
-      await requireApprovedResource(ctx, production.projectId!, 'caption', caption._id, production._id);
+      await requireApprovedResource(ctx, production.projectId!, 'caption', caption._id, production._id,actorId);
       source.captionId = caption._id.toString();
       source.captionUpdatedAt = caption.updatedAt ?? caption.createdAt;
       source.captionTracks = [normalizeCaptionTrack({ language: caption.language, style: caption.style ?? {}, cues: caption.cues }, duration, preset.fps, `${clip._id}:captions`)];
@@ -403,17 +404,18 @@ function rendererOutputAudio(sources: SourceItem[]) {
     : undefined;
 }
 
-export const createJob = mutation({
-  args: { productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), idempotencyKey: v.optional(v.string()), selectionScope: v.optional(v.union(v.literal("FULL_PROJECT"), v.literal("TIMELINE"), v.literal("SCENES"), v.literal("SHOTS"))), selectedSceneIds: v.optional(v.array(v.id("scenes"))), shotVersionIds: v.optional(v.array(v.id("shotVersions"))), confirmOlderVersions: v.optional(v.boolean()), correlationId: v.optional(v.string()) },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const production = await getProduction(ctx, args.productionId.toString());
-    await requireMember(ctx, production.studioExternalId);
+const assemblyCreateArgs={ productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), idempotencyKey: v.optional(v.string()), selectionScope: v.optional(v.union(v.literal("FULL_PROJECT"), v.literal("TIMELINE"), v.literal("SCENES"), v.literal("SHOTS"))), selectedSceneIds: v.optional(v.array(v.id("scenes"))), shotVersionIds: v.optional(v.array(v.id("shotVersions"))), confirmOlderVersions: v.optional(v.boolean()), correlationId: v.optional(v.string()) };
+const assemblyCreateValidator=v.object(assemblyCreateArgs);
+export const createJob=mutation({args:assemblyCreateArgs,returns:v.any(),handler:(ctx,args)=>createCanonicalAssembly(ctx,args)});
+export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof assemblyCreateValidator>,actorId?:Id<'users'>){
+    const production = actorId?await ctx.db.get(args.productionId):await getProduction(ctx, args.productionId.toString());
+    if(!production)throw new Error("Production not found.");
+    if(!actorId)await requireMember(ctx, production.studioExternalId);
     const projectId = production.projectId;
     if (!projectId) throw new Error("Production is not attached to a project.");
-    await requireProjectRole(ctx, projectId, ["OWNER", "EDITOR"]);
-    const timeline = await authorizedTimeline(ctx, production, args.timelineId);
-    const timelineState = await getEffectiveResourceState(ctx, projectId, "timeline", timeline._id.toString(), production._id);
+    if(actorId)await resolveProjectAccessForActor(ctx,projectId,actorId,["OWNER","EDITOR"]);else await requireProjectRole(ctx, projectId, ["OWNER", "EDITOR"]);
+    const timeline = await authorizedTimeline(ctx, production, args.timelineId,actorId);
+    const timelineState = await getEffectiveResourceState(ctx, projectId, "timeline", timeline._id.toString(), production._id,actorId);
     const preset = outputPreset(timeline.outputPreset || production.outputPreset, timelineMetadata(timeline));
     const selectionScope: SelectionScope = args.selectionScope ?? (args.shotVersionIds?.length ? "SHOTS" : args.selectedSceneIds?.length ? "SCENES" : "FULL_PROJECT");
     const selectedIds = new Set<string>(selectionScope === "SHOTS" ? (args.shotVersionIds ?? []).map(String) : selectionScope === "SCENES" ? (args.selectedSceneIds ?? []).map(String) : []);
@@ -428,7 +430,7 @@ export const createJob = mutation({
       return { jobId: legacy?._id, manifestId: existingManifest._id, manifest: existingManifest.manifest };
     }
 
-    const built = await buildSourceItems(ctx, production, timeline, preset, selectionScope, selectedIds);
+    const built = await buildSourceItems(ctx, production, timeline, preset, selectionScope, selectedIds,actorId);
     const olderSources: string[] = [];
     for (const source of built.sources) {
       if (!source.shotId || !source.shotVersionId) continue;
@@ -481,8 +483,7 @@ export const createJob = mutation({
     await ctx.db.patch(manifestId, { manifest: persistedPayload });
     const jobId = await ctx.db.insert("assemblyJobs", { projectId, productionId: production._id, manifestId, selectionScope, exportScope: selectionScope, idempotencyKey, progress: 100, status: "QUEUED", manifest: persistedPayload, correlationId: args.correlationId, createdAt: timestamp, updatedAt: timestamp });
     return { jobId, manifestId, manifest: persistedPayload };
-  },
-});
+}
 
 export const getManifest = query({
   args: { manifestId: v.id("manifests") },
