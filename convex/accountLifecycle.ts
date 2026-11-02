@@ -28,7 +28,7 @@ async function log(ctx: MutationCtx, userId: Id<'users'>, action: string, entity
 async function authorizedProject(ctx: ReadCtx, projectId: Id<'projects'>) {
   try { return await requireProjectAccess(ctx, projectId, undefined, { includeInactive: true, allowRestrictedRead: true }); }
   catch (error) {
-    if (error instanceof ConvexAuthorizationError && ['PROJECT_ACCESS_DENIED', 'PROJECT_NOT_FOUND', 'STUDIO_ACCESS_DENIED', 'STUDIO_NOT_FOUND'].includes(error.code)) return null;
+    if (error instanceof ConvexAuthorizationError && ['PROJECT_ACCESS_DENIED', 'PROJECT_NOT_FOUND', 'STUDIO_ACCESS_DENIED', 'STUDIO_NOT_FOUND', 'NOT_A_MEMBER'].includes(error.code)) return null;
     throw error;
   }
 }
@@ -186,19 +186,34 @@ async function preflight(ctx: ReadCtx, actor: Actor): Promise<DeactivationPrefli
   for (const rows of [await ctx.db.query('projects').withIndex('by_owner_user', (q) => q.eq('ownerUserId', user._id)).take(101), await ctx.db.query('projects').withIndex('by_created_by_user', (q) => q.eq('createdByUserId', user._id)).take(101), await ctx.db.query('projects').withIndex('by_created_by_external', (q) => q.eq('createdByExternalId', identity.externalId)).take(101)]) { if (rows.length > 100) return limit(); for (const project of rows) projectIds.add(project._id); }
   scanned += memberships.length + projectIds.size; if (scanned > 500) return limit();
   for (const projectId of projectIds) {
-    const access = await authorizedProject(ctx, projectId); if (!access || access.projectRole !== 'OWNER') continue;
+    const access = await authorizedProject(ctx, projectId);
+    if (access && access.projectRole !== 'OWNER') continue;
+    const project = access?.project ?? await ctx.db.get(projectId);
+    if (!project) continue;
+    if (!access) {
+      // Workspace removal can leave retained ownership rows. Deleted history
+      // is harmless to cleanup; an active shared project still needs handoff.
+      if (project.deletedAt || project.status === 'DELETED') continue;
+      const explicit = memberships.filter(row => row.projectId === projectId);
+      if (explicit.length > 1) return limit();
+      const owns = explicit.length ? explicit[0].status === 'ACTIVE' && explicit[0].role === 'OWNER' : project.ownerUserId === user._id || project.createdByUserId === user._id || project.createdByExternalId === identity.externalId;
+      if (!owns) continue;
+    }
+    const studio = access?.studio ?? (project.studioId ? await ctx.db.get(project.studioId) : await ctx.db.query('studios').withIndex('by_external_id', q => q.eq('externalId', project.studioExternalId)).unique());
+    const inactive = (status: unknown) => ['DISABLED', 'SUSPENDED', 'REMOVED', 'ARCHIVED', 'DELETED'].includes(String(status ?? '').toUpperCase());
+    const enabledStudio = studio && studio.externalId === project.studioExternalId && (!project.studioId || project.studioId === studio._id) && !inactive(studio.status);
     const peers = await ctx.db.query('projectMembers').withIndex('by_project_status', (q) => q.eq('projectId', projectId).eq('status', 'ACTIVE')).take(51);
     scanned += peers.length; if (peers.length > 50 || scanned > 500) return limit();
     let shared = false; let enabledOwner = false;
     for (const member of peers) {
       if (member.userId === user._id) continue;
-      const peer = await ctx.db.get(member.userId); if (!peer || peer.status === 'disabled') continue;
+      const peer = await ctx.db.get(member.userId); if (!peer || inactive(peer.status)) continue;
       shared = true;
-      if (member.role === 'OWNER') {
-        if (await studioRoleForUser(ctx, access.studio, peer, userExternalKey(peer))) enabledOwner = true;
+      if (member.role === 'OWNER' && enabledStudio) {
+        if (await studioRoleForUser(ctx, studio, peer, userExternalKey(peer))) enabledOwner = true;
       }
     }
-    if (shared && !enabledOwner) return deny('SHARED_PROJECT_OWNER', `Shared project “${access.project.name}” needs another enabled OWNER with active studio access before this account can deactivate.`);
+    if (shared && !enabledOwner) return deny('SHARED_PROJECT_OWNER', access ? `Shared project “${project.name}” needs another enabled OWNER with active studio access before this account can deactivate.` : 'A shared project needs another enabled OWNER with active studio access before this account can deactivate. Ask its workspace owner or support to review the ownership handoff.');
   }
   return { allowed: true, blockers: [] };
 }
