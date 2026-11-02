@@ -117,4 +117,17 @@ export function validateShotOperationControls(controls: ShotOperationControls, a
 export type CompositionClip = { kind: 'TAKE'; shotVersionId: string }
     | { kind: 'ASSET'; assetId: string; durationSeconds: number }
     | { kind: 'GRAPHIC'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationSeconds: number; props: { title: string } & Record<string, string>; logoAssetId?: string };
-export interface CompositionAudioTrack { assetId: string; startSeconds: number; durationSeconds: number; volume?: number }
+export interface CompositionAudioTrack { assetId: string; startSeconds: number; durationSeconds: number; volume?: number; trimStartSeconds?: number; fadeInSeconds?: number; fadeOutSeconds?: number; role?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx' }
+
+/** Client feedback only; Convex independently authorizes and validates every lane. */
+export function validateCompositionAudioTracks(tracks: CompositionAudioTrack[], totalSeconds: number) {
+    if (tracks.length > 16) throw new Error('Use at most 16 audio lanes.');
+    for (const track of tracks) {
+        if (!track.assetId.trim()) throw new Error('Choose project audio or remove the empty audio lane.');
+        if (!Number.isFinite(track.startSeconds) || track.startSeconds < 0 || !Number.isFinite(track.durationSeconds) || track.durationSeconds <= 0 || track.startSeconds + track.durationSeconds > totalSeconds) throw new Error('Audio timing must fit inside the visual timeline.');
+        const volume = track.volume ?? 1;
+        if (!Number.isFinite(volume) || volume < 0 || volume > 1) throw new Error('Audio volume must be between zero and one.');
+        if (!Number.isFinite(track.trimStartSeconds ?? 0) || (track.trimStartSeconds ?? 0) < 0) throw new Error('Source audio trim must be zero or greater.');
+        for (const fade of [track.fadeInSeconds, track.fadeOutSeconds]) if (fade !== undefined && (!Number.isFinite(fade) || fade < 0 || fade > track.durationSeconds)) throw new Error('Audio fades must fit inside their clip.');
+    }
+}

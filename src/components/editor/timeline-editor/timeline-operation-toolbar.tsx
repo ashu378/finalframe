@@ -29,6 +29,7 @@ export interface TimelineOperationToolbarProps {
   trimEndSeconds?: number;
   transition?: TransitionKind;
   audioLevelDb?: number;
+  maxAudioLevelDb?: number;
   disabled?: boolean;
   readOnly?: boolean;
   canUndo?: boolean;
@@ -46,6 +47,7 @@ export function TimelineOperationToolbar({
   trimEndSeconds = 0,
   transition = 'CUT',
   audioLevelDb = 0,
+  maxAudioLevelDb = 0,
   disabled = false,
   readOnly = false,
   canUndo = false,
@@ -94,7 +96,7 @@ export function TimelineOperationToolbar({
           <select aria-label="Transition" value={transition} disabled={locked || !selectedClipId} onChange={(e) => emit({ type: 'transition', transition: e.target.value as TransitionKind })} className="h-10 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50">{transitions.map((item) => <option key={item} value={item}>{item[0] + item.slice(1).toLowerCase()}</option>)}</select>
         </label>
         <label className="grid gap-1 text-xs font-medium text-[#91a0b8]">Audio level (dB)
-          <input aria-label="Audio level in decibels" type="number" min="-60" max="12" step="1" value={audioLevelDb} disabled={locked || !selectedClipId} onChange={(e) => emit({ type: 'audio-level', volumeDb: Number(e.target.value) })} className="h-10 w-28 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50" />
+          <input aria-label="Audio level in decibels" type="number" min="-60" max={maxAudioLevelDb} step="1" value={audioLevelDb} disabled={locked || !selectedClipId} onChange={(e) => emit({ type: 'audio-level', volumeDb: Number(e.target.value) })} className="h-10 w-28 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50" />
         </label>
         <div className="ml-auto flex gap-1" role="group" aria-label="History">
           <button type="button" title="Undo" aria-label="Undo" disabled={!canUndo} onClick={() => emit({ type: 'undo' })} className="tool-button"><Undo2 aria-hidden="true" className="h-4 w-4" /></button>

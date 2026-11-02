@@ -22,6 +22,9 @@ type SourceItem = {
   durationSeconds: number;
   trimStartSeconds?: number;
   volume?: number;
+  fadeInSeconds?: number;
+  fadeOutSeconds?: number;
+  audioRole?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx';
   assetId?: string;
   assetChecksum?: string;
   shotId?: string;
@@ -161,6 +164,8 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
     sourceIds.add(clip._id.toString());
 
     const clipMeta = record(clip.metadata);
+    const audioSettings = record(clipMeta.audio);
+    const audioRole = stringValue(clipMeta.audioRole);
     const source: SourceItem = {
       orderIndex,
       timelineClipId: clip._id.toString(),
@@ -169,7 +174,10 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       startSeconds: start,
       durationSeconds: duration,
       trimStartSeconds: numberValue(clip.trimStartSeconds),
-      volume: numberValue(clip.volume),
+      volume: audioSettings.muted === true ? 0 : numberValue(clip.volume),
+      fadeInSeconds: numberValue(audioSettings.fadeInSeconds),
+      fadeOutSeconds: numberValue(audioSettings.fadeOutSeconds),
+      audioRole: ['dialogue', 'voiceover', 'music', 'ambience', 'sfx'].includes(audioRole ?? '') ? audioRole as SourceItem['audioRole'] : 'music',
       sourceKind: track.kind.toUpperCase() === "GRAPHIC" ? "GRAPHIC" : track.kind.toUpperCase() === "TEXT" ? "TEXT" : "MEDIA",
       graphicTemplateId: stringValue(clipMeta.motionTemplateId ?? clipMeta.templateId),
       graphicProps: record(clipMeta.templateProps ?? clipMeta.props),
@@ -275,7 +283,9 @@ function rendererAudioTracks(sources: SourceItem[], fps: number) {
     durationInFrames: Math.max(1, Math.ceil(source.durationSeconds * fps)),
     trimStartInFrames: Math.max(0, Math.floor((source.trimStartSeconds ?? 0) * fps)),
     volume: source.volume ?? 1,
-    role: "music" as const,
+    fadeInFrames: Math.max(0, Math.floor((source.fadeInSeconds ?? 0) * fps)),
+    fadeOutFrames: Math.max(0, Math.floor((source.fadeOutSeconds ?? 0) * fps)),
+    role: source.audioRole ?? 'music',
   }));
 }
 

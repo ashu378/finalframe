@@ -239,14 +239,14 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
   if (kind === "trim") {
     if (!clipId) throw new Error("A clip ID is required for trimming.");
     const { clip } = findClip(state, clipId);
-    const trimStart = optionalNumber(input.trimStartSeconds, "Trim start", 0) ?? clip.trimStartSeconds;
-    const trimEnd = optionalNumber(input.trimEndSeconds, "Trim end", 0) ?? clip.trimEndSeconds;
-    if (trimEnd !== undefined && trimStart !== undefined && trimEnd <= trimStart) throw new Error("Trim end must be after trim start.");
-    const duration = optionalNumber(input.durationSeconds, "Duration", 0);
-    if (duration !== undefined && duration <= 0) throw new Error("Trimmed duration must be greater than zero.");
+    const trimStart = optionalNumber(input.trimStartSeconds, "Trim start", 0) ?? clip.trimStartSeconds ?? 0;
+    const trimEnd = optionalNumber(input.trimEndSeconds, "Trim end", 0) ?? clip.trimEndSeconds ?? (clip.trimStartSeconds ?? 0) + clip.durationSeconds;
+    if (trimEnd <= trimStart) throw new Error("Trim end must be after trim start.");
+    const duration = optionalNumber(input.durationSeconds, "Duration", 0) ?? trimEnd - trimStart;
+    if (duration <= 0 || duration > trimEnd - trimStart + 0.000001) throw new Error("Trimmed duration must fit between the source trim bounds.");
     clip.trimStartSeconds = trimStart;
-    clip.trimEndSeconds = trimEnd;
-    if (duration !== undefined) clip.durationSeconds = duration;
+    clip.trimEndSeconds = trimStart + duration;
+    clip.durationSeconds = duration;
     const start = optionalNumber(input.startSeconds, "Timeline start", 0);
     if (start !== undefined) clip.startSeconds = start;
     return state;
@@ -259,12 +259,13 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     if (splitAt === undefined || splitAt <= 0 || splitAt >= clip.durationSeconds) throw new Error("Split position must be inside the clip.");
     const first: ClipState = { ...clip, metadata: { ...clip.metadata, splitPart: 1 } };
     first.durationSeconds = splitAt;
+    first.trimEndSeconds = (clip.trimStartSeconds ?? 0) + splitAt;
     const second: ClipState = {
       ...clip,
       id: `${clip.id}:split:${splitAt}`,
       startSeconds: clip.startSeconds + splitAt,
       durationSeconds: clip.durationSeconds - splitAt,
-      trimStartSeconds: clip.trimStartSeconds === undefined ? undefined : clip.trimStartSeconds + splitAt,
+      trimStartSeconds: (clip.trimStartSeconds ?? 0) + splitAt,
       metadata: { ...clip.metadata, splitPart: 2, splitFrom: clip.id },
     };
     track.clips.splice(track.clips.indexOf(clip), 1, first, second);
@@ -285,6 +286,11 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     targetTrack.clips.forEach((candidate, candidateIndex) => {
       candidate.metadata = { ...candidate.metadata, orderIndex: candidateIndex };
     });
+    // Reordering must move content in time, not only change display metadata.
+    for (const lane of new Set([track, targetTrack])) {
+      let elapsed = 0;
+      for (const candidate of lane.clips) { candidate.startSeconds = elapsed; elapsed += candidate.durationSeconds; }
+    }
     return state;
   }
 
@@ -293,8 +299,8 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
 
   if (kind === "replace") {
     clip.assetId = stringValue(input.assetId, "Replacement asset ID");
-    const shotVersionId = optionalString(input.shotVersionId, "Shot version ID");
-    if (shotVersionId !== undefined) clip.shotVersionId = shotVersionId;
+    // A deliberate asset replacement must not retain the old take's identity.
+    clip.shotVersionId = optionalString(input.shotVersionId, "Shot version ID");
     return state;
   }
 
@@ -320,7 +326,17 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
   }
 
   if (kind === "adjustAudio") {
-    const volume = optionalNumber(input.volume, "Volume") ?? optionalNumber(input.volumeDb, "Volume") ?? clip.volume;
+    if (input.volume !== undefined && input.volumeDb !== undefined) throw new Error("Choose linear volume or decibels, not both.");
+    let volume = optionalNumber(input.volume, "Volume") ?? clip.volume;
+    if (input.volumeDb !== undefined) {
+      if (typeof input.volumeDb !== "number" || !Number.isFinite(input.volumeDb)) throw new Error("Decibel volume must be finite.");
+      volume = Math.pow(10, input.volumeDb / 20);
+    }
+    if (volume !== undefined && (!Number.isFinite(volume) || volume < 0 || volume > (clip.kind === "AUDIO" ? 2 : 1))) throw new Error("Volume exceeds the supported playback range.");
+    if (input.pan !== undefined && input.pan !== 0) throw new Error("Stereo panning is not supported by the current renderer.");
+    if (input.muted !== undefined && typeof input.muted !== "boolean") throw new Error("Muted must be true or false.");
+    for (const value of [input.fadeInSeconds, input.fadeOutSeconds]) if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > clip.durationSeconds)) throw new Error("Audio fades must fit inside the clip.");
+    if (clip.kind !== "AUDIO" && (input.fadeInSeconds !== undefined || input.fadeOutSeconds !== undefined)) throw new Error("Add a soundtrack lane to use audio fades.");
     if (volume !== undefined) clip.volume = volume;
     const audio = {
       ...(record(clip.metadata).audio as JsonRecord | undefined),
@@ -444,15 +460,20 @@ async function persistDraft(
     const nextClips: ClipState[] = [];
 
     for (const [clipIndex, clip] of track.clips.entries()) {
+      const trimStart = clip.trimStartSeconds ?? 0;
+      if (!Number.isFinite(clip.startSeconds) || clip.startSeconds < 0 || !Number.isFinite(clip.durationSeconds) || clip.durationSeconds <= 0 || clip.startSeconds + clip.durationSeconds > 60 || !Number.isFinite(trimStart) || trimStart < 0 || (clip.trimEndSeconds !== undefined && (!Number.isFinite(clip.trimEndSeconds) || clip.trimEndSeconds < trimStart + clip.durationSeconds - 0.000001))) throw new Error("Edited clip timing exceeds the supported source or 60-second composition.");
       const assetId = clip.assetId ? clip.assetId as Id<"assets"> : undefined;
       if (assetId) {
         const asset = await ctx.db.get(assetId);
         if (!asset || asset.studioExternalId !== member.studio.externalId || asset.projectId !== projectId || asset.scope === "GLOBAL" || asset.deletedAt) throw new Error("An edited clip references media outside this project.");
+        const expectedMedia = ({ VIDEO: 'video/', IMAGE: 'image/', AUDIO: 'audio/' } as Record<string, string>)[clip.kind];
+        if (expectedMedia && !asset.mimeType?.startsWith(expectedMedia)) throw new Error("Replacement media must match the clip's media type.");
+        if (asset.durationSeconds !== undefined && (asset.mimeType?.startsWith("video/") || asset.mimeType?.startsWith("audio/")) && trimStart + clip.durationSeconds > asset.durationSeconds + 0.05) throw new Error("Edited clip extends beyond its source media.");
       }
       const shotVersionId = clip.shotVersionId ? clip.shotVersionId as Id<"shotVersions"> : undefined;
       if (shotVersionId) {
         const shotVersion = await ctx.db.get(shotVersionId);
-        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId || shotVersion.projectId !== projectId) throw new Error("An edited clip references a take outside this project.");
+        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId || shotVersion.projectId !== projectId || shotVersion.productionId !== source.productionId || shotVersion.assetId !== assetId) throw new Error("An edited clip references a take outside this production or its media.");
       }
       const clipId = await ctx.db.insert("timelineClips", {
         studioExternalId: member.studio.externalId,

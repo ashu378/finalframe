@@ -9,7 +9,7 @@ export function toTimelineVersion(draft: any, resourceState?: string): TimelineV
     const trackId = String(track.id ?? track._id);
     const sourceClips = Array.isArray(track.clips) ? track.clips : (draft.clips ?? []).filter((clip: any) => String(clip.trackId) === trackId);
     const clips: TimelineClip[] = sourceClips.map((clip: any) => {
-      const base = { id: String(clip.id ?? clip._id), trackId, kind, startSeconds: clip.startSeconds, durationSeconds: clip.durationSeconds, metadata: clip.metadata ?? {}, transitionIn: undefined, transitionOut: undefined };
+      const base = { id: String(clip.id ?? clip._id), trackId, kind, startSeconds: clip.startSeconds, durationSeconds: clip.durationSeconds, sourceStartSeconds: clip.trimStartSeconds ?? 0, sourceDurationSeconds: clip.durationSeconds, metadata: clip.metadata ?? {}, transitionIn: undefined, transitionOut: undefined };
       if (kind === 'GRAPHIC') {
         const metadata = clip.metadata ?? {};
         const templateId = typeof metadata.motionTemplateId === 'string' ? metadata.motionTemplateId : typeof metadata.templateId === 'string' ? metadata.templateId : 'kinetic-title';

@@ -2,7 +2,7 @@ import { internal } from './_generated/api';
 import { internalMutation, internalQuery, mutation, query } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { SchedulableFunctionReference } from 'convex/server';
+import type { SchedulableFunctionReference, FunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { requireProjectAccess, requireProjectRole } from './authorization';
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
@@ -454,7 +454,7 @@ export const completePreparation = internalMutation({
       const stored = await ctx.db.system.get('_storage', args.storageId);
       const expected = job.modality === 'IMAGE' ? 'image/' : 'audio/';
       if (!stored || !args.contentType?.startsWith(expected) || !stored.contentType?.startsWith(expected) || stored.size <= 0 || stored.size > 15 * 1024 * 1024) throw new Error('Preparation output is invalid.');
-      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : 'NARRATION'], storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, metadata: { generationJobId: job._id, technicalStatus: 'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
+      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : 'NARRATION'], name: job.modality === 'AUDIO' ? `${request.preparationKind === 'VOICE_PREVIEW' ? 'Voice preview' : 'Narration'} · ${String(request.text || '').slice(0, 60)}` : undefined, storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, metadata: { generationJobId: job._id, technicalStatus: 'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
     } else if (request.preparationKind === 'TRANSCRIPT') {
       if (typeof args.text !== 'string' || args.text.length > 100_000 || typeof request.sourceAssetId !== 'string') throw new Error('Transcript output is invalid.');
       const source = await ctx.db.get(request.sourceAssetId as Id<'assets'>);
@@ -464,8 +464,14 @@ export const completePreparation = internalMutation({
       await ctx.db.insert('transcripts', { studioExternalId: job.studioExternalId, studioId: job.studioId, audioId: audio!._id, productionId: job.productionId, language: 'und', provider: job.provider, model: job.model, status: 'COMPLETED', segments: { text: args.text, segments: args.segments ?? [], generationJobId: job._id }, createdAt: Date.now() });
     } else throw new Error('Preparation output is missing.');
     const timestamp = Date.now();
+    const attempt = await currentAttempt(ctx, job);
+    if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', providerRequestId: args.providerRequestId, completedAt: timestamp, latencyMs: timestamp - (job.startedAt ?? job.createdAt) });
     await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, providerRequestId: args.providerRequestId, providerCostUsd: args.providerCostUsd, actualCost: job.estimatedCost, response: { assetId, text: args.text, usage: args.usage, reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await settle(ctx, job, true, args.providerCostUsd);
+    if (job.modality === 'AUDIO' && args.providerCostUsd === undefined && /^gen-tts-\d+-[A-Za-z0-9]+$/.test(args.providerRequestId ?? '')) {
+      const receipts = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;
+      await ctx.scheduler.runAfter(0, receipts.reconcile, { jobId: job._id });
+    }
     return null;
   },
 });

@@ -52,6 +52,6 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
     const result = await synthesizeSpeech({ model: job.model, input: String(request.text), ...(voice.mode === 'STOCK' ? { voice: voice.providerVoiceId } : { inputReferences: voice.references.map((reference: any) => ({ url: reference.url })) }), responseFormat: 'mp3' }, options);
     if (!result.contentType.startsWith('audio/') || !result.audio.byteLength || result.audio.byteLength > 15 * 1024 * 1024) throw new Error('Speech output is invalid.');
     const storageId = await ctx.storage.store(new Blob([result.audio], { type: result.contentType }));
-    await ctx.runMutation(jobs.completePreparation, { ...lease, storageId, contentType: result.contentType, actualModel: result.modelUsed, providerRequestId: result.requestId, providerCostUsd: result.costUsd, usage: result.usage });
+    await ctx.runMutation(jobs.completePreparation, { ...lease, storageId, contentType: result.contentType, actualModel: result.modelUsed, providerRequestId: result.generationId || result.requestId, providerCostUsd: result.costUsd, usage: result.usage });
   }
 }

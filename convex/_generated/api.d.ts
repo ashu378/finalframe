@@ -46,6 +46,7 @@ import type * as productions from "../productions.js";
 import type * as projectProductions from "../projectProductions.js";
 import type * as projects from "../projects.js";
 import type * as providerBudget from "../providerBudget.js";
+import type * as providerReceipts from "../providerReceipts.js";
 import type * as providerText from "../providerText.js";
 import type * as providerTextContracts from "../providerTextContracts.js";
 import type * as providerTextRequests from "../providerTextRequests.js";
@@ -110,6 +111,7 @@ declare const fullApi: ApiFromModules<{
   projectProductions: typeof projectProductions;
   projects: typeof projects;
   providerBudget: typeof providerBudget;
+  providerReceipts: typeof providerReceipts;
   providerText: typeof providerText;
   providerTextContracts: typeof providerTextContracts;
   providerTextRequests: typeof providerTextRequests;

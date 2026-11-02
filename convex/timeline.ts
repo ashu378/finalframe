@@ -93,7 +93,7 @@ const draftClip = v.union(
  * previous manifest: assembly freezes its approved/locked content into v4.
  * This removes the timeline -> manifest -> timeline dependency loop. */
 export const createDraft = mutation({
-  args: { productionId: v.id('productions'), productionVersionId: v.id('productionVersions'), idempotencyKey: v.string(), clips: v.array(draftClip), audioTracks: v.optional(v.array(v.object({ assetId: v.id('assets'), startSeconds: v.number(), durationSeconds: v.number(), volume: v.optional(v.number()) }))) },
+  args: { productionId: v.id('productions'), productionVersionId: v.id('productionVersions'), idempotencyKey: v.string(), clips: v.array(draftClip), audioTracks: v.optional(v.array(v.object({ assetId: v.id('assets'), startSeconds: v.number(), durationSeconds: v.number(), volume: v.optional(v.number()), trimStartSeconds: v.optional(v.number()), fadeInSeconds: v.optional(v.number()), fadeOutSeconds: v.optional(v.number()), role: v.optional(v.union(v.literal('dialogue'), v.literal('voiceover'), v.literal('music'), v.literal('ambience'), v.literal('sfx'))) }))) },
   returns: v.object({ timelineId: v.id('timelines'), versionNumber: v.number(), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
@@ -119,7 +119,7 @@ export const createDraft = mutation({
       await requireApprovedResource(ctx, projectId, 'asset', id);
       return asset;
     }
-    const clips: Array<{ kind: 'VIDEO' | 'IMAGE' | 'GRAPHIC' | 'AUDIO'; assetId?: Id<'assets'>; shotVersionId?: Id<'shotVersions'>; durationSeconds: number; startSeconds: number; volume?: number; metadata: Record<string, unknown> }> = [];
+    const clips: Array<{ kind: 'VIDEO' | 'IMAGE' | 'GRAPHIC' | 'AUDIO'; assetId?: Id<'assets'>; shotVersionId?: Id<'shotVersions'>; durationSeconds: number; startSeconds: number; trimStartSeconds?: number; volume?: number; metadata: Record<string, unknown> }> = [];
     let elapsed = 0;
     for (const input of args.clips) {
       let asset: Doc<'assets'> | undefined;
@@ -155,6 +155,7 @@ export const createDraft = mutation({
         metadata = { motionTemplateId: input.templateId, templateProps: input.props };
       }
       if (!Number.isFinite(duration) || duration <= 0 || duration > 60 || elapsed + duration > 60) throw new Error('This composition must total at most 60 seconds.');
+      if (kind === 'VIDEO' && asset?.durationSeconds !== undefined && duration > asset.durationSeconds + 0.05) throw new Error('Visual clip extends beyond its source media.');
       clips.push({ kind, assetId: asset?._id, shotVersionId: takeId, startSeconds: elapsed, durationSeconds: duration, metadata });
       elapsed += duration;
     }
@@ -162,7 +163,10 @@ export const createDraft = mutation({
       const asset = await assetFor(audio.assetId);
       if (!asset.mimeType?.startsWith('audio/')) throw new Error('Select project audio for the soundtrack.');
       if (!Number.isFinite(audio.startSeconds) || audio.startSeconds < 0 || !Number.isFinite(audio.durationSeconds) || audio.durationSeconds <= 0 || audio.startSeconds + audio.durationSeconds > elapsed || (audio.volume !== undefined && (!Number.isFinite(audio.volume) || audio.volume < 0 || audio.volume > 1))) throw new Error('Audio clips must fit inside the composition with volume between zero and one.');
-      clips.push({ kind: 'AUDIO', assetId: asset._id, startSeconds: audio.startSeconds, durationSeconds: audio.durationSeconds, volume: audio.volume ?? 1, metadata: {} });
+      const trimStartSeconds = audio.trimStartSeconds ?? 0;
+      if (!Number.isFinite(trimStartSeconds) || trimStartSeconds < 0 || (asset.durationSeconds !== undefined && trimStartSeconds + audio.durationSeconds > asset.durationSeconds + 0.05)) throw new Error('Audio trim exceeds the source recording.');
+      for (const fade of [audio.fadeInSeconds, audio.fadeOutSeconds]) if (fade !== undefined && (!Number.isFinite(fade) || fade < 0 || fade > audio.durationSeconds)) throw new Error('Audio fades must fit inside the clip.');
+      clips.push({ kind: 'AUDIO', assetId: asset._id, startSeconds: audio.startSeconds, durationSeconds: audio.durationSeconds, trimStartSeconds, volume: audio.volume ?? 1, metadata: { audioRole: audio.role ?? 'music', audio: { fadeInSeconds: audio.fadeInSeconds ?? 0, fadeOutSeconds: audio.fadeOutSeconds ?? 0 } } });
     }
     const latest = await ctx.db.query('timelines').withIndex('by_production_version', q => q.eq('productionId', production._id)).order('desc').first();
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
@@ -171,10 +175,15 @@ export const createDraft = mutation({
     for (const [orderIndex, kind] of ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO'].entries()) {
       const selected = clips.filter(clip => clip.kind === kind);
       if (!selected.length) continue;
-      const trackId = await ctx.db.insert('timelineTracks', { timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId, kind, name: kind === 'AUDIO' ? 'Project soundtrack' : kind === 'GRAPHIC' ? 'Designed graphics' : 'Selected visuals', orderIndex });
-      for (const clip of selected) {
-        const { kind: _kind, ...values } = clip; void _kind;
-        await ctx.db.insert('timelineClips', { ...values, trackId, timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId });
+      // Narration and music intentionally overlap. Separate lanes preserve the
+      // single-lane non-overlap contract used by assembly and the editor.
+      const lanes = kind === 'AUDIO' ? selected.map(clip => [clip]) : [selected];
+      for (const [laneIndex, lane] of lanes.entries()) {
+        const trackId = await ctx.db.insert('timelineTracks', { timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId, kind, name: kind === 'AUDIO' ? String(lane[0].metadata.audioRole ?? 'music') : kind === 'GRAPHIC' ? 'Designed graphics' : 'Selected visuals', orderIndex: orderIndex + laneIndex });
+        for (const clip of lane) {
+          const { kind: _kind, ...values } = clip; void _kind;
+          await ctx.db.insert('timelineClips', { ...values, trackId, timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId });
+        }
       }
     }
     await ensureResourceState(ctx, { projectId, productionId: production._id, resourceType: 'timeline', resourceId: timelineId });
