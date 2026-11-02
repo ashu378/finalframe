@@ -301,8 +301,16 @@ export function validateManifest(input: unknown): ValidationResult {
     input.shots.forEach((value, index) => {
       const result = validateShotManifest(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0);
       issues.push(...result.issues);
-      if (result.value && ids.has(result.value.shotId)) issues.push({ path: `shots[${index}].shotId`, message: 'must be unique within the manifest' });
-      if (result.value) ids.add(result.value.shotId);
+      // Splitting/reusing a take creates several legitimate occurrences of
+      // one shot. Timeline item identity, rather than shot identity, is unique.
+      if (result.value && ids.has(result.value.itemId)) issues.push({ path: `shots[${index}].itemId`, message: 'must be unique within the manifest' });
+      if (result.value) {
+        ids.add(result.value.itemId);
+        if (input.version === 4) {
+          const item = Array.isArray(input.items) ? input.items.find(value => isRecord(value) && value.id === result.value?.itemId) : undefined;
+          if (!isRecord(item) || item.shotId !== result.value.shotId || item.shotVersionId !== result.value.shotVersionId || item.assetId !== result.value.assetId) issues.push({ path: `shots[${index}].itemId`, message: 'must resolve to the same shot, take, and asset as its timeline item' });
+        }
+      }
     });
   } else if (input.shots !== undefined) issues.push({ path: '$.shots', message: 'must be an array' });
 

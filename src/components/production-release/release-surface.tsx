@@ -25,6 +25,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   const [saving, setSaving] = useState(false); const [error, setError] = useState<string>(); const [manifestChoice, setManifestChoice] = useState('');
   const approve = useMutation(api.reviewExport.approve); const requestRevision = useMutation(api.reviewExport.requestRevision);
   const requestReview = useMutation(api.reviewExport.requestReview); const requestExport = useMutation(api.reviewExport.requestExport);
+  const retryRender = useMutation(api.renderJobs.retry);
   const manifest = state?.manifests?.find((item: any) => item._id === manifestChoice) ?? state?.manifests?.[0];
   const review = state?.reviews?.filter((item: any) => item.manifestId === manifest?._id && !item.exportId).sort((a: any, b: any) => b.createdAt - a.createdAt)[0];
   const latestExport = state?.exports?.find((item: any) => item.manifestId === manifest?._id);
@@ -62,6 +63,6 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {latestExport?.status === 'COMPLETED' && canEdit && state?.projectExternalId && <ShareButton projectId={state.projectExternalId} />}
     </section>
-    <ProductionReleaseView review={{ availability, videoUrl: exportDetails?.downloadUrl ?? undefined, decision, canDecide: Boolean(canDecide && review && review.status === 'REQUESTED') }} renderer={{ state: rendererState, message: latestJob?.errorMessage ?? undefined }} download={{ status: downloadStatus, href: exportDetails?.downloadUrl ?? undefined, fileName: exportDetails?.mimeType === 'video/webm' ? 'finalframe-export.webm' : exportDetails?.mimeType === 'video/quicktime' ? 'finalframe-export.mov' : 'finalframe-export.mp4' }} savingDecision={saving} onApprove={review ? () => save(() => approve({ reviewId: review._id })) : undefined} onRequestChanges={review ? note => save(() => requestRevision({ reviewId: review._id, note })) : undefined} />
+    <ProductionReleaseView review={{ availability, videoUrl: exportDetails?.downloadUrl ?? undefined, decision, canDecide: Boolean(canDecide && review && review.status === 'REQUESTED') }} renderer={{ state: rendererState, message: latestJob?.errorMessage ?? undefined }} download={{ status: downloadStatus, href: exportDetails?.downloadUrl ?? undefined, fileName: exportDetails?.mimeType === 'video/webm' ? 'finalframe-export.webm' : exportDetails?.mimeType === 'video/quicktime' ? 'finalframe-export.mov' : 'finalframe-export.mp4' }} savingDecision={saving} retryingRender={saving} onRetryRender={canEdit && latestJob?.status === 'FAILED' ? () => save(() => retryRender({ jobId: latestJob._id })) : undefined} onApprove={review ? () => save(() => approve({ reviewId: review._id })) : undefined} onRequestChanges={review ? note => save(() => requestRevision({ reviewId: review._id, note })) : undefined} />
   </div>;
 }

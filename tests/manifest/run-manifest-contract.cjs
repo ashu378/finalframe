@@ -40,6 +40,16 @@ const valid = {
 assert.equal(manifest.validateManifest(valid).ok, true, 'v4 manifest validates');
 assert.equal(manifest.validateManifest({ ...valid, selection: { scope: 'SHOTS', ids: [] } }).ok, false, 'scoped manifest requires selected IDs');
 assert.equal(manifest.validateManifest({ ...valid, version: 3 }).ok, false, 'v3 is not a writable renderer contract');
+const split = { ...valid, items: [
+  { ...valid.items[0], durationInFrames: 45 },
+  { ...valid.items[0], id: 'clip-2', startFrame: 45, durationInFrames: 45, trimStartInFrames: 45 },
+], shots: [
+  { ...valid.shots[0], durationInFrames: 45 },
+  { ...valid.shots[0], itemId: 'clip-2', startFrame: 45, durationInFrames: 45, orderIndex: 1 },
+] };
+assert.equal(manifest.validateManifest(split).ok, true, 'one take can appear in multiple split timeline clips');
+assert.equal(manifest.validateManifest({ ...split, shots: [split.shots[0], split.shots[0]] }).ok, false, 'duplicate item occurrences fail');
+assert.equal(manifest.validateManifest({ ...split, shots: [{ ...split.shots[0], itemId: 'foreign-clip' }] }).ok, false, 'shot references must resolve to their exact timeline item');
 
 const assembly = read('convex/assembly.ts');
 const timeline = read('convex/timeline.ts');
