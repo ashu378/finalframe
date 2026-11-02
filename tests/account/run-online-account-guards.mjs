@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { onlineAccountConfiguration } from './online-account-config.mjs';
+const runId = 'd7053699-77d5-4cb6-8858-54d74c2ba0de';
+const env = { FINALFRAME_ALLOW_ACCOUNT_ONLINE_TESTS: 'true', NEXT_PUBLIC_CONVEX_URL: 'https://fixture-test-123.convex.cloud', FINALFRAME_ACCOUNT_FIXTURE_RUN_ID: runId, FINALFRAME_ACCOUNT_FIXTURE_EMAIL: `finalframe-b03-fixture-${runId}@example.test`, FINALFRAME_ACCOUNT_FIXTURE_PASSWORD: 'unit-only-fixture-not-real', FINALFRAME_ACCOUNT_ADMIN_EMAIL: 'admin@example.test', FINALFRAME_ACCOUNT_ADMIN_PASSWORD: 'unit-only-admin-not-real' };
+assert.equal(onlineAccountConfiguration(env).deployment, 'fixture-test-123');
+for (const url of ['http://fixture-test-123.convex.cloud', 'https://localhost', 'https://custom.example.test', 'https://extra.fixture-test-123.convex.cloud', 'https://fixture-test-123.convex.cloud:9999', 'https://name:secret@fixture-test-123.convex.cloud', 'https://fixture-test-123.convex.cloud/path', 'https://fixture-test-123.convex.cloud/?x=1']) assert.throws(() => onlineAccountConfiguration({ ...env, NEXT_PUBLIC_CONVEX_URL: url }), /exact HTTPS/);
+assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ALLOW_ACCOUNT_ONLINE_TESTS: 'false' }), /opt-in/);
+assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ACCOUNT_FIXTURE_RUN_ID: 'ordinary-user' }), /unique UUID/);
+for (const email of ['ordinary@example.test', 'fixture-owner@example.test', `finalframe-b03-fixture-${runId}@actual-mail.example`, 'finalframe-b03-fixture-different@example.test']) assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ACCOUNT_FIXTURE_EMAIL: email }), /dedicated B03 prefix/);
+assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ACCOUNT_ADMIN_EMAIL: env.FINALFRAME_ACCOUNT_FIXTURE_EMAIL }), /separate accounts/);
+assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ACCOUNT_FIXTURE_PASSWORD: env.FINALFRAME_ACCOUNT_ADMIN_PASSWORD }), /separate accounts/);
+assert.throws(() => onlineAccountConfiguration({ ...env, FINALFRAME_ACCOUNT_FIXTURE_PASSWORD: '' }), /private dedicated/);
+console.log('PASS online account driver configuration rejects unpinned targets, ordinary/reused emails, missing opt-in and shared administrator credentials (no network/DB calls)');

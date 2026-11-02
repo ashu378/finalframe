@@ -72,6 +72,7 @@ export interface VideoRoutingRequest {
     upscaleFactor?: number;
     creativity?: number;
     upscaleSource?: UpscaleSourceCertificate;
+    editSource?: VideoEditSourceCertificate;
     qualityTier: QualityTier;
     durationSeconds: number;
     aspectRatio: string;
@@ -105,6 +106,8 @@ export interface VideoRouteSelection {
     resolution?: string;
     policyVersion?: number;
     upscaleQuote?: UpscaleQuoteCertificate;
+    editQuote?: VideoEditQuoteCertificate;
+    continuationQuote?: ContinuationQuoteCertificate;
 }
 
 export function buildVideoRouteMetadata(
@@ -123,6 +126,8 @@ export function buildVideoRouteMetadata(
         modelVersion: options.modelVersion,
         estimatedProviderCostUsd: selection.estimatedCostUsd,
         ...(selection.upscaleQuote ? { upscaleQuote: selection.upscaleQuote } : {}),
+        ...(selection.editQuote ? { editQuote: selection.editQuote } : {}),
+        ...(selection.continuationQuote ? { continuationQuote: selection.continuationQuote } : {}),
         maximumCostUsd: options.costCeilingUsd,
         referenceAssetIds: options.referenceAssetIds || [],
         audioAssetIds: options.audioAssetIds || [],
@@ -177,6 +182,48 @@ export interface UpscaleQuoteCertificate {
     costUsd: number;
 }
 
+export const VIDEO_EDIT_BILLING_VERSION = 'FLUX_SOURCE_VIDEO_EDIT_V1' as const;
+export const CONTINUATION_BILLING_VERSION = 'OPENROUTER_CONTINUATION_OUTPUT_SECOND_V1' as const;
+export interface ContinuationQuoteCertificate {
+    version: typeof CONTINUATION_BILLING_VERSION; sourceProviderJobId: string; sourceModelId: string;
+    catalogFingerprint: string; sku: string; rateUsdPerSecond: number; billableDurationSeconds: number; costUsd: number;
+}
+export function quoteVideoContinuation(model: VideoModelCapabilities, request: VideoRoutingRequest): ContinuationQuoteCertificate | undefined {
+    if ((request.operation || request.task) !== 'EXTEND' || !request.previousJobId || !/^gen-vid-\d+-[0-9A-Za-z]{20}$/.test(request.previousJobId) || request.previousModelId !== model.modelId || !Number.isInteger(request.durationSeconds) || request.durationSeconds <= 0 || request.hasImageReferences || request.hasVideoReference || request.hasAudioReference || request.requiresFirstFrame || request.requiresLastFrame) return undefined;
+    const entries = Object.entries(model.pricingSkus || {});
+    if (!entries.length || entries.some(([sku, price]) => !/^cents_per_second_(?:output|video_continuation)(?:_(?:720p|1080p|2k|4k))?$/i.test(sku) || !Number.isFinite(price) || price < 0)) return undefined;
+    const resolution = request.resolution?.toLowerCase();
+    const rates = entries.filter(([sku]) => resolution ? sku.toLowerCase() === `cents_per_second_video_continuation_${resolution}` : /^cents_per_second_video_continuation(?:_(?:720p|1080p|2k|4k))?$/i.test(sku));
+    if (!rates.length || rates.some(([, price]) => price <= 0)) return undefined;
+    const [sku, cents] = [...rates].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0];
+    return { version: CONTINUATION_BILLING_VERSION, sourceProviderJobId: request.previousJobId, sourceModelId: request.previousModelId, catalogFingerprint: videoCatalogFingerprint(model), sku, rateUsdPerSecond: cents / 100, billableDurationSeconds: request.durationSeconds, costUsd: Math.ceil(cents * request.durationSeconds / 100 * 1_000_000) / 1_000_000 };
+}
+export interface VideoEditSourceCertificate extends UpscaleSourceCertificate { hasAudio: boolean }
+export interface VideoEditQuoteCertificate {
+    version: typeof VIDEO_EDIT_BILLING_VERSION;
+    catalogFingerprint: string;
+    source: VideoEditSourceCertificate;
+    billableDurationSeconds: number;
+    sku: 'cents_per_second_output';
+    rateUsdPerSecond: number;
+    costUsd: number;
+}
+export function isSourceVideoEdit(operation: unknown): boolean { return ['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE'].includes(String(operation)); }
+export function validVideoEditSource(source: VideoEditSourceCertificate | undefined): source is VideoEditSourceCertificate {
+    return Boolean(source && source.assetId && source.storageId && source.checksum && Number.isSafeInteger(source.byteSize) && source.byteSize > 0 && source.byteSize <= 50 * 1024 * 1024 && Number.isInteger(source.width) && source.width > 0 && Number.isInteger(source.height) && source.height > 0 && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 15 && typeof source.hasAudio === 'boolean');
+}
+/** OpenRouter's FLUX Edit contract preserves full source duration, framing and
+ * audio. The documented 15s/50MiB bounds and output-second SKU are separate
+ * from the null generation-duration/resolution lists in its live catalog. */
+export function quoteVideoEdit(model: VideoModelCapabilities, request: VideoRoutingRequest): VideoEditQuoteCertificate | undefined {
+    if (model.modelId !== 'black-forest-labs/flux-video-edit' || !isSourceVideoEdit(request.operation || request.task) || !validVideoEditSource(request.editSource) || request.audioPolicy !== 'KEEP_SOURCE' || !request.hasVideoReference || request.hasImageReferences || request.hasAudioReference || request.requiresFirstFrame || request.requiresLastFrame || request.requiresAudio || request.resolution || request.requiresMask || request.previousJobId || request.upscaleFactor !== undefined || request.creativity !== undefined) return undefined;
+    const entries = Object.entries(model.pricingSkus || {});
+    if (entries.length !== 1 || entries[0][0] !== 'cents_per_second_output' || !Number.isFinite(entries[0][1]) || entries[0][1] <= 0) return undefined;
+    const billableDurationSeconds = Math.ceil(request.editSource.durationSeconds);
+    const rateUsdPerSecond = entries[0][1] / 100;
+    return { version: VIDEO_EDIT_BILLING_VERSION, catalogFingerprint: videoCatalogFingerprint(model), source: { ...request.editSource }, billableDurationSeconds, sku: 'cents_per_second_output', rateUsdPerSecond, costUsd: Math.ceil(billableDurationSeconds * rateUsdPerSecond * 1_000_000) / 1_000_000 };
+}
+
 export function validUpscaleSource(source: UpscaleSourceCertificate | undefined): source is UpscaleSourceCertificate {
     return Boolean(source && typeof source.assetId === 'string' && source.assetId && typeof source.storageId === 'string' && source.storageId && typeof source.checksum === 'string' && source.checksum && Number.isSafeInteger(source.byteSize) && source.byteSize > 0 && source.byteSize <= 50_000_000 && Number.isInteger(source.width) && Number.isInteger(source.height) && source.width > 0 && source.height > 0 && Math.max(source.width, source.height) <= 2560 && Math.min(source.width, source.height) <= 1440 && source.width * source.height <= 2560 * 1440 && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 20);
 }
@@ -185,6 +232,8 @@ export function videoCatalogFingerprint(model: { provider: string; modelId: stri
     const controls = [model.provider, model.modelId, [...model.supportedDurations].sort((a, b) => a - b), [...model.supportedResolutions].sort(), [...model.supportedAspectRatios].sort(), [...(model.supportedSizes || [])].sort(), [...model.supportedParameters].sort()];
     // Preserve historical non-upscale review fingerprints. Upscale certification
     // includes exact controls and prices, so changes withdraw that review.
+    if (model.modelId === 'black-forest-labs/flux-video-edit') return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), VIDEO_EDIT_BILLING_VERSION]);
+    if (model.modelId === 'black-forest-labs/flux-3-video' || Object.keys(model.pricingSkus || {}).some(sku => sku.includes('video_continuation'))) return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), CONTINUATION_BILLING_VERSION]);
     return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...controls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : controls);
 }
 
@@ -211,7 +260,11 @@ export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoR
 export function videoModelSupportsRequest(model: VideoModelCapabilities, request: VideoRoutingRequest): boolean {
     if (!model.available) return false;
     const operation = request.operation || request.task;
-    if (!Number.isFinite(request.durationSeconds) || (operation === 'UPSCALE' ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
+    const sourceEdit = isSourceVideoEdit(operation) && model.modelId === 'black-forest-labs/flux-video-edit';
+    // Manual capability flags cannot certify an undocumented motion-transfer
+    // contract or a supplied-audio output-duration billing bound.
+    if (operation === 'PERFORMANCE_TRANSFER' || operation === 'LIP_SYNC' || isSourceVideoEdit(operation) && !sourceEdit) return false;
+    if (!Number.isFinite(request.durationSeconds) || (operation === 'UPSCALE' || sourceEdit ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
     if (request.maximumCostUsd !== undefined && (!Number.isFinite(request.maximumCostUsd) || request.maximumCostUsd < 0)) return false;
     if (!(VIDEO_OPERATIONS as readonly string[]).includes(operation)) return false;
     // The portable API has no mask contract. Never silently drop a requested mask.
@@ -220,9 +273,7 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     if (operation === 'GENERATE' && !model.supportsTextToVideo) return false;
     if (operation === 'FRAME_TO_VIDEO' && !model.supportsFirstFrame) return false;
     if (['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE'].includes(operation) && (!model.supportsVideoEdit || !request.hasVideoReference)) return false;
-    if (operation === 'PERFORMANCE_TRANSFER' && (!model.supportsPerformanceTransfer || !request.hasVideoReference || !request.hasImageReferences)) return false;
     if (operation === 'EXTEND' && (!model.supportsVideoExtension || !request.previousJobId || request.previousModelId !== model.modelId)) return false;
-    if (operation === 'LIP_SYNC' && (!model.supportsLipSync || !request.hasAudioReference || (!request.hasImageReferences && !request.hasVideoReference))) return false;
     if (operation === 'UPSCALE' && (!model.supportsUpscale || !request.hasVideoReference || !quoteVideoUpscale(model, request))) return false;
     if (request.hasAudioReference && !model.supportsAudioReferences) return false;
     if (request.requiresSourceAudioPreservation && !model.supportsSourceAudioPreservation) return false;
@@ -237,6 +288,8 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
         // This operation inherits duration/framing from its single certified
         // source. Null generation catalog lists are not unsupported controls.
         if (request.resolution || request.requiresFirstFrame || request.requiresLastFrame || request.hasImageReferences || request.hasAudioReference || request.requiresAudio) return false;
+    } else if (sourceEdit) {
+        if (!quoteVideoEdit(model, request)) return false;
     } else {
         if (!model.supportedDurations.includes(request.durationSeconds)) return false;
         if (request.resolution && !model.supportedResolutions.includes(request.resolution)) return false;
@@ -250,6 +303,14 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
 
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
     if ((request.operation || request.task) === 'UPSCALE') return quoteVideoUpscale(model, request)?.costUsd;
+    if (model.modelId === 'black-forest-labs/flux-video-edit') return quoteVideoEdit(model, request)?.costUsd;
+    if ((request.operation || request.task) === 'EXTEND') {
+        return quoteVideoContinuation(model, request)?.costUsd;
+    }
+    // Reference video can bill full input plus output duration and a separate
+    // minimum-token floor. Only the measured source contracts above bound it;
+    // a catalog video-input SKU or an output-only estimate is insufficient.
+    if (request.hasVideoReference) return undefined;
     const skus = Object.entries(model.pricingSkus || {}).filter(([, value]) => Number.isFinite(value) && value >= 0);
     const resolution = request.resolution?.toLowerCase();
     const taskPrefix = request.task === 'FRAME_TO_VIDEO' ? 'image_to_video_' : request.task === 'GENERATE' ? 'text_to_video_' : '';
@@ -360,7 +421,7 @@ export function selectVideoRoute(
     if (request.qualityTier === 'PREMIUM' && maximumCostUsd === undefined) throw new Error('An administrator must set a premium spending cap before premium video generation is available.');
     const requests = models.map((model) => ({
         model,
-        request: { ...checkedRequest, resolution: checkedRequest.operation === 'UPSCALE' ? checkedRequest.resolution : checkedRequest.resolution || defaultResolution(model, checkedRequest.aspectRatio) },
+        request: { ...checkedRequest, resolution: checkedRequest.operation === 'UPSCALE' || model.modelId === 'black-forest-labs/flux-video-edit' ? checkedRequest.resolution : checkedRequest.resolution || defaultResolution(model, checkedRequest.aspectRatio) },
     }));
     const capable = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, { ...candidate, maximumCostUsd: undefined }));
     const eligible = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, candidate));
@@ -388,5 +449,7 @@ export function selectVideoRoute(
         resolution: selectedRequest.resolution,
         policyVersion: policy?.updatedAt,
         ...(selectedRequest.operation === 'UPSCALE' ? { upscaleQuote: quoteVideoUpscale(selected, selectedRequest) } : {}),
+        ...(selected.modelId === 'black-forest-labs/flux-video-edit' ? { editQuote: quoteVideoEdit(selected, selectedRequest) } : {}),
+        ...((selectedRequest.operation || selectedRequest.task) === 'EXTEND' ? { continuationQuote: quoteVideoContinuation(selected, selectedRequest) } : {}),
     };
 }

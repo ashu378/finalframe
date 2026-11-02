@@ -10,12 +10,16 @@
 
 import type * as _shared from "../_shared.js";
 import type * as account from "../account.js";
+import type * as accountLifecycle from "../accountLifecycle.js";
 import type * as app from "../app.js";
 import type * as approvals from "../approvals.js";
 import type * as assembly from "../assembly.js";
 import type * as assetStorage from "../assetStorage.js";
+import type * as audioCertificates from "../audioCertificates.js";
 import type * as auth from "../auth.js";
 import type * as authorization from "../authorization.js";
+import type * as beatAnalysis from "../beatAnalysis.js";
+import type * as beatCutContracts from "../beatCutContracts.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as canvasLayouts from "../canvasLayouts.js";
 import type * as continuity from "../continuity.js";
@@ -81,12 +85,16 @@ import type {
 declare const fullApi: ApiFromModules<{
   _shared: typeof _shared;
   account: typeof account;
+  accountLifecycle: typeof accountLifecycle;
   app: typeof app;
   approvals: typeof approvals;
   assembly: typeof assembly;
   assetStorage: typeof assetStorage;
+  audioCertificates: typeof audioCertificates;
   auth: typeof auth;
   authorization: typeof authorization;
+  beatAnalysis: typeof beatAnalysis;
+  beatCutContracts: typeof beatCutContracts;
   bootstrap: typeof bootstrap;
   canvasLayouts: typeof canvasLayouts;
   continuity: typeof continuity;

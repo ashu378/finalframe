@@ -7,7 +7,7 @@ import { object } from './generationWorkerContracts';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { requireAdmin, requireMember, requireProjectRole } from "./authorization";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { videoCatalogFingerprint, validUpscaleSource, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate } from "../src/lib/ai/video-routing";
+import { videoCatalogFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
 
 function catalogFingerprint(model: Parameters<typeof videoCatalogFingerprint>[0]) {
   return videoCatalogFingerprint(model);
@@ -212,6 +212,8 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
     requiresMask: raw.requiresMask === true, requiresSourceAudioPreservation: raw.requiresSourceAudioPreservation === true,
     upscaleFactor: typeof raw.upscaleFactor === 'number' ? raw.upscaleFactor : undefined, creativity: typeof raw.creativity === 'number' ? raw.creativity : undefined,
     upscaleSource: raw.upscaleSource as UpscaleSourceCertificate | undefined,
+    editSource: raw.editSource as VideoEditSourceCertificate | undefined,
+    audioPolicy: raw.audioPolicy as VideoRoutingRequest['audioPolicy'],
     maximumCostUsd: typeof raw.maximumCostUsd === "number" ? raw.maximumCostUsd : undefined,
   };
   const models: VideoModelCapabilities[] = catalog.map((model) => ({ ...model,
@@ -243,21 +245,34 @@ export async function resolveUpscaleSourceCertificate(ctx: ReadCtx, args: { proj
   return source;
 }
 
-async function upscaleProbeContext(ctx: ReadCtx, args: { productionId: Id<'productions'>; shotId: Id<'shots'> }) {
+export async function resolveVideoEditSourceCertificate(ctx: ReadCtx, args: { projectId: Id<'projects'>; referenceAssetIds: string[] }): Promise<VideoEditSourceCertificate> {
+  if (args.referenceAssetIds.length !== 1) throw new Error('Editing requires exactly one project video source.');
+  const assetId = ctx.db.normalizeId('assets', args.referenceAssetIds[0]);
+  const asset = assetId ? await ctx.db.get(assetId) : null;
+  if (!asset || asset.projectId !== args.projectId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('video/')) throw new Error('The edit source is unavailable in this project.');
+  const storage = await ctx.db.system.get('_storage', asset.storageId);
+  const probe = await ctx.db.query('verifiedMediaProbes').withIndex('by_asset', q => q.eq('assetId', asset._id)).unique();
+  if (!storage || !probe || probe.projectId !== args.projectId || probe.storageId !== asset.storageId || probe.checksum !== storage.sha256 || probe.byteSize !== storage.size || !storage.contentType?.startsWith('video/')) throw new Error('Measure the current stored video before editing.');
+  const source = { assetId: asset._id, storageId: asset.storageId, checksum: storage.sha256, byteSize: storage.size, width: probe.width, height: probe.height, durationSeconds: probe.durationSeconds, hasAudio: probe.hasAudio };
+  if (!validVideoEditSource(source) || !probe.videoCodec) throw new Error('Edit source exceeds the documented15-second/50MiB limits.');
+  return source;
+}
+
+async function upscaleProbeContext(ctx: ReadCtx, args: { productionId: Id<'productions'>; shotId: Id<'shots'> }, edit = false) {
   const production = await ctx.db.get(args.productionId);
   const shot = await ctx.db.get(args.shotId);
-  if (!production?.projectId || !shot || shot.productionId !== production._id || shot.projectId !== production.projectId || shot.productionVersionId !== production.currentVersionId || object(shot.metadata).operation !== 'UPSCALE') throw new Error('Choose an upscale shot in the current project production.');
+  if (!production?.projectId || !shot || shot.productionId !== production._id || shot.projectId !== production.projectId || shot.productionVersionId !== production.currentVersionId || (edit ? !isSourceVideoEdit(object(shot.metadata).operation) : object(shot.metadata).operation !== 'UPSCALE')) throw new Error('Choose a supported source-video shot in the current project production.');
   const access = await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']);
-  if (access.project.archivedAt || access.project.deletedAt) throw new Error('Restore the project before measuring its media.');
+  if (access.project.archivedAt || access.project.deletedAt || access.project.moderationStatus === 'RESTRICTED') throw new Error('Restore access to the project before measuring its media.');
   const version = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
-  if (!version || version.status !== 'APPROVED') throw new Error('Approve the current production before measuring its upscale source.');
+  if (!version || version.productionId !== production._id || version.status !== 'APPROVED') throw new Error('Approve the current production before measuring its source video.');
   const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: object(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds || [] });
   if (continuity.referenceAssetIds.length !== 1) throw new Error('Upscaling requires exactly one project video source.');
   const assetId = ctx.db.normalizeId('assets', continuity.referenceAssetIds[0]);
   const asset = assetId ? await ctx.db.get(assetId) : null;
   if (!asset || asset.projectId !== access.project._id || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('video/')) throw new Error('Choose a stored project video for upscaling.');
   const storage = await ctx.db.system.get('_storage', asset.storageId);
-  if (!storage || storage.size <= 0 || storage.size > 50_000_000 || !storage.contentType?.startsWith('video/')) throw new Error('Upscale source must be a video of at most 50 MB.');
+  if (!storage || storage.size <= 0 || storage.size > (edit ? 50 * 1024 * 1024 : 50_000_000) || !storage.contentType?.startsWith('video/')) throw new Error('The source video exceeds its documented size limit.');
   const cached = await ctx.db.query('verifiedMediaProbes').withIndex('by_asset', q => q.eq('assetId', asset._id)).unique();
   return { production, project: access.project, asset, storage, cached };
 }
@@ -296,4 +311,35 @@ export const prepareUpscaleSource = action({ args: upscaleShotArgs, returns: v.a
   const response = await fetch(base.replace(/\/$/, '') + '/media/probe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret }, body: JSON.stringify({ url: context.url, kind: 'video' }), redirect: 'error', signal: AbortSignal.timeout(45_000) });
   if (!response.ok) throw new Error('The source video could not be measured.');
   return ctx.runMutation(refs.recordUpscaleSourceProbe, { ...args, assetId: context.assetId, storageId: context.storageId, checksum: context.checksum, byteSize: context.byteSize, probe: await response.json() });
+} });
+
+export const editSourceContext = internalQuery({ args: upscaleShotArgs, returns: v.any(), handler: async (ctx, args) => {
+  const context = await upscaleProbeContext(ctx, args, true);
+  const url = await ctx.storage.getUrl(context.asset.storageId!);
+  if (!url) throw new Error('The source video is unavailable.');
+  const cached = context.cached && context.cached.storageId === context.asset.storageId && context.cached.checksum === context.storage.sha256 && context.cached.byteSize === context.storage.size;
+  return { projectId: context.project._id, assetId: context.asset._id, storageId: context.asset.storageId, checksum: context.storage.sha256, byteSize: context.storage.size, url, ...(cached ? { source: await resolveVideoEditSourceCertificate(ctx, { projectId: context.project._id, referenceAssetIds: [context.asset._id] }) } : {}) };
+} });
+export const recordEditSourceProbe = internalMutation({
+  args: { ...upscaleShotArgs, assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(), probe: v.any() }, returns: v.any(),
+  handler: async (ctx, args) => {
+    const context = await upscaleProbeContext(ctx, args, true);
+    if (context.asset._id !== args.assetId || context.asset.storageId !== args.storageId || context.storage.sha256 !== args.checksum || context.storage.size !== args.byteSize) throw new Error('The source storage changed while it was measured.');
+    const probe = object(args.probe);
+    const source = { assetId: args.assetId, storageId: args.storageId, checksum: args.checksum, byteSize: args.byteSize, width: Number(probe.width), height: Number(probe.height), durationSeconds: Number(probe.durationSeconds), hasAudio: probe.hasAudio === true };
+    if (!validVideoEditSource(source) || typeof probe.videoCodec !== 'string' || !probe.videoCodec || typeof probe.hasAudio !== 'boolean' || probe.byteSize !== args.byteSize) throw new Error('Edit source exceeds the documented 15-second/50MiB limits.');
+    const value = { projectId: context.project._id, ...source, videoCodec: probe.videoCodec, ...(typeof probe.audioCodec === 'string' ? { audioCodec: probe.audioCodec } : {}), probedAt: Date.now() };
+    if (context.cached) await ctx.db.patch(context.cached._id, value); else await ctx.db.insert('verifiedMediaProbes', value);
+    return source;
+  },
+});
+export const prepareEditSource = action({ args: upscaleShotArgs, returns: v.any(), handler: async (ctx, args): Promise<VideoEditSourceCertificate> => {
+  const refs = (internal as unknown as { videoRouting: Record<string, FunctionReference<any, 'internal', any, any>> }).videoRouting;
+  const context = await ctx.runQuery(refs.editSourceContext, args);
+  if (context.source) return context.source;
+  const base = process.env.RENDER_WORKER_URL?.trim(); const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim();
+  if (!base || !secret) throw new Error('Source video measurement is not configured.');
+  const response = await fetch(base.replace(/\/$/, '') + '/media/probe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret }, body: JSON.stringify({ url: context.url, kind: 'video' }), redirect: 'error', signal: AbortSignal.timeout(45_000) });
+  if (!response.ok) throw new Error('The source video could not be measured.');
+  return ctx.runMutation(refs.recordEditSourceProbe, { ...args, assetId: context.assetId, storageId: context.storageId, checksum: context.checksum, byteSize: context.byteSize, probe: await response.json() });
 } });

@@ -10,6 +10,7 @@ import { toTimelineVersion } from '@/lib/production/timeline-view';
 import { PromptEditPanel, type PromptEditSubmission } from './prompt-edit-panel';
 import type { ProductionEditImpact } from './edit-impact-summary';
 import { TimelineEditor, type TimelineEditEvent } from '@/components/editor/timeline-editor/timeline-editor';
+import { MusicBeatEditor } from './music-beat-editor';
 
 type ProductionId = Id<'productions'>;
 
@@ -119,6 +120,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
     <section className="ff-card p-5 sm:p-7"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow">Editing workspace</p><h2 className="ff-display mt-2 text-3xl font-semibold">Change one part without losing the rest.</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Use a plain-language request for a creative change, or select a clip below for practical timing and audio edits.</p></div><label className="grid gap-2 text-sm font-semibold sm:min-w-64">Editing <select value={selectedNode.id} onChange={(event) => { const node = nodes.find((candidate) => candidate.id === event.target.value); if (node) selectNode(node); }} className="h-11 rounded-xl border border-input bg-background px-3 font-normal outline-none focus:border-primary focus:ring-2 focus:ring-ring/40">{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label></div></section>
     <PromptEditPanel selectedNode={selectedNode} impact={impact} impactLoading={impactRequested && impactQuery === undefined} impactError={impactError} onPreviewImpact={handlePromptPreview} onSubmitOperation={handlePromptSubmit} />
     <TimelineEditor timeline={timeline} frameRate={timeline?.frameRate} finishingV5Enabled={draft?.finishingV5Enabled === true} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
+    {timeline&&draft?.timeline?.projectId&&<MusicBeatEditor key={timeline.id} timeline={timeline} projectId={draft.timeline.projectId as Id<'projects'>} onCreatedTimeline={id=>{setActiveTimelineId(id);setMessage('A new beat-aligned draft is ready. The source timeline and soundtrack are retained.');}} />}
     {message ? <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/45 p-4 text-sm" role="status"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[hsl(var(--success))]" aria-hidden="true" /><span>{message}</span></div> : null}
     {impactError ? <div className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive" role="alert"><CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{impactError}</span></div> : null}
   </div>;

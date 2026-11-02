@@ -157,7 +157,7 @@ export const currentUser = query({
     if (!userId) return null;
 
     const user = await ctx.db.get(userId);
-    if (!user) return null;
+    if (!user || user.status === 'disabled') return null;
 
     const canonicalMembership = await ctx.db
       .query("members")
@@ -186,7 +186,7 @@ export const currentUser = query({
     return {
       id: userId.toString(),
       email: user.email ?? "",
-      name: user.name ?? null,
+      name: user.displayName ?? user.name ?? null,
       onboardingCompleted: metadata.onboardingCompleted === true,
       isAdmin: role === "owner" || role === "admin",
       role,

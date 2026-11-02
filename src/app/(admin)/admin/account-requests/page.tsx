@@ -1,0 +1,9 @@
+import Link from 'next/link';
+import { requirePlatformRole } from '@/lib/guards/platform';
+import { getAccountDeactivationRequests } from '@/lib/account-lifecycle/actions';
+import { AccountRecoveryForm } from '@/components/account/account-recovery-form';
+export const metadata = { title: 'Account requests | FinalFrame' };
+export default async function AccountRequestsPage({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
+  await requirePlatformRole(['ADMIN']); const params = await searchParams; const page = await getAccountDeactivationRequests(params.cursor);
+  return <div className="space-y-7"><header><Link href="/admin" className="ff-link inline-flex min-h-11 items-center text-sm">Platform administration</Link><h1 className="mt-3 text-3xl font-semibold">Account deactivation requests</h1><p className="mt-4 text-sm leading-7 text-muted-foreground">Requests retain projects and history. Recovery is an ADMIN-only decision; this surface does not permanently delete data.</p></header>{page.requests.length ? page.requests.map((row) => <section key={row.requestId} className="ff-card p-6"><h2 className="text-lg font-semibold">{row.displayName}</h2><p className="mt-2 text-sm text-muted-foreground">{row.email} · {new Date(row.createdAt).toLocaleString()}</p><p className="mt-3 whitespace-pre-wrap break-words text-sm leading-7">{row.reason}</p><p className="mt-3 break-all text-xs text-muted-foreground">Request {row.requestId}</p><AccountRecoveryForm requestId={row.requestId} /></section>) : <p className="ff-card p-6 text-sm text-muted-foreground">No pending requests on this page.</p>}{page.continueCursor ? <Link className="ff-button-quiet inline-flex min-h-11 items-center" href={`/admin/account-requests?${new URLSearchParams({ cursor: page.continueCursor })}`}>Next requests</Link> : null}</div>;
+}

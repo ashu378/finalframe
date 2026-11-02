@@ -135,6 +135,7 @@ export function normalizeDiscoveredVideoModel(value: unknown): DiscoveredVideoMo
     if (!id) return null;
     const upscale = asRecord(item.upscale_factor);
     const prices = asNumericRecord(item.pricing_skus);
+    if ((id === 'black-forest-labs/flux-video-edit' || id === 'black-forest-labs/flux-3-video' || Object.keys(asRecord(item.pricing_skus)).some(sku => sku.includes('video_continuation'))) && Object.keys(prices).length !== Object.keys(asRecord(item.pricing_skus)).length) return null;
     if (item.upscale_factor != null && (typeof upscale.min !== 'number' || typeof upscale.max !== 'number' || !Number.isFinite(upscale.min) || !Number.isFinite(upscale.max) || !Array.isArray(item.creativity) || item.creativity.some(level => typeof level !== 'number' || !Number.isInteger(level)) || Object.keys(prices).length !== Object.keys(asRecord(item.pricing_skus)).length)) return null;
     return {
         id,

@@ -1,0 +1,5 @@
+import Link from 'next/link';
+export const metadata = { title: 'Account access deactivated | FinalFrame' };
+export default function DeactivatedAccountPage() {
+  return <section className="mx-auto max-w-3xl space-y-6 px-5 py-20 sm:py-28"><p className="ff-eyebrow">Account requests</p><h1 className="text-4xl font-semibold">After an account deactivation request</h1><p className="text-base leading-8 text-muted-foreground">An accepted request disables account access while projects, membership history and audit records remain retained. The request does not permanently erase data. Account recovery requires a reviewed decision by an authorized platform administrator.</p><p className="text-sm leading-7 text-muted-foreground">For recovery or questions about retained data, contact support using the email associated with your account. This page does not show private request status or restore access.</p><Link href="/contact" className="ff-button-primary inline-flex min-h-11 items-center">Contact support</Link></section>;
+}

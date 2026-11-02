@@ -96,6 +96,7 @@ export const current = query({
     const identity = await requireIdentity(ctx);
     const user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.externalId)).unique()
       ?? await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
+    if (user?.status === "disabled") throw new Error("This account is disabled.");
     const membership = user
       ? await ctx.db.query("members").withIndex("by_user", q => q.eq("userId", user._id)).filter(q => q.eq(q.field("status"), "active")).first()
       : null;

@@ -59,6 +59,10 @@ function assertLocalMediaPath(value: string, label: string): void {
 export function buildNormalizeArgs(inputPath: string, outputPath: string, options: FFmpegAssemblyOptions): string[] {
   assertLocalMediaPath(inputPath, 'FFmpeg input');
   assertLocalMediaPath(outputPath, 'FFmpeg output');
+  const durationSeconds = options.output.durationInFrames / options.output.fps;
+  const sampleRate = options.output.audio?.sampleRate ?? 48000;
+  const audioSamples = Math.round(durationSeconds * sampleRate);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || !Number.isSafeInteger(audioSamples) || audioSamples <= 0) throw new Error('Normalization requires a bounded positive output duration.');
   return [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath,
     // Preserve any mixed/native audio even when an older manifest did not
@@ -66,7 +70,12 @@ export function buildNormalizeArgs(inputPath: string, outputPath: string, option
     '-map', '0:v:0', '-map', '0:a:0?',
     ...codecArgs(options.output.codec), '-pix_fmt', options.output.codec === 'prores' ? 'yuv422p10le' : 'yuv420p',
     '-r', String(options.output.fps), '-frames:v', String(options.output.durationInFrames),
-    '-c:a', 'aac', '-ar', String(options.output.audio?.sampleRate ?? 48000), '-ac', String(options.output.audio?.channels ?? 2), '-b:a', '192k',
+    // Remotion/AAC packet padding can outlive the final picture. Normalize the
+    // decoded audio to the canonical sample count and bound the mux duration,
+    // so independent chunks do not accumulate encoder padding when joined.
+    '-c:a', 'aac', '-ar', String(sampleRate), '-ac', String(options.output.audio?.channels ?? 2), '-b:a', '192k',
+    '-af', `aresample=${sampleRate},apad,atrim=end_sample=${audioSamples},asetpts=PTS-STARTPTS`,
+    '-t', String(durationSeconds),
     ...(options.output.codec === 'h264' ? ['-movflags', '+faststart'] : []), outputPath,
   ];
 }

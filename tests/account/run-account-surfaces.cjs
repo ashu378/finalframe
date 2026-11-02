@@ -1,0 +1,44 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const ts = require('typescript');
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const { getFunctionName } = require('convex/server');
+const root = path.resolve(__dirname, '../..');
+function load(file, stubs = {}) {
+  const filename = path.join(root, file); const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
+  const normal = mod.require.bind(mod); mod.require = (name) => Object.hasOwn(stubs, name) ? stubs[name] : normal(name);
+  mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename); return mod.exports;
+}
+const contracts = load('src/lib/account-lifecycle/contracts.ts');
+const Link = ({ children, ...props }) => React.createElement('a', props, children);
+const navigation = { useRouter: () => ({ refresh() {} }) };
+const mutations = []; const queries = []; const refreshed = []; let fail = false;
+const client = { mutation: async (ref, args) => { mutations.push({ name: getFunctionName(ref), args }); if (fail) throw new Error('private-provider-authority-secret'); return { requestId: 'request-one', displayName: 'Saved' }; }, query: async (ref, args) => { queries.push({ name: getFunctionName(ref), args }); return { userId: 'user-one', displayName: 'Name', email: 'owner@example.test', latestExport: null }; } };
+const actions = load('src/lib/account-lifecycle/actions.ts', { '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client }, 'next/cache': { revalidatePath: (value) => refreshed.push(value) } });
+const settings = load('src/components/account/account-settings.tsx', { '@convex-dev/auth/react': { useAuthActions: () => ({ signOut: async () => {} }) }, '@/lib/account-lifecycle/actions': actions, '@/lib/account-lifecycle/contracts': contracts });
+const recovery = load('src/components/account/account-recovery-form.tsx', { 'next/navigation': navigation, '@/lib/account-lifecycle/actions': actions });
+(async () => {
+  const profile = { userId: 'user-one', displayName: 'Current display', email: 'owner@example.test', latestExport: null };
+  const markup = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile }));
+  assert(markup.includes('Account and project index')); assert(markup.includes('Media files and download URLs')); assert(markup.includes('Permanent deletion is not performed'));
+  assert(markup.includes('name="displayName"')); assert(!markup.includes('name="email"')); assert(!markup.includes('type="password"')); assert(!markup.includes('name="confirmation"'), 'Deactivation confirmation appears only after preflight');
+  const resumed = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile: { ...profile, latestExport: { requestId: 'persisted-request', status: 'OPEN', nextOrdinal: 12, recordCount: 30, expiresAt: Date.now() + 10000, expired: false } } }));
+  assert(resumed.includes('Download next part (12)')); assert(resumed.includes('Download a previous part'));
+  const completed = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile: { ...profile, latestExport: { requestId: 'persisted-request', status: 'COMPLETED', nextOrdinal: 12, recordCount: 30, expiresAt: Date.now() + 10000, expired: false } } })); assert(completed.includes('Download completed manifest'));
+  await actions.saveAccountProfile('My name'); assert.deepEqual(mutations.at(-1), { name: 'accountLifecycle:updateProfile', args: { displayName: 'My name' } });
+  refreshed.length = 0; await actions.requestAccountDeactivation({ requestId: 'stable-request', reason: 'Fixture request', confirmation: 'DEACTIVATE' }); assert.equal(refreshed.length, 0, 'Disabled dashboard must not rerender before receipt/sign-out');
+  await actions.recoverDeactivatedAccount('specific-request', 'Reviewed recovery'); assert.deepEqual(mutations.at(-1), { name: 'accountLifecycle:recoverAccount', args: { requestId: 'specific-request', reason: 'Reviewed recovery' } }); assert(refreshed.includes('/admin/audit'));
+  fail = true; const failure = await actions.downloadAccountIndexPart('specific-index', 7); assert.equal(failure.success, false); assert(!failure.error.includes('authority-secret')); assert.equal(mutations.at(-1).args.ordinal, 7); fail = false;
+  let guardCalls = 0; let allow = true;
+  const accountPage = load('src/app/(dashboard)/dashboard/settings/account/page.tsx', { 'next/link': Link, '@/lib/guards': { requireAuth: async () => { guardCalls++; if (!allow) throw new Error('login redirect'); } }, '@/lib/account-lifecycle/actions': { getAccountProfile: async () => profile }, '@/components/account/account-settings': settings });
+  assert(renderToStaticMarkup(await accountPage.default()).includes('Your account')); allow = false; await assert.rejects(accountPage.default(), /login redirect/); assert.equal(guardCalls, 2);
+  let requested = 0; let requestedRoles;
+  const adminPage = load('src/app/(admin)/admin/account-requests/page.tsx', { 'next/link': Link, '@/lib/guards/platform': { requirePlatformRole: async (roles) => { requestedRoles = roles; if (!allow) throw new Error('platform redirect'); } }, '@/lib/account-lifecycle/actions': { getAccountDeactivationRequests: async () => { requested++; return { requests: [{ requestId: 'r', displayName: 'Disabled account', email: 'fixture@example.test', reason: 'Retained request', createdAt: 1 }], continueCursor: 'next', isDone: false }; } }, '@/components/account/account-recovery-form': recovery });
+  await assert.rejects(adminPage.default({ searchParams: Promise.resolve({}) }), /platform redirect/); assert.equal(requested, 0); allow = true;
+  const adminMarkup = renderToStaticMarkup(await adminPage.default({ searchParams: Promise.resolve({ cursor: 'previous' }) })); assert.deepEqual(requestedRoles, ['ADMIN']); assert(adminMarkup.includes('Recovery review reason')); assert(adminMarkup.includes('Next requests')); assert(adminMarkup.includes('Cancel request and restore account access'));
+  const publicPage = load('src/app/(public)/account/deactivated/page.tsx', { 'next/link': Link }); const publicMarkup = renderToStaticMarkup(React.createElement(publicPage.default)); assert(publicMarkup.includes('does not show private request status')); assert(!publicMarkup.includes('fixture@example.test'));
+  console.log('PASS account SSR scope/resume/manifest states, guarded owner and ADMIN routes, safe exact server-action arguments, disabled receipt flow and public confirmation privacy (no browser/DB calls)');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

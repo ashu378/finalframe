@@ -1,65 +1,30 @@
-import { mutation } from "./_generated/server";
-import { v } from "convex/values";
-import { now, requireStudio } from "./_shared";
-import { requireIdentity } from "./identity";
+import { internalMutation } from './_generated/server';
+import { v } from 'convex/values';
 
-export const ensureStudio = mutation({
-  args: {
-    studioExternalId: v.string(),
-    name: v.string(),
-    initialCredits: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const identity = await requireIdentity(ctx);
-    const existing = await ctx.db
-      .query("studios")
-      .withIndex("by_external_id", (q) => q.eq("externalId", args.studioExternalId))
-      .unique();
-    if (existing) return existing._id;
-    return await ctx.db.insert("studios", {
-      externalId: args.studioExternalId,
-      ownerExternalId: identity.externalId,
-      name: args.name,
-      credits: args.initialCredits ?? 0,
-      createdAt: now(),
-      updatedAt: now(),
-    });
-  },
+// These legacy names have no application or fixture callers. Keep internal
+// compatibility references, but no second path for creating studios, projects,
+// assets or credits outside the canonical authorization and financial flows.
+function legacyReadOnly(): never {
+  throw new Error('LEGACY_BOOTSTRAP_READ_ONLY: Use the canonical account, project and project-asset workflows.');
+}
+
+export const ensureStudio = internalMutation({
+  args: { studioExternalId: v.string(), name: v.string(), initialCredits: v.optional(v.number()) },
+  returns: v.id('studios'),
+  handler: async () => legacyReadOnly(),
 });
 
-export const mirrorProject = mutation({
-  args: {
-    studioExternalId: v.string(),
-    projectExternalId: v.string(),
-    name: v.string(),
-    description: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const studio = await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", args.studioExternalId)).unique();
-    if (!studio) throw new Error("Studio not found");
-    await requireStudio(ctx, args.studioExternalId);
-    const existing = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
-    if (existing) return existing._id;
-    return await ctx.db.insert("projects", { externalId: args.projectExternalId, studioExternalId: args.studioExternalId, name: args.name, description: args.description, createdAt: now(), updatedAt: now() });
-  },
+export const mirrorProject = internalMutation({
+  args: { studioExternalId: v.string(), projectExternalId: v.string(), name: v.string(), description: v.optional(v.string()) },
+  returns: v.id('projects'),
+  handler: async () => legacyReadOnly(),
 });
 
-export const mirrorAsset = mutation({
+export const mirrorAsset = internalMutation({
   args: {
-    studioExternalId: v.string(),
-    productionId: v.id("productions"),
-    assetExternalId: v.string(),
-    source: v.string(),
-    roles: v.array(v.string()),
-    name: v.optional(v.string()),
-    mimeType: v.optional(v.string()),
-    storageUrl: v.optional(v.string()),
-    metadata: v.any(),
+    studioExternalId: v.string(), productionId: v.id('productions'), assetExternalId: v.string(), source: v.string(), roles: v.array(v.string()),
+    name: v.optional(v.string()), mimeType: v.optional(v.string()), storageUrl: v.optional(v.string()), metadata: v.any(),
   },
-  handler: async (ctx, args) => {
-    await requireStudio(ctx, args.studioExternalId);
-    const existing = await ctx.db.query("assets").withIndex("by_external_id", (q) => q.eq("externalId", args.assetExternalId)).unique();
-    if (existing) return existing._id;
-    return await ctx.db.insert("assets", { externalId: args.assetExternalId, productionId: args.productionId, studioExternalId: args.studioExternalId, source: args.source, roles: args.roles, name: args.name, mimeType: args.mimeType, storageUrl: args.storageUrl, metadata: args.metadata, createdAt: now() });
-  },
+  returns: v.id('assets'),
+  handler: async () => legacyReadOnly(),
 });

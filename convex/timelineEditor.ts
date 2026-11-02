@@ -4,9 +4,11 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
 import { transitionResourceState } from "./approvals";
-import { ensureResourceState, getEffectiveResourceState, requireEditable } from "./resourceStates";
+import { ensureResourceState, getEffectiveResourceState, requireEditable, requireApprovedResource } from "./resourceStates";
 import { cropCaptionTrack, finishingFps, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
 import type { CaptionTrack } from '../renderer/src/types';
+import { approvedBeatSource } from './beatAnalysis';
+import { planBeatCuts } from './beatCutContracts';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -489,6 +491,7 @@ async function persistDraft(
   member: Awaited<ReturnType<typeof requireMember>>,
   sourceTimelineId: Id<"timelines">,
   projectId: Id<"projects">,
+  options: { preserveAudioTiming?: boolean } = {},
 ) {
   const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq('productionId', source.productionId)).order('desc').first();
   const timestamp = now();
@@ -533,7 +536,7 @@ async function persistDraft(
     const nextClips: ClipState[] = [];
 
     for (const [clipIndex, clip] of track.clips.entries()) {
-      if (finishingV5Enabled()) {
+      if (finishingV5Enabled() && !(options.preserveAudioTiming && clip.kind === 'AUDIO')) {
         const fps = finishingFps(state.metadata);
         clip.startSeconds = Math.round(clip.startSeconds * fps) / fps;
         clip.durationSeconds = Math.round(clip.durationSeconds * fps) / fps;
@@ -679,7 +682,7 @@ export const undo = mutation({
     }
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
-    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "UNDO", "REDO"]);
+    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
     if (!original) throw new Error("There is no completed edit to undo for this timeline.");
     const sourceTimelineId = optionalString(operationInput(original).sourceTimelineId, "Source timeline ID");
     if (!sourceTimelineId) throw new Error("The previous edit does not contain a recoverable source version.");
@@ -752,5 +755,66 @@ export const lockVersion = mutation({
     });
     const operation = await insertOperation(ctx, member, timeline, "LOCK_VERSION", key, { sourceTimelineId: timelineKey(timeline._id), createdTimelineId: timelineKey(timeline._id) }, [timelineKey(timeline._id)]);
     return { timelineId: timeline._id, operationId: operation, replayed: false };
+  },
+});
+
+const beatCutArgs = { timelineId: v.id('timelines'), analysisVersionId: v.id('beatAnalysisVersions'), audioClipId: v.string(), pictureTrackId: v.string(), beatIndices: v.optional(v.array(v.number())) };
+
+async function beatCutContext(ctx: ReadCtx, args: { timelineId: Id<'timelines'>; analysisVersionId: Id<'beatAnalysisVersions'>; audioClipId: string; pictureTrackId: string; beatIndices?: number[] }) {
+  if (process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED !== 'true') throw new Error('Beat-aligned editing is not enabled yet.');
+  const access = await getTimelineForMember(ctx, args.timelineId);
+  if (access.timeline.status === 'SUPERSEDED' || !['DRAFT','REVISION_REQUESTED','APPROVED','LOCKED'].includes(access.resourceState.currentState)) throw new Error('Choose an editable or retained approved timeline for a new beat edit.');
+  const state = await getTimelineState(ctx, access.timeline); const analysis = await ctx.db.get(args.analysisVersionId);
+  if (!analysis || analysis.projectId !== access.production.projectId || !(analysis.origin === 'AUTO' && analysis.outcome === 'RELIABLE' && analysis.confidence >= 0.7 || analysis.origin === 'MANUAL' && analysis.outcome === 'MANUAL')) throw new Error('Choose a reliable automatic beat map or an explicitly reviewed manual version from this project.');
+  const source = await approvedBeatSource(ctx, analysis.projectId, analysis.assetId);
+  if (analysis.storageId !== source.storageId || analysis.sourceChecksum !== source.sourceChecksum || analysis.assetChecksum !== source.assetChecksum) throw new Error('The audio bytes changed after this analysis. Analyze the current source first.');
+  const sourceManifest = !state.metadata.productionVersionId && access.timeline.manifestId ? await ctx.db.get(access.timeline.manifestId) : null;
+  const boundVersion = state.metadata.productionVersionId ?? record(sourceManifest?.manifest).productionVersionId;
+  if (!access.production.currentVersionId || boundVersion !== access.production.currentVersionId) throw new Error('Use a timeline from the current approved production version.');
+  const version = await ctx.db.get(access.production.currentVersionId); if (!version || version.status !== 'APPROVED') throw new Error('Approve the current production before applying a beat edit.');
+  const { clip: audio } = findClip(state, args.audioClipId);
+  if (audio.kind !== 'AUDIO' || audio.assetId !== analysis.assetId) throw new Error('The selected soundtrack clip must use the exact analyzed project audio.');
+  const fps = finishingFps(state.metadata);
+  if ((audio.trimStartSeconds ?? 0) + audio.durationSeconds > analysis.durationSeconds + 1 / fps + 0.01) throw new Error('The soundtrack window extends beyond the measured source.');
+  const pictureTrack = state.tracks.find(track => track.id === args.pictureTrackId);
+  if (!pictureTrack || !pictureTrack.clips.length || pictureTrack.clips.some(clip => !['VIDEO','IMAGE','GRAPHIC'].includes(clip.kind))) throw new Error('Choose one ordered picture lane for the beat cut.');
+  const pictures = pictureTrack.clips.slice().sort((a,b)=>a.startSeconds-b.startSeconds);
+  for (const track of state.tracks) for (const clip of track.clips) {
+    if (record(clip.transition).kind && record(clip.transition).kind !== 'CUT' || Object.values(record(clip.transition)).some(value=>record(value).kind&&record(value).kind!=='CUT')) throw new Error('Remove non-cut transitions before aligning picture cuts to a beat map.');
+    const metadata = clip.metadata;
+    if (clip.kind === 'CAPTIONS' || Array.isArray(record(metadata.captionTrack).cues) && (record(metadata.captionTrack).cues as unknown[]).length || metadata.captionId || metadata.captionTrackId || metadata.captionsId || Array.isArray(metadata.cues) && metadata.cues.length) throw new Error('Re-time captions explicitly after the beat edit; use a dedicated picture-and-soundtrack timeline first.');
+    if (track !== pictureTrack && clip.startSeconds + clip.durationSeconds > audio.startSeconds + audio.durationSeconds + 0.000001) throw new Error('Other audio or overlays extend beyond this soundtrack. Revise them explicitly before applying cuts.');
+  }
+  for (const clip of pictures) {
+    if (clip.assetId) {
+      const asset = await ctx.db.get(clip.assetId as Id<'assets'>);
+      if (!asset || asset.projectId !== analysis.projectId || asset.studioExternalId !== access.member.studio.externalId || asset.deletedAt || !asset.storageId || !asset.checksum || [asset.rights,asset.provenance,asset.moderation].some(value=>{const rights=record(value);return rights.approved===false||rights.consent===false||['DENIED','REJECTED','EXPIRED','REVOKED'].includes(String(rights.status??rights.state??'').toUpperCase());})) throw new Error('A picture source is unavailable or its rights changed.');
+      await requireApprovedResource(ctx, analysis.projectId, 'asset', clip.assetId);
+    }
+    if (clip.shotVersionId) await requireApprovedResource(ctx, analysis.projectId, 'shotVersion', clip.shotVersionId, access.production._id);
+  }
+  const plan = planBeatCuts({ pictures, beatsSeconds: analysis.beatsSeconds, fps, audioStartSeconds: audio.startSeconds, audioDurationSeconds: audio.durationSeconds, audioTrimStartSeconds: audio.trimStartSeconds ?? 0, beatIndices: args.beatIndices });
+  const hashInput = { sourceTimelineId: access.timeline._id, sourceVersionNumber: access.timeline.versionNumber, sourceUpdatedAt: access.timeline.updatedAt, analysisVersionId: analysis._id, sourceChecksum: source.sourceChecksum, audio, pictureTrackId: pictureTrack.id, plan };
+  const planHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(hashInput))))).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+  return { ...access, state, analysis, source, plan, planHash, fps, pictureTrack };
+}
+
+export const previewBeatCuts = query({ args: beatCutArgs, returns: v.any(), handler: async(ctx,args)=>{
+  const context=await beatCutContext(ctx,args);
+  return {planHash:context.planHash,sourceTimelineId:context.timeline._id,sourceVersionNumber:context.timeline.versionNumber,analysisVersionId:context.analysis._id,origin:context.analysis.origin,confidence:context.analysis.confidence,fps:context.fps,...context.plan};
+}});
+
+export const applyBeatCuts = mutation({
+  args: {...beatCutArgs,expectedPlanHash:v.string(),idempotencyKey:v.string()},returns:v.object({timelineId:v.id('timelines'),operationId:v.id('productionOperations'),replayed:v.boolean()}),
+  handler:async(ctx,args)=>{
+    const context=await beatCutContext(ctx,args);const key=idempotencyKey(args.idempotencyKey);const previous=await findOperationByKey(ctx,key);
+    if(args.expectedPlanHash!==context.planHash)throw new Error('The beat plan changed. Preview the current source and map again.');
+    if(previous){if(previous.kind!=='APPLY_BEAT_CUTS'||previous.productionId!==context.production._id||previous.targetId!==context.timeline._id||previous.actorUserId!==context.member.user._id||operationInput(previous).planHash!==args.expectedPlanHash)throw new Error('This beat-edit key belongs to another source, plan or user.');return {timelineId:previous.outputResourceIds[0] as Id<'timelines'>,operationId:previous._id,replayed:true};}
+    const state=structuredClone(context.state);const track=state.tracks.find(candidate=>candidate.id===args.pictureTrackId)!;const byId=new Map(context.plan.clips.map(clip=>[clip.clipId,clip]));
+    for(const clip of track.clips){const planned=byId.get(clip.id)!;clip.startSeconds=planned.startFrame/context.fps;clip.durationSeconds=planned.durationInFrames/context.fps;clip.trimEndSeconds=(clip.trimStartSeconds??0)+clip.durationSeconds;clip.transition=undefined;clip.metadata={...clip.metadata,rendererTiming:{fps:context.fps,startFrame:planned.startFrame,durationInFrames:planned.durationInFrames,trimStartInFrames:Math.round((clip.trimStartSeconds??0)*context.fps)}};delete clip.metadata.rendererOrderIndex;}
+    state.metadata={...state.metadata,beatEdit:{analysisVersionId:context.analysis._id,sourceChecksum:context.source.sourceChecksum,sourceAudioClipId:args.audioClipId,sourcePictureTrackId:args.pictureTrackId,boundaryFrames:context.plan.boundaryFrames,beatIndices:context.plan.beatIndices,planHash:context.planHash}};
+    const draft=await persistDraft(ctx,context.timeline,state,context.member,context.timeline._id,context.analysis.projectId,{preserveAudioTiming:true});
+    const operation=await insertOperation(ctx,context.member,context.timeline,'APPLY_BEAT_CUTS',key,{sourceTimelineId:context.timeline._id,createdTimelineId:draft.timelineId,analysisVersionId:context.analysis._id,sourceChecksum:context.source.sourceChecksum,audioClipId:args.audioClipId,pictureTrackId:args.pictureTrackId,planHash:context.planHash,beatIndices:context.plan.beatIndices,boundaryFrames:context.plan.boundaryFrames},[draft.timelineId,...draft.createdTrackIds,...draft.createdClipIds]);
+    return {timelineId:draft.timelineId,operationId:operation,replayed:false};
   },
 });

@@ -74,6 +74,13 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
     const expectedWidth = sourceWidth * expectedFactor; const expectedHeight = sourceHeight * expectedFactor;
     if (Math.abs(width - expectedWidth) > Math.max(16, expectedWidth * .03) || Math.abs(height - expectedHeight) > Math.max(16, expectedHeight * .03) || width <= sourceWidth || height <= sourceHeight || Math.abs(duration - Number(source.durationSeconds)) > Math.max(.25, Number(source.durationSeconds) * .02)) throw new Error('MEDIA_VALIDATION_FAILED');
   }
+  if (object(request.editQuote).version === 'FLUX_SOURCE_VIDEO_EDIT_V1') {
+    const source = object(request.editSource);
+    const sourceWidth = Number(source.width); const sourceHeight = Number(source.height); const sourceDuration = Number(source.durationSeconds);
+    // Source aspect ratio/duration are preserved. 720p is an output ceiling,
+    // not an exact dimension promise for already smaller source media.
+    if (!sourceWidth || !sourceHeight || !Number.isFinite(sourceDuration) || Math.min(width, height) > 736 || width > sourceWidth + 16 || height > sourceHeight + 16 || Math.abs(width / height - sourceWidth / sourceHeight) > .03 || Math.abs(duration - sourceDuration) > Math.max(.25, sourceDuration * .02) || (source.hasAudio === true && probe.hasAudio !== true)) throw new Error('MEDIA_VALIDATION_FAILED');
+  }
   if ((constraints.requiresAudio === true || constraints.requiresSourceAudioPreservation === true) && probe.hasAudio !== true) throw new Error('MEDIA_VALIDATION_FAILED');
   return { durationSeconds: duration, width, height, videoCodec: probe.videoCodec, hasAudio: probe.hasAudio === true, ...(typeof probe.audioCodec === 'string' ? { audioCodec: probe.audioCodec } : {}) };
 }

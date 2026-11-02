@@ -5,6 +5,7 @@ import { PLATFORM_READ_ROLES, type PlatformInventoryKind } from '@/lib/platform-
 export const metadata = { title: 'Platform administration | FinalFrame' };
 const sections: Array<{ href: string; kind: PlatformInventoryKind; label: string; description: string }> = [
   { href: '/admin/users', kind: 'users', label: 'Accounts', description: 'Review accounts and audited account access changes.' },
+  { href: '/admin/account-requests', kind: 'roles', label: 'Account requests', description: 'Review retained-data deactivation requests and audited account recovery.' },
   { href: '/admin/roles', kind: 'roles', label: 'Platform access', description: 'Manage explicit platform roles with last-administrator protection.' },
   { href: '/admin/jobs', kind: 'jobs', label: 'Generation jobs', description: 'Inspect projected job status and reported provider costs across studios.' },
   { href: '/admin/moderation', kind: 'reports', label: 'Content reports', description: 'Review submitted concerns and record a moderation decision.' },

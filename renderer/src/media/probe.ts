@@ -26,6 +26,18 @@ function frameRate(value: unknown): number | undefined {
   return Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0 ? numerator / denominator : numeric(value);
 }
 
+function streamTime(stream: Record<string, unknown> | undefined, secondsKey: string, ticksKey: string): number | undefined {
+  const ticks = numeric(stream?.[ticksKey]); const timeBase = frameRate(stream?.time_base);
+  return ticks !== undefined && timeBase !== undefined && timeBase > 0 ? ticks * timeBase : numeric(stream?.[secondsKey]);
+}
+
+function streamTolerance(stream: Record<string, unknown> | undefined): number {
+  const timeBase = frameRate(stream?.time_base); const sampleRate = numeric(stream?.sample_rate);
+  // Optional timing fields are often absent in WebM and old fixtures. Known
+  // values get a tight quantization allowance rather than container tolerance.
+  return Math.max(0.002, timeBase && timeBase > 0 ? Math.min(timeBase, 0.01) : 0, sampleRate && sampleRate > 0 ? 2 / sampleRate : 0);
+}
+
 export function normalizeProbe(probe: FFprobeResult): ValidatedMediaProbe {
   const video = probe.streams.find((stream) => stream.codec_type === 'video');
   const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
@@ -33,7 +45,7 @@ export function normalizeProbe(probe: FFprobeResult): ValidatedMediaProbe {
   return {
     width: numeric(video?.width),
     height: numeric(video?.height),
-    durationSeconds: numeric(probe.format?.duration ?? video?.duration ?? audio?.duration),
+    durationSeconds: numeric(probe.format?.duration) ?? streamTime(video, 'duration', 'duration_ts') ?? streamTime(audio, 'duration', 'duration_ts'),
     fps: frameRate(video?.avg_frame_rate ?? video?.r_frame_rate),
     videoCodec: typeof video?.codec_name === 'string' ? video.codec_name : undefined,
     audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined,
@@ -71,6 +83,19 @@ export function validateOutputProbe(
   if (value.durationSeconds === undefined) issues.push({ path: 'format.duration', message: 'ffprobe did not report output duration' });
   const expectedDuration = expected.durationInFrames / expected.fps;
   if (value.durationSeconds !== undefined && Math.abs(value.durationSeconds - expectedDuration) > tolerance) issues.push({ path: 'format.duration', message: `expected approximately ${expectedDuration.toFixed(3)} seconds, received ${value.durationSeconds.toFixed(3)}` });
+  for (const kind of ['video', 'audio'] as const) {
+    const stream = probe.streams.find(candidate => candidate.codec_type === kind);
+    if (!stream) continue;
+    const timingTolerance = streamTolerance(stream);
+    const duration = streamTime(stream, 'duration', 'duration_ts'); const reportedDuration = numeric(stream.duration);
+    if ([duration, reportedDuration].some(seconds => seconds !== undefined && Math.abs(seconds - expectedDuration) > timingTolerance)) issues.push({ path: `${kind}.duration`, message: `known stream duration must match ${expectedDuration.toFixed(6)} seconds within timestamp quantization` });
+    const start = streamTime(stream, 'start_time', 'start_pts'); const reportedStart = numeric(stream.start_time);
+    if ([start, reportedStart].some(seconds => seconds !== undefined && Math.abs(seconds) > timingTolerance)) issues.push({ path: `${kind}.start_time`, message: 'known output stream start must be zero within timestamp quantization' });
+    if (kind === 'video') for (const field of ['nb_frames', 'nb_read_frames']) {
+      const count = numeric(stream[field]);
+      if (count !== undefined && (!Number.isInteger(count) || count !== expected.durationInFrames)) issues.push({ path: `video.${field}`, message: `expected exactly ${expected.durationInFrames} video frames, received ${count}` });
+    }
+  }
   if (options.requireAudio || expected.audio) {
     if (!value.hasAudio) issues.push({ path: 'streams', message: 'rendered output must contain an audio stream' });
     if (expected.audio && value.audioSampleRate !== undefined && value.audioSampleRate !== expected.audio.sampleRate) issues.push({ path: 'audio.sample_rate', message: `expected ${expected.audio.sampleRate}, received ${value.audioSampleRate}` });

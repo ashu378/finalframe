@@ -82,15 +82,22 @@ assert.equal(routing.videoModelSupportsRequest({ ...model, supportsVideoReferenc
 assert.equal(routing.videoModelSupportsRequest({ ...model, supportsVideoEdit: true }, { ...baseRequest, task: 'EDIT', hasVideoReference: true }), false, 'video editing stays unavailable until the provider request is implemented');
 assert.equal(routing.videoModelSupportsRequest({ ...model, supportsVideoExtension: true }, { ...baseRequest, task: 'EXTEND', hasVideoReference: true }), false, 'video extension stays unavailable until the provider request is implemented');
 assert.equal(routing.videoModelSupportsRequest({ ...model, supportsAudio: false }, { ...baseRequest, requiresAudio: true }), false);
-assert.equal(routing.videoModelSupportsRequest({ ...model, supportsVideoReferences: true }, { ...baseRequest, hasVideoReference: true }), true, 'reviewed video reference support may guide generation');
+assert.equal(routing.videoModelSupportsRequest({ ...model, supportsVideoReferences: true }, { ...baseRequest, hasVideoReference: true }), false, 'reviewed video reference controls do not certify input billing or minimum-token floors');
 assert.equal(routing.videoModelSupportsRequest({ ...model, supportsAudioReferences: false }, { ...baseRequest, hasAudioReference: true }), false, 'audio references cannot silently be dropped');
 assert.equal(routing.videoModelSupportsRequest({ ...model, supportsCombinedFrameReferences: false }, { ...baseRequest, requiresFirstFrame: true, hasImageReferences: true }), false, 'frame precedence must not silently drop required references');
-assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['APPEARANCE_EDIT'] }, { ...baseRequest, operation: 'APPEARANCE_EDIT', task: 'EDIT', hasVideoReference: true }), true);
+assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['APPEARANCE_EDIT'] }, { ...baseRequest, operation: 'APPEARANCE_EDIT', task: 'EDIT', hasVideoReference: true }), false, 'review flags alone cannot certify source-derived edit controls or billing');
 assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['APPEARANCE_EDIT'] }, { ...baseRequest, operation: 'OBJECT_REPLACE', task: 'EDIT', hasVideoReference: true }), false, 'one reviewed edit recipe does not certify every operation');
-assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['EXTEND'] }, { ...baseRequest, task: 'EXTEND', previousJobId: 'gen-vid-123-abcdefghijklmnopqrst', previousModelId: model.modelId }), true);
+const continuationModel = { ...model, reviewedOperations: ['EXTEND'], pricingSkus: { cents_per_second_output_720p: 17, cents_per_second_video_continuation_720p: 41, cents_per_second_video_continuation_1080p: 53 } };
+assert.equal(routing.videoModelSupportsRequest(continuationModel, { ...baseRequest, task: 'EXTEND', previousJobId: 'gen-vid-123-abcdefghijklmnopqrst', previousModelId: model.modelId }), true);
 assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['EXTEND'] }, { ...baseRequest, task: 'EXTEND', previousJobId: 'gen-vid-123-abcdefghijklmnopqrst', previousModelId: 'other/model' }), false, 'continuation remains pinned to original model');
-assert.equal(routing.videoModelSupportsRequest({ ...model, supportsLipSync: true, supportsAudioReferences: true, reviewedOperations: ['LIP_SYNC'] }, { ...baseRequest, operation: 'LIP_SYNC', hasImageReferences: true, hasAudioReference: true }), true);
-assert.equal(routing.videoModelSupportsRequest({ ...model, supportsPerformanceTransfer: true, reviewedOperations: ['PERFORMANCE_TRANSFER'] }, { ...baseRequest, operation: 'PERFORMANCE_TRANSFER', hasImageReferences: true, hasVideoReference: true }), true);
+const continuationRequest = { ...baseRequest, task: 'EXTEND', previousJobId: 'gen-vid-123-abcdefghijklmnopqrst', previousModelId: model.modelId, resolution: '720p' };
+assert.equal(routing.estimateVideoCost(continuationModel, continuationRequest), 2.46, 'continuation uses41c rather than17c output rate');
+assert.equal(routing.estimateVideoCost(continuationModel, { ...continuationRequest, resolution: undefined }), 3.18, 'unspecified continuation resolution is bounded by maximum dedicated rate');
+for (const patch of [{ pricingSkus: { cents_per_second_output_720p: 17 } }, { pricingSkus: { cents_per_second_video_continuation_720p: 41, unknown_input_units: 1 } }, { pricingSkus: { cents_per_second_video_continuation_720p: 0 } }, { pricingSkus: undefined, estimatedCostPerSecond: .17 }]) assert.equal(routing.estimateVideoCost({ ...continuationModel, ...patch }, continuationRequest), undefined, 'missing or unbounded continuation units failclosed');
+assert.equal(routing.videoModelSupportsRequest(continuationModel, { ...continuationRequest, maximumCostUsd: 2 }), false, 'normal-output budget cannot fund higher continuation rate');
+assert.equal(routing.estimateVideoCost(continuationModel, { ...continuationRequest, hasImageReferences: true }), undefined, 'uncertified extra continuation reference charges cannot be ignored');
+assert.equal(routing.videoModelSupportsRequest({ ...model, supportsLipSync: true, supportsAudioReferences: true, reviewedOperations: ['LIP_SYNC'] }, { ...baseRequest, operation: 'LIP_SYNC', hasImageReferences: true, hasAudioReference: true }), false, 'supplied audio duration needs a certified billing bound');
+assert.equal(routing.videoModelSupportsRequest({ ...model, supportsPerformanceTransfer: true, reviewedOperations: ['PERFORMANCE_TRANSFER'] }, { ...baseRequest, operation: 'PERFORMANCE_TRANSFER', hasImageReferences: true, hasVideoReference: true }), false, 'generic multimodal references do not certify exact performance transfer');
 assert.equal(routing.videoModelSupportsRequest({ ...model, reviewedOperations: ['EDIT'] }, { ...baseRequest, task: 'EDIT', hasVideoReference: true, requiresMask: true }), false, 'undocumented mask controls fail closed');
 assert.equal(routing.videoModelSupportsRequest({ ...model, estimatedCostPerSecond: 0.2 }, { ...baseRequest, maximumCostUsd: 1 }), false, 'routes above the budget are rejected');
 assert.equal(routing.videoModelSupportsRequest({ ...model, estimatedCostPerSecond: undefined }, { ...baseRequest, maximumCostUsd: 1 }), false, 'unknown price cannot pass an explicit cap');
@@ -252,6 +259,13 @@ async function testMockedProviderContract() {
   assert.equal(upscalePayload.upscale_factor, 2.5);
   assert.equal(upscalePayload.creativity, 1);
   assert.equal(upscalePayload.input_references[0].type, 'video_url');
+  const sourceVideo = [{ kind: 'video', url: 'https://fixture.test/source.mp4' }];
+  const editPayload = adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-edit', prompt: 'Change the toy car paint.', inputReferences: sourceVideo }, { allowDiscoveredModel: true });
+  assert.deepEqual(editPayload, { model: 'black-forest-labs/flux-video-edit', prompt: 'Change the toy car paint.', input_references: [{ type: 'video_url', video_url: { url: 'https://fixture.test/source.mp4' } }] });
+  for (const patch of [{ duration: 4 }, { aspectRatio: '16:9' }, { resolution: '720p' }, { generateAudio: true }, { upscaleFactor: 2 }, { creativity: 1 }, { inputReferences: [] }, { inputReferences: [{ kind: 'image', url: 'https://fixture.test/portrait.png' }] }]) assert.throws(() => adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-edit', prompt: 'Edit source.', inputReferences: sourceVideo, ...patch }, { allowDiscoveredModel: true }), /Source-derived|editing/);
+  const certifiedUpscalePayload = adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-upscale', prompt: 'Enlarge source.', inputReferences: sourceVideo, upscaleFactor: 2, creativity: 0 }, { allowDiscoveredModel: true });
+  assert.equal(certifiedUpscalePayload.upscale_factor, 2); assert.equal(certifiedUpscalePayload.creativity, 0); assert.equal(certifiedUpscalePayload.generate_audio, undefined);
+  for (const id of ['black-forest-labs/flux-video-edit', 'black-forest-labs/flux-3-video']) assert.equal(discovery.normalizeDiscoveredVideoModel({ id, pricing_skus: { cents_per_second_output: 3, unknown_input_units: 'unbounded' } }), null, 'unknown source-operation billing cannot disappear during catalog normalization');
   let downloadAuthorization;
   const downloaded = await adapter.downloadVideo('accepted', { apiKey: 'fixture-key', fetch: async (_url, init) => {
     downloadAuthorization = new Headers(init.headers).get('authorization');
@@ -263,7 +277,29 @@ async function testMockedProviderContract() {
   const clone = adapter.buildSpeechSynthesisRequest({ model: 'local/test-speech', input: 'A consented reference voice', inputReferences: [{ url: 'https://fixture.test/consented.wav' }] }, { allowDiscoveredModel: true });
   assert.equal(clone.voice, undefined);
   assert.equal(clone.input_references[0].type, 'input_audio');
+  assert.throws(() => adapter.buildSpeechSynthesisRequest({ model: 'local/test-speech', input: 'Voice.', voice: 'stock', responseFormat: 'wav' }, { allowDiscoveredModel: true }), /MP3 or PCM/);
   assert.throws(() => adapter.buildSpeechSynthesisRequest({ model: 'local/test-speech', input: 'Voice', voice: 'stock', inputReferences: [{ url: 'https://fixture.test/consented.wav' }] }, { allowDiscoveredModel: true }), /not both/);
+  const seedModel = 'bytedance-seed/seed-audio-1-0';
+  const samples = [{ url: 'https://fixture.test/one.wav' }, { url: 'https://fixture.test/two.wav' }];
+  assert.equal(adapter.buildSpeechSynthesisRequest({ model: seedModel, input: '@Audio1 First. @Audio2 Second.', inputReferences: samples }, { allowDiscoveredModel: true }).input_references.length, 2);
+  for (const text of ['Both clips but no explicit speakers.', '@Audio1 Only one clip addressed.', '@Audio1 First. @Audio3 Missing clip.']) assert.throws(() => adapter.buildSpeechSynthesisRequest({ model: seedModel, input: text, inputReferences: samples }, { allowDiscoveredModel: true }), /matching @Audio/);
+  assert.throws(() => adapter.buildSpeechSynthesisRequest({ model: seedModel, input: '@Audio1 No sample.', voice: 'stock' }, { allowDiscoveredModel: true }), /matching @Audio/);
+  for (const reference of [{ url: 'https://fixture.test/one.wav', data: 'AAAA' }, { url: 'file:///private.wav' }, { url: 'https://user:password@fixture.test/one.wav' }, { data: 'A'.repeat(20 * 1024 * 1024 + 1) }]) assert.throws(() => adapter.buildSpeechSynthesisRequest({ model: seedModel, input: 'One sample.', inputReferences: [reference] }, { allowDiscoveredModel: true }), /reference|Reference/);
+  for (const endpoints of [[{ supports_voice_cloning: true }], [{ supports_voice_cloning: true, supports_multiple_audio_references: true }, { supports_voice_cloning: true, supports_multiple_audio_references: false }], [{ supports_voice_cloning: true, supports_multiple_audio_references: true }]]) {
+    let posts = 0; let fences = 0;
+    const supported = endpoints.every(endpoint => endpoint.supports_multiple_audio_references === true);
+    const operation = adapter.synthesizeSpeech({ model: seedModel, input: '@Audio1 First. @Audio2 Second.', inputReferences: samples, responseFormat: 'mp3' }, {
+      apiKey: 'isolated-test-key', allowDiscoveredModel: supported, fallbackModels: [], beforeMediaSubmit: async () => { fences++; },
+      fetch: async (url, init) => {
+        if (String(url).endsWith('/models?output_modalities=speech')) return new Response(JSON.stringify({ data: [{ id: seedModel }] }), { headers: { 'content-type': 'application/json' } });
+        if (String(url).endsWith('/endpoints')) return new Response(JSON.stringify({ data: { endpoints } }), { headers: { 'content-type': 'application/json' } });
+        assert.equal(init.method, 'POST'); posts++; assert.deepEqual(JSON.parse(init.body).input_references, samples.map(input_audio => ({ type: 'input_audio', input_audio })));
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'audio/mpeg' } });
+      },
+    });
+    if (supported) assert.equal((await operation).body.byteLength, 3); else await assert.rejects(operation, /Multiple reference/);
+    assert.equal(posts, supported ? 1 : 0); assert.equal(fences, supported ? 1 : 0);
+  }
 
 }
 

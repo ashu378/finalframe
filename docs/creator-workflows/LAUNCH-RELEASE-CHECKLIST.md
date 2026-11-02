@@ -9,7 +9,7 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 | A01 | Shared contracts and complete route/action inventory | release-inventory | Implementing |
 | B01 | All six entry modes retain selection; eight authored templates create independent projects; presets work | template-project-contract | Implementing |
 | B02 | Paginated projects, search, lifecycle/archive/restore; no history loss | online-project-library | Backend/contracts verified; full library browser journey pending |
-| B03 | Profile, data export, recoverable deletion request, safe legacy routes | account-lifecycle | Pending |
+| B03 | Profile, data export, recoverable deletion request, safe legacy routes | account-lifecycle | Actual online Auth lifecycle6 passed; index browser downloads pending |
 | B04 | Studio/team/project roles and complete invitation acceptance | online-team-permissions | Pending; invitation email delivery last |
 | B05 | Separate platform admin, real moderation and audit/actions | online-platform-admin | Backend verified online; selected owner ADMIN granted in development; full browser matrix pending |
 | B06 | Public/contact/policy/navigation, responsive and accessible states | all-routes-browser | Pending; policy publication owner approval |
@@ -17,7 +17,7 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 | C02 | Lossless timeline/manifest roundtrip, compatible v4/v5 rollout | manifest-roundtrip | Pending |
 | D01 | Caption authoring, burn-in, SRT/VTT, scope rebasing | caption-frame-acceptance | Pending |
 | D02 | Cut/dissolve/fade/wipe/slide with explicit duration and audio semantics | transition-frame-acceptance | Pending |
-| D03 | Automatic beats, editable confidence-bound beat map, apply as new timeline | beat-analysis-acceptance | Pending |
+| D03 | Automatic beats, editable confidence-bound beat map, apply as new timeline | beat-analysis-acceptance | Implemented/local tests and independent review passed; online worker/browser acceptance pending |
 | D04 | Native/recorded/dialogue/music/SFX audio mixing and source extraction | audio-content-acceptance | Partial; retained short fixtures |
 | D05 | Exact titles/logos/UI/CTA/charts/explainer templates | graphics-content-acceptance | Partial; retained title/UI fixtures |
 | E01 | Correct lip-sync/extension/upscale public controls and canonical validation | operation-input-contract | Implementing |
@@ -46,3 +46,5 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 ## Current checkpoint
 
 Detailed implementation and verified limits: [2 November checkpoint](LAUNCH-COMPLETION-CHECKPOINT-2026-11-02.md). Personal voice/performance fixtures are absent; use synthetic fixtures without claiming personal likeness acceptance.
+
+Second integration checkpoint: [account, operation certificates, beat analysis and precise finishing](LAUNCH-COMPLETION-CHECKPOINT-2-2026-11-02.md). Development v5 reader-to-browser fixture passed; the measured AAC overrun was repaired locally and requires the new worker rollout.

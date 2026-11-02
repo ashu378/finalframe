@@ -20,11 +20,27 @@
       "acceptance": "PENDING"
     },
     {
+      "route": "/account/deactivated",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/account/deactivated/page.tsx",
+      "testId": "route:page:/account/deactivated",
+      "acceptance": "PENDING"
+    },
+    {
       "route": "/admin",
       "kind": "page",
       "area": "platform",
       "source": "src/app/(admin)/admin/page.tsx",
       "testId": "route:page:/admin",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/account-requests",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/account-requests/page.tsx",
+      "testId": "route:page:/admin/account-requests",
       "acceptance": "PENDING"
     },
     {
@@ -233,6 +249,14 @@
       "area": "creator",
       "source": "src/app/(dashboard)/dashboard/settings/page.tsx",
       "testId": "route:page:/dashboard/settings",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings/account",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/settings/account/page.tsx",
+      "testId": "route:page:/dashboard/settings/account",
       "acceptance": "PENDING"
     },
     {

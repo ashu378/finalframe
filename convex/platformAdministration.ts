@@ -110,10 +110,11 @@ export const setUserStatus = mutation({
   handler: async (ctx, args) => {
     const actor = await requirePlatformRole(ctx, ['ADMIN']);
     const note = reason(args.reason);
-    const event = await replay(ctx, actor.user._id, 'PLATFORM_USER_STATUS_CHANGED', args.userId, args.requestId, { status: args.status, reason: note });
-    if (event.existing) return { userId: args.userId, replayed: true };
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error('The selected account is unavailable.');
+    if (user.deactivationRequestId) throw new Error('Resolve the pending account-deactivation request through the dedicated recovery workflow.');
+    const event = await replay(ctx, actor.user._id, 'PLATFORM_USER_STATUS_CHANGED', args.userId, args.requestId, { status: args.status, reason: note });
+    if (event.existing) return { userId: args.userId, replayed: true };
     if (args.status === 'disabled') {
       if (args.userId === actor.user._id) throw new Error('Another administrator must review disabling your account.');
       const grant = await ctx.db.query('platformRoles').withIndex('by_user', (q) => q.eq('userId', args.userId)).unique();

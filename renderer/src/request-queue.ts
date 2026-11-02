@@ -9,6 +9,8 @@ export class RenderRequestQueue {
 
   constructor(private readonly limit = 4) {}
 
+  get busy() { return this.pending > 0; }
+
   accept(jobId: string, payload: unknown, work: () => Promise<unknown>) {
     const timestamp = Date.now();
     for (const [id, entry] of this.entries) if (entry.completedAt && (timestamp - entry.completedAt > 600_000 || this.entries.size > 100)) this.entries.delete(id);

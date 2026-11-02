@@ -15,7 +15,9 @@
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "build": "tsc --project tsconfig.json",
     "check": "npm run typecheck",
-    "test": "npm run build && node tests/run-renderer-tests.cjs && node tests/run-transfer-outbox-tests.cjs && node tests/run-v5-contract-tests.mjs",
+    "test": "npm run build && node tests/run-renderer-tests.cjs && node tests/run-transfer-outbox-tests.cjs && node tests/run-v5-contract-tests.mjs && node tests/run-beat-detector-tests.cjs && node tests/run-probe-timing-tests.mjs",
+    "test:audio": "npm run build && node tests/run-audio-normalization-tests.mjs",
+    "test:beats:media": "npm run build && node tests/run-beat-media-tests.mjs",
     "test:visual": "npm run build && node tests/run-v5-visual-tests.mjs"
   },
   "engines": {

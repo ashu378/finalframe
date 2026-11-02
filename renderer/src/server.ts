@@ -12,12 +12,16 @@ import { RenderRequestQueue } from './request-queue.js';
 import { assertTransferUrl, transferOrigins, uploadRenderFile } from './worker-transfer.js';
 import { CompletionOutbox, FileRenderReceiptStore, type CompletionRequest } from './completion-outbox.js';
 import { LeaseHeartbeatMonitor } from './lease-heartbeat.js';
+import { HeavyMediaGate } from './media/heavy-media-gate.js';
+import { analyzeCanonicalAudio } from './media/beat-analysis.js';
+import { BEAT_ANALYSIS_VERSION } from './media/beat-detector.js';
 
 const port = Number(process.env.PORT ?? 8080);
 const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim() ?? '';
 const outputRoot = process.env.RENDER_OUTPUT_ROOT ?? '/tmp/finalframe-renders';
 const rendererVersion = process.env.RENDERER_VERSION ?? 'finalframe-renderer-v1';
 const renderQueue = new RenderRequestQueue(4);
+const heavyMedia = new HeavyMediaGate(() => renderQueue.busy);
 const mediaHosts = (process.env.RENDER_MEDIA_ALLOWED_HOSTS ?? '').split(',').map(host => host.trim()).filter(Boolean);
 const callbackOrigins = transferOrigins(process.env.RENDER_CALLBACK_ORIGINS, mediaHosts, 'callback');
 const storageOrigins = transferOrigins(process.env.RENDER_STORAGE_ORIGINS, mediaHosts, 'storage');
@@ -25,7 +29,6 @@ const stateRoot = process.env.RENDER_STATE_ROOT ?? join(outputRoot, '.worker-sta
 const receipts = new FileRenderReceiptStore(join(stateRoot, 'receipts'));
 const maxOutputBytes = Number(process.env.RENDER_MAX_OUTPUT_BYTES ?? 2_000_000_000);
 const heartbeatMonitor = new LeaseHeartbeatMonitor({ secret, allowedOrigins: callbackOrigins });
-let probing = false;
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -102,15 +105,15 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion });
-    if (request.method !== 'POST' || !['/render', '/media/probe'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' } });
+    if (request.method !== 'POST' || !['/render', '/media/probe', '/media/analyze-beats'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
     if (headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
     const payload = await body(request);
     if (request.url === '/media/probe') {
-      if (probing) return json(response, 429, { error: 'Media probe is busy.' });
-      probing = true;
+      const release = heavyMedia.tryAcquireMedia();
+      if (!release) return json(response, 429, { error: 'FinalFrame media processing is busy. Retry the existing job later.' });
       try {
         const result = await probeRemoteMedia(payload.url, {
           kind: payload.kind === 'audio' ? 'audio' : 'video',
@@ -118,7 +121,16 @@ createServer(async (request, response) => {
           ffprobe: new InjectableFFprobeAdapter(),
         });
         return json(response, 200, result);
-      } finally { probing = false; }
+      } finally { release(); }
+    }
+    if (request.url === '/media/analyze-beats') {
+      if (process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED !== 'true') return json(response, 503, { error: 'Beat analysis is not enabled.' });
+      const release = heavyMedia.tryAcquireMedia();
+      if (!release) return json(response, 429, { error: 'FinalFrame media processing is busy. Retry the existing job later.' });
+      try {
+        const result = await analyzeCanonicalAudio(payload, { allowedHosts: mediaHosts, ffmpeg: new InjectableFFmpegAdapter(), ffprobe: new InjectableFFprobeAdapter(), cacheRoot: join(stateRoot, 'beat-cache') });
+        return json(response, 200, result);
+      } finally { release(); }
     }
     if (
       typeof payload.jobId !== 'string' || !/^[a-zA-Z0-9._-]{1,180}$/.test(payload.jobId)
@@ -134,6 +146,7 @@ createServer(async (request, response) => {
       if (heartbeat.pathname !== '/renderer/heartbeat' || heartbeat.search) throw new Error('Invalid worker heartbeat endpoint.');
     }
     if (!validateManifest(payload.manifest).ok) return json(response, 400, { error: 'Invalid render manifest.' });
+    if (!heavyMedia.acceptsRender) return json(response, 429, { error: 'FinalFrame media processing is busy. Retry the existing job later.' });
     return json(response, 202, renderQueue.accept(payload.jobId, payload, () => render({ ...payload, secret: headerSecret })));
   } catch (error) {
     const code = error instanceof Error ? error.message : '';

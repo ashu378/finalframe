@@ -8,7 +8,8 @@ import { requireProjectAccess, requireProjectRole } from './authorization';
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
-import { resolveUpscaleSourceCertificate, validateReviewedVideoJob } from './videoRouting';
+import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, validateReviewedVideoJob } from './videoRouting';
+import { isSourceVideoEdit } from '../src/lib/ai/video-routing';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, type PreparationKind } from '../src/lib/ai/preparation';
@@ -154,7 +155,7 @@ export const create = mutation({
       hasAudioReference: sourceAssets.some((asset) => asset.mimeType?.startsWith('audio/')),
       requiresFirstFrame: Boolean(firstFrame) || metadata.requiresFirstFrame === true,
       requiresLastFrame: Boolean(lastFrame) || metadata.requiresLastFrame === true,
-      upscaleSource: undefined, upscaleQuote: undefined, constraints: undefined,
+      upscaleSource: undefined, upscaleQuote: undefined, editSource: undefined, editQuote: undefined, continuationQuote: undefined, constraints: undefined,
     };
     if (operation === 'EXTEND') {
       const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') });
@@ -170,11 +171,28 @@ export const create = mutation({
       normalizedRequest.aspectRatio = normalizedRequest.ratio;
       normalizedRequest.resolution = undefined;
     }
+    if (isSourceVideoEdit(operation)) {
+      if (metadata.resolution || normalizedRequest.resolution) throw new Error('Video edit dimensions come from the source; remove the resolution constraint.');
+      const source = await resolveVideoEditSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds });
+      normalizedRequest.editSource = source;
+      normalizedRequest.duration = source.durationSeconds; normalizedRequest.durationSeconds = source.durationSeconds;
+      normalizedRequest.ratio = `${source.width}:${source.height}`; normalizedRequest.aspectRatio = normalizedRequest.ratio;
+      normalizedRequest.requiresSourceAudioPreservation = source.hasAudio;
+      normalizedRequest.resolution = undefined;
+    }
     validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
     const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
     if (operation === 'UPSCALE') {
       if (!validated.selection.upscaleQuote) throw new Error('Upscale pricing certification is unavailable.');
       normalizedRequest.upscaleQuote = validated.selection.upscaleQuote;
+    }
+    if (isSourceVideoEdit(operation)) {
+      if (!validated.selection.editQuote) throw new Error('Source video edit certification is unavailable.');
+      normalizedRequest.editQuote = validated.selection.editQuote;
+    }
+    if (operation === 'EXTEND') {
+      if (!validated.selection.continuationQuote) throw new Error('Continuation pricing certification is unavailable.');
+      normalizedRequest.continuationQuote = validated.selection.continuationQuote;
     }
     normalizedRequest.routeReason = validated.selection.routeReason;
     normalizedRequest.path = validated.selection.path;
@@ -182,7 +200,7 @@ export const create = mutation({
     normalizedRequest.resolution = validated.selection.resolution ?? normalizedRequest.resolution;
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
-    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'UPSCALE' ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
+    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
@@ -312,14 +330,25 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     dispatchValidation = { model: job.model, estimatedCostUsd: job.estimatedProviderCostUsd };
   } else {
     try {
-      if (request.operation === 'EXTEND') await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') });
+      if (request.operation === 'EXTEND') {
+        await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') });
+        const frozen = object(request.continuationQuote);
+        if (args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Continuation catalog certification changed.');
+      }
       if (request.operation === 'UPSCALE') {
         const source = await resolveUpscaleSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
         const frozen = object(request.upscaleQuote);
         if (stable(source) !== stable(request.upscaleSource) || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Upscale input or current catalog certification changed.');
       }
+      if (isSourceVideoEdit(request.operation)) {
+        const source = await resolveVideoEditSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
+        const frozen = object(request.editQuote);
+        if (stable(source) !== stable(request.editSource) || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Edit source or catalog certification changed.');
+      }
       const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
       if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
+      if (isSourceVideoEdit(request.operation) && stable(current.selection.editQuote) !== stable(request.editQuote)) throw new Error('The frozen video edit pricing certificate changed.');
+      if (request.operation === 'EXTEND' && stable(current.selection.continuationQuote) !== stable(request.continuationQuote)) throw new Error('The frozen continuation pricing certificate changed.');
       const estimatedMicros = Math.ceil(current.estimatedCostUsd * 1_000_000);
       if (!Number.isFinite(estimatedMicros) || estimatedMicros <= 0 || estimatedMicros > reserved.estimatedMicros || (typeof request.path === 'string' && current.selection.path !== request.path) || (typeof request.resolution === 'string' && current.selection.resolution !== request.resolution)) throw new Error('The frozen route or provider quote has changed.');
       dispatchValidation = { estimatedCostUsd: current.estimatedCostUsd, policyVersion: current.selection.policyVersion ?? null, resolution: current.selection.resolution ?? null, model: current.selection.modelId };

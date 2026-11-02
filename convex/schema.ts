@@ -124,8 +124,24 @@ export default defineSchema({
     phoneVerificationTime: v.optional(timestamp), isAnonymous: v.optional(v.boolean()),
     externalId: v.optional(v.string()), authSubject: v.optional(v.string()),
     status: v.optional(status), metadata: v.optional(json), createdAt: v.optional(timestamp),
-    updatedAt: v.optional(timestamp),
+    updatedAt: v.optional(timestamp), displayName: v.optional(v.string()),
+    deactivationRequestId: v.optional(v.id('accountDeactivationRequests')),
   }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]),
+
+  accountDeactivationRequests: defineTable({
+    userId: v.id('users'), status: v.union(v.literal('REQUESTED'), v.literal('CANCELED')), reason: v.string(), idempotencyKey: v.string(),
+    createdAt: timestamp, updatedAt: timestamp, canceledAt: v.optional(timestamp), canceledByUserId: v.optional(v.id('users')), cancellationReason: v.optional(v.string()),
+  }).index('by_user', ['userId']).index('by_status', ['status']).index('by_idempotency', ['idempotencyKey']),
+
+  accountExportRequests: defineTable({
+    userId: v.id('users'), formatVersion: v.literal(1), status: v.union(v.literal('OPEN'), v.literal('COMPLETED'), v.literal('CANCELED')),
+    idempotencyKey: v.string(), createdAt: timestamp, updatedAt: timestamp, expiresAt: timestamp, nextOrdinal: v.number(), cursor: v.string(), recordCount: v.number(),
+  }).index('by_user', ['userId']).index('by_idempotency', ['idempotencyKey']),
+
+  accountExportPages: defineTable({
+    requestId: v.id('accountExportRequests'), userId: v.id('users'), ordinal: v.number(), cursor: v.string(), nextCursor: v.string(), isDone: v.boolean(),
+    recordCount: v.number(), byteCount: v.number(), sha256: v.string(), createdAt: timestamp,
+  }).index('by_request_ordinal', ['requestId', 'ordinal']).index('by_request', ['requestId']),
 
   studios: defineTable({
     externalId: v.string(), ownerExternalId: v.string(), ownerId: v.optional(v.id("users")), ownerUserId: v.optional(v.id("users")),
@@ -173,7 +189,8 @@ export default defineSchema({
     moderationStatus: v.optional(v.union(v.literal('RESTRICTED'), v.literal('CLEAR'))), moderationReportId: v.optional(v.id('moderationReports')),
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"])
-    .index("by_studio_id", ["studioId"]).index("by_studio_status", ["studioExternalId", "status"]),
+    .index("by_studio_id", ["studioId"]).index("by_studio_status", ["studioExternalId", "status"])
+    .index('by_owner_user', ['ownerUserId']).index('by_created_by_user', ['createdByUserId']).index('by_created_by_external', ['createdByExternalId']),
 
   projectMembers: defineTable({
     projectId: v.id("projects"), userId: v.id("users"), role: projectRole, status: projectMemberStatus,
@@ -497,6 +514,28 @@ export default defineSchema({
     projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
     width: v.number(), height: v.number(), durationSeconds: v.number(), videoCodec: v.string(), hasAudio: v.boolean(), audioCodec: v.optional(v.string()), probedAt: timestamp,
   }).index('by_asset', ['assetId']),
+
+  verifiedAudioProbes: defineTable({
+    projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
+    durationSeconds: v.number(), audioCodec: v.string(), sampleRate: v.number(), channels: v.number(), hasVideo: v.boolean(), probedAt: timestamp,
+  }).index('by_asset', ['assetId']),
+
+  beatAnalysisJobs: defineTable({
+    projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), sourceChecksum: v.string(), assetChecksum: v.string(), algorithmVersion: v.string(),
+    requestHash: v.string(), idempotencyKey: v.string(), status: v.union(v.literal('QUEUED'), v.literal('PROCESSING'), v.literal('RETRYING'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('CANCELED')),
+    createdByUserId: v.id('users'), attemptCount: v.number(), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), nextAttemptAt: v.optional(timestamp),
+    analysisVersionId: v.optional(v.id('beatAnalysisVersions')), errorCode: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp, completedAt: v.optional(timestamp),
+  }).index('by_project', ['projectId', 'createdAt']).index('by_asset', ['assetId', 'createdAt']).index('by_idempotency', ['idempotencyKey']).index('by_status', ['status', 'nextAttemptAt']),
+
+  beatAnalysisVersions: defineTable({
+    projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), sourceChecksum: v.string(), assetChecksum: v.string(), algorithmVersion: v.string(),
+    sourceJobId: v.optional(v.id('beatAnalysisJobs')), parentVersionId: v.optional(v.id('beatAnalysisVersions')), origin: v.union(v.literal('AUTO'), v.literal('MANUAL')),
+    outcome: v.union(v.literal('RELIABLE'), v.literal('AMBIGUOUS'), v.literal('SILENT'), v.literal('NO_GRID'), v.literal('MANUAL')), durationSeconds: v.number(), sampleRate: v.number(),
+    beatsSeconds: v.array(v.number()), confidence: v.number(), tempoBpm: v.optional(v.number()),
+    tempoSegments: v.optional(v.array(v.object({ startSeconds: v.number(), endSeconds: v.number(), bpm: v.number(), confidence: v.number() }))),
+    reasonCode: v.string(), createdByUserId: v.id('users'), createdAt: timestamp, correctionNote: v.optional(v.string()),
+    creationKey: v.optional(v.string()), requestHash: v.optional(v.string()),
+  }).index('by_project', ['projectId', 'createdAt']).index('by_asset', ['assetId', 'createdAt']).index('by_source', ['projectId', 'assetId', 'sourceChecksum', 'algorithmVersion']).index('by_parent', ['parentVersionId']).index('by_creation_key', ['creationKey']),
 
   renderJobs: defineTable({
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), operation: v.string(), preset: v.string(),

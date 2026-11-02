@@ -671,8 +671,9 @@ async function resolveCatalogModel(capability: CapabilityId, model: string | und
             for (const parameter of requiredParameters) if (!(parameter in parameters)) throw new AICapabilityError({ code: 'UNSUPPORTED_CAPABILITY', message: 'A required image control is unavailable.', provider: 'openrouter', model: configured, retryable: false });
         }
         if (outputModality === 'audio' && requiredParameters.includes('input_references')) {
-            const endpoints = await requestJson<{ data?: { endpoints?: Array<{ supports_voice_cloning?: boolean }> } }>(`/models/${configured}/endpoints`, { method: 'GET' }, options, capability, configured);
+            const endpoints = await requestJson<{ data?: { endpoints?: Array<{ supports_voice_cloning?: boolean; supports_multiple_audio_references?: boolean }> } }>(`/models/${configured}/endpoints`, { method: 'GET' }, options, capability, configured);
             if (!endpoints.body.data?.endpoints?.length || endpoints.body.data.endpoints.some((entry) => entry.supports_voice_cloning !== true)) throw new AICapabilityError({ code: 'UNSUPPORTED_CAPABILITY', message: 'Reference voice synthesis is unavailable.', provider: 'openrouter', model: configured, retryable: false });
+            if (requiredParameters.includes('multiple_audio_references') && endpoints.body.data.endpoints.some((entry) => entry.supports_multiple_audio_references !== true)) throw new AICapabilityError({ code: 'UNSUPPORTED_CAPABILITY', message: 'Multiple reference recordings are unavailable for this speech route.', provider: 'openrouter', model: configured, retryable: false });
         }
         return { id: configured, discovered: true, supportedVoices: Array.isArray(model.supported_voices) ? model.supported_voices.filter((voice): voice is string => typeof voice === 'string') : undefined };
     }
@@ -712,6 +713,11 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
     if (input.previousJobId && !/^gen-vid-\d+-[0-9A-Za-z]{20}$/.test(input.previousJobId)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'A valid completed provider job is required for continuation.', provider: 'openrouter', retryable: false });
     if (input.upscaleFactor !== undefined) assertFiniteRange(input.upscaleFactor, 'upscaleFactor', Number.EPSILON);
     if (input.creativity !== undefined && (!Number.isInteger(input.creativity) || input.creativity < 0)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Upscale creativity must be a non-negative integer.', provider: 'openrouter', retryable: false });
+    const sourceDerived = ['black-forest-labs/flux-video-edit', 'black-forest-labs/flux-video-upscale'].includes(input.model);
+    if (sourceDerived && (input.duration !== undefined || input.aspectRatio !== undefined || input.resolution !== undefined || input.frameImages?.length || input.generateAudio === true || input.previousJobId)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Source-derived video operations do not accept generation duration, framing or generated-audio controls.', provider: 'openrouter', retryable: false });
+    if (sourceDerived && (input.inputReferences?.length !== 1 || input.inputReferences[0].kind !== 'video')) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Source-derived video operations require exactly one video reference.', provider: 'openrouter', retryable: false });
+    if (input.model === 'black-forest-labs/flux-video-edit' && (input.upscaleFactor !== undefined || input.creativity !== undefined)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Video editing does not accept upscale controls.', provider: 'openrouter', retryable: false });
+    if (input.model === 'black-forest-labs/flux-video-upscale' && (input.upscaleFactor === undefined || input.upscaleFactor < 1.5 || input.upscaleFactor > 3 || ![0, 1].includes(input.creativity!))) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'FLUX upscale requires its documented factor and processing mode.', provider: 'openrouter', retryable: false });
     assertCapabilityRequest({ capability: 'VIDEO_GENERATION', model: input.model, parameters: [
         ...(input.aspectRatio ? ['aspect_ratio' as const] : []),
         ...(input.duration === undefined ? [] : ['duration' as const]),
@@ -747,7 +753,7 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
         ...(input.creativity === undefined ? {} : { creativity: input.creativity }),
         // OpenRouter enables audio by default for models that support it.
         // Keep video jobs silent unless the caller explicitly opts in.
-        generate_audio: input.generateAudio === true,
+        ...(sourceDerived ? {} : { generate_audio: input.generateAudio === true }),
         ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}),
     };
 }
@@ -900,6 +906,7 @@ export async function downloadVideo(jobId: string, options: OpenRouterTransportO
 
 export function buildSpeechSynthesisRequest(input: SpeechSynthesisRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.model?.trim() || !input.input?.trim() || (!input.voice?.trim() && !input.inputReferences?.length)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Speech model, text, and either a stock voice or reference sample are required.', provider: 'openrouter', capability: 'TEXT_TO_SPEECH', retryable: false });
+    if (input.responseFormat !== undefined && !['mp3', 'pcm'].includes(input.responseFormat)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'The documented speech endpoint supports MP3 or PCM output.', provider: 'openrouter', retryable: false });
     assertCapabilityRequest({ capability: 'TEXT_TO_SPEECH', model: input.model, parameters: [
         ...(input.responseFormat ? ['response_format' as const] : []),
         ...(input.speed === undefined ? [] : ['speed' as const]),
@@ -909,7 +916,23 @@ export function buildSpeechSynthesisRequest(input: SpeechSynthesisRequest, optio
     ], allowDiscoveredModel: options.allowDiscoveredModel });
     if (input.voice && input.inputReferences?.length) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Choose a stock voice or reference cloning, not both.', provider: 'openrouter', retryable: false });
     if (input.inputReferences && (input.inputReferences.length > 3 || input.inputReferences.some((reference) => !('url' in reference ? reference.url?.trim() : reference.data?.trim())))) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'One to three non-empty reference samples are required.', provider: 'openrouter', retryable: false });
-    return { model: input.model, input: input.input, ...(input.voice ? { voice: input.voice } : {}), ...(input.inputReferences ? { input_references: input.inputReferences.map((reference) => ({ type: 'input_audio', input_audio: reference })) } : {}), ...(input.responseFormat ? { response_format: input.responseFormat } : {}), ...(input.speed === undefined ? {} : { speed: input.speed }), ...(input.instructions ? { instructions: input.instructions } : {}), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
+    const references = input.inputReferences?.map(reference => {
+        const raw = reference as { url?: unknown; data?: unknown; format?: unknown };
+        if ((raw.url !== undefined) === (raw.data !== undefined)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'A reference recording needs exactly one URL or base64 body.', provider: 'openrouter', retryable: false });
+        if (raw.url !== undefined) {
+            let url: URL;
+            try { url = new URL(String(raw.url)); } catch { throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'A reference recording needs a valid HTTP URL.', provider: 'openrouter', retryable: false }); }
+            if (typeof raw.url !== 'string' || raw.url.length > 2048 || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'A reference recording needs a public HTTP URL without credentials.', provider: 'openrouter', retryable: false });
+        } else if (typeof raw.data !== 'string' || !raw.data.trim() || raw.data.length > 20 * 1024 * 1024) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Reference audio exceeds the documented base64 limit.', provider: 'openrouter', retryable: false });
+        if (raw.format !== undefined && (typeof raw.format !== 'string' || !raw.format.trim())) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Reference audio format must be a non-empty string.', provider: 'openrouter', retryable: false });
+        return { type: 'input_audio', input_audio: { ...(raw.url === undefined ? { data: raw.data } : { url: raw.url }), ...(raw.format === undefined ? {} : { format: raw.format }) } };
+    });
+    if (input.model === 'bytedance-seed/seed-audio-1-0') {
+        const count = references?.length ?? 0;
+        const placeholders = [...input.input.matchAll(/@Audio(\d+)/g)].map(match => Number(match[1]));
+        if (placeholders.some(index => index < 1 || index > count) || (count > 1 && Array.from({ length: count }, (_, index) => index + 1).some(index => !placeholders.includes(index)))) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Seed Audio requires each supplied recording to be addressed with its matching @Audio number.', provider: 'openrouter', retryable: false });
+    }
+    return { model: input.model, input: input.input, ...(input.voice ? { voice: input.voice } : {}), ...(references ? { input_references: references } : {}), ...(input.responseFormat ? { response_format: input.responseFormat } : {}), ...(input.speed === undefined ? {} : { speed: input.speed }), ...(input.instructions ? { instructions: input.instructions } : {}), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
 }
 
 export async function synthesizeSpeech(input: SpeechSynthesisRequest, options: OpenRouterTransportOptions = {}) {
@@ -919,7 +942,9 @@ export async function synthesizeSpeech(input: SpeechSynthesisRequest, options: O
     let lastError: AICapabilityError | undefined;
     for (const candidate of candidates) {
         try {
-            const resolved = await resolveCatalogModel('TEXT_TO_SPEECH', candidate, 'audio', options, input.inputReferences?.length ? ['input_references'] : ['voice']);
+            // References require live endpoint capabilities even when a caller
+            // selects a centrally registered speech model rather than discovery.
+            const resolved = await resolveCatalogModel('TEXT_TO_SPEECH', candidate, 'audio', input.inputReferences?.length ? { ...options, allowDiscoveredModel: true } : options, input.inputReferences?.length ? ['input_references', ...(input.inputReferences.length > 1 ? ['multiple_audio_references'] : [])] : ['voice']);
             const model = resolved.id;
             if (input.voice && resolved.discovered && !options.mock && !resolved.supportedVoices?.includes(input.voice)) throw new AICapabilityError({ code: 'UNSUPPORTED_CAPABILITY', message: 'The selected stock voice is no longer available for this model.', provider: 'openrouter', model, retryable: false });
             const request = { ...input, model };

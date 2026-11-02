@@ -20,11 +20,11 @@ const originalLoad = Module._load;
 const member = { studio: { _id: 'studio_1', externalId: 'studio' }, user: { _id: 'user_1' }, identity: { externalId: 'owner' } };
 Module._load = function(request, parent, isMain) {
   if (parent?.filename.includes('/convex/')) {
-    if (request === './_generated/server') return { query: value => value, mutation: value => value };
+    if (request === './_generated/server') return { query: value => value, mutation: value => value, internalMutation: value => value, internalAction: value => value };
     if (request === './authorization') return {
       requireMember: async (ctx, studio) => { if (studio !== 'studio' || ctx.role === 'GUEST') throw new Error('Forbidden studio'); return member; },
-      requireProjectRole: async (ctx, projectId, roles) => { if (projectId !== 'project_1' || !roles.includes(ctx.role)) throw new Error('Forbidden project'); return { ...member, project: await ctx.db.get(projectId) }; },
-      requireProjectAccess: async (ctx, projectId) => { if (projectId !== 'project_1' || ctx.role === 'GUEST') throw new Error('Forbidden project'); return { ...member, project: await ctx.db.get(projectId) }; },
+      requireProjectRole: async (ctx, projectId, roles) => { if (projectId !== 'project_1' || !roles.includes(ctx.role)) throw new Error('Forbidden project'); return { ...member, user: ctx.actorUserId ? {_id:ctx.actorUserId} : member.user, projectRole: ctx.role, project: await ctx.db.get(projectId) }; },
+      requireProjectAccess: async (ctx, projectId) => { if (projectId !== 'project_1' || ctx.role === 'GUEST') throw new Error('Forbidden project'); return { ...member, user: ctx.actorUserId ? {_id:ctx.actorUserId} : member.user, projectRole: ctx.role, project: await ctx.db.get(projectId) }; },
     };
     if (request === './resourceStates') return {
       ensureResourceState: async (ctx, args) => { ctx.states.set(`${args.resourceType}:${args.resourceId}`, 'DRAFT'); },
@@ -88,7 +88,7 @@ async function check(name, run) { await run(); checks++; console.log(`PASS ${nam
 let key = 0;
 const apply = (ctx, id, kind, input) => editor.apply.handler(ctx, { timelineId: id, kind, input, idempotencyKey: `finishing-test-${++key}` });
 
-(async () => {
+async function runFinishingTests() {
   try {
     await check('writer flag off retains caption/non-cut denials with no new timeline', async () => {
       delete process.env.FINALFRAME_MANIFEST_V5_ENABLED; const ctx = fixture(); const before = ctx.count('timelines');
@@ -186,4 +186,6 @@ const apply = (ctx, id, kind, input) => editor.apply.handler(ctx, { timelineId: 
     });
     console.log(`Finishing v5 backend: ${checks} PASS; actual handlers with in-memory storage/auth fixtures, no database/provider calls.`);
   } finally { if (originalFlag === undefined) delete process.env.FINALFRAME_MANIFEST_V5_ENABLED; else process.env.FINALFRAME_MANIFEST_V5_ENABLED=originalFlag; }
-})().catch(error=>{console.error(error);process.exitCode=1;});
+}
+module.exports={fixture,editor,assembly,apply};
+if(require.main===module)runFinishingTests().catch(error=>{console.error(error);process.exitCode=1;});
