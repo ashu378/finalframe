@@ -39,7 +39,8 @@ export interface TimelineOperationToolbarProps {
   className?: string;
 }
 
-const transitions: TransitionKind[] = ['CUT', 'DISSOLVE', 'FADE', 'WIPE', 'SLIDE'];
+// Only expose effects that survive canonical assembly and real rendering.
+const transitions: TransitionKind[] = ['CUT'];
 
 export function TimelineOperationToolbar({
   selectedClipId,

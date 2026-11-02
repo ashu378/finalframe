@@ -11,10 +11,17 @@ const checks = [];
 async function check(name, fn) { await fn(); checks.push(name); console.log('PASS ' + name); }
 function fetcher(body) { return async () => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }); }
 async function main() {
-  await check('image quote uses one output at verified flat 1K endpoint prices', async () => {
+  await check('image hold covers every documented output variant and a receipt margin', async () => {
     const id = preparationModel('CHARACTER_REFERENCE').id;
     const result = await quotePreparation({ kind: 'CHARACTER_REFERENCE', text: 'project reference' }, fetcher({ id, endpoints: [{ pricing: [{ billable: 'output_image', unit: 'image', cost_usd: .13 }] }, { pricing: [{ billable: 'output_image', unit: 'image', cost_usd: .15 }] }] }));
-    assert.equal(result.estimatedProviderCostUsd, .15);
+    assert.equal(result.estimatedProviderCostUsd, .1675);
+    const observed = await quotePreparation({ kind: 'CHARACTER_REFERENCE', text: 'controlled pigeon sample' }, fetcher({ id, endpoints: [{ pricing: [
+      { billable: 'output_image', unit: 'image', cost_usd: .13 },
+      { billable: 'output_image', unit: 'image', variant: '2k', cost_usd: .15 },
+      { billable: 'output_image', unit: 'image', variant: '4k', cost_usd: .17 },
+    ] }] }));
+    assert.equal(observed.estimatedProviderCostUsd, .188501);
+    assert(observed.estimatedProviderCostUsd > .154407, 'hold covers the actual observed image receipt');
   });
   await check('unknown image billing at any eligible endpoint fails closed', async () => {
     const id = preparationModel('CHARACTER_REFERENCE').id;

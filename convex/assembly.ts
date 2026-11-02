@@ -53,6 +53,13 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function requireSupportedClipEffects(clip: { transition?: unknown; metadata?: unknown }) {
+  const metadata = record(clip.metadata);
+  const transitions = record(clip.transition);
+  if (Object.values(transitions).some(value => record(value).kind && record(value).kind !== "CUT")) throw new Error("Non-cut transition export is not implemented. Create a revised timeline with cuts before exporting.");
+  if (metadata.captionId || metadata.captionTrackId || metadata.captionsId || Array.isArray(metadata.cues) && metadata.cues.length) throw new Error("Caption authoring is not connected to canonical export. This assembly cannot silently omit captions.");
+}
+
 function stableHash(value: unknown) {
   const text = JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
     ? Object.keys(item).sort().reduce((out, key) => ({ ...out, [key]: item[key] }), {})
@@ -153,6 +160,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
   const trackEnds = new Map<string, number>();
 
   for (const [orderIndex, clip] of selectedClips.entries()) {
+    requireSupportedClipEffects(clip);
     const track = tracks.find((candidate) => candidate._id === clip.trackId);
     if (!track) throw new Error("Assembly is blocked because a timeline track is missing.");
     const start = numberValue(clip.startSeconds);

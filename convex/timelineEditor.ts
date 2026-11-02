@@ -320,6 +320,7 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     const cues = input.cues;
     if (cues !== undefined && !Array.isArray(cues)) throw new Error("Caption cues must be an array.");
     if (captionTrackId === undefined && cues === undefined) throw new Error("Caption track ID or cues are required.");
+    if (captionTrackId || Array.isArray(cues) && cues.length) throw new Error("Caption authoring is not connected to canonical export yet. No edit was saved.");
     clip.metadata = { ...clip.metadata, ...(captionTrackId ? { captionTrackId } : {}), ...(cues !== undefined ? { cues } : {}) };
     if (captionTrackId) clip.captionTrackId = captionTrackId;
     return state;
@@ -354,6 +355,7 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     if (position !== "in" && position !== "out") throw new Error("Transition position must be 'in' or 'out'.");
     const transitionKind = stringValue(input.transitionKind ?? input.type, "Transition type");
     if (!["CUT", "DISSOLVE", "FADE", "WIPE", "SLIDE"].includes(transitionKind)) throw new Error("Transition type is not supported.");
+    if (transitionKind !== "CUT") throw new Error("Only cut transitions are connected to canonical export yet. No edit was saved.");
     const durationSeconds = numberValue(input.durationSeconds, "Transition duration");
     if (durationSeconds > clip.durationSeconds) throw new Error("Transition cannot be longer than the clip.");
     const transition = { kind: transitionKind, durationSeconds };

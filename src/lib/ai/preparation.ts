@@ -23,12 +23,15 @@ export async function quotePreparation(input: { kind: PreparationKind; text?: st
   let usd: number;
   if (image) {
     const costs = endpoints.map((endpoint: Record<string, any>) => {
-      const sku = Array.isArray(endpoint.pricing) ? endpoint.pricing.find((item: Record<string, unknown>) => item.billable === 'output_image' && item.unit === 'image' && !item.variant) : null;
-      if (!sku) throw new Error('Image price cannot be bounded for every endpoint.');
-      return positive(sku.cost_usd);
+      const skus = Array.isArray(endpoint.pricing) ? endpoint.pricing.filter((item: Record<string, unknown>) => item.billable === 'output_image' && item.unit === 'image') : [];
+      if (!skus.length) throw new Error('Image price cannot be bounded for every endpoint.');
+      return Math.max(...skus.map((sku: Record<string, unknown>) => positive(sku.cost_usd)));
     });
     if (!costs.length) throw new Error('Image price cannot be bounded.');
-    usd = Math.max(...costs);
+    // The live 1K request exceeded its base output-image SKU. Reserve the
+    // largest documented output variant plus a margin rather than assuming
+    // the base SKU is a complete receipt. Settlement uses actual reported cost.
+    usd = Math.max(...costs) * 1.05 + .01;
   } else if (input.kind === 'TRANSCRIPT') {
     if (!Number.isFinite(input.durationSeconds) || input.durationSeconds! <= 0 || input.durationSeconds! > 60) throw new Error('Use a recording of at most 60 seconds.');
     usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).prompt))) * Math.ceil(input.durationSeconds!);
