@@ -1,6 +1,6 @@
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireMember, requireMemberById } from "./authorization";
+import { requireMember, requireMemberById, requireProjectAccess } from "./authorization";
 
 export type ReadCtx = QueryCtx | MutationCtx;
 export type StudioId = Id<"studios">;
@@ -170,13 +170,16 @@ export async function requireStudioMemberById(
   return { studio: member.studio, membership };
 }
 
-/** Fetch a production only after enforcing its studio ownership boundary. */
+/** A studio membership never grants access to another client's project. */
 export async function getProduction(ctx: ReadCtx, productionId: string, _legacyOwnerExternalId?: string) {
   const production = await ctx.db.get(productionId as Id<"productions">);
   if (!production) {
     throw new Error("Production not found");
   }
   await requireStudio(ctx, production.studioExternalId);
+  if (!production.projectId) throw new Error("Production project ownership requires migration.");
+  const access = await requireProjectAccess(ctx, production.projectId);
+  if (access.project.studioExternalId !== production.studioExternalId) throw new Error("Production project ownership does not match its workspace.");
   return production;
 }
 

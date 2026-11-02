@@ -277,3 +277,13 @@ export function getRegisteredModelIds(): string[] {
 export function isRegisteredModelId(model: string): boolean {
     return getRegisteredModelIds().includes(model);
 }
+
+
+/** Production preparation uses conservative, documented billing units. Model
+ * overrides remain central; unsupported model/unit combinations fail closed. */
+export const PREPARATION_MODELS = {
+    image: { id: configuredModel('OPENROUTER_REFERENCE_IMAGE_MODEL', 'sourceful/riverflow-v2.6-pro'), capability: 'IMAGE_GENERATION' as const, billing: 'ENDPOINT_IMAGE_SKUS' as const },
+    narration: { id: configuredModel('OPENROUTER_NARRATION_MODEL', 'mistralai/voxtral-mini-tts-3-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'CHARACTER' as const, certifiedModel: 'mistralai/voxtral-mini-tts-3-0' },
+    referenceVoice: { id: configuredModel('OPENROUTER_REFERENCE_VOICE_MODEL', 'bytedance-seed/seed-audio-1-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'OUTPUT_SECONDS' as const, certifiedModel: 'bytedance-seed/seed-audio-1-0', maxOutputSeconds: 120 },
+    transcription: { id: configuredModel('OPENROUTER_PREPARATION_STT_MODEL', 'mistralai/voxtral-mini-transcribe-3-0'), capability: 'TRANSCRIPTION' as const, billing: 'INPUT_SECONDS' as const, certifiedModel: 'mistralai/voxtral-mini-transcribe-3-0' },
+};

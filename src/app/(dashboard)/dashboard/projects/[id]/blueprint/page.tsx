@@ -11,8 +11,12 @@ import { requireAuth } from '@/lib/guards';
 import { getProjectById } from '@/lib/project/actions';
 import { getScenesForProject } from '@/lib/scene/actions';
 import { BlueprintEditor } from '@/components/project';
-import { getAssets } from '@/lib/assets/actions';
+import { getProjectAssets } from '@/lib/assets/actions';
 import styles from './page.module.css';
+import { getEpisodeNavigation } from '@/lib/production/episode-actions';
+import { getProductionWorkspace } from '@/lib/production/actions';
+import { EpisodePicker } from '@/components/production-workspace/episode-picker';
+import { EpisodeBlueprint } from '@/components/production-workspace/episode-blueprint';
 
 export const metadata = {
     title: 'Blueprint Editor',
@@ -21,11 +25,30 @@ export const metadata = {
 
 interface BlueprintPageProps {
     params: Promise<{ id: string }>;
+    searchParams: Promise<{ production?: string }>;
 }
 
-export default async function BlueprintPage({ params }: BlueprintPageProps) {
+export default async function BlueprintPage({ params, searchParams }: BlueprintPageProps) {
     await requireAuth();
     const { id } = await params;
+    const query = await searchParams;
+    const navigation = await getEpisodeNavigation(id);
+    if (!navigation) notFound();
+    const selectedProductionId = query.production || (navigation.options.length === 1 ? navigation.options[0].productionId : undefined);
+    if (selectedProductionId && !navigation.options.some((option) => option.productionId === selectedProductionId)) notFound();
+    const picker = <EpisodePicker projectExternalId={id} options={navigation.options} selectedProductionId={selectedProductionId} nextEpisodeNumber={navigation.nextEpisodeNumber} />;
+    if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6">{picker}<p className="text-sm text-muted-foreground">Select an episode to review its plan.</p></div>;
+    if (selectedProductionId && navigation.options.some((option) => option.episodeId)) {
+        const workspace = await getProductionWorkspace(id, selectedProductionId);
+        if (!workspace.success || !workspace.production) notFound();
+        const plan = workspace.plan;
+        return <div className="mx-auto max-w-6xl space-y-6 py-5 sm:py-8">{picker}<EpisodeBlueprint
+            projectId={id} productionId={selectedProductionId} planId={plan?._id}
+            summary={plan?.plan?.summary || ''}
+            approved={workspace.version?.status === 'APPROVED' && workspace.version?.sourcePlanId === plan?._id}
+            sequences={Array.isArray(plan?.plan?.sequences) ? plan.plan.sequences : workspace.sequences || []}
+        /></div>;
+    }
 
     const [result, scenesResult] = await Promise.all([
         getProjectById(id),
@@ -41,10 +64,11 @@ export default async function BlueprintPage({ params }: BlueprintPageProps) {
     const scenes = scenesResult.success ? (scenesResult.scenes || []) : [];
 
     // Fetch assets for the studio
-    const assets = await getAssets(project.studio_id);
+    const assets = await getProjectAssets(project.id);
 
     return (
         <div className="mx-auto max-w-6xl py-5 sm:py-8">
+            {picker}
             <header className="mb-10 space-y-4">
                 <Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground">
                     <ArrowLeft className="size-4" /> Back to project

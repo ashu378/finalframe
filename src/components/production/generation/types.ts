@@ -27,7 +27,13 @@ export interface GenerationJobView {
     jobId?: string;
     shotId: string;
     status?: string;
+    executionStage?: string;
     progress?: number;
     errorMessage?: string;
     assetId?: string;
+    provider?: string;
+    model?: string;
+    estimatedProviderCostUsd?: number;
+    providerCostUsd?: number;
+    request?: Record<string, unknown>;
 }

@@ -1,11 +1,13 @@
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireAdmin, requireMember } from "./authorization";
+import { requireAdmin, requireMember, requireProjectAccess } from "./authorization";
 import { now } from "./_shared";
+export { estimateGenerationCredits } from "../src/lib/credits/pricing";
 
 type ReadCtx = QueryCtx | MutationCtx;
+type WalletOwner = { studio: Doc<"studios"> };
 type ReservationState = "RESERVED" | "COMMITTED" | "RELEASED" | "EXPIRED" | "RECONCILIATION_REQUIRED";
 
 function object(value: unknown): Record<string, unknown> {
@@ -22,7 +24,7 @@ async function getStudioForMember(ctx: ReadCtx, studioExternalId: string) {
   return await requireMember(ctx, studioExternalId);
 }
 
-async function wallet(ctx: MutationCtx, member: Awaited<ReturnType<typeof requireMember>>) {
+async function wallet(ctx: MutationCtx, member: WalletOwner) {
   const existing = await ctx.db.query("credits").withIndex("by_studio", (q) => q.eq("studioExternalId", member.studio.externalId)).unique();
   if (existing) return existing;
   const timestamp = now();
@@ -30,7 +32,7 @@ async function wallet(ctx: MutationCtx, member: Awaited<ReturnType<typeof requir
   return await ctx.db.get(id);
 }
 
-async function changeWallet(ctx: MutationCtx, member: Awaited<ReturnType<typeof requireMember>>, availableDelta: number, reservedDelta: number) {
+async function changeWallet(ctx: MutationCtx, member: WalletOwner, availableDelta: number, reservedDelta: number) {
   const current = await wallet(ctx, member);
   if (!current) throw new Error("Credit wallet could not be initialized.");
   const balance = current.balance + availableDelta;
@@ -45,7 +47,7 @@ async function changeWallet(ctx: MutationCtx, member: Awaited<ReturnType<typeof 
 }
 
 async function ledgerForReservation(ctx: ReadCtx, reservation: { _id: Id<"reservations">; studioExternalId: string }) {
-  return (await ctx.db.query("ledger").withIndex("by_studio", (q) => q.eq("studioExternalId", reservation.studioExternalId)).collect()).filter((entry) => entry.reservationId === reservation._id);
+  return await ctx.db.query("ledger").withIndex("by_reservation", (q) => q.eq("reservationId", reservation._id)).take(100);
 }
 
 function reservationState(entries: Array<{ entryType: string }>): ReservationState {
@@ -67,6 +69,13 @@ async function canonicalReservation(ctx: ReadCtx, reservationId: Id<"reservation
   const reservation = await ctx.db.get(reservationId);
   if (!reservation) throw new Error("Reservation not found.");
   const member = await requireMember(ctx, reservation.studioExternalId);
+  const job = reservation.generationJobId ? await ctx.db.get(reservation.generationJobId) : reservation.renderJobId ? await ctx.db.get(reservation.renderJobId) : null;
+  if (reservation.generationJobId || reservation.renderJobId) {
+    const production = job ? await ctx.db.get(job.productionId) : null;
+    const projectId = job?.projectId ?? production?.projectId;
+    if (!job || !projectId || job.studioExternalId !== reservation.studioExternalId) throw new Error("Reservation project ownership is unavailable.");
+    await requireProjectAccess(ctx, projectId, undefined, { includeInactive: true });
+  }
   return { reservation, member };
 }
 
@@ -153,26 +162,70 @@ export const reserve = mutation({
   args: { studioExternalId: v.string(), amount: v.number(), idempotencyKey: v.string(), generationJobId: v.optional(v.id("generationJobs")), renderJobId: v.optional(v.id("renderJobs")), estimateId: v.optional(v.id("estimates")), expiresInMs: v.optional(v.number()), metadata: v.optional(v.any()) },
   handler: async (ctx, args) => {
     const member = await getStudioForMember(ctx, args.studioExternalId);
-    const idempotencyKey = requireKey(args.idempotencyKey);
-    if (!Number.isInteger(args.amount) || args.amount <= 0) throw new Error("Credit amount must be a positive integer.");
-    const existing = await ctx.db.query("reservations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
-    if (existing) {
-      if (existing.studioExternalId !== member.studio.externalId || existing.amount !== args.amount) throw new Error("Reservation idempotency key is already used for a different amount or studio.");
-      const entries = await ledgerForReservation(ctx, existing);
-      return { reservationId: existing._id, status: reservationState(entries), amount: existing.amount, expiresAt: existing.expiresAt };
-    }
-    const timestamp = now();
-    const reservationId = await ctx.db.insert("reservations", { studioExternalId: member.studio.externalId, studioId: member.studio._id, estimateId: args.estimateId, generationJobId: args.generationJobId, renderJobId: args.renderJobId, amount: args.amount, idempotencyKey, reservedAt: timestamp, expiresAt: timestamp + Math.min(Math.max(args.expiresInMs ?? 30 * 60 * 1000, 60_000), 24 * 60 * 60 * 1000), createdAt: timestamp });
-    await changeWallet(ctx, member, -args.amount, args.amount);
-    await appendLedger(ctx, { studioExternalId: member.studio.externalId, studioId: member.studio._id, entryType: "RESERVE", amount: -args.amount, sourceType: "RESERVATION", sourceId: reservationId.toString(), idempotencyKey: `reserve:${idempotencyKey}`, reservationId, metadata: args.metadata });
-    return { reservationId, status: "RESERVED" as const, amount: args.amount, expiresAt: timestamp + Math.min(Math.max(args.expiresInMs ?? 30 * 60 * 1000, 60_000), 24 * 60 * 60 * 1000) };
+    return await reserveCreditsInTransaction(ctx, member, args);
   },
 });
+
+type CreditReservationInput = {
+  amount: number; idempotencyKey: string; generationJobId?: Id<"generationJobs">;
+  renderJobId?: Id<"renderJobs">; estimateId?: Id<"estimates">; expiresInMs?: number; metadata?: unknown;
+};
+
+async function reserveCreditsInTransaction(ctx: MutationCtx, member: WalletOwner, args: CreditReservationInput) {
+  const idempotencyKey = requireKey(args.idempotencyKey);
+  if (!Number.isInteger(args.amount) || args.amount <= 0) throw new Error("Credit amount must be a positive integer.");
+  const existing = await ctx.db.query("reservations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
+  if (existing) {
+    if (existing.studioExternalId !== member.studio.externalId || existing.amount !== args.amount || existing.generationJobId !== args.generationJobId || existing.renderJobId !== args.renderJobId) {
+      throw new Error("Reservation idempotency key is already used for a different request.");
+    }
+    return { reservationId: existing._id, status: reservationState(await ledgerForReservation(ctx, existing)), amount: existing.amount, expiresAt: existing.expiresAt };
+  }
+  const timestamp = now();
+  const expiresAt = timestamp + Math.min(Math.max(args.expiresInMs ?? 30 * 60 * 1000, 60_000), 24 * 60 * 60 * 1000);
+  const reservationId = await ctx.db.insert("reservations", {
+    studioExternalId: member.studio.externalId, studioId: member.studio._id, estimateId: args.estimateId,
+    generationJobId: args.generationJobId, renderJobId: args.renderJobId, amount: args.amount, idempotencyKey,
+    reservedAt: timestamp, expiresAt, createdAt: timestamp,
+  });
+  await changeWallet(ctx, member, -args.amount, args.amount);
+  await appendLedger(ctx, { studioExternalId: member.studio.externalId, studioId: member.studio._id, entryType: "RESERVE", amount: -args.amount, sourceType: "RESERVATION", sourceId: reservationId.toString(), idempotencyKey: `reserve:${idempotencyKey}`, reservationId, metadata: args.metadata });
+  return { reservationId, status: "RESERVED" as const, amount: args.amount, expiresAt };
+}
+
+/** Shared transaction helper, not a public Convex endpoint. The job create
+ * mutation owns authorization and atomically reserves before scheduling work. */
+export async function reserveGenerationCreditsInTransaction(ctx: MutationCtx, args: {
+  studioExternalId: string; amount: number; idempotencyKey: string; generationJobId: Id<"generationJobs">;
+}) {
+  const member = await requireMember(ctx, args.studioExternalId);
+  const job = await ctx.db.get(args.generationJobId);
+  if (!job || job.studioExternalId !== member.studio.externalId) throw new Error("Generation reservation ownership mismatch.");
+  return await reserveCreditsInTransaction(ctx, member, args);
+}
+
+/** Internal workers cannot rely on a browser session. Resolve the owner from
+ * the job's canonical reservation, never from worker-supplied studio IDs. */
+export async function settleGenerationCreditsInTransaction(ctx: MutationCtx, args: {
+  jobId: Id<"generationJobs">; outcome: "COMMIT" | "RELEASE"; actualAmount?: number;
+}) {
+  const job = await ctx.db.get(args.jobId);
+  if (!job?.canonicalReservationId) throw new Error("Generation credit reservation is missing.");
+  const reservation = await ctx.db.get(job.canonicalReservationId);
+  if (!reservation || reservation.generationJobId !== job._id || reservation.studioExternalId !== job.studioExternalId) throw new Error("Generation reservation ownership mismatch.");
+  const studio = await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", job.studioExternalId)).unique();
+  if (!studio) throw new Error("Generation studio not found.");
+  const trusted = { reservation, member: { studio } };
+  return args.outcome === "COMMIT"
+    ? await commitInTransaction(ctx, reservation._id, args.actualAmount, trusted)
+    : await releaseInTransaction(ctx, reservation._id, trusted);
+}
 
 export const commit = mutation({
   args: { reservationId: v.id("reservations"), actualAmount: v.optional(v.number()), idempotencyKey: v.optional(v.string()), metadata: v.optional(v.any()) },
   handler: async (ctx, args) => {
     const { reservation, member } = await canonicalReservation(ctx, args.reservationId);
+    if (reservation.generationJobId) throw new Error("Generation reservations are settled by the worker.");
     const entries = await ledgerForReservation(ctx, reservation);
     const state = reservationState(entries);
     if (state !== "RESERVED") return { reservationId: reservation._id, status: state };
@@ -193,6 +246,7 @@ export const release = mutation({
   args: { reservationId: v.id("reservations"), reason: v.optional(v.string()), expired: v.optional(v.boolean()), idempotencyKey: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { reservation, member } = await canonicalReservation(ctx, args.reservationId);
+    if (reservation.generationJobId) throw new Error("Generation reservations are settled by the worker.");
     const entries = await ledgerForReservation(ctx, reservation);
     const state = reservationState(entries);
     if (state !== "RESERVED") return { reservationId: reservation._id, status: state };
@@ -208,8 +262,9 @@ export const finalize = mutation({
   handler: async (ctx, args) => args.outcome === "COMMIT" ? await commitInTransaction(ctx, args.reservationId, args.actualAmount) : await releaseInTransaction(ctx, args.reservationId),
 });
 
-async function commitInTransaction(ctx: MutationCtx, reservationId: Id<"reservations">, actualAmount?: number) {
-  const { reservation, member } = await canonicalReservation(ctx, reservationId);
+async function commitInTransaction(ctx: MutationCtx, reservationId: Id<"reservations">, actualAmount?: number, trusted?: { reservation: Doc<"reservations">; member: WalletOwner }) {
+  const { reservation, member } = trusted ?? await canonicalReservation(ctx, reservationId);
+  if (!trusted && reservation.generationJobId) throw new Error("Generation reservations are settled by the worker.");
   const entries = await ledgerForReservation(ctx, reservation);
   const state = reservationState(entries);
   if (state !== "RESERVED") return state;
@@ -222,8 +277,9 @@ async function commitInTransaction(ctx: MutationCtx, reservationId: Id<"reservat
   return "COMMITTED";
 }
 
-async function releaseInTransaction(ctx: MutationCtx, reservationId: Id<"reservations">) {
-  const { reservation, member } = await canonicalReservation(ctx, reservationId);
+async function releaseInTransaction(ctx: MutationCtx, reservationId: Id<"reservations">, trusted?: { reservation: Doc<"reservations">; member: WalletOwner }) {
+  const { reservation, member } = trusted ?? await canonicalReservation(ctx, reservationId);
+  if (!trusted && reservation.generationJobId) throw new Error("Generation reservations are settled by the worker.");
   const state = reservationState(await ledgerForReservation(ctx, reservation));
   if (state !== "RESERVED") return state;
   await changeWallet(ctx, member, reservation.amount, -reservation.amount);
@@ -245,7 +301,7 @@ export const expireReservations = mutation({
   handler: async (ctx, args) => {
     const member = await getStudioForMember(ctx, args.studioExternalId);
     const rows = await ctx.db.query("reservations").withIndex("by_studio", (q) => q.eq("studioExternalId", member.studio.externalId)).collect();
-    const expired = rows.filter((reservation) => reservation.expiresAt <= now()).slice(0, Math.min(Math.max(args.limit ?? 100, 1), 500));
+    const expired = rows.filter((reservation) => !reservation.generationJobId && reservation.expiresAt <= now()).slice(0, Math.min(Math.max(args.limit ?? 100, 1), 500));
     const results = [];
     for (const reservation of expired) results.push(await releaseInTransaction(ctx, reservation._id));
     return { expired: results.length, results };
@@ -278,8 +334,11 @@ export const getReservationForJob = query({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.generationJobId);
     if (!job) throw new Error("Generation job not found.");
-    await requireMember(ctx, job.studioExternalId);
-    const reservations = await ctx.db.query("reservations").withIndex("by_generation_job", (q) => q.eq("generationJobId", args.generationJobId)).collect();
+    const production = await ctx.db.get(job.productionId);
+    const projectId = job.projectId ?? production?.projectId;
+    if (!projectId) throw new Error("Generation reservation project is unavailable.");
+    await requireProjectAccess(ctx, projectId);
+    const reservations = await ctx.db.query("reservations").withIndex("by_generation_job", (q) => q.eq("generationJobId", args.generationJobId)).order("desc").take(10);
     const reservation = reservations.sort((left, right) => right.createdAt - left.createdAt)[0];
     return reservation ? { ...reservation, status: reservationState(await ledgerForReservation(ctx, reservation)) } : null;
   },
@@ -288,8 +347,8 @@ export const getReservationForJob = query({
 export const listReservations = query({
   args: { studioExternalId: v.string() },
   handler: async (ctx, args) => {
-    const member = await getStudioForMember(ctx, args.studioExternalId);
-    const rows = await ctx.db.query("reservations").withIndex("by_studio", (q) => q.eq("studioExternalId", member.studio.externalId)).order("desc").collect();
+    const member = await requireAdmin(ctx, args.studioExternalId);
+    const rows = await ctx.db.query("reservations").withIndex("by_studio", (q) => q.eq("studioExternalId", member.studio.externalId)).order("desc").take(200);
     return await Promise.all(rows.map(async (reservation) => ({ reservation, status: reservationState(await ledgerForReservation(ctx, reservation)) })));
   },
 });
@@ -297,7 +356,7 @@ export const listReservations = query({
 export const getLedger = query({
   args: { studioExternalId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const member = await getStudioForMember(ctx, args.studioExternalId);
+    const member = await requireAdmin(ctx, args.studioExternalId);
     return await ctx.db.query("ledger").withIndex("by_studio", (q) => q.eq("studioExternalId", member.studio.externalId)).order("desc").take(Math.min(Math.max(args.limit ?? 100, 1), 500));
   },
 });

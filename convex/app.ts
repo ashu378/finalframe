@@ -1,30 +1,16 @@
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAdmin, requireMember, requireUser } from "./authorization";
+import { requireAdmin, requireCurrentMember, requireMember, requireProjectRole } from "./authorization";
 
 const now = () => Date.now();
 
 async function accessibleStudio(ctx: QueryCtx | MutationCtx) {
-  const authorized = await requireUser(ctx);
-  const memberships = await ctx.db.query("members")
-    .withIndex("by_user", q => q.eq("userId", authorized.user._id))
-    .collect();
-  const activeMembership = memberships.find((membership) => membership.status === "active");
-  const legacyMembership = !activeMembership
-    ? await ctx.db.query("studioMembers")
-      .withIndex("by_user", q => q.eq("userExternalId", authorized.identity.externalId))
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .first()
-    : null;
-  const studio = activeMembership
-    ? await ctx.db.get(activeMembership.studioId)
-    : legacyMembership?.studioExternalId
-      ? await ctx.db.query("studios").withIndex("by_external_id", q => q.eq("externalId", legacyMembership.studioExternalId)).first()
-    : await ctx.db.query("studios").withIndex("by_owner_user", q => q.eq("ownerUserId", authorized.user._id)).first();
-  if (!studio) throw new Error("Create your studio before continuing.");
-  await requireMember(ctx, studio.externalId);
-  return { identity: authorized.identity, user: authorized.user, studio };
+  // Keep dashboard resolution aligned with the authorization helper used by
+  // project operations. It also handles legacy ownerExternalId records while
+  // account.ensureAccount backfills canonical owner and membership fields.
+  const member = await requireCurrentMember(ctx);
+  return { identity: member.identity, user: member.user, studio: member.studio };
 }
 
 export const dashboard = query({
@@ -89,10 +75,15 @@ export const saveFriendlyOnboarding = mutation({
 });
 
 export const listAssets = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { projectId: v.optional(v.id("projects")) },
+  handler: async (ctx, args) => {
     const { studio } = await accessibleStudio(ctx);
-    return await ctx.db.query("assets").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").collect();
+    if (args.projectId) {
+      await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR", "REVIEWER", "VIEWER"]);
+      return await ctx.db.query("assets").withIndex("by_project", q => q.eq("projectId", args.projectId)).order("desc").collect();
+    }
+    const assets = await ctx.db.query("assets").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").collect();
+    return assets.filter((asset) => asset.scope !== "PROJECT" && !asset.projectId && !asset.deletedAt);
   },
 });
 
@@ -101,7 +92,11 @@ export const updateAsset = mutation({
   handler: async (ctx, args) => {
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Media not found.");
-    await requireMember(ctx, asset.studioExternalId);
+    if (asset.projectId) {
+      await requireProjectRole(ctx, asset.projectId, ["OWNER", "EDITOR"]);
+    } else {
+      await requireMember(ctx, asset.studioExternalId);
+    }
     const patch: Record<string, unknown> = { updatedAt: now() };
     if (args.name !== undefined) patch.name = args.name;
     if (args.metadata !== undefined) patch.metadata = args.metadata;
@@ -201,6 +196,9 @@ export const adminOperations = query({
         status: job.status,
         provider: job.provider,
         model: job.model,
+        estimatedProviderCostUsd: job.estimatedProviderCostUsd,
+        providerCostUsd: job.providerCostUsd,
+        routeReason: typeof job.request === "object" && job.request !== null && !Array.isArray(job.request) && typeof (job.request as Record<string, unknown>).routeReason === "string" ? (job.request as Record<string, unknown>).routeReason as string : undefined,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
         errorMessage: job.errorMessage,

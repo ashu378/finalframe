@@ -16,6 +16,8 @@ import type {
 export interface AssetUploadRequest {
     ownerExternalId: string;
     studioExternalId: string;
+    scope?: 'GLOBAL' | 'PROJECT';
+    projectId?: string;
     productionId?: string;
     externalId?: string;
     name?: string;
@@ -53,7 +55,7 @@ export interface IngestedAsset {
 }
 
 export interface ConvexAssetTransport {
-    generateUploadUrl(input: Pick<AssetUploadRequest, 'ownerExternalId' | 'studioExternalId'>): Promise<string>;
+    generateUploadUrl(input: Pick<AssetUploadRequest, 'ownerExternalId' | 'studioExternalId' | 'projectId'>): Promise<string>;
     ingestAsset(input: AssetIngestRequest): Promise<IngestedAsset>;
     resolveAuthorizedMedia(input: {
         ownerExternalId: string;
@@ -65,6 +67,7 @@ export function validateAssetUploadRequest(input: AssetUploadRequest): string[] 
     const errors: string[] = [];
     if (!input.ownerExternalId) errors.push('ownerExternalId is required');
     if (!input.studioExternalId) errors.push('studioExternalId is required');
+    if (input.scope === 'PROJECT' && !input.projectId) errors.push('projectId is required for project assets');
     if (!input.source) errors.push('source is required');
     if (!input.roles.length) errors.push('at least one asset role is required');
     if (!input.provenance?.createdAt) errors.push('provenance.createdAt is required');
@@ -91,6 +94,8 @@ export function toAssetMetadata(input: AssetUploadRequest) {
     return {
         contractVersion: 'media-asset.v1' as const,
         kind: inferAssetKind(input.mimeType),
+        scope: input.scope ?? 'GLOBAL',
+        projectId: input.projectId,
         sizeBytes: input.sizeBytes,
         technical: input.metadata,
         consent: input.consent,

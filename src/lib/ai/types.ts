@@ -6,6 +6,8 @@
  * adapter layer.
  */
 
+import type { VideoTask, VideoType } from './video-routing';
+
 export type AIProvider = 'openrouter' | 'runway' | 'internal' | (string & {});
 
 export type CapabilityId =
@@ -44,7 +46,12 @@ export type CapabilityParameter =
     | 'output_compression'
     | 'seed'
     | 'n'
-    | 'instructions';
+    | 'instructions'
+    | 'frame_images'
+    | 'generate_audio'
+    | 'previous_job_id'
+    | 'upscale_factor'
+    | 'creativity';
 
 export interface CapabilityDescriptor {
     capability: CapabilityId;
@@ -158,6 +165,7 @@ export interface QualityGateResult {
  */
 export interface CreateIntent {
     preset: WorkflowPreset;
+    videoType?: VideoType;
     inputMode: InputMode;
     /** Empty is allowed for voice-only and reference-only intake; the validator enforces mode-specific requirements. */
     brief: string;
@@ -219,6 +227,7 @@ export interface DirectorPlan {
     planVersion: number;
     intentSummary: string;
     preset: WorkflowPreset;
+    videoType?: VideoType;
     inputMode: InputMode;
     language: string;
     platform: string;
@@ -254,6 +263,8 @@ export interface ProviderReference {
 
 export interface GenerationRequest {
     capability: CapabilityId;
+    videoType?: VideoType;
+    task?: VideoTask;
     prompt: string;
     model?: string;
     provider?: AIProvider;
@@ -429,7 +440,8 @@ export class AICapabilityError extends Error implements NormalizedAIErrorShape {
     readonly details?: unknown;
 
     constructor(input: Omit<NormalizedAIErrorShape, 'name'> & { cause?: unknown }) {
-        super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
+        super(input.message);
+        if (input.cause !== undefined) (this as Error & { cause?: unknown }).cause = input.cause;
         this.code = input.code;
         this.provider = input.provider;
         this.capability = input.capability;
@@ -473,21 +485,35 @@ export interface ImageGenerationRequest {
     providerOptions?: Record<string, unknown>;
 }
 
+export type MediaReference = ({ url: string } | { data: string; mediaType?: string }) & {
+    /** Missing kind is retained as an image for older callers. */
+    kind?: 'image' | 'audio' | 'video';
+};
+
 export interface VideoGenerationRequest {
     prompt: string;
     model: string;
+    videoType?: VideoType;
+    task?: VideoTask;
     aspectRatio?: string;
     duration?: number;
     resolution?: string;
-    frameImages?: Array<{ url: string } | { data: string; mediaType?: string }>;
-    inputReferences?: Array<{ url: string } | { data: string; mediaType?: string }>;
+    frameImages?: Array<{ url: string; frameType: 'first_frame' | 'last_frame' } | { data: string; mediaType?: string; frameType: 'first_frame' | 'last_frame' }>;
+    inputReferences?: MediaReference[];
+    /** Continuation is pinned by OpenRouter to the original model and endpoint. */
+    previousJobId?: string;
+    upscaleFactor?: number;
+    creativity?: number;
+    generateAudio?: boolean;
     providerOptions?: Record<string, unknown>;
 }
 
 export interface SpeechSynthesisRequest {
     input: string;
     model: string;
-    voice: string;
+    voice?: string;
+    /** Consented project samples; reference cloning is separate from stock voices. */
+    inputReferences?: Array<{ data: string; format?: string } | { url: string; format?: string }>;
     responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
     speed?: number;
     instructions?: string;

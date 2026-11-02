@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireMember } from "./authorization";
+import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
 
 type ReadCtx = QueryCtx | MutationCtx;
 
@@ -110,7 +110,8 @@ function requireOlderVersionConfirmation(kind: string, input: unknown) {
 async function requireProduction(ctx: ReadCtx, productionId: Id<"productions">) {
   const production = await ctx.db.get(productionId);
   if (!production) throw new Error("Production not found.");
-  const member = await requireMember(ctx, production.studioExternalId);
+  if (!production.projectId) throw new Error("Production is not attached to a project.");
+  const member = await requireProjectAccess(ctx, production.projectId);
   return { production, member };
 }
 
@@ -162,6 +163,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { production, member } = await requireProduction(ctx, args.productionId);
+    await requireProjectRole(ctx, production.projectId!, ["OWNER", "EDITOR"]);
     await validateProductionVersion(ctx, production._id, args.productionVersionId);
 
     const kind = requireOperationKind(args.kind);

@@ -19,6 +19,12 @@ export type FinalFrameIdentity = {
   name?: string;
 };
 
+/** Convex Auth subjects are `userId|sessionId`; only the user id is stable. */
+function stableExternalId(subject: string) {
+  const [userId] = subject.split("|", 1);
+  return userId || subject;
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -53,7 +59,7 @@ export async function getIdentity(ctx: IdentityCtx): Promise<FinalFrameIdentity 
     tokenIdentifier: identity.tokenIdentifier,
     subject: identity.subject,
     issuer: identity.issuer,
-    externalId: identity.subject,
+    externalId: stableExternalId(identity.subject),
     email: isNonEmptyString(identity.email) ? identity.email : undefined,
     name: isNonEmptyString(identity.name) ? identity.name : undefined,
   };
@@ -70,4 +76,3 @@ export async function requireIdentity(ctx: IdentityCtx): Promise<FinalFrameIdent
   }
   return identity;
 }
-

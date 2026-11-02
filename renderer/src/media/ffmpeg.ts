@@ -94,7 +94,7 @@ export class InjectableFFprobeAdapter implements FFprobeAdapter {
   }
 
   async probe(input: string, options: { cwd?: string; timeoutMs?: number } = {}): Promise<FFprobeResult> {
-    const result = await this.runner.run(this.command, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input], options);
+    const result = await this.runner.run(this.command, ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_format', '-show_streams', input], options);
     try {
       const parsed = JSON.parse(result.stdout) as Partial<FFprobeResult>;
       return { streams: Array.isArray(parsed.streams) ? parsed.streams : [], format: parsed.format };

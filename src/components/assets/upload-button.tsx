@@ -13,7 +13,7 @@ interface UploadProgress {
     progress: number;
 }
 
-export function UploadButton({ studioId }: { studioId: string }) {
+export function UploadButton({ studioId, projectExternalId }: { studioId: string; projectExternalId?: string }) {
     const [uploads, setUploads] = useState<UploadProgress[]>([]);
     const [dragActive, setDragActive] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -27,9 +27,10 @@ export function UploadButton({ studioId }: { studioId: string }) {
         for (const file of fileArray) {
             const formData = new FormData();
             formData.append('file', file);
+            if (projectExternalId) formData.append('projectId', projectExternalId);
 
             try {
-                const res = await uploadAsset(studioId, formData);
+                const res = await uploadAsset(studioId, formData, projectExternalId ? `/productions/${projectExternalId}` : '/');
                 if (res.success) {
                     setUploads(prev => prev.map(u => u.name === file.name ? { ...u, status: 'success' as const, progress: 100 } : u));
                 } else {

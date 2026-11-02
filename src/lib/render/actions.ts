@@ -25,6 +25,8 @@ export async function submitRenderJob(
         const assembly = await client.mutation(api.assembly.createJob, {
             productionId: workspace.production._id,
             idempotencyKey: `assembly:${projectId}:${sceneId || 'all'}`,
+            selectionScope: sceneId ? 'SCENES' : 'FULL_PROJECT',
+            selectedSceneIds: sceneId ? [sceneId as any] : undefined,
         });
         const renderJob = await client.mutation(api.renderJobs.create, {
             productionId: workspace.production._id,

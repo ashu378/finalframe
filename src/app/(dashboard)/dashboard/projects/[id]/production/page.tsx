@@ -8,13 +8,22 @@ import { AssembleButton } from '@/components/production/assemble-button';
 import { GenerationPanel } from '@/components/production/generation';
 import { AssemblyPanel } from '@/components/production/assembly';
 import { ThreeUIAmbient } from '@/components/threeui/ambient';
+import { getEpisodeNavigation } from '@/lib/production/episode-actions';
+import { EpisodePicker } from '@/components/production-workspace/episode-picker';
 
-interface ProductionPageProps { params: Promise<{ id: string }> }
+interface ProductionPageProps { params: Promise<{ id: string }>; searchParams: Promise<{ production?: string }> }
 
-export default async function ProductionPage({ params }: ProductionPageProps) {
+export default async function ProductionPage({ params, searchParams }: ProductionPageProps) {
     await requireAuth();
     const { id } = await params;
-    const result = await getProductionWorkspace(id);
+    const query = await searchParams;
+    const navigation = await getEpisodeNavigation(id);
+    if (!navigation) notFound();
+    const selectedProductionId = query.production || (navigation.options.length === 1 ? navigation.options[0].productionId : undefined);
+    if (selectedProductionId && !navigation.options.some((option) => option.productionId === selectedProductionId)) notFound();
+    const picker = <EpisodePicker projectExternalId={id} options={navigation.options} selectedProductionId={selectedProductionId} nextEpisodeNumber={navigation.nextEpisodeNumber} />;
+    if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6">{picker}<p className="text-sm text-muted-foreground">Select an episode to make its shots.</p></div>;
+    const result = await getProductionWorkspace(id, selectedProductionId);
     if (!result.success) notFound();
     const generationEnabled = isFeatureEnabled('openRouterMedia');
     const allShots = (result.sequences || []).flatMap((sequence: any) => sequence.scenes.flatMap((scene: any) => scene.shots));
@@ -22,6 +31,7 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
     const readyTakes = allShots.filter((shot: any) => String(shot.status || '').toUpperCase() === 'COMPLETED' || completedShotIds.has(String(shot._id))).length;
 
     return <div className="relative mx-auto max-w-6xl space-y-9 py-5 sm:py-8">
+        {picker}
         <ThreeUIAmbient variant="flow" className="-z-10 opacity-20" label="Production flow background" />
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>

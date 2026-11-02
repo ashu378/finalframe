@@ -1,4 +1,4 @@
-export const SUPPORTED_MOTION_TEMPLATE_IDS = ['kinetic-title'] as const;
+export const SUPPORTED_MOTION_TEMPLATE_IDS = ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] as const;
 export type MotionTemplateId = (typeof SUPPORTED_MOTION_TEMPLATE_IDS)[number];
 
 export interface MotionTemplateProps {

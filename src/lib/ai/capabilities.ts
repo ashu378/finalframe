@@ -39,15 +39,15 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
         model: modelId('IMAGE_ENGINE'),
         discovery: 'images',
     }),
-    VIDEO_ENGINE: descriptor('VIDEO_ENGINE', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references'], {
+    VIDEO_ENGINE: descriptor('VIDEO_ENGINE', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'frame_images', 'generate_audio', 'previous_job_id', 'upscale_factor', 'creativity', 'provider_options'], {
         model: modelId('VIDEO_ENGINE'),
         discovery: 'videos',
     }),
-    VIDEO_PREVIEW: descriptor('VIDEO_PREVIEW', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'provider_options'], {
+    VIDEO_PREVIEW: descriptor('VIDEO_PREVIEW', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'frame_images', 'generate_audio', 'previous_job_id', 'upscale_factor', 'creativity', 'provider_options'], {
         model: modelId('VIDEO_PREVIEW'),
         discovery: 'videos',
     }),
-    VIDEO_FINAL: descriptor('VIDEO_FINAL', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'provider_options'], {
+    VIDEO_FINAL: descriptor('VIDEO_FINAL', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'frame_images', 'generate_audio', 'previous_job_id', 'upscale_factor', 'creativity', 'provider_options'], {
         model: modelId('VIDEO_FINAL'),
         discovery: 'videos',
     }),
@@ -67,11 +67,11 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
         model: modelId('IMAGE_GENERATION'),
         discovery: 'images',
     }),
-    VIDEO_GENERATION: descriptor('VIDEO_GENERATION', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'provider_options'], {
+    VIDEO_GENERATION: descriptor('VIDEO_GENERATION', ['text', 'image', 'video'], ['video'], ['duration', 'aspect_ratio', 'resolution', 'input_references', 'frame_images', 'generate_audio', 'previous_job_id', 'upscale_factor', 'creativity', 'provider_options'], {
         model: modelId('VIDEO_GENERATION'),
         discovery: 'videos',
     }),
-    TEXT_TO_SPEECH: descriptor('TEXT_TO_SPEECH', ['text'], ['audio'], ['voice', 'speed', 'response_format', 'instructions', 'provider_options'], {
+    TEXT_TO_SPEECH: descriptor('TEXT_TO_SPEECH', ['text'], ['audio'], ['voice', 'speed', 'response_format', 'instructions', 'input_references', 'provider_options'], {
         model: modelId('TEXT_TO_SPEECH'),
     }),
     TRANSCRIPTION: descriptor('TRANSCRIPTION', ['audio'], ['transcription'], ['language', 'temperature', 'provider_options'], {

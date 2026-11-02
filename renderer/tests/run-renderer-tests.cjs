@@ -43,6 +43,25 @@ async function main() {
     captionTracks: [{ id: 'en', language: 'en', cues: [{ id: 'cue-1', startFrame: 0, durationInFrames: 24, text: 'Hello' }] }],
   };
   assert.equal(manifest.validateManifest(imageManifest).ok, true);
+  const graphicsManifest = {
+    ...imageManifest,
+    items: [
+      { id: 'brand', kind: 'motion-graphics', templateId: 'brand-card', props: { title: 'Launch day', brandName: 'Northstar', logoUrl: 'https://media.finalframe.app/logo.png' }, startFrame: 0, durationInFrames: 16, orderIndex: 0 },
+      { id: 'feature', kind: 'motion-graphics', templateId: 'feature-callout', props: { title: 'Fast setup', feature: 'Fast setup', detail: 'Start in minutes.' }, startFrame: 16, durationInFrames: 16, orderIndex: 1 },
+      { id: 'end', kind: 'motion-graphics', templateId: 'end-card', props: { title: 'Try it today', callToAction: 'Get started', url: 'example.test' }, startFrame: 32, durationInFrames: 16, orderIndex: 2 },
+    ],
+    shots: [],
+  };
+  assert.equal(manifest.validateManifest(graphicsManifest).ok, true, 'brand, feature and end cards retain exact deterministic text');
+  const unsupportedTemplate = structuredClone(graphicsManifest);
+  unsupportedTemplate.items[0].templateId = 'generated-logo';
+  assert.equal(manifest.validateManifest(unsupportedTemplate).ok, false);
+  const missingTitle = structuredClone(graphicsManifest);
+  delete missingTitle.items[0].props.title;
+  assert.equal(manifest.validateManifest(missingTitle).ok, false);
+  const unsafeColor = structuredClone(graphicsManifest);
+  unsafeColor.items[0].props.accentColor = 'url(javascript:alert(1))';
+  assert.equal(manifest.validateManifest(unsafeColor).ok, false);
   const ordered = plan.createAssemblyPlan(imageManifest);
   assert.deepEqual(ordered.items.map((item) => item.id), ['title', 'image']);
   assert.equal(ordered.audioTracks.length, 1);
@@ -101,7 +120,7 @@ async function main() {
     /must be verified by ffprobe/,
   );
 
-  const raw = callback.createCallbackBody({ eventId: 'event-1', idempotencyKey: 'same-request', jobId: 'job-1', rendererVersion: 'test', attempt: 1, eventType: 'render.completed', payload: { outputPath } });
+  const raw = callback.createCallbackBody({ eventId: 'event-1', idempotencyKey: 'same-request', jobId: 'job-1', projectId: 'project-1', rendererVersion: 'test', attempt: 1, eventType: 'render.completed', payload: { outputPath } });
   const signature = callback.signCallbackBody(raw, 'secret');
   const receipts = new Map();
   const store = { get: async (id) => receipts.get(id) || null, claim: async (receipt) => { if (receipts.has(receipt.eventId)) return 'duplicate'; receipts.set(receipt.eventId, receipt); return 'claimed'; } };

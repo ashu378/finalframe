@@ -19,7 +19,6 @@ import type {
     CameraConfig,
     MotionConfig
 } from '@/lib/types/database';
-import { executeAITask } from './engine';
 
 interface BlueprintScene {
     scene_title: string;
@@ -273,10 +272,10 @@ This blueprint must feel like it was created by:
 Return a JSON object with a "scenes" array containing 4-6 scenes.`;
 
     try {
-        const response = await executeAITask('AI_BRAIN', [
+        const response = await convex.action(api.providerText.execute, { projectId: project._id, capability: 'AI_BRAIN', messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Expand this project into a 4-6 scene blueprint: ${project.description || ''}` }
-        ], {
+        ],
             structuredOutput: {
                 name: 'finalframe_blueprint',
                 schema: BLUEPRINT_SCHEMA,
@@ -295,10 +294,10 @@ Return a JSON object with a "scenes" array containing 4-6 scenes.`;
         return { success: true, scenesGenerated: scenes.length };
 
     } catch (err) {
-        console.error('Blueprint Director Error:', err);
+        console.error('Blueprint Director Error:', { code: 'BLUEPRINT_FAILED' });
         return {
             success: false,
-            error: err instanceof Error ? err.message : 'Critical error during blueprint generation'
+            error: 'The blueprint could not be created. Check the configured planning model and test budget.'
         };
     }
 }

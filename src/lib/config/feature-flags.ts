@@ -6,6 +6,7 @@ export type FinalFrameFeature =
     | 'stylized2d'
     | 'ugcWorkflow'
     | 'cinematicWorkflow'
+    | 'videoTypeRouting'
     | 'bacsPayments'
     | 'adminOperations';
 
@@ -24,6 +25,7 @@ const defaults: Record<FinalFrameFeature, boolean> = {
     stylized2d: false,
     ugcWorkflow: false,
     cinematicWorkflow: false,
+    videoTypeRouting: false,
     bacsPayments: false,
     adminOperations: false,
 };
@@ -36,6 +38,7 @@ const envNames: Record<FinalFrameFeature, string> = {
     stylized2d: 'NEXT_PUBLIC_FF_STYLIZED_2D',
     ugcWorkflow: 'NEXT_PUBLIC_FF_UGC_WORKFLOW',
     cinematicWorkflow: 'NEXT_PUBLIC_FF_CINEMATIC_WORKFLOW',
+    videoTypeRouting: 'NEXT_PUBLIC_FF_VIDEO_TYPE_ROUTING',
     bacsPayments: 'NEXT_PUBLIC_FF_BACS_PAYMENTS',
     adminOperations: 'NEXT_PUBLIC_FF_ADMIN_OPERATIONS',
 };

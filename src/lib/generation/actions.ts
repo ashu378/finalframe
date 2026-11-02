@@ -4,10 +4,32 @@ import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
-import { executeVideoGeneration } from '@/lib/ai/engine';
 import type { QualityTier } from '@/lib/types/database';
+import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, VIDEO_OPERATIONS, type VideoOperation, type VideoModelCapabilities, type VideoTask } from '@/lib/ai/video-routing';
+import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
+import { isFeatureEnabled } from '@/lib/config/feature-flags';
+
+function object(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function safeRatio(value: string | undefined) {
+    return value === '9:16' || value === '1:1' || value === '16:9' ? value : '16:9';
+}
+
+function generationTask(value: unknown): VideoTask {
+    return value === 'EDIT' || value === 'EXTEND' || value === 'FRAME_TO_VIDEO' ? value : 'GENERATE';
+}
+
+function routingFailure(error: unknown): string {
+    const message = error instanceof Error ? error.message : '';
+    if (/premium model|administrator/i.test(message)) return 'This finish level is not configured yet. Ask an administrator to approve a compatible model route.';
+    if (/supports all requested|within the configured spending cap/i.test(message)) return 'No available video model supports all the requested controls and spending limits.';
+    return 'A compatible video route is not available for this request. An administrator can refresh the model catalog and review its capabilities.';
+}
 
 function userSafeGenerationError(error: unknown): string {
+    if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';
     const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
     if (code === 'MISSING_API_KEY') return 'Video generation is not configured yet.';
     if (code === 'PROVIDER_RATE_LIMIT') return 'The video provider is busy. Please try again shortly.';
@@ -17,126 +39,175 @@ function userSafeGenerationError(error: unknown): string {
     return 'We could not complete this video generation. Please try again.';
 }
 
-export async function createShotGenerationJob(input: { productionId: string; shotId: string; qualityTier?: QualityTier }) {
+export async function createShotGenerationJob(input: { productionId: string; shotId: string; qualityTier?: QualityTier; requestId: string }) {
     try {
         const convex = await getAuthenticatedConvexClient();
         const account = await convex.query(api.account.current, {});
         if (!account?.user) return { success: false, error: 'Unauthorized' };
 
-        const { production, shot } = await convex.query(api.generation.getShot, {
+        const shotContext = await convex.query(api.generation.getShot, {
             productionId: input.productionId as any,
             shotId: input.shotId as any,
         });
+        const { production, shot } = shotContext;
         const executionProfile = input.qualityTier === 'PREMIUM' ? 'PREMIUM' : input.qualityTier === 'STANDARD' ? 'COMMERCIAL' : 'FAST_SOCIAL';
         const capabilityId = executionProfile === 'FAST_SOCIAL' ? 'VIDEO_PREVIEW' : 'VIDEO_FINAL';
         const capability = assertCapability(capabilityId);
+        const tier = input.qualityTier || 'STANDARD';
+        const shotMetadata = object(shot.metadata);
+        const requestedTask = generationTask(shotMetadata.videoTask);
+        const operation: VideoOperation | undefined = (VIDEO_OPERATIONS as readonly unknown[]).includes(shotMetadata.operation) ? shotMetadata.operation as VideoOperation : undefined;
+        const operationControls = { operation, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, previousModelId: typeof shotMetadata.previousModelId === 'string' ? shotMetadata.previousModelId : undefined, requiresSourceAudioPreservation: shotMetadata.audioPolicy === 'KEEP_SOURCE' || shotMetadata.requiresSourceAudioPreservation === true, requiresMask: shotMetadata.requiresMask === true };
+        const videoType = normalizeVideoType(shotContext.project?.projectType || production.projectType || production.preset || production.workflow);
+        const outputPreset = String(production.outputPreset || 'LANDSCAPE');
+        const typeRoutingEnabled = isFeatureEnabled('videoTypeRouting');
+        const aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : outputPreset === 'SQUARE' ? '1:1' : '16:9');
+        const durationSeconds = Number(shot.durationSeconds);
+        const requestedResolution = typeof shotMetadata.resolution === 'string' ? shotMetadata.resolution : undefined;
+        const firstFrameAssetId = typeof shotMetadata.firstFrameAssetId === 'string' ? shotMetadata.firstFrameAssetId : undefined;
+        const lastFrameAssetId = typeof shotMetadata.lastFrameAssetId === 'string' ? shotMetadata.lastFrameAssetId : undefined;
+        const requiresFirstFrame = shotMetadata.requiresFirstFrame === true || requestedTask === 'FRAME_TO_VIDEO' || Boolean(firstFrameAssetId);
+        const requiresLastFrame = shotMetadata.requiresLastFrame === true || Boolean(lastFrameAssetId);
+        const requiresAudio = shotMetadata.generateAudio === true;
+        const references = shotContext.referenceAssets || [];
+        const frameAssetIds = new Set([firstFrameAssetId, lastFrameAssetId].filter((value): value is string => Boolean(value)));
+        const hasImageReferences = references.some((asset) => String(asset.mimeType).startsWith('image/') && !frameAssetIds.has(asset.assetId));
+        const hasVideoReference = references.some((asset) => String(asset.mimeType).startsWith('video/'));
+        if (requestedTask === 'EDIT' || requestedTask === 'EXTEND') {
+            if (!hasVideoReference) return { success: false, error: 'Add a video reference to this project before editing or extending a clip.' };
+        }
+        if (requiresFirstFrame && !firstFrameAssetId) return { success: false, error: 'Choose a project image for the first frame before generating this shot.' };
+        if (requiresLastFrame && !lastFrameAssetId) return { success: false, error: 'Choose a project image for the last frame before generating this shot.' };
+        if (firstFrameAssetId && !references.some((asset) => asset.assetId === firstFrameAssetId && String(asset.mimeType).startsWith('image/'))) return { success: false, error: 'The first frame must be an image stored in this project.' };
+        if (lastFrameAssetId && !references.some((asset) => asset.assetId === lastFrameAssetId && String(asset.mimeType).startsWith('image/'))) return { success: false, error: 'The last frame must be an image stored in this project.' };
+        if (!typeRoutingEnabled && (hasImageReferences || shotContext.hasAudioReference || requiresFirstFrame || requiresLastFrame || requiresAudio || requestedResolution)) {
+            return { success: false, error: 'This shot needs a verified style-aware route for its media or output controls. Ask an administrator to enable and configure video routing.' };
+        }
+        if (!typeRoutingEnabled && videoType === 'MOTION_GRAPHICS') {
+            return { success: false, error: 'Motion graphics use deterministic renderer templates. Open the production editor and add a designed graphics clip.' };
+        }
+        let provider = capability.provider;
+        let model = capability.model;
+        let route: Record<string, unknown> = {
+            videoType, task: requestedTask, ...operationControls, path: 'AI_VIDEO', routingMode: 'legacy', routeReason: 'Existing generic route retained while type-based routing is disabled.',
+            constraints: { durationSeconds, aspectRatio, resolution: requestedResolution, hasImageReferences, hasVideoReference, hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio },
+            referenceAssetIds: references.map((asset) => asset.assetId),
+            audioAssetIds: shotContext.audioAssetIds || [],
+        };
+        let estimatedProviderCostUsd: number | undefined;
+        let modelVersion: string | undefined;
+
+        if (typeRoutingEnabled) {
+            if (!production.projectId) return { success: false, error: 'This production needs to belong to a project before style-aware generation can run.' };
+            try {
+                const configuration = await convex.query(api.videoRouting.forGeneration, {
+                    studioExternalId: production.studioExternalId,
+                    videoType: videoType as never,
+                    qualityTier: tier as never,
+                });
+                const live = await discoverOpenRouterVideoModels({ staleIfError: false });
+                const liveById = new Map(live.map((entry) => [entry.id, entry]));
+                const models: VideoModelCapabilities[] = configuration.catalog
+                    .filter((entry: any) => entry.provider === 'openrouter' && entry.available && entry.reviewedAt && liveById.has(entry.modelId))
+                    .map((entry: any) => {
+                        const current = liveById.get(entry.modelId)!;
+                        return {
+                            provider: 'openrouter', modelId: entry.modelId, available: true,
+                            supportsTextToVideo: entry.supportsTextToVideo,
+                            supportsImageReferences: entry.supportsImageReferences,
+                            supportsVideoReferences: entry.supportsVideoReferences,
+                            supportsFirstFrame: entry.supportsFirstFrame,
+                            supportsLastFrame: entry.supportsLastFrame,
+                            supportsVideoEdit: entry.supportsVideoEdit,
+                            supportsVideoExtension: entry.supportsVideoExtension,
+                            supportsAudio: entry.supportsAudio,
+                            supportsAudioReferences: entry.supportsAudioReferences,
+                            supportsPerformanceTransfer: entry.supportsPerformanceTransfer,
+                            supportsLipSync: entry.supportsLipSync,
+                            supportsUpscale: entry.supportsUpscale,
+                            supportsSourceAudioPreservation: entry.supportsSourceAudioPreservation,
+                            supportsCombinedFrameReferences: entry.supportsCombinedFrameReferences,
+                            reviewedOperations: entry.reviewedOperations,
+                            catalogFingerprint: entry.catalogFingerprint,
+                            reviewedCatalogFingerprint: entry.reviewedCatalogFingerprint,
+                            supportedDurations: current.supportedDurations,
+                            supportedResolutions: current.supportedResolutions,
+                            supportedAspectRatios: current.supportedAspectRatios,
+                            supportedSizes: current.supportedSizes,
+                            estimatedCostPerSecond: current.pricingSkus['per-video-second'] ?? entry.estimatedCostPerSecond,
+                            pricingSkus: current.pricingSkus,
+                            supportedParameters: current.allowedPassthroughParameters,
+                        };
+                    });
+                const policy = configuration.policy ? {
+                    videoType, qualityTier: tier, path: configuration.policy.path,
+                    preferredModelIds: configuration.policy.preferredModelIds,
+                    maxCostUsd: configuration.policy.maxCostUsd,
+                    updatedAt: configuration.policy.updatedAt,
+                } : undefined;
+                const selection = selectVideoRoute({
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls,
+                    resolution: requestedResolution, hasImageReferences, hasVideoReference,
+                    hasAudioReference: shotContext.hasAudioReference,
+                    requiresFirstFrame, requiresLastFrame, requiresAudio,
+                }, models, policy);
+                if (selection.path === 'MOTION_GRAPHICS') {
+                    return { success: false, error: 'This project is routed to deterministic motion graphics. Create the graphics in the renderer timeline instead of submitting an AI video job.' };
+                }
+                provider = selection.provider;
+                model = selection.modelId;
+                estimatedProviderCostUsd = selection.estimatedCostUsd;
+                const selectedResolution = selection.resolution || requestedResolution;
+                modelVersion = `video-catalog:${configuration.catalog.reduce((latest: number, entry: any) => Math.max(latest, entry.lastSeenAt || 0), 0)}:policy:${selection.policyVersion || 0}`;
+                route = buildVideoRouteMetadata({
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls,
+                    resolution: selectedResolution, hasImageReferences, hasVideoReference,
+                    hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio,
+                }, selection, {
+                    modelVersion, referenceAssetIds: references.map((asset) => asset.assetId),
+                    audioAssetIds: shotContext.audioAssetIds || [], costCeilingUsd: policy?.maxCostUsd,
+                });
+            } catch (error) {
+                return { success: false, error: routingFailure(error) };
+            }
+        }
         const estimate = await estimateProductionCost({
             shotCount: 1,
             videoSeconds: Math.ceil(Number(shot.durationSeconds)),
-            qualityTier: input.qualityTier || 'STANDARD',
+            qualityTier: tier,
             needsAssembly: false,
         });
-        const idempotencyKey = `shot_${input.productionId}_${input.shotId}_${input.qualityTier || 'STANDARD'}`;
+        if (!/^[a-zA-Z0-9-]{16,100}$/.test(input.requestId)) return { success: false, error: 'Start a new generation request.' };
+        const idempotencyKey = `shot_${input.shotId}_${input.requestId}`;
         const job = await convex.mutation(api.generationJobs.create, {
             productionId: input.productionId as any,
             shotId: input.shotId as any,
-            provider: capability.provider,
-            model: capability.model,
-            request: { prompt: shot.prompt, duration: shot.durationSeconds, ratio: production.outputPreset, qualityTier: input.qualityTier || 'STANDARD', executionProfile },
+            provider,
+            model,
+            modelVersion,
+            request: { ...operationControls, prompt: shot.prompt, duration: durationSeconds, ratio: aspectRatio, qualityTier: tier, executionProfile, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, ...route },
             estimatedCost: estimate.totalCredits,
+            estimatedProviderCostUsd,
             idempotencyKey,
             capability: capabilityId,
             modality: 'VIDEO',
             correlationId: `generation-${input.productionId}-${input.shotId}`,
         });
-        const jobId = job?._id as any;
-        const reservation = await convex.mutation(api.credits.reserve, {
-            studioExternalId: production.studioExternalId,
-            amount: estimate.totalCredits,
-            idempotencyKey: `generation:${jobId}`,
-            generationJobId: jobId,
-        });
-        return { success: true, jobId: jobId?.toString(), reservationId: reservation.reservationId.toString(), estimate };
+        return { success: true, jobId: typeof job?._id === 'string' ? job._id : undefined, estimate };
     } catch (error) {
         return { success: false, error: userSafeGenerationError(error) };
     }
 }
 
+/** Compatibility handoff: the authenticated request only schedules work.
+ * Provider IDs, leases, output ingestion, and settlement stay inside Convex.
+ */
 export async function processShotGenerationJob(jobId: string) {
-    const convex = await getAuthenticatedConvexClient();
     try {
-        const account = await convex.query(api.account.current, {});
-        if (!account?.user) return { success: false, error: 'Unauthorized' };
-
-        const current = await convex.query(api.generationJobs.get, { jobId: jobId as any });
-        const job = current.job;
-        const shot = current.shot;
-        const production = current.production;
-        if (!shot || !production) return { success: false, error: 'Generation job not found' };
-        const processing = await convex.mutation(api.generationJobs.claim, { jobId: jobId as any }) as any;
-        const processingJob = processing?.job ?? processing;
-        if (!processingJob || processingJob.status !== 'PROCESSING') {
-            return { success: false, error: `Job is ${processingJob?.status?.toLowerCase() || 'unavailable'}` };
-        }
-        const leaseId = processing.leaseId;
-
-        const duration = Math.max(4, Math.min(8, Math.round(Number(shot.durationSeconds)))) as 4 | 6 | 8;
-        const request = job.request && typeof job.request === 'object' ? job.request as Record<string, unknown> : {};
-        const executionProfile = request.executionProfile === 'PREMIUM' || request.executionProfile === 'COMMERCIAL' || request.executionProfile === 'CINEMATIC' ? request.executionProfile : 'FAST_SOCIAL';
-        const result = await executeVideoGeneration('TEXT_TO_VIDEO', shot.prompt, executionProfile, {
-            duration,
-            ratio: production.outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : production.outputPreset === 'SQUARE' ? '1:1' : '16:9',
-        });
-        if (!result.videoUrl) throw new Error(result.error || 'Provider returned no video URL');
-
-        const remoteResponse = await fetch(result.videoUrl);
-        if (!remoteResponse.ok) throw new Error(`The provider video could not be downloaded (${remoteResponse.status}).`);
-        const bytes = await remoteResponse.arrayBuffer();
-        if (bytes.byteLength === 0) throw new Error('The provider returned an empty video.');
-        const uploadUrl = await convex.mutation(api.assetStorage.generateUploadUrl, { studioExternalId: production.studioExternalId });
-        const upload = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': remoteResponse.headers.get('content-type') || 'video/mp4' }, body: bytes });
-        if (!upload.ok) throw new Error('FinalFrame could not store the generated video.');
-        const uploaded = await upload.json() as { storageId?: string };
-        if (!uploaded.storageId) throw new Error('FinalFrame storage did not return an asset ID.');
-        const asset = await convex.mutation(api.assetStorage.ingestAsset, {
-            studioExternalId: production.studioExternalId,
-            productionId: production._id,
-            storageId: uploaded.storageId as any,
-            source: 'AI_GENERATED',
-            roles: ['GENERATED_VIDEO'],
-            mimeType: remoteResponse.headers.get('content-type') || 'video/mp4',
-            metadata: { byteSize: bytes.byteLength, durationSeconds: shot.durationSeconds, sourceUrl: result.videoUrl },
-            provenance: { provider: result.provider, model: result.model, providerTaskId: result.taskId, generationJobId: jobId },
-        });
-
-        const completed = await convex.mutation(api.generationJobs.succeed, {
-            jobId: jobId as any,
-            leaseId,
-            assetId: asset.assetId,
-            providerJobId: result.taskId,
-            providerRequestId: result.requestId,
-            providerCostUsd: result.providerCostUsd,
-            latencyMs: result.latencyMs,
-            response: result,
-            qc: { status: 'PASS', qualityVersion: 'media-ingest-v1', checkedAt: new Date().toISOString(), blockingReasons: [], checks: [{ check: 'MEDIA_INTEGRITY', status: 'PASS', explanation: `${bytes.byteLength} bytes stored in Convex Storage.` }] },
-        });
-        const reservation = await convex.query(api.credits.getReservationForJob, { generationJobId: jobId as any });
-        if (reservation?.status === 'RESERVED') {
-            await convex.mutation(api.credits.finalize, { reservationId: reservation._id, outcome: 'COMMIT' });
-        }
-        return { success: true, assetId: completed.assetId?.toString(), storageId: uploaded.storageId };
+        const convex = await getAuthenticatedConvexClient();
+        const state = await convex.mutation(api.generationJobs.enqueue, { jobId: jobId as any });
+        return { success: true, jobId, status: state.status, progress: state.progress };
     } catch (error) {
-        const message = userSafeGenerationError(error);
-        try {
-            const retryable = Boolean((error as { retryable?: boolean }).retryable);
-            const failed = await convex.mutation(api.generationJobs.fail, { jobId: jobId as any, errorMessage: message, errorCode: 'PROVIDER_ERROR', retryable });
-            const reservation = await convex.query(api.credits.getReservationForJob, { generationJobId: jobId as any });
-            if (reservation?.status === 'RESERVED' && failed?.status !== 'RETRYING') {
-                await convex.mutation(api.credits.finalize, { reservationId: reservation._id, outcome: 'RELEASE' });
-            }
-        } catch {
-            // Preserve the provider/action error for the caller; reconciliation can recover the job.
-        }
-        return { success: false, error: message };
+        return { success: false, error: userSafeGenerationError(error) };
     }
 }

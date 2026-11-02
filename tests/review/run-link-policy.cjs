@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('typescript');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../../convex/reviewLinkContracts.ts'), 'utf8');
+const sandbox = { exports: {}, Date, Number };
+vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, sandbox);
+const { isReviewLinkActive, assertReviewToken, validateReviewComment, REVIEW_LINK_MAX_AGE_MS, REVIEW_LINK_DEFAULT_AGE_MS, REVIEW_COMMENT_LIMIT } = sandbox.exports;
+let count = 0;
+function test(label, run) { run(); count++; console.log(`PASS ${label}`); }
+test('active link requires future expiry', () => { assert.equal(isReviewLinkActive({ expiresAt: 101 }, 100), true); assert.equal(isReviewLinkActive({ expiresAt: 100 }, 100), false); assert.equal(isReviewLinkActive({ expiresAt: Infinity }, 100), false); });
+test('revocation denies access before expiry', () => assert.equal(isReviewLinkActive({ expiresAt: 200, revokedAt: 99 }, 100), false));
+test('token format rejects weak or malformed bearer credentials', () => { assert.doesNotThrow(() => assertReviewToken('A'.repeat(43))); for (const token of ['', 'short', 'a'.repeat(44), '/'.repeat(43), 'a'.repeat(42) + '.']) assert.throws(() => assertReviewToken(token)); });
+const valid = { authorName: ' Client ', body: ' Please adjust this cut. ', durationSeconds: 8, timeSeconds: 4, requestId: 'request_123456' };
+test('comment validates and normalizes display fields', () => { const result = validateReviewComment(valid); assert.equal(result.authorName, 'Client'); assert.equal(result.body, 'Please adjust this cut.'); });
+test('timestamp stays inside the exact video', () => { for (const timeSeconds of [-1, 8.1, NaN, Infinity]) assert.throws(() => validateReviewComment({ ...valid, timeSeconds })); for (const timeSeconds of [0, 8, undefined]) assert.doesNotThrow(() => validateReviewComment({ ...valid, timeSeconds })); });
+test('comments require a bounded name and body', () => { for (const change of [{ authorName: '' }, { authorName: 'x'.repeat(101) }, { body: '' }, { body: 'x'.repeat(10001) }]) assert.throws(() => validateReviewComment({ ...valid, ...change })); });
+test('idempotency identifiers are bounded', () => { for (const requestId of ['', 'short', 'x'.repeat(101), 'request/id']) assert.throws(() => validateReviewComment({ ...valid, requestId })); });
+test('sharing and comment retention are bounded', () => { assert.equal(REVIEW_LINK_DEFAULT_AGE_MS, 7 * 86400000); assert.equal(REVIEW_LINK_MAX_AGE_MS, 30 * 86400000); assert.equal(REVIEW_COMMENT_LIMIT, 200); });
+console.log(`${count} review-link policy tests passed; no database or provider was called.`);

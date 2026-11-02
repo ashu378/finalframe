@@ -1,6 +1,8 @@
 export const RENDER_MANIFEST_KIND = 'finalframe.render-manifest' as const;
-export const RENDER_MANIFEST_VERSION = 2 as const;
-export const SUPPORTED_RENDER_MANIFEST_VERSIONS = [1, 2] as const;
+export const RENDER_MANIFEST_VERSION = 4 as const;
+export const SUPPORTED_RENDER_MANIFEST_VERSIONS = [1, 2, 4] as const;
+
+export type RenderSelectionScope = 'FULL_PROJECT' | 'TIMELINE' | 'SCENES' | 'SHOTS';
 
 export type OutputCodec = 'h264' | 'vp9' | 'prores';
 
@@ -97,10 +99,18 @@ export interface ShotManifestEntry {
 
 export interface RenderManifest {
   kind: typeof RENDER_MANIFEST_KIND;
-  version: 1 | typeof RENDER_MANIFEST_VERSION;
+  version: 1 | 2 | typeof RENDER_MANIFEST_VERSION;
   manifestId: string;
   projectId: string;
   rendererVersion: string;
+  productionId?: string;
+  productionVersionId?: string;
+  timelineId?: string;
+  timelineVersionNumber?: number;
+  selection?: { scope: RenderSelectionScope; ids: string[] };
+  export?: { scope: RenderSelectionScope; format: 'MP4' | 'WEBM' | 'MOV' };
+  idempotencyKey?: string;
+  correlationId?: string;
   output: RenderOutputSpec;
   items: RenderItem[];
   shots?: ShotManifestEntry[];

@@ -72,6 +72,42 @@ const status = v.union(
   v.literal("degraded"), v.literal("unhealthy"),
 );
 
+const projectRole = v.union(
+  v.literal("OWNER"),
+  v.literal("EDITOR"),
+  v.literal("REVIEWER"),
+  v.literal("VIEWER"),
+);
+
+const projectMemberStatus = v.union(
+  v.literal("ACTIVE"),
+  v.literal("INVITED"),
+  v.literal("SUSPENDED"),
+  v.literal("REMOVED"),
+);
+
+const resourceState = v.union(
+  v.literal("DRAFT"),
+  v.literal("IN_REVIEW"),
+  v.literal("APPROVED"),
+  v.literal("LOCKED"),
+  v.literal("REVISION_REQUESTED"),
+);
+
+const voiceKind = v.union(v.literal("CLONED"), v.literal("STOCK"), v.literal("RECORDED"));
+const voiceStatus = v.union(
+  v.literal("DRAFT"), v.literal("CONSENT_REQUIRED"), v.literal("QUEUED"), v.literal("TRAINING"),
+  v.literal("READY"), v.literal("FAILED"), v.literal("REVOKING"), v.literal("REVOKED"), v.literal("DELETED"),
+);
+const voiceConsentUse = v.union(v.literal("TRAIN"), v.literal("SYNTHESIZE"), v.literal("AVATAR_LIPSYNC"));
+const videoType = v.union(
+  v.literal("ANIMATED_COMEDY_2D"), v.literal("REALISTIC_SKIT_UGC"), v.literal("PRODUCT_SAAS_LAUNCH"),
+  v.literal("MOTION_GRAPHICS"), v.literal("EXPLAINER_STORY"), v.literal("CINEMATIC_FILM"),
+  v.literal("MUSIC_VIDEO"), v.literal("SOCIAL_CUTDOWN"),
+);
+const videoQualityTier = v.union(v.literal("ECONOMY"), v.literal("STANDARD"), v.literal("PREMIUM"));
+const videoProductionPath = v.union(v.literal("AI_VIDEO"), v.literal("MOTION_GRAPHICS"), v.literal("COMPOSITED"));
+
 // Keep the legacy external key during migration while making studio ownership
 // explicit on every private canonical record.
 const studioOwned = {
@@ -118,13 +154,92 @@ export default defineSchema({
 
   projects: defineTable({
     externalId: v.string(), studioExternalId: v.string(), studioId: v.optional(v.id("studios")), name: v.string(),
-    description: v.optional(v.string()), status: v.optional(status), metadata: v.optional(json),
+    description: v.optional(v.string()), projectType: v.optional(v.string()), status: v.optional(status), metadata: v.optional(json),
     createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")),
+    ownerUserId: v.optional(v.id("users")), archivedAt: v.optional(timestamp), deletedAt: v.optional(timestamp),
     createdAt: timestamp, updatedAt: timestamp,
-  }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"]).index("by_studio_id", ["studioId"]),
+  }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"])
+    .index("by_studio_id", ["studioId"]).index("by_studio_status", ["studioExternalId", "status"]),
+
+  projectMembers: defineTable({
+    projectId: v.id("projects"), userId: v.id("users"), role: projectRole, status: projectMemberStatus,
+    invitedByUserId: v.optional(v.id("users")), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_project", ["projectId"]).index("by_project_user", ["projectId", "userId"])
+    .index("by_user", ["userId"]).index("by_project_status", ["projectId", "status"]),
+
+  episodes: defineTable({
+    projectId: v.id("projects"), productionId: v.id("productions"), episodeNumber: v.number(), title: v.string(),
+    predecessorEpisodeId: v.optional(v.id("episodes")), inputStoryStateId: v.optional(v.id("episodeStoryStates")),
+    acceptedStoryStateId: v.optional(v.id("episodeStoryStates")),
+    continuityStatus: v.union(v.literal("CURRENT"), v.literal("STALE")),
+    createdByUserId: v.id("users"), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_project_and_number", ["projectId", "episodeNumber"])
+    .index("by_production", ["productionId"]).index("by_project_and_predecessor", ["projectId", "predecessorEpisodeId"]),
+
+  projectResources: defineTable({
+    projectId: v.id("projects"), kind: v.union(v.literal("CHARACTER"), v.literal("LOCATION"), v.literal("COSTUME"),
+      v.literal("PROP"), v.literal("PRODUCT"), v.literal("BRAND"), v.literal("STYLE")),
+    name: v.string(), createdByUserId: v.id("users"), createdAt: timestamp, updatedAt: timestamp, archivedAt: v.optional(timestamp),
+  }).index("by_project_and_kind", ["projectId", "kind"]).index("by_project", ["projectId"]),
+
+  projectResourceVersions: defineTable({
+    projectId: v.id("projects"), resourceId: v.id("projectResources"), versionNumber: v.number(), profile: json,
+    assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), createdByUserId: v.id("users"), createdAt: timestamp,
+  }).index("by_resource_and_version", ["resourceId", "versionNumber"]).index("by_project", ["projectId"]),
+
+  continuityBibles: defineTable({
+    projectId: v.id("projects"), versionNumber: v.number(), snapshot: json,
+    idempotencyKey: v.optional(v.string()),
+    state: v.union(v.literal("DRAFT"), v.literal("APPROVED")), sourceBibleId: v.optional(v.id("continuityBibles")),
+    createdByUserId: v.id("users"), approvedByUserId: v.optional(v.id("users")), approvedAt: v.optional(timestamp),
+    createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_project_and_version", ["projectId", "versionNumber"]).index("by_project_and_state", ["projectId", "state"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  episodeStoryStates: defineTable({
+    projectId: v.id("projects"), episodeId: v.id("episodes"), productionVersionId: v.id("productionVersions"),
+    timelineId: v.optional(v.id("timelines")),
+    continuityBibleId: v.optional(v.id("continuityBibles")), predecessorStoryStateId: v.optional(v.id("episodeStoryStates")),
+    snapshot: json, createdByUserId: v.id("users"), createdAt: timestamp,
+  }).index("by_episode", ["episodeId"]).index("by_version", ["productionVersionId"]),
+
+  // Provider dollars are separate from internal product credits. One run can
+  // cover multiple studios without multiplying the approved testing ceiling.
+  providerBudgets: defineTable({
+    key: v.string(), limitMicros: v.number(), spentMicros: v.number(), reservedMicros: v.number(),
+    status: v.union(v.literal("ACTIVE"), v.literal("PAUSED"), v.literal("CLOSED")),
+    allowedStudioExternalIds: v.array(v.string()), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_key", ["key"]),
+
+  providerBudgetReservations: defineTable({
+    budgetId: v.id("providerBudgets"), jobId: v.optional(v.id("generationJobs")), studioExternalId: v.string(),
+    idempotencyKey: v.string(), estimatedMicros: v.number(), actualMicros: v.optional(v.number()),
+    status: v.union(v.literal("RESERVED"), v.literal("SETTLED"), v.literal("RELEASED"), v.literal("RECONCILIATION_REQUIRED")),
+    createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_idempotency", ["idempotencyKey"]).index("by_job", ["jobId"]).index("by_budget", ["budgetId"]),
+
+  // Transport receipts, not a second planning/approval authority. Successful
+  // content is applied only through productions.ts and productionVersions.
+  providerTextRequests: defineTable({
+    projectId: v.id("projects"), createdByUserId: v.id("users"), studioExternalId: v.string(),
+    requestKey: v.string(), capability: v.string(), provider: v.literal("openrouter"), model: v.string(),
+    reservationId: v.id("providerBudgetReservations"), estimatedCostUsd: v.number(), actualCostUsd: v.optional(v.number()),
+    status: v.union(v.literal("RESERVED"), v.literal("SUBMITTING"), v.literal("COMPLETED"), v.literal("FAILED"), v.literal("RECONCILIATION_REQUIRED")),
+    content: v.optional(v.string()), providerRequestId: v.optional(v.string()), usage: v.optional(json), errorCode: v.optional(v.string()),
+    createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_request_key", ["requestKey"]).index("by_project", ["projectId"]),
+
+  resourceStates: defineTable({
+    projectId: v.id("projects"), productionId: v.optional(v.id("productions")), resourceType: v.string(), resourceId: v.string(),
+    state: resourceState, approvedByUserId: v.optional(v.id("users")), approvedAt: v.optional(timestamp),
+    lockedByUserId: v.optional(v.id("users")), lockedAt: v.optional(timestamp), unlockReason: v.optional(v.string()),
+    revisionOfResourceId: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_project_resource", ["projectId", "resourceType", "resourceId"])
+    .index("by_project", ["projectId"]).index("by_production", ["productionId"]).index("by_state", ["state"]),
 
   productions: defineTable({
-    externalProjectId: v.string(), projectId: v.optional(v.id("projects")), studioExternalId: v.string(),
+    externalProjectId: v.string(), projectId: v.optional(v.id("projects")), projectType: v.optional(v.string()),
+    plannedDurationSeconds: v.optional(v.number()), studioExternalId: v.string(),
     studioId: v.optional(v.id("studios")), workflow: v.string(), inputMode: v.string(),
     requestedDurationSeconds: v.number(), language: v.string(), outputPreset: v.string(), status,
     preset: v.optional(workflowPreset), inputModes: v.optional(v.array(inputMode)), platform: v.optional(v.string()),
@@ -152,10 +267,11 @@ export default defineSchema({
     // Optional while the existing approval mutation is migrated; ownership is
     // still enforced through the required production relation.
     studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.id("productions"),
-    versionNumber: v.optional(v.number()), input: json, plan: json, estimate: json, status,
+    versionNumber: v.optional(v.number()), idempotencyKey: v.optional(v.string()), input: json, plan: json, estimate: json, status,
     approval: v.optional(json), createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")),
     createdAt: timestamp, updatedAt: v.optional(timestamp), approvedAt: v.optional(timestamp),
-  }).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]).index("by_status", ["status"]),
+  }).index("by_production", ["productionId"]).index("by_idempotency", ["idempotencyKey"])
+    .index("by_studio", ["studioExternalId"]).index("by_status", ["status"]),
 
   productionBibles: defineTable({
     studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.optional(v.id("productions")),
@@ -167,6 +283,39 @@ export default defineSchema({
     ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
     name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
+
+  // Project-owned voice profiles. Provider identifiers are private backend
+  // metadata and must be removed from browser-facing query projections.
+  voices: defineTable({
+    ...studioOwned, projectId: v.id("projects"), productionId: v.optional(v.id("productions")),
+    characterId: v.optional(v.id("characters")), kind: voiceKind, name: v.string(), description: v.optional(v.string()),
+    language: v.optional(v.string()), status: voiceStatus, provider: v.optional(v.string()), providerVoiceId: v.optional(v.string()),
+    sampleAssetIds: v.array(v.id("assets")), previewAssetId: v.optional(v.id("assets")), currentConsentId: v.optional(v.id("voiceConsents")),
+    originVoiceId: v.optional(v.id("voices")), importedByUserId: v.optional(v.id("users")), importedAt: v.optional(timestamp),
+    settingsSnapshot: v.optional(json), providerMetadata: v.optional(json), retentionPolicy: v.optional(json),
+    createdByUserId: v.id("users"), idempotencyKey: v.optional(v.string()), revokedAt: v.optional(timestamp), deletedAt: v.optional(timestamp),
+    createdAt: timestamp, updatedAt: timestamp,
+  }).index("by_project", ["projectId"]).index("by_project_status", ["projectId", "status"])
+    .index("by_character", ["characterId"]).index("by_production", ["productionId"])
+    .index("by_idempotency", ["idempotencyKey"]).index("by_provider_voice", ["provider", "providerVoiceId"]),
+
+  // Grants are immutable. Revocation and other lifecycle changes are appended
+  // to voiceConsentEvents so the original consent record remains auditable.
+  voiceConsents: defineTable({
+    projectId: v.id("projects"), voiceId: v.id("voices"), subjectType: v.union(v.literal("SELF"), v.literal("AUTHORIZED_SPEAKER")),
+    subjectUserId: v.optional(v.id("users")), subjectDisplayName: v.optional(v.string()), grantedByUserId: v.id("users"),
+    consentVersion: v.string(), permittedUses: v.array(voiceConsentUse), projectScope: v.literal("PROJECT"),
+    grantedAt: timestamp, expiresAt: v.optional(timestamp), proofAssetId: v.optional(v.id("assets")), proofChecksum: v.optional(v.string()),
+    thirdPartyDisclosureAcceptedAt: timestamp, idempotencyKey: v.string(),
+  }).index("by_project", ["projectId"]).index("by_voice", ["voiceId"])
+    .index("by_idempotency", ["idempotencyKey"]),
+
+  voiceConsentEvents: defineTable({
+    projectId: v.id("projects"), voiceId: v.id("voices"), consentId: v.id("voiceConsents"),
+    event: v.union(v.literal("GRANTED"), v.literal("REVOKED")), actorUserId: v.id("users"),
+    reason: v.optional(v.string()), idempotencyKey: v.string(), createdAt: timestamp,
+  }).index("by_project", ["projectId"]).index("by_voice", ["voiceId"])
+    .index("by_consent", ["consentId"]).index("by_idempotency", ["idempotencyKey"]),
 
   locations: defineTable({
     ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
@@ -199,37 +348,41 @@ export default defineSchema({
     .index("by_project", ["projectId"]).index("by_production", ["productionId"]),
 
   sequences: defineTable({
-    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.optional(v.id("productions")),
+    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")),
     productionVersionId: v.id("productionVersions"), title: v.string(), description: v.string(), orderIndex: v.number(),
     status: v.optional(status), metadata: v.optional(json),
   }).index("by_version", ["productionVersionId"]).index("by_production", ["productionId"])
-    .index("by_studio", ["studioExternalId"]).index("by_order", ["productionVersionId", "orderIndex"]),
+    .index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]).index("by_order", ["productionVersionId", "orderIndex"]),
 
   scenes: defineTable({
-    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.optional(v.id("productions")),
+    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
     sequenceId: v.id("sequences"), title: v.string(), purpose: v.string(), visualDirection: v.string(), orderIndex: v.number(),
     status: v.optional(status), metadata: v.optional(json),
   }).index("by_sequence", ["sequenceId"]).index("by_production", ["productionId"])
-    .index("by_studio", ["studioExternalId"]).index("by_order", ["sequenceId", "orderIndex"]),
+    .index("by_version", ["productionVersionId"]).index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]).index("by_order", ["sequenceId", "orderIndex"]),
 
   shots: defineTable({
-    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.optional(v.id("productions")),
+    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
     sequenceId: v.optional(v.id("sequences")), sceneId: v.id("scenes"), title: v.string(), prompt: v.string(), durationSeconds: v.number(),
     orderIndex: v.number(), camera: json, requiredAssetIds: v.array(v.string()), referencePackIds: v.optional(v.array(v.id("referencePacks"))),
     status, metadata: v.optional(json),
   }).index("by_scene", ["sceneId"]).index("by_production", ["productionId"])
-    .index("by_studio", ["studioExternalId"]).index("by_order", ["sceneId", "orderIndex"]),
+    .index("by_version", ["productionVersionId"]).index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]).index("by_order", ["sceneId", "orderIndex"]),
 
   shotVersions: defineTable({
-    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), productionId: v.optional(v.id("productions")),
+    studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")),
+    productionVersionId: v.optional(v.id("productionVersions")),
     shotId: v.id("shots"), versionNumber: v.number(), status, assetId: v.optional(v.id("assets")),
     promptSnapshot: v.optional(v.string()), contextSnapshot: json, model: v.optional(v.string()), provider: v.optional(v.string()),
     actualCost: v.optional(v.number()), createdAt: v.optional(timestamp),
   }).index("by_shot", ["shotId"]).index("by_shot_version", ["shotId", "versionNumber"])
-    .index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
+    .index("by_production", ["productionId"]).index("by_version", ["productionVersionId"])
+    .index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]),
 
   assets: defineTable({
-    ...studioOwned, externalId: v.optional(v.string()), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")),
+    ...studioOwned, externalId: v.optional(v.string()), scope: v.optional(v.union(v.literal("GLOBAL"), v.literal("PROJECT"))),
+    projectId: v.optional(v.id("projects")), originAssetId: v.optional(v.id("assets")), importedByUserId: v.optional(v.id("users")), importedAt: v.optional(timestamp),
+    productionId: v.optional(v.id("productions")),
     source: v.string(), roles: v.array(v.string()), name: v.optional(v.string()), mimeType: v.optional(v.string()), byteSize: v.optional(v.number()),
     storageUrl: v.optional(v.string()), storageKey: v.optional(v.string()), storageId: v.optional(v.id("_storage")), checksum: v.optional(v.string()),
     width: v.optional(v.number()), height: v.optional(v.number()), durationSeconds: v.optional(v.number()), frameRate: v.optional(v.number()),
@@ -253,9 +406,13 @@ export default defineSchema({
   }).index("by_asset", ["assetId"]).index("by_generation_job", ["generationJobId"]).index("by_studio", ["studioExternalId"]),
 
   generationJobs: defineTable({
-    ...studioOwned, productionId: v.id("productions"), shotId: v.id("shots"), shotVersionId: v.id("shotVersions"), operation: v.optional(v.string()),
+    ...studioOwned, productionId: v.id("productions"), shotId: v.optional(v.id("shots")), shotVersionId: v.optional(v.id("shotVersions")), operation: v.optional(v.string()),
+    projectId: v.optional(v.id("projects")), productionVersionId: v.optional(v.id("productionVersions")),
+    createdByUserId: v.optional(v.id("users")),
+    executionStage: v.optional(v.string()), submissionStartedAt: v.optional(timestamp), nextPollAt: v.optional(timestamp),
+    providerBudgetReservationId: v.optional(v.id("providerBudgetReservations")),
     capability: v.optional(v.string()), modality: v.string(), provider: v.string(), model: v.string(), modelVersion: v.optional(v.string()), request: json,
-    response: v.optional(json), status, progress: v.number(), estimatedCost: v.number(), estimateId: v.optional(v.id("estimates")),
+    response: v.optional(json), status, progress: v.number(), estimatedCost: v.number(), estimatedProviderCostUsd: v.optional(v.number()), estimateId: v.optional(v.id("estimates")),
     idempotencyKey: v.string(), requestHash: v.optional(v.string()), reservationId: v.optional(v.id("creditReservations")), canonicalReservationId: v.optional(v.id("reservations")),
     correlationId: v.optional(v.string()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), nextAttemptAt: v.optional(timestamp),
     actualCost: v.optional(v.number()), providerCostUsd: v.optional(v.number()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), providerJobId: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()),
@@ -263,8 +420,27 @@ export default defineSchema({
   }).index("by_idempotency", ["idempotencyKey"]).index("by_production", ["productionId"]).index("by_shot", ["shotId"])
     .index("by_status", ["status"]).index("by_studio", ["studioExternalId"]).index("by_provider_job", ["provider", "providerJobId"]),
 
+  videoModelCatalog: defineTable({
+    studioExternalId: v.string(), provider: v.string(), modelId: v.string(), name: v.optional(v.string()),
+    supportsTextToVideo: v.boolean(), supportsImageReferences: v.boolean(), supportsVideoReferences: v.boolean(),
+    supportsFirstFrame: v.boolean(), supportsLastFrame: v.boolean(), supportsVideoEdit: v.boolean(),
+    supportsVideoExtension: v.boolean(), supportsAudio: v.boolean(), supportedDurations: v.array(v.number()),
+    supportsAudioReferences: v.optional(v.boolean()), supportsPerformanceTransfer: v.optional(v.boolean()),
+    supportsLipSync: v.optional(v.boolean()), supportsUpscale: v.optional(v.boolean()), supportsSourceAudioPreservation: v.optional(v.boolean()),
+    supportsCombinedFrameReferences: v.optional(v.boolean()),
+    reviewedOperations: v.optional(v.array(v.string())), catalogFingerprint: v.optional(v.string()), reviewedCatalogFingerprint: v.optional(v.string()),
+    supportedResolutions: v.array(v.string()), supportedAspectRatios: v.array(v.string()), supportedSizes: v.optional(v.array(v.string())), supportedParameters: v.array(v.string()),
+    estimatedCostPerSecond: v.optional(v.number()), pricingSkus: v.optional(json), available: v.boolean(), lastSeenAt: timestamp, reviewedAt: v.optional(timestamp),
+  }).index("by_studio", ["studioExternalId"]).index("by_studio_model", ["studioExternalId", "modelId"]),
+
+  videoRoutePolicies: defineTable({
+    studioExternalId: v.string(), videoType, qualityTier: videoQualityTier, path: videoProductionPath,
+    preferredModelIds: v.array(v.string()), maxCostUsd: v.optional(v.number()), updatedByUserId: v.id("users"), updatedAt: timestamp,
+  }).index("by_studio", ["studioExternalId"])
+    .index("by_studio_type_quality", ["studioExternalId", "videoType", "qualityTier"]),
+
   attempts: defineTable({
-    ...studioOwned, generationJobId: v.id("generationJobs"), attemptNumber: v.number(), status, provider: v.string(),
+    ...studioOwned, generationJobId: v.id("generationJobs"), attemptNumber: v.number(), status, provider: v.string(), model: v.optional(v.string()),
     providerJobId: v.optional(v.string()), providerRequestId: v.optional(v.string()), latencyMs: v.optional(v.number()), requestHash: v.optional(v.string()), response: v.optional(json), errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), startedAt: v.optional(timestamp), completedAt: v.optional(timestamp), createdAt: timestamp,
   }).index("by_job", ["generationJobId"]).index("by_job_attempt", ["generationJobId", "attemptNumber"]).index("by_studio", ["studioExternalId"]),
@@ -286,9 +462,10 @@ export default defineSchema({
   }).index("by_transcript", ["transcriptId"]).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
 
   timelines: defineTable({
-    ...studioOwned, productionId: v.id("productions"), versionNumber: v.number(), durationSeconds: v.number(), tracks: json, outputPreset: v.string(),
+    creationKey: v.optional(v.string()), creationHash: v.optional(v.string()),
+    ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), versionNumber: v.number(), durationSeconds: v.number(), tracks: json, outputPreset: v.string(),
     status, createdByUserId: v.optional(v.id("users")), createdAt: timestamp, updatedAt: v.optional(timestamp),
-  }).index("by_production", ["productionId"]).index("by_production_version", ["productionId", "versionNumber"]).index("by_studio", ["studioExternalId"]),
+  }).index("by_production", ["productionId"]).index("by_production_version", ["productionId", "versionNumber"]).index("by_studio", ["studioExternalId"]).index("by_creation_key", ["creationKey"]),
 
   timelineTracks: defineTable({
     ...studioOwned, timelineId: v.id("timelines"), kind: v.string(), name: v.optional(v.string()), orderIndex: v.number(), metadata: v.optional(json),
@@ -301,35 +478,55 @@ export default defineSchema({
   }).index("by_timeline", ["timelineId"]).index("by_track", ["trackId"]).index("by_studio", ["studioExternalId"]),
 
   renderJobs: defineTable({
-    ...studioOwned, productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), manifestId: v.optional(v.id("manifests")), operation: v.string(), preset: v.string(),
+    ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), operation: v.string(), preset: v.string(),
     status, idempotencyKey: v.string(), requestHash: v.optional(v.string()), progress: v.number(), estimatedCost: v.optional(v.number()), actualCost: v.optional(v.number()),
+    createdByUserId: v.optional(v.id("users")), executionStage: v.optional(v.string()), dispatchAttempt: v.optional(v.number()),
+    dispatchPayload: v.optional(json), dispatchStartedAt: v.optional(timestamp), acceptedAt: v.optional(timestamp),
+    dispatchLeaseId: v.optional(v.string()), dispatchLeaseExpiresAt: v.optional(timestamp), nextDispatchAt: v.optional(timestamp),
+    callbackIdempotencyKey: v.optional(v.string()),
+    dispatchRetryCount: v.optional(v.number()),
     providerJobId: v.optional(v.string()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()),
     createdAt: timestamp, startedAt: v.optional(timestamp), completedAt: v.optional(timestamp), updatedAt: timestamp,
   }).index("by_idempotency", ["idempotencyKey"]).index("by_production", ["productionId"]).index("by_status", ["status"]).index("by_studio", ["studioExternalId"]),
 
+  renderCallbackReceipts: defineTable({
+    jobId: v.id("renderJobs"), projectId: v.optional(v.id("projects")), eventId: v.string(), idempotencyKey: v.string(),
+    eventType: v.string(), attempt: v.number(), occurredAt: timestamp, receivedAt: timestamp, payloadHash: v.string(),
+    signature: v.optional(v.string()), status: v.string(),
+  }).index("by_event_id", ["eventId"]).index("by_idempotency", ["idempotencyKey"])
+    .index("by_job", ["jobId"]).index("by_project", ["projectId"]),
+
   manifests: defineTable({
-    ...studioOwned, productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), versionNumber: v.number(), manifest: json, sourceHashes: v.array(v.string()),
+    ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), contractVersion: v.optional(v.number()), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), selectionIds: v.optional(v.array(v.string())), versionNumber: v.number(), manifest: json, sourceHashes: v.array(v.string()),
     rendererVersion: v.optional(v.string()), templateVersions: v.optional(json), createdAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_timeline", ["timelineId"]).index("by_studio", ["studioExternalId"]),
 
   exports: defineTable({
-    ...studioOwned, productionId: v.id("productions"), renderJobId: v.optional(v.id("renderJobs")), manifestId: v.optional(v.id("manifests")), assemblyJobId: v.optional(v.id("assemblyJobs")),
+    ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), renderJobId: v.optional(v.id("renderJobs")), manifestId: v.optional(v.id("manifests")), assemblyJobId: v.optional(v.id("assemblyJobs")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), progress: v.optional(v.number()), downloadReadyAt: v.optional(timestamp), downloadExpiresAt: v.optional(timestamp),
     preset: v.string(), status, storageId: v.optional(v.id("_storage")), storageKey: v.optional(v.string()), outputUrl: v.optional(v.string()), checksum: v.optional(v.string()),
     mimeType: v.optional(v.string()), errorMessage: v.optional(v.string()), createdAt: timestamp, completedAt: v.optional(timestamp),
   }).index("by_production", ["productionId"]).index("by_render_job", ["renderJobId"]).index("by_studio", ["studioExternalId"]),
 
   reviews: defineTable({
+    projectId: v.optional(v.id("projects")), manifestId: v.optional(v.id("manifests")), timelineId: v.optional(v.id("timelines")), timelineVersionNumber: v.optional(v.number()), exportId: v.optional(v.id("exports")),
     ...studioOwned, productionId: v.id("productions"), status: v.union(v.literal("DRAFT"), v.literal("REQUESTED"), v.literal("APPROVED"), v.literal("CHANGES_REQUESTED")),
     shareTokenHash: v.optional(v.string()), requestedByUserId: v.optional(v.id("users")), createdAt: timestamp, updatedAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]).index("by_status", ["status"]),
 
   comments: defineTable({
+    reviewLinkId: v.optional(v.id("reviewLinks")), authorName: v.optional(v.string()), clientRequestId: v.optional(v.string()),
     ...studioOwned, reviewId: v.id("reviews"), authorExternalId: v.optional(v.string()), authorUserId: v.optional(v.id("users")), body: v.string(),
     timeSeconds: v.optional(v.number()), shotId: v.optional(v.id("shots")), resolvedAt: v.optional(timestamp), createdAt: timestamp,
-  }).index("by_review", ["reviewId"]).index("by_shot", ["shotId"]).index("by_studio", ["studioExternalId"]),
+  }).index("by_review", ["reviewId"]).index("by_shot", ["shotId"]).index("by_studio", ["studioExternalId"]).index("by_review_link_request", ["reviewLinkId", "clientRequestId"]),
+
+  reviewLinks: defineTable({
+    projectId: v.id("projects"), productionId: v.id("productions"), reviewId: v.id("reviews"), timelineId: v.id("timelines"),
+    timelineVersionNumber: v.number(), manifestId: v.id("manifests"), exportId: v.optional(v.id("exports")),
+    label: v.string(), tokenHash: v.string(), expiresAt: timestamp, revokedAt: v.optional(timestamp), createdByUserId: v.id("users"), createdAt: timestamp,
+  }).index("by_token_hash", ["tokenHash"]).index("by_project", ["projectId"]).index("by_review", ["reviewId"]),
 
   approvals: defineTable({
-    ...studioOwned, productionId: v.id("productions"), reviewId: v.optional(v.id("reviews")), resourceType: v.string(), resourceId: v.string(), decision: v.string(),
+    ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")), reviewId: v.optional(v.id("reviews")), resourceType: v.string(), resourceId: v.string(), decision: v.string(),
     actorUserId: v.optional(v.id("users")), note: v.optional(v.string()), createdAt: timestamp,
   }).index("by_resource", ["resourceType", "resourceId"]).index("by_production", ["productionId"]).index("by_studio", ["studioExternalId"]),
 
@@ -357,7 +554,7 @@ export default defineSchema({
     idempotencyKey: v.optional(v.string()), reservationId: v.optional(v.id("reservations")), purchaseId: v.optional(v.id("purchases")), refundId: v.optional(v.id("refunds")),
     metadata: json, createdAt: timestamp,
   }).index("by_studio", ["studioExternalId"]).index("by_source", ["sourceType", "sourceId"])
-    .index("by_idempotency", ["idempotencyKey"]).index("by_created_at", ["studioExternalId", "createdAt"]),
+    .index("by_idempotency", ["idempotencyKey"]).index("by_reservation", ["reservationId"]).index("by_created_at", ["studioExternalId", "createdAt"]),
 
   payments: defineTable({
     ...studioOwned, provider: v.string(), providerCheckoutId: v.optional(v.string()), providerPaymentId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), status, metadata: json, createdAt: timestamp,
@@ -438,11 +635,14 @@ export default defineSchema({
   }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"])
     .index("by_studio", ["studioExternalId"]),
 
-  // Compatibility shims for untouched current functions. New code should use
-  // the canonical tables above and migrate these records by ID.
+  // Canonical production snapshots. Draft versions are mutable only through
+  // the canonical productions path; approved versions are immutable snapshots.
   productionVersions: defineTable({
-    productionId: v.id("productions"), versionNumber: v.number(), status, sourcePlanId: v.id("directorPlans"), approvedAt: v.optional(timestamp), createdAt: timestamp,
-  }).index("by_production", ["productionId"]),
+    productionId: v.id("productions"), versionNumber: v.number(), status, sourcePlanId: v.id("directorPlans"),
+    idempotencyKey: v.optional(v.string()), snapshot: v.optional(json), planningContextSnapshot: v.optional(json), approvedByUserId: v.optional(v.id("users")),
+    approvedAt: v.optional(timestamp), createdAt: timestamp, updatedAt: v.optional(timestamp),
+  }).index("by_production", ["productionId"]).index("by_source_plan", ["sourcePlanId"])
+    .index("by_idempotency", ["idempotencyKey"]),
   priceRules: defineTable({ operation: v.string(), qualityTier: v.string(), unit: v.string(), creditsPerUnit: v.number(), enabled: v.boolean() }).index("by_operation", ["operation", "qualityTier"]),
   creditReservations: defineTable({
     studioExternalId: v.string(), generationJobId: v.optional(v.id("generationJobs")), amount: v.number(), idempotencyKey: v.string(), status, expiresAt: timestamp, createdAt: timestamp,
@@ -452,7 +652,7 @@ export default defineSchema({
     studioExternalId: v.string(), delta: v.number(), transactionType: v.string(), source: v.string(), referenceId: v.optional(v.string()), metadata: json, createdAt: timestamp,
   }).index("by_studio", ["studioExternalId"]),
   assemblyJobs: defineTable({
-    productionId: v.id("productions"), status, manifest: json, outputUrl: v.optional(v.string()), errorMessage: v.optional(v.string()), rendererJobId: v.optional(v.string()), correlationId: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp,
+    projectId: v.optional(v.id("projects")), productionId: v.id("productions"), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), idempotencyKey: v.optional(v.string()), progress: v.optional(v.number()), status, manifest: json, outputUrl: v.optional(v.string()), errorMessage: v.optional(v.string()), rendererJobId: v.optional(v.string()), correlationId: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp, completedAt: v.optional(timestamp),
   }).index("by_production", ["productionId"]),
   paymentPurchases: defineTable({
     studioExternalId: v.string(), provider: v.string(), providerCheckoutId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), status, metadata: json, createdAt: timestamp, completedAt: v.optional(timestamp),

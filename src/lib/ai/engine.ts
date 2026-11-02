@@ -10,7 +10,9 @@
 import { getModelForCapability, type AICapability, type ExecutionProfile } from './model-registry';
 import { executeAITask as executeOpenRouter, generateVideo as submitOpenRouterVideo, pollVideo, type AIResponse, type OpenRouterChatOptions } from '@/lib/adapters/openrouter-adapter';
 import type { CameraConfig, MotionConfig, RenderStrategy, SceneAsset, StudioAsset } from '@/lib/types/database';
+import type { VideoTask, VideoType } from './video-routing';
 import type OpenAI from 'openai';
+import type { MediaReference } from './types';
 
 // Re-export types for consumers
 export type { AIResponse } from '@/lib/adapters/openrouter-adapter';
@@ -63,12 +65,22 @@ export async function executeVideoGeneration(
     prompt: string,
     executionProfile: ExecutionProfile,
     options: {
+        model?: string;
+        fallbackModels?: string[];
+        videoType?: VideoType;
+        task?: VideoTask;
+        resolution?: string;
+        inputReferences?: MediaReference[];
+        previousJobId?: string;
+        frameImages?: Array<{ url: string; frameType: 'first_frame' | 'last_frame' }>;
+        generateAudio?: boolean;
+        onSubmitted?: (submission: { taskId: string; model: string; requestId?: string }) => Promise<void>;
         initImageUrl?: string;
         initVideoUrl?: string;
         cameraConfig?: CameraConfig;
         motionConfig?: MotionConfig;
-        duration?: 4 | 6 | 8;
-        ratio?: '16:9' | '9:16' | '1:1';
+        duration?: number;
+        ratio?: string;
         sceneAssets?: SceneAsset[];
         studioAssets?: StudioAsset[];
     }
@@ -77,13 +89,15 @@ export async function executeVideoGeneration(
     const ratio = options.ratio || '16:9';
     const videoCapability = executionProfile === 'FAST_SOCIAL' ? 'VIDEO_PREVIEW' : 'VIDEO_FINAL';
     const videoConfig = getModelForCapability(videoCapability);
-    const model = videoConfig.id;
+    const model = options.model || videoConfig.id;
     const enrichedPrompt = [
         prompt,
         options.cameraConfig ? `Camera: ${JSON.stringify(options.cameraConfig)}` : '',
         options.motionConfig ? `Motion: ${JSON.stringify(options.motionConfig)}` : '',
         `Execution profile: ${executionProfile}`,
         `Generation strategy: ${strategy}`,
+        options.videoType ? `Video type: ${options.videoType}` : '',
+        options.task ? `Video task: ${options.task}` : '',
     ].filter(Boolean).join('\n');
 
     const submitted = await submitOpenRouterVideo({
@@ -91,11 +105,23 @@ export async function executeVideoGeneration(
         prompt: enrichedPrompt,
         duration: options.duration || 6,
         aspectRatio: ratio,
+        resolution: options.resolution,
+        frameImages: options.frameImages,
+        generateAudio: options.generateAudio,
+        previousJobId: options.previousJobId,
         inputReferences: [
+            ...(options.inputReferences || []),
             ...(options.initImageUrl ? [{ url: options.initImageUrl }] : []),
-            ...(options.initVideoUrl ? [{ url: options.initVideoUrl }] : []),
+            ...(options.initVideoUrl ? [{ url: options.initVideoUrl, kind: 'video' as const }] : []),
         ],
-    }, { fallbackModels: [...(videoConfig.fallbackIds || [])] });
+    }, {
+        fallbackModels: options.fallbackModels ?? (options.model ? [] : [...(videoConfig.fallbackIds || [])]),
+        allowDiscoveredModel: Boolean(options.model),
+    });
+
+    // Persist the accepted provider ID before polling. If a later step fails,
+    // the durable job records that the provider has already accepted it.
+    await options.onSubmitted?.({ taskId: submitted.id, model: submitted.modelUsed, requestId: submitted.requestId });
 
     let current = await pollVideo(submitted.id);
     for (let attempt = 0; attempt < 60 && !['completed', 'succeeded', 'failed', 'error', 'canceled'].includes(String(current.status).toLowerCase()); attempt += 1) {

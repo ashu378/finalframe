@@ -7,11 +7,16 @@ import { RemotionRenderRuntime } from './remotion/runtime.js';
 import { InjectableFFmpegAdapter, InjectableFFprobeAdapter } from './media/ffmpeg.js';
 import { createCallbackBody, sendRendererCallback } from './contracts/callback.js';
 import type { RenderManifest, RenderMode } from './types.js';
+import { probeRemoteMedia } from './media/remote-probe.js';
+import { validateManifest } from './manifest.js';
+import { RenderRequestQueue } from './request-queue.js';
 
 const port = Number(process.env.PORT ?? 8080);
 const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim() ?? '';
 const outputRoot = process.env.RENDER_OUTPUT_ROOT ?? '/tmp/finalframe-renders';
 const rendererVersion = process.env.RENDERER_VERSION ?? 'finalframe-renderer-v1';
+const renderQueue = new RenderRequestQueue(4);
+let probing = false;
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -62,13 +67,13 @@ async function render(payload: any) {
     }
     if (payload.callbackUrl) {
       if (!payload.storageId) throw new Error('storageId is required when callbackUrl is supplied.');
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${result.manifestId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.completed', payload: { storageId: payload.storageId, leaseId: payload.leaseId, mimeType: 'video/mp4', outputPath: result.outputPath, durationInFrames: result.durationInFrames } });
+      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${result.manifestId}`, jobId, projectId: String((payload.manifest as RenderManifest).projectId), rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.completed', payload: { storageId: payload.storageId, leaseId: payload.leaseId, mimeType: 'video/mp4', outputPath: result.outputPath, durationInFrames: result.durationInFrames } });
       await sendRendererCallback(payload.callbackUrl, callbackBody, secret);
     }
     return result;
   } catch (error) {
     if (payload.callbackUrl) {
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}`, jobId, rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.failed', payload: { leaseId: payload.leaseId, errorCode: 'RENDER_FAILED', errorMessage: error instanceof Error ? error.message : String(error), retryable: true } });
+      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}`, jobId, projectId: String((payload.manifest as RenderManifest).projectId), rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.failed', payload: { leaseId: payload.leaseId, errorCode: 'RENDER_FAILED', errorMessage: 'The renderer could not complete this export.', retryable: true } });
       await sendRendererCallback(payload.callbackUrl, callbackBody, secret).catch(() => undefined);
     }
     throw error;
@@ -80,13 +85,29 @@ async function render(payload: any) {
 createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion });
-    if (request.method !== 'POST' || request.url !== '/render') return json(response, 404, { error: 'Not found' });
+    if (request.method !== 'POST' || !['/render', '/media/probe'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
     if (headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
     const payload = await body(request);
-    return json(response, 202, await render({ ...payload, secret: headerSecret }));
+    if (request.url === '/media/probe') {
+      if (probing) return json(response, 429, { error: 'Media probe is busy.' });
+      probing = true;
+      try {
+        const result = await probeRemoteMedia(payload.url, {
+          kind: payload.kind === 'audio' ? 'audio' : 'video',
+          allowedHosts: (process.env.RENDER_MEDIA_ALLOWED_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean),
+          ffprobe: new InjectableFFprobeAdapter(),
+        });
+        return json(response, 200, result);
+      } finally { probing = false; }
+    }
+    if (typeof payload.jobId !== 'string' || !/^[a-zA-Z0-9._-]{1,180}$/.test(payload.jobId) || !payload.callbackUrl || !payload.storageUploadUrl || !payload.leaseId) return json(response, 400, { error: 'A leased render job, storage upload, and callback are required.' });
+    if (!validateManifest(payload.manifest).ok) return json(response, 400, { error: 'Invalid render manifest.' });
+    return json(response, 202, renderQueue.accept(payload.jobId, payload, () => render({ ...payload, secret: headerSecret })));
   } catch (error) {
-    return json(response, 400, { error: error instanceof Error ? error.message : 'Request failed' });
+    const code = error instanceof Error ? error.message : '';
+    return json(response, code === 'RENDER_QUEUE_FULL' ? 429 : code === 'RENDER_REQUEST_CONFLICT' ? 409 : 400,
+      { error: code === 'RENDER_QUEUE_FULL' ? 'Renderer is busy. Retry the existing job later.' : code === 'RENDER_REQUEST_CONFLICT' ? 'This render job already has a different request.' : 'Request could not be processed.' });
   }
 }).listen(port, '0.0.0.0', () => console.log(`FinalFrame renderer listening on 0.0.0.0:${port}`));

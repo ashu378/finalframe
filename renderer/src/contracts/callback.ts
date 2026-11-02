@@ -11,6 +11,7 @@ export interface RendererCallbackEnvelope<TPayload = Record<string, unknown>> {
   eventType: RendererCallbackType;
   idempotencyKey: string;
   jobId: string;
+  projectId: string;
   rendererVersion: string;
   occurredAt: string;
   attempt: number;
@@ -49,6 +50,7 @@ export interface CallbackRequestOptions {
   eventId: string;
   idempotencyKey: string;
   jobId: string;
+  projectId: string;
   rendererVersion: string;
   attempt: number;
   eventType: RendererCallbackType;
@@ -63,6 +65,7 @@ export function createCallbackBody(options: CallbackRequestOptions): string {
     eventType: options.eventType,
     idempotencyKey: options.idempotencyKey,
     jobId: options.jobId,
+    projectId: options.projectId,
     rendererVersion: options.rendererVersion,
     occurredAt: options.occurredAt ?? new Date().toISOString(),
     attempt: options.attempt,
@@ -155,7 +158,7 @@ export function assertCallbackEnvelope(input: unknown): asserts input is Rendere
   if (typeof input !== 'object' || input === null) throw new Error('Renderer callback must be an object');
   const value = input as Record<string, unknown>;
   if (value.version !== RENDERER_CALLBACK_VERSION) throw new Error('Unsupported renderer callback version');
-  for (const key of ['eventId', 'idempotencyKey', 'jobId', 'rendererVersion', 'occurredAt']) {
+  for (const key of ['eventId', 'idempotencyKey', 'jobId', 'projectId', 'rendererVersion', 'occurredAt']) {
     if (typeof value[key] !== 'string' || value[key].length === 0) throw new Error(`Renderer callback ${key} is required`);
   }
   if (!['render.completed', 'render.failed', 'render.cancelled'].includes(value.eventType as string)) throw new Error('Unsupported renderer callback event type');

@@ -89,7 +89,9 @@ assert.equal(hasBlockingQualityGate({ status: 'PASS', evidence: [{ rule: 'contin
 // The form must use the legacy sequence/scene contract that Convex persists,
 // with a strict structured-output request. This prevents valid provider output
 // from being parsed against a different shot-only contract.
-assert.match(productionActionsSource, /executeAITask\('STRUCTURED_PLANNING'/, 'production planning must use the structured planning capability');
+assert.match(productionActionsSource, /api\.providerText\.execute/, 'planning must use the authenticated budgeted backend transport');
+assert.match(productionActionsSource, /capability: 'STRUCTURED_PLANNING'/, 'planning must request the structured capability');
+assert.doesNotMatch(productionActionsSource, /import.*executeAITask/, 'planning must not call the unbudgeted adapter directly');
 assert.match(productionActionsSource, /LEGACY_DIRECTOR_PLAN_SCHEMA/, 'production planning must send the persistence schema to the provider');
 assert.doesNotMatch(productionActionsSource, /No fallback or fake plan was used/, 'provider failures must not expose the old misleading fallback message');
 assert.equal(LEGACY_DIRECTOR_PLAN_SCHEMA.strict, true, 'legacy production schema must be strict');

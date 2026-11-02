@@ -8,6 +8,8 @@ import { createProject } from '@/lib/project/actions';
 import { approveDirectorPlan, createDirectorPlan, reviseDirectorPlan, type CreateDirectorPlanResult } from '@/lib/production/actions';
 import { uploadAsset } from '@/lib/assets/actions';
 import { PlanPreview } from '@/components/production/planning';
+import { VIDEO_TYPE_LABELS, VIDEO_TYPES } from '@/lib/ai/video-routing';
+import type { VideoType } from '@/lib/ai/video-routing';
 import type { CreateIntent, OutputPreset, ProductionInputMode, ProjectContentType, QualityTier } from '@/lib/types/database';
 
 const MODES: Array<{ id: ProductionInputMode; label: string; description: string; icon: typeof Sparkles }> = [
@@ -21,19 +23,23 @@ const MODES: Array<{ id: ProductionInputMode; label: string; description: string
 
 type SuccessfulPlan = Extract<CreateDirectorPlanResult, { success: true }> & { projectId: string; inputAssetIds: string[] };
 
-export function CreateProductionForm({ studioId }: { studioId?: string }) {
+export function CreateProductionForm({ studioId, existingProjectId, productionId, continuityOptions }: { studioId?: string; existingProjectId?: string; productionId?: string; continuityOptions?: { requiresBible: boolean; bibles: Array<{ id: string; versionNumber: number }>; selectionError: string | null } }) {
     const router = useRouter();
     const [mode, setMode] = useState<ProductionInputMode>('IDEA');
     const [name, setName] = useState('');
     const [prompt, setPrompt] = useState('');
+    const [videoType, setVideoType] = useState<VideoType>('SOCIAL_CUTDOWN');
     const [duration, setDuration] = useState(30);
     const [outputPreset, setOutputPreset] = useState<OutputPreset>('SOCIAL_VERTICAL');
     const [qualityTier, setQualityTier] = useState<QualityTier>('STANDARD');
     const [files, setFiles] = useState<File[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [plan, setPlan] = useState<SuccessfulPlan | null>(null);
+    const [continuityChoice, setContinuityChoice] = useState('');
 
     async function requestPlan(options?: { existingProjectId?: string; inputAssetIds?: string[]; revision?: string }) {
+        if (continuityOptions?.selectionError) { toast.error(continuityOptions.selectionError); return; }
+        if (continuityOptions?.requiresBible && !continuityChoice && !plan?.continuityBibleId) { toast.error('Choose an approved continuity bible or explicitly start blank for this episode.'); return; }
         const brief = prompt.trim();
         const hasMediaInput = files.length > 0;
         if (!options?.existingProjectId && brief.length < 10 && !hasMediaInput) {
@@ -47,14 +53,15 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
 
         setIsSubmitting(true);
         try {
-            let projectId = options?.existingProjectId;
+            let projectId = options?.existingProjectId || existingProjectId;
             let inputAssetIds = options?.inputAssetIds || [];
             if (!projectId) {
                 const contentType: ProjectContentType = mode === 'AD' ? 'commercial' : mode === 'FOOTAGE' ? 'ugc' : mode === 'SCRIPT' ? 'explainer' : 'commercial';
-                const project = await createProject({ name: name.trim() || 'Untitled video', contentType, description: brief || 'A video shaped around the media you supplied.', outcomeGoal: mode === 'AD' ? 'convert_sales' : 'get_attention' });
+                const project = await createProject({ name: name.trim() || 'Untitled video', contentType, videoType, description: brief || 'A video shaped around the media you supplied.', outcomeGoal: mode === 'AD' ? 'convert_sales' : 'get_attention' });
                 if (!project.success || !project.projectId) throw new Error(project.error || 'Could not create your project');
                 projectId = project.projectId;
-                if (files.length > 0 && studioId) {
+            }
+            if (files.length > 0 && studioId && !options?.inputAssetIds) {
                     for (const file of files) {
                         const formData = new FormData();
                         formData.append('file', file);
@@ -62,11 +69,14 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
                         if (!upload.success || !upload.asset) throw new Error(upload.error || `Could not upload ${file.name}`);
                         inputAssetIds.push(upload.asset.id);
                     }
-                }
             }
 
             const intent: CreateIntent = {
                 projectId,
+                productionId: plan?.productionId || productionId,
+                continuityBibleId: plan?.continuityBibleId || (continuityChoice && continuityChoice !== 'NEW_BLANK_BIBLE' ? continuityChoice : undefined),
+                continuityMode: continuityChoice === 'NEW_BLANK_BIBLE' && !plan?.continuityBibleId ? 'NEW_BLANK_BIBLE' : continuityChoice || plan?.continuityBibleId ? 'USE_APPROVED_BIBLE' : undefined,
+                videoType,
                 mode,
                 prompt: mode === 'SCRIPT' ? undefined : brief || undefined,
                 script: mode === 'SCRIPT' ? brief : undefined,
@@ -79,6 +89,7 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
             const result = options?.revision ? await reviseDirectorPlan(intent, options.revision) : await createDirectorPlan(intent);
             if (!result.success) throw new Error(result.error || 'Could not create your plan');
             setPlan({ ...result, projectId, inputAssetIds });
+            if (result.continuityBibleId) setContinuityChoice(result.continuityBibleId);
             toast.success(options?.revision ? 'Your revised plan is ready to review.' : 'Your plan is ready to review.');
             if (result.warning) toast.info(result.warning);
         } catch (error) {
@@ -98,7 +109,7 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
             return;
         }
         toast.success('Plan approved. Your video is ready for the making stage.');
-        router.push(`/dashboard/projects/${plan.projectId}`);
+        router.push(`/dashboard/projects/${plan.projectId}/workspace/overview?production=${encodeURIComponent(plan.productionId)}`);
     }
 
     if (plan) {
@@ -110,9 +121,11 @@ export function CreateProductionForm({ studioId }: { studioId?: string }) {
             <div className="rounded-2xl border border-border/70 bg-secondary/35 px-4 py-3 text-sm leading-6 text-muted-foreground"><span className="font-semibold text-foreground">Start your way.</span> An idea or script is enough. Voice, images, footage, and other media are optional ways to give the plan more to work with.</div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{MODES.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} onClick={() => setMode(item.id)} aria-pressed={mode === item.id} className={`rounded-[1.15rem] border p-5 text-left transition hover:-translate-y-0.5 ${mode === item.id ? 'border-primary bg-[#151b25] shadow-[0_15px_35px_-25px_hsl(38_86%_48%_/_0.9)]' : 'border-border bg-card hover:bg-secondary/45'}`}><span className={`grid size-10 place-items-center rounded-xl ${mode === item.id ? 'bg-[#86a7ff]' : 'bg-secondary'}`}><Icon className="size-5" aria-hidden="true" /></span><span className="mt-8 block font-semibold">{item.label}</span><span className="mt-2 block text-sm leading-6 text-muted-foreground">{item.description}</span></button>; })}</div>
             <div className="ff-card space-y-7 p-6 sm:p-8">
+                {continuityOptions ? <div><label htmlFor="production-continuity" className="text-sm font-semibold">Project continuity {continuityOptions.requiresBible ? '(required for this episode)' : '(optional)'}</label><p className="mt-1 text-sm leading-6 text-muted-foreground">Use exact approved character, voice, location, and style references, or deliberately start with no identity defaults.</p><select id="production-continuity" value={continuityChoice} onChange={(event) => setContinuityChoice(event.target.value)} className="mt-3 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="">{continuityOptions.requiresBible ? 'Choose continuity for this episode' : 'No bible for this standalone production'}</option>{continuityOptions.bibles.map((bible) => <option key={bible.id} value={bible.id}>Approved project bible · version {bible.versionNumber}</option>)}{continuityChoice && continuityChoice !== 'NEW_BLANK_BIBLE' && !continuityOptions.bibles.some((bible) => bible.id === continuityChoice) ? <option value={continuityChoice}>Selected project continuity bible</option> : null}<option value="NEW_BLANK_BIBLE">Start an explicitly blank project bible</option></select>{continuityOptions.selectionError ? <p role="alert" className="mt-2 text-sm text-destructive">{continuityOptions.selectionError}</p> : null}</div> : null}
                 <div><label htmlFor="production-name" className="text-sm font-semibold">Name your video <span className="font-normal text-muted-foreground">(optional)</span></label><input id="production-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. A funny launch video for my bakery" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none focus:border-primary" /></div>
+                <div><label htmlFor="production-video-type" className="text-sm font-semibold">What kind of video are you making?</label><p className="mt-1 text-sm text-muted-foreground">FinalFrame uses this to choose the right video or graphics workflow.</p><select id="production-video-type" value={videoType} onChange={(event) => setVideoType(event.target.value as VideoType)} className="mt-3 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm">{VIDEO_TYPES.map((type) => <option key={type} value={type}>{VIDEO_TYPE_LABELS[type]}</option>)}</select></div>
                 <div><label htmlFor="production-brief" className="text-sm font-semibold">{mode === 'SCRIPT' ? 'Paste your script' : 'Tell us what you want to make'}</label><p className="mt-1 text-sm text-muted-foreground">{mode === 'VOICE' ? 'Optional when you upload a recording. Add context if you have it.' : 'Write it like you would explain it to a creative friend.'}</p><textarea id="production-brief" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === 'SCRIPT' ? 'Paste your script here…' : mode === 'VOICE' ? 'Optional context: what is happening in this performance?' : 'Make a warm 30-second video about…'} className="mt-3 min-h-44 w-full resize-y rounded-xl border border-border bg-background p-4 text-sm leading-7 outline-none focus:border-primary" /></div>
-                <div className="grid gap-4 sm:grid-cols-3"><div><label htmlFor="production-duration" className="text-sm font-semibold">Length</label><select id="production-duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option></select></div><div><label htmlFor="production-output" className="text-sm font-semibold">Where it will go</label><select id="production-output" value={outputPreset} onChange={(event) => setOutputPreset(event.target.value as OutputPreset)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="SOCIAL_VERTICAL">Social · vertical</option><option value="SQUARE">Social · square</option><option value="LANDSCAPE">Website · landscape</option></select></div><div><label htmlFor="production-quality" className="text-sm font-semibold">Finish level</label><select id="production-quality" value={qualityTier} onChange={(event) => setQualityTier(event.target.value as QualityTier)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="ECONOMY">Quick draft</option><option value="STANDARD">Standard</option><option value="PREMIUM">Polished</option></select></div></div>
+                <div className="grid gap-4 sm:grid-cols-3"><div><label htmlFor="production-duration" className="text-sm font-semibold">Length</label><select id="production-duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value={4}>4 seconds · quick test</option><option value={8}>8 seconds · short clip</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option></select></div><div><label htmlFor="production-output" className="text-sm font-semibold">Where it will go</label><select id="production-output" value={outputPreset} onChange={(event) => setOutputPreset(event.target.value as OutputPreset)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="SOCIAL_VERTICAL">Social · vertical</option><option value="SQUARE">Social · square</option><option value="LANDSCAPE">Website · landscape</option></select></div><div><label htmlFor="production-quality" className="text-sm font-semibold">Finish level</label><select id="production-quality" value={qualityTier} onChange={(event) => setQualityTier(event.target.value as QualityTier)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="ECONOMY">Quick draft</option><option value="STANDARD">Standard</option><option value="PREMIUM">Polished</option></select></div></div>
                 <label className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 px-4 text-sm text-muted-foreground transition hover:border-primary hover:bg-secondary/60"><Upload className="size-5 shrink-0" aria-hidden="true" /><span>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} ready to use` : 'Add a logo, photo, clip, voice note, or reference (optional)'}</span><input type="file" multiple accept="image/*,video/*,audio/*" className="hidden" onChange={(event) => setFiles(Array.from(event.target.files || []))} /></label>
                 <button type="button" onClick={() => requestPlan()} disabled={isSubmitting} className="ff-button-primary min-h-12 w-full">{isSubmitting ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ArrowRight className="size-5" aria-hidden="true" />} Show me the plan</button>
             </div>

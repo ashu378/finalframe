@@ -1,0 +1,28 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '../..');
+const ts = require(root + '/node_modules/typescript');
+const Module = require('node:module');
+Module._extensions['.ts'] = (m, p) => m._compile(ts.transpileModule(fs.readFileSync(p, 'utf8'), {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,p);
+const assert = require('node:assert/strict');
+const {RenderRequestQueue} = require(root + '/renderer/src/request-queue.ts');
+const {assertProbeUrl,probeRemoteMedia} = require(root + '/renderer/src/media/remote-probe.ts');
+(async()=>{
+ let release;let calls=0;
+ const q=new RenderRequestQueue(1);
+ const payload={leaseId:'a'};
+ assert.equal(q.accept('job',payload,async()=>{calls++;await new Promise(r=>release=r)}).accepted,true);
+ assert.equal(q.accept('job',payload,async()=>calls++).duplicate,true);
+ assert.throws(()=>q.accept('job',{leaseId:'b'},async()=>{}),/CONFLICT/);
+ assert.throws(()=>q.accept('job2',payload,async()=>{}),/FULL/);
+ await new Promise(r=>setImmediate(r)); release();await q.idle();assert.equal(calls,1);
+ const host='knowing-snail-785.convex.cloud';
+ for(const url of ['file:///etc/passwd','https://localhost/api/storage/x','http://'+host+'/api/storage/x','https://'+host+'/not-storage','https://user:pass@'+host+'/api/storage/x'])assert.throws(()=>assertProbeUrl(url,[host]));
+ assert.throws(()=>assertProbeUrl('https://'+host+'/api/storage/x',[]));
+ const source='https://'+host+'/api/storage/x';assert.equal(assertProbeUrl(source,[host]).hostname,host);
+ const valid={streams:[{codec_type:'video',codec_name:'h264',width:640,height:360},{codec_type:'audio',codec_name:'aac'}],format:{duration:'4'}};
+ const probe=await probeRemoteMedia(source,{allowedHosts:[host],fetch:async()=>new Response(new Uint8Array([1,2,3])),ffprobe:{probe:async()=>valid}});
+ assert.equal(probe.hasAudio,true);assert.equal(probe.durationSeconds,4);assert.equal(probe.byteSize,3);
+ await assert.rejects(probeRemoteMedia(source,{allowedHosts:[host],maxBytes:1,fetch:async()=>new Response(new Uint8Array([1,2])),ffprobe:{probe:async()=>valid}}),/limit/);
+ console.log('Render queue + authenticated probe contract tests: PASS; no render/provider calls');
+})().catch(e=>{console.error(e);process.exitCode=1});

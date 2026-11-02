@@ -75,6 +75,7 @@ await check('renderer callbacks are authenticated and idempotent', async () => {
     eventType: 'render.completed',
     idempotencyKey: 'chunk4-render-job-1',
     jobId: 'chunk4-render-job-1',
+    projectId: 'chunk4-project',
     rendererVersion: 'chunk4-fixture',
     occurredAt: new Date(now).toISOString(),
     attempt: 1,

@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('typescript');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../../convex/renderWorkerContracts.ts'), 'utf8');
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const sandbox = { exports: {}, process: { env: {} }, Set };
+vm.runInNewContext(compiled, sandbox);
+const { dispatchCanRun, publicRenderJob, renderWorkerEnabled, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS } = sandbox.exports;
+const now = 100_000;
+let checks = 0;
+function test(label, run) { run(); checks++; console.log(`PASS ${label}`); }
+test('worker is disabled unless explicitly enabled', () => { assert.equal(renderWorkerEnabled(), false); sandbox.process.env.FINALFRAME_RENDER_WORKER_ENABLED = 'true'; assert.equal(renderWorkerEnabled(), true); });
+test('terminal work cannot be dispatched', () => { for (const status of ['COMPLETED', 'FAILED', 'CANCELED']) assert.equal(dispatchCanRun({ status }, now), false); });
+test('accepted work cannot be blindly resubmitted', () => { assert.equal(dispatchCanRun({ status: 'SUBMITTED', acceptedAt: now - 1 }, now), false); assert.equal(dispatchCanRun({ status: 'PROCESSING', executionStage: 'AWAITING_CALLBACK' }, now), false); });
+test('HTTP backoff and dispatch lease both apply', () => { assert.equal(dispatchCanRun({ status: 'PROCESSING', nextDispatchAt: now + 1 }, now), false); assert.equal(dispatchCanRun({ status: 'PROCESSING', dispatchLeaseExpiresAt: now + 1 }, now), false); assert.equal(dispatchCanRun({ status: 'PROCESSING', dispatchLeaseExpiresAt: now }, now), true); });
+test('queued work becomes dispatchable without changing provider identity', () => assert.equal(dispatchCanRun({ status: 'QUEUED' }, now), true));
+test('public progress omits all worker authority and frozen upload payloads', () => { const result = publicRenderJob({ status: 'PROCESSING', progress: 12, leaseId: 'secret', leaseExpiresAt: now, dispatchLeaseId: 'secret', dispatchLeaseExpiresAt: now, dispatchPayload: { storageUploadUrl: 'private' }, callbackIdempotencyKey: 'private', errorCode: 'RENDER_HANDOFF_UNKNOWN', errorMessage: '/private/provider/raw/error' }); assert.equal(result.progress, 12); for (const key of ['leaseId', 'leaseExpiresAt', 'dispatchLeaseId', 'dispatchLeaseExpiresAt', 'dispatchPayload', 'callbackIdempotencyKey']) assert.equal(key in result, false); assert.equal(result.errorMessage.includes('/private/'), false); });
+test('render resource limits remain bounded', () => { assert.equal(RENDER_LEASE_MS, 30 * 60 * 1000); assert.equal(RENDER_MAX_ATTEMPTS, 3); });
+console.log(`${checks} renderer worker policy checks passed; no database, renderer, or paid provider was called.`);

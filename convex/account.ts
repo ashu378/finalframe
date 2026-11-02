@@ -9,16 +9,18 @@ export const ensureAccount = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx);
     const timestamp = now();
-    let user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
+    let user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.externalId)).unique()
+      ?? await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique()
+      ?? await ctx.db.query("users").withIndex("by_external_id", q => q.eq("externalId", identity.externalId)).unique();
     if (!user) {
       const existing = identity.email
         ? await ctx.db.query("users").withIndex("by_email", q => q.eq("email", identity.email)).unique()
         : null;
       if (existing) {
-        await ctx.db.patch(existing._id, { authSubject: identity.subject, externalId: identity.externalId, name: args.name || existing.name, updatedAt: timestamp });
+        await ctx.db.patch(existing._id, { authSubject: identity.externalId, externalId: identity.externalId, name: args.name || existing.name, updatedAt: timestamp });
         user = await ctx.db.get(existing._id);
       } else {
-        const id = await ctx.db.insert("users", { authSubject: identity.subject, externalId: identity.externalId, email: identity.email, name: args.name || identity.name, createdAt: timestamp, updatedAt: timestamp });
+        const id = await ctx.db.insert("users", { authSubject: identity.externalId, externalId: identity.externalId, email: identity.email, name: args.name || identity.name, createdAt: timestamp, updatedAt: timestamp });
         user = await ctx.db.get(id);
       }
     }
@@ -30,7 +32,7 @@ export const ensureAccount = mutation({
       studio = await ctx.db.query("studios").withIndex("by_owner", q => q.eq("ownerExternalId", identity.externalId)).first();
     }
     if (!studio) {
-      const externalId = `studio_${identity.subject.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+      const externalId = `studio_${identity.externalId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
       const studioId = await ctx.db.insert("studios", {
         externalId,
         ownerExternalId: identity.externalId,
@@ -92,7 +94,8 @@ export const current = query({
   args: {},
   handler: async (ctx) => {
     const identity = await requireIdentity(ctx);
-    const user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
+    const user = await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.externalId)).unique()
+      ?? await ctx.db.query("users").withIndex("by_auth_subject", q => q.eq("authSubject", identity.subject)).unique();
     const membership = user
       ? await ctx.db.query("members").withIndex("by_user", q => q.eq("userId", user._id)).filter(q => q.eq(q.field("status"), "active")).first()
       : null;

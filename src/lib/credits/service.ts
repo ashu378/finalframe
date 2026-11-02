@@ -1,8 +1,9 @@
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { api } from '../../../convex/_generated/api';
 import type { CostEstimate, CostLineItem, QualityTier } from '@/lib/types/database';
+import { VIDEO_CREDITS_PER_SECOND } from './pricing';
 
-const FALLBACK_PRICES: Record<string, number> = { VIDEO_ECONOMY: 8, VIDEO_STANDARD: 16, VIDEO_PREMIUM: 32, TRANSCRIPTION: 4, CAPTIONS: 2, ASSEMBLY: 3 };
+const FALLBACK_PRICES: Record<string, number> = { VIDEO_ECONOMY: VIDEO_CREDITS_PER_SECOND.ECONOMY, VIDEO_STANDARD: VIDEO_CREDITS_PER_SECOND.STANDARD, VIDEO_PREMIUM: VIDEO_CREDITS_PER_SECOND.PREMIUM, TRANSCRIPTION: 4, CAPTIONS: 2, ASSEMBLY: 3 };
 function priceKey(operation: string, tier: QualityTier = 'STANDARD') { return operation === 'VIDEO' ? `${operation}_${tier}` : operation; }
 
 export async function estimateProductionCost(input: { shotCount: number; videoSeconds: number; qualityTier: QualityTier; hasVoice?: boolean; needsCaptions?: boolean; needsAssembly?: boolean }): Promise<CostEstimate> {

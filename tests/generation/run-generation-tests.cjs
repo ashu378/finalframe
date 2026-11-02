@@ -31,6 +31,9 @@ const aliasMap = new Map([
   ['@/lib/types/database', path.join(tempRoot, 'database.js')],
 ]);
 fs.writeFileSync(path.join(tempRoot, 'database.js'), 'module.exports = {};\n', 'utf8');
+for (const [alias, compiled] of [...aliasMap.entries()]) {
+  if (alias.startsWith('@/lib/ai/')) aliasMap.set(alias.replace('@/lib/ai/', '../ai/'), compiled);
+}
 const originalResolve = require.resolve;
 const Module = require('node:module');
 const originalFilename = Module._resolveFilename;
@@ -77,28 +80,44 @@ async function main() {
     assert.equal(calls, 1);
   });
 
-  await check('idempotency key is stable across retries', async () => {
+  await check('media submission is sent once with its job-specific idempotency key', async () => {
     const keys = [];
-    let attempt = 0;
-    const result = await adapter.generateImage(
+    await assert.rejects(adapter.generateImage(
       { model: 'local/retry-image', prompt: 'A retryable fixture frame' },
-      {
-        apiKey: null,
-        idempotencyKey: 'generation-qa-production-shot-001',
-        retry: { maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
-        mock: {
-          seed: 'retry-qa',
-          handler: async (request) => {
-            keys.push(request.headers['x-idempotency-key']);
-            attempt += 1;
-            if (attempt === 1) return { status: 503, body: { error: { code: 'temporary', message: 'retry me' } } };
-            return { body: { data: [{ b64_json: 'retry-image' }], model: 'local/retry-image', usage: { cost: 0 } } };
-          },
-        },
+      { apiKey: null, idempotencyKey: 'generation-qa-production-shot-001',
+        retry: { maxRetries: 1, sleep: async () => {} },
+        mock: { seed: 'retry-qa', handler: async (request) => {
+          keys.push(request.headers['x-idempotency-key']);
+          return { status: 503, body: { error: { message: 'temporary failure after possible acceptance' } } };
+        } },
       },
-    );
-    assert.equal(result.b64_json, 'retry-image');
-    assert.deepEqual(keys, ['generation-qa-production-shot-001', 'generation-qa-production-shot-001']);
+    ));
+    assert.deepEqual(keys, ['generation-qa-production-shot-001']);
+  });
+
+  await check('legacy paid media calls without a durable reservation fence cannot POST', async () => {
+    let posts = 0;
+    await assert.rejects(adapter.generateImage({ model: 'test/registered-image', prompt: 'must not submit' }, { apiKey: 'local-test-only', fetch: async () => { posts++; throw new Error('must not call'); } }), error => error.code === 'INVALID_REQUEST');
+    await assert.rejects(adapter.synthesizeSpeech({ model: 'test/voice', input: 'hello', voice: 'voice' }, { apiKey: 'local-test-only' }), error => error.code === 'INVALID_REQUEST');
+    await assert.rejects(adapter.transcribeAudio({ model: 'test/stt', audio: { data: 'YQ==', format: 'wav' } }, { apiKey: 'local-test-only' }), error => error.code === 'INVALID_REQUEST');
+    assert.equal(posts, 0);
+  });
+
+  await check('retired stock voices fail before the paid submission fence', async () => {
+    let posts = 0, fences = 0;
+    await assert.rejects(adapter.synthesizeSpeech({ model: 'test/voice', input: 'fixture', voice: 'retired-stock' }, { apiKey: 'local-test-only', allowDiscoveredModel: true, beforeMediaSubmit: async () => { fences++; }, fetch: async (url, init) => {
+      if ((init.method || 'GET') === 'GET') return response({ data: [{ id: 'test/voice', supported_voices: ['current-stock'] }] });
+      posts++; return new Response(new Uint8Array([1]), { headers: { 'content-type': 'audio/mpeg' } });
+    } }), error => error.code === 'UNSUPPORTED_CAPABILITY');
+    assert.equal(posts, 0); assert.equal(fences, 0);
+  });
+  await check('verified stock voices use one fenced bounded audio request', async () => {
+    let posts = 0, fences = 0;
+    const result = await adapter.synthesizeSpeech({ model: 'test/voice', input: 'fixture', voice: 'current-stock' }, { apiKey: 'local-test-only', allowDiscoveredModel: true, beforeMediaSubmit: async () => { fences++; }, fetch: async (url, init) => {
+      if ((init.method || 'GET') === 'GET') return response({ data: [{ id: 'test/voice', supported_voices: ['current-stock'] }] });
+      posts++; assert.equal(JSON.parse(init.body).voice, 'current-stock'); return new Response(new Uint8Array([1]), { headers: { 'content-type': 'audio/mpeg' } });
+    } });
+    assert.equal(posts, 1); assert.equal(fences, 1); assert.equal(result.audio.byteLength, 1);
   });
 
   await check('provider timeout is normalized and non-live', async () => {
@@ -113,10 +132,23 @@ async function main() {
         { model: 'test/registered-image', prompt: 'A timeout fixture frame' },
         // A sentinel key satisfies the adapter's credential guard; the
         // injected fetch below never reaches a network socket.
-        { apiKey: 'local-test-only', fetch: neverResponds, timeoutMs: 5, retry: { maxRetries: 0 } },
+        { apiKey: 'local-test-only', beforeMediaSubmit: async () => {}, fetch: neverResponds, timeoutMs: 5, retry: { maxRetries: 0 } },
       ),
       (error) => error?.code === 'REQUEST_TIMEOUT' && error?.retryable === true,
     );
+  });
+
+  await check('paid chat rejects missing or failed reservation fences before POST', async () => {
+    let posts = 0;
+    const fakeFetch = async () => { posts++; return response({}); };
+    await assert.rejects(adapter.executeAITask('AI_BRAIN', [{ role: 'user', content: 'fixture' }], { apiKey: 'local-test-only', fetch: fakeFetch }), error => error.code === 'INVALID_REQUEST');
+    await assert.rejects(adapter.executeAITask('AI_BRAIN', [{ role: 'user', content: 'fixture' }], { apiKey: 'local-test-only', fetch: fakeFetch, beforeChatSubmit: async () => { throw new Error('fixture budget denied'); } }));
+    assert.equal(posts, 0);
+  });
+  await check('paid chat makes one POST and one fence despite configured retries and fallbacks', async () => {
+    let posts = 0, fences = 0;
+    await assert.rejects(adapter.executeAITask('AI_BRAIN', [{ role: 'user', content: 'fixture' }], { apiKey: 'local-test-only', fetch: async () => { posts++; return response({ error: { message: 'ambiguous provider failure' } }, 503); }, retry: { maxRetries: 3, sleep: async () => {} }, fallbackModels: ['test/planner-fallback'], beforeChatSubmit: async () => { fences++; } }));
+    assert.equal(posts, 1); assert.equal(fences, 1);
   });
 
   await check('retry classification remains deterministic', async () => {
@@ -152,26 +184,32 @@ async function main() {
     const source = fs.readFileSync(path.join(repoRoot, 'src/lib/ai/types.ts'), 'utf8');
     assert.match(source, /export interface GenerationRequest[\s\S]*?idempotencyKey:\s*string/);
     const generationJobs = fs.readFileSync(path.join(repoRoot, 'convex/generationJobs.ts'), 'utf8');
-    assert.match(generationJobs, /withIndex\("by_idempotency"/);
+    assert.match(generationJobs, /withIndex\(['"]by_idempotency['"]/);
   });
 
   await check('generation failures expose safe messages and preserve provider metadata', async () => {
     const actions = fs.readFileSync(path.join(repoRoot, 'src/lib/generation/actions.ts'), 'utf8');
     assert.match(actions, /userSafeGenerationError/);
     assert.doesNotMatch(actions, /error:\s*error\.message/);
-    assert.match(actions, /providerRequestId/);
-    assert.match(actions, /providerCostUsd/);
-    assert.match(actions, /latencyMs/);
+    const worker = fs.readFileSync(path.join(repoRoot, 'convex/generationWorker.ts'), 'utf8');
+    const jobs = fs.readFileSync(path.join(repoRoot, 'convex/generationJobs.ts'), 'utf8');
+    assert.match(worker, /providerRequestId/);
+    assert.match(worker, /providerCostUsd/);
+    assert.match(jobs, /latencyMs/);
     const schema = fs.readFileSync(path.join(repoRoot, 'convex/schema.ts'), 'utf8');
     assert.match(schema, /providerRequestId:\s*v\.optional\(v\.string\(\)\)/);
     assert.match(schema, /providerCostUsd:\s*v\.optional\(v\.number\(\)\)/);
   });
 
-  await check('generation jobs record the same preview/final capability they execute', async () => {
+  await check('generation jobs execute the selected route through private durable steps', async () => {
+    const worker = fs.readFileSync(path.join(repoRoot, 'convex/generationWorker.ts'), 'utf8');
     const actions = fs.readFileSync(path.join(repoRoot, 'src/lib/generation/actions.ts'), 'utf8');
     assert.match(actions, /capabilityId = executionProfile === 'FAST_SOCIAL' \? 'VIDEO_PREVIEW' : 'VIDEO_FINAL'/);
-    assert.match(actions, /request\.executionProfile/);
-    assert.match(actions, /executeVideoGeneration\('TEXT_TO_VIDEO', shot\.prompt, executionProfile/);
+    assert.match(worker, /model: job.model/);
+    assert.match(worker, /maxRetries: 0, fallbackModels: \[\]/);
+    assert.match(worker, /jobs.fenceSubmission/);
+    assert.match(worker, /jobs.submit/);
+    assert.doesNotMatch(actions, /api\.generationJobs\.(claim|submit|succeed|fail)/);
   });
 
   await check('missing media blocks completion before charging success', async () => {

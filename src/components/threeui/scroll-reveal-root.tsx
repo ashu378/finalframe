@@ -7,41 +7,47 @@ type ScrollRevealRootProps = {
   selector?: string;
 };
 
-/**
- * Adds the same viewport choreography to a page without changing its layout
- * or interaction code. Each matching block reveals once, then stays visible.
- */
+/** One-shot viewport motion must not mutate class/style attributes belonging
+ * to streamed React children: they may still be waiting to hydrate. */
 export function ScrollRevealRoot({ selector = '#main-content > *' }: ScrollRevealRootProps) {
   const pathname = usePathname();
 
   useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (media.matches || !('IntersectionObserver' in window)) return;
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    if (!nodes.length) return;
+    const animations = new Map<Element, Animation>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        animations.get(entry.target)?.play();
+        observer.unobserve(entry.target);
+      }
+    }, { threshold: 0, rootMargin: '0px 0px -8% 0px' });
 
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    nodes.forEach((node, index) => {
-      node.classList.add('ff-scroll-reveal');
-      node.style.setProperty('--reveal-delay', `${Math.min(index % 4, 3) * 85}ms`);
-    });
-
-    if (reduceMotion || !('IntersectionObserver' in window)) {
-      nodes.forEach((node) => node.classList.add('is-visible'));
-      return;
+    for (const [index, node] of nodes.entries()) {
+      // An unsupported animation API leaves the original static content intact.
+      if (typeof node.animate !== 'function') continue;
+      const animation = node.animate([
+        { opacity: 0, transform: 'translate3d(0, 36px, 0)' },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 800, delay: (index % 4) * 85, easing: 'cubic-bezier(.2,.75,.2,1)', fill: 'both' });
+      animation.pause();
+      animation.onfinish = () => { animation.cancel(); animations.delete(node); };
+      animations.set(node, animation);
+      observer.observe(node);
     }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          entry.target.classList.add('is-visible');
-          observer.unobserve(entry.target);
-        });
-      },
-      { threshold: 0.12, rootMargin: '0px 0px -10% 0px' },
-    );
-
-    nodes.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
+    const stopMotion = () => {
+      if (!media.matches) return;
+      observer.disconnect();
+      for (const animation of animations.values()) animation.cancel();
+    };
+    media.addEventListener?.('change', stopMotion);
+    return () => {
+      observer.disconnect();
+      media.removeEventListener?.('change', stopMotion);
+      for (const animation of animations.values()) animation.cancel();
+    };
   }, [pathname, selector]);
 
   return null;

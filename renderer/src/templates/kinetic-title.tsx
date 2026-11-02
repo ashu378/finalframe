@@ -19,9 +19,9 @@ export function KineticTitle({
   eyebrow = 'FINALFRAME',
   title,
   subtitle,
-  accentColor = '#ff6b4a',
-  backgroundColor = '#111827',
-  textColor = '#f9fafb',
+  accentColor = '#87a8ff',
+  backgroundColor = '#101722',
+  textColor = '#eaf0fa',
 }: KineticTitleProps) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();

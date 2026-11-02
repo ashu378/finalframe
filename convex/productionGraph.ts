@@ -1,4 +1,5 @@
 import { query } from "./_generated/server";
+import { selectProjectProduction } from "./projectProductions";
 import { v } from "convex/values";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
@@ -62,7 +63,8 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
     const version = await ctx.db.get(production.currentVersionId);
     if (version) {
       const versionNodeId = `version:${version._id}`;
-      addNode(versionNodeId, "productionVersion", `Version ${version.versionNumber}`, friendlyState(version.status), "productionVersions", version._id, "Approved production snapshot");
+      const versionDetail = version.status === "DRAFT" ? "Editable planning snapshot" : "Immutable approved production snapshot";
+      addNode(versionNodeId, "productionVersion", `Version ${version.versionNumber}`, friendlyState(version.status), "productionVersions", version._id, versionDetail);
       addEdge(`contains:${productionNodeId}:${versionNodeId}`, productionNodeId, versionNodeId, "contains");
 
       const sequences = (await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", version._id)).collect()).sort((a, b) => a.orderIndex - b.orderIndex);
@@ -150,9 +152,11 @@ export const get = query({
 });
 
 export const getByProject = query({
-  args: { projectExternalId: v.string() },
+  args: { projectExternalId: v.string(), productionId: v.optional(v.id("productions")) },
   handler: async (ctx, args) => {
-    const production = await ctx.db.query("productions").withIndex("by_project", (q) => q.eq("externalProjectId", args.projectExternalId)).unique();
+    const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
+    if (!project) return null;
+    const production = await selectProjectProduction(ctx, project, args.productionId);
     if (!production) return null;
     return buildGraph(ctx, await getProduction(ctx, production._id.toString()));
   },

@@ -11,8 +11,11 @@ type ConvexProject = {
     studioExternalId: string;
     name: string;
     description?: string;
+    projectType?: string;
     status?: string;
     metadata?: Record<string, unknown>;
+    archivedAt?: number;
+    deletedAt?: number;
     createdAt: number;
     updatedAt: number;
 };
@@ -35,7 +38,7 @@ function projectFromConvex(project: ConvexProject): FullProject {
         state: stateFor(project.status),
         outcome_goal: (metadata.outcomeGoal as FullProject['outcome_goal']) || null,
         platform: (metadata.platform as FullProject['platform']) || null,
-        content_type: (metadata.contentType as FullProject['content_type']) || null,
+        content_type: (metadata.contentType as FullProject['content_type']) || (project.projectType as FullProject['content_type']) || null,
         project_description: project.description || null,
         context: (metadata.context as FullProject['context']) || null,
         identity_presence: (metadata.identityPresence as FullProject['identity_presence']) || null,
@@ -50,8 +53,8 @@ function projectFromConvex(project: ConvexProject): FullProject {
         creative_dna_context: (metadata.creativeDnaContext as string) || null,
         created_at: new Date(project.createdAt).toISOString(),
         updated_at: new Date(project.updatedAt).toISOString(),
-        archived_at: (metadata.archivedAt as string) || null,
-        deleted_at: (metadata.deletedAt as string) || null,
+        archived_at: project.archivedAt ? new Date(project.archivedAt).toISOString() : (metadata.archivedAt as string) || null,
+        deleted_at: project.deletedAt ? new Date(project.deletedAt).toISOString() : (metadata.deletedAt as string) || null,
     };
 }
 
@@ -65,14 +68,16 @@ async function currentStudio() {
 async function findProject(projectId: string) {
     const { convex, studio } = await currentStudio();
     if (!studio) return { convex, studio: null, project: null };
-    const projects = await convex.query(api.projects.list, { studioExternalId: studio.externalId });
-    const project = projects.find((row) => row.externalId === projectId || row._id === projectId);
+    const direct = await convex.query(api.projects.getByExternalId, { externalId: projectId });
+    const project = direct || (await convex.query(api.projects.list, { studioExternalId: studio.externalId }))
+        .find((row) => row.externalId === projectId || row._id === projectId) || null;
     return { convex, studio, project };
 }
 
 export async function createProject(options: {
     name: string;
     contentType: ProjectContentType;
+    videoType?: string;
     description: string;
     outcomeGoal?: string;
     platform?: string;
@@ -93,6 +98,7 @@ export async function createProject(options: {
             name: options.name.trim(),
             description: options.description.trim(),
             contentType: options.contentType,
+            projectType: options.videoType,
             outcomeGoal: options.outcomeGoal,
         });
         return { success: true, projectId: project.externalId };
@@ -132,18 +138,56 @@ function unsupportedMutation(operation: string): { success: false; error: string
 export async function updateProject(projectId: string, data: { name?: string; description?: string; content_type?: ProjectContentType; outcome_goal?: any }): Promise<{ success: boolean; error?: string }> {
     const result = await findProject(projectId);
     if (!result.project) return { success: false, error: 'Project not found' };
-    void data;
-    return unsupportedMutation('Updating a project');
+    try {
+        await result.convex.mutation(api.projects.update, {
+            projectId: result.project._id,
+            name: data.name,
+            description: data.description,
+            contentType: data.content_type,
+            outcomeGoal: typeof data.outcome_goal === 'string' ? data.outcome_goal : undefined,
+        });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex updateProject failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to update project' };
+    }
 }
 
 export async function archiveProject(projectId: string): Promise<{ success: boolean; error?: string }> {
     const result = await findProject(projectId);
     if (!result.project) return { success: false, error: 'Project not found' };
-    return unsupportedMutation('Archiving a project');
+    try {
+        await result.convex.mutation(api.projects.archive, { projectId: result.project._id });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex archiveProject failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to archive project' };
+    }
 }
 
 export async function deleteProject(projectId: string): Promise<{ success: boolean; error?: string }> {
-    return archiveProject(projectId);
+    const result = await findProject(projectId);
+    if (!result.project) return { success: false, error: 'Project not found' };
+    try {
+        await result.convex.mutation(api.projects.softDelete, { projectId: result.project._id });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex softDeleteProject failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to delete project' };
+    }
+}
+
+export async function restoreProject(projectId: string): Promise<{ success: boolean; error?: string }> {
+    const { convex } = await currentStudio();
+    try {
+        const project = await convex.query(api.projects.getByExternalId, { externalId: projectId, includeInactive: true });
+        if (!project) return { success: false, error: 'Project not found' };
+        await convex.mutation(api.projects.restore, { projectId: project._id });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex restoreProject failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to restore project' };
+    }
 }
 
 export async function transitionProjectState(projectId: string, newState: ProjectState): Promise<{ success: boolean; error?: string }> {
@@ -188,4 +232,3 @@ export async function unlockBlueprint(projectId: string): Promise<{ success: boo
     if (!result.project) return { success: false, error: 'Project not found' };
     return unsupportedMutation('Unlocking a blueprint');
 }
-

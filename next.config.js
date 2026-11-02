@@ -5,6 +5,9 @@ process.env.BROWSERSLIST_IGNORE_OLD_DATA ??= 'true';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // Preserve loopback origins during local auth redirects. Next 16.1's
+    // normalizer otherwise rewrites 127.0.0.1 to localhost during logout.
+    skipProxyUrlNormalize: process.env.NODE_ENV === 'development',
     // The Convex URL is public configuration, not a secret. Keep a safe
     // production fallback so a Vercel deployment cannot crash during client
     // hydration when the dashboard environment variable is missing.

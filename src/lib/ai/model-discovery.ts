@@ -17,6 +17,20 @@ export interface DiscoveredModel {
     raw: unknown;
 }
 
+export interface DiscoveredVideoModel {
+    id: string;
+    canonicalSlug?: string;
+    name?: string;
+    description?: string;
+    supportedDurations: number[];
+    supportedResolutions: string[];
+    supportedAspectRatios: string[];
+    supportedSizes: string[];
+    allowedPassthroughParameters: string[];
+    pricingSkus: Record<string, number>;
+    raw: unknown;
+}
+
 export interface ModelDiscoveryOptions {
     /** OpenRouter's catalog endpoint is public, so this remains optional. */
     apiKey?: string | null;
@@ -25,6 +39,8 @@ export interface ModelDiscoveryOptions {
     ttlMs?: number;
     now?: () => number;
     force?: boolean;
+    /** API-only media models are omitted from the unfiltered chat catalog. */
+    outputModality?: 'image' | 'speech' | 'transcription';
     staleIfError?: boolean;
 }
 
@@ -39,6 +55,10 @@ interface CatalogCacheEntry {
 
 const cache = new Map<string, CatalogCacheEntry>();
 const inFlight = new Map<string, Promise<DiscoveredModel[]>>();
+const videoCatalogCache = new Map<string, CatalogEntry<DiscoveredVideoModel[]>>();
+const videoCatalogInFlight = new Map<string, Promise<DiscoveredVideoModel[]>>();
+
+interface CatalogEntry<T> { fetchedAt: number; expiresAt: number; models: T }
 
 function asRecord(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -56,7 +76,7 @@ function asStringArray(value: unknown): string[] {
 
 function normalizeModalities(value: unknown): Modality[] {
     const allowed: Modality[] = ['text', 'image', 'video', 'audio', 'file', 'transcription'];
-    return asStringArray(value).filter((item): item is Modality => allowed.includes(item as Modality));
+    return asStringArray(value).map((item) => item === 'speech' ? 'audio' : item).filter((item): item is Modality => allowed.includes(item as Modality));
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -92,6 +112,40 @@ export function normalizeDiscoveredModel(value: unknown): DiscoveredModel | null
     };
 }
 
+function asNumberArray(value: unknown): number[] {
+    if (!Array.isArray(value)) return [];
+    return value.map(asNumber).filter((number): number is number => number !== undefined && number >= 0);
+}
+
+function asNumericRecord(value: unknown): Record<string, number> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const entries: Array<[string, number]> = [];
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        const number = asNumber(item);
+        if (number !== undefined && number >= 0) entries.push([key, number]);
+    }
+    return Object.fromEntries(entries);
+}
+
+export function normalizeDiscoveredVideoModel(value: unknown): DiscoveredVideoModel | null {
+    const item = asRecord(value);
+    const id = asString(item.id);
+    if (!id) return null;
+    return {
+        id,
+        canonicalSlug: asString(item.canonical_slug),
+        name: asString(item.name),
+        description: asString(item.description),
+        supportedDurations: asNumberArray(item.supported_durations),
+        supportedResolutions: asStringArray(item.supported_resolutions),
+        supportedAspectRatios: asStringArray(item.supported_aspect_ratios),
+        supportedSizes: asStringArray(item.supported_sizes),
+        allowedPassthroughParameters: asStringArray(item.allowed_passthrough_parameters),
+        pricingSkus: asNumericRecord(item.pricing_skus),
+        raw: value,
+    };
+}
+
 function catalogHeaders(apiKey?: string | null): HeadersInit {
     return {
         Accept: 'application/json',
@@ -115,7 +169,7 @@ async function fetchModels(options: ModelDiscoveryOptions): Promise<DiscoveredMo
     const baseUrl = normalizeBaseUrl(options.baseUrl);
     let response: Response;
     try {
-        response = await fetcher(`${baseUrl}/models`, { headers: catalogHeaders(options.apiKey) });
+        response = await fetcher(`${baseUrl}/models${options.outputModality ? `?output_modalities=${options.outputModality}` : ''}`, { headers: catalogHeaders(options.apiKey) });
     } catch (cause) {
         throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'OpenRouter model discovery could not be reached.', provider: 'openrouter', retryable: true, cause });
     }
@@ -142,7 +196,7 @@ async function fetchModels(options: ModelDiscoveryOptions): Promise<DiscoveredMo
 
 /** Discover and cache OpenRouter's general model catalog. No API key is required. */
 export async function discoverOpenRouterModels(options: ModelDiscoveryOptions = {}): Promise<DiscoveredModel[]> {
-    const key = normalizeBaseUrl(options.baseUrl);
+    const key = `${normalizeBaseUrl(options.baseUrl)}${options.outputModality ? `?output_modalities=${options.outputModality}` : ''}`;
     const now = options.now || Date.now;
     const cached = cache.get(key);
     if (!options.force && cached && cached.expiresAt > now()) return cached.models;
@@ -169,6 +223,50 @@ export async function discoverOpenRouterModels(options: ModelDiscoveryOptions = 
 }
 
 export const getOpenRouterModelCatalog = discoverOpenRouterModels;
+
+/** Refreshes OpenRouter's dedicated video catalog, including per-model limits and pricing. */
+export async function discoverOpenRouterVideoModels(options: ModelDiscoveryOptions = {}): Promise<DiscoveredVideoModel[]> {
+    const baseUrl = normalizeBaseUrl(options.baseUrl);
+    const currentTime = (options.now || Date.now)();
+    const cached = videoCatalogCache.get(baseUrl);
+    if (!options.force && cached && cached.expiresAt > currentTime) return cached.models;
+    const pending = videoCatalogInFlight.get(baseUrl);
+    if (pending) return pending;
+
+    const request = (async () => {
+        const fetcher = options.fetch || globalThis.fetch;
+        if (!fetcher) throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'No fetch implementation is available for OpenRouter video model discovery.', provider: 'openrouter', retryable: false });
+        let response: Response;
+        try {
+            response = await fetcher(`${baseUrl}/videos/models`, { headers: catalogHeaders(options.apiKey) });
+        } catch (cause) {
+            if (options.staleIfError !== false && cached) return cached.models;
+            throw new AICapabilityError({ code: 'NETWORK_ERROR', message: 'OpenRouter video model discovery could not be reached.', provider: 'openrouter', retryable: true, cause });
+        }
+        const body = await response.json().catch(() => null) as unknown;
+        if (!response.ok) {
+            if (options.staleIfError !== false && cached) return cached.models;
+            const classification = providerError(response.status);
+            const errorBody = asRecord(body);
+            const nested = asRecord(errorBody.error);
+            throw new AICapabilityError({
+                code: classification.code,
+                message: asString(errorBody.message) || asString(nested.message) || `OpenRouter video model discovery failed (${response.status}).`,
+                provider: 'openrouter', status: response.status, requestId: response.headers.get('x-request-id') || undefined,
+                retryable: classification.retryable, details: body,
+            });
+        }
+        const data = asRecord(body).data;
+        const models = (Array.isArray(data) ? data : []).map(normalizeDiscoveredVideoModel).filter((item): item is DiscoveredVideoModel => item !== null);
+        const fetchedAt = (options.now || Date.now)();
+        videoCatalogCache.set(baseUrl, { fetchedAt, expiresAt: fetchedAt + Math.max(0, options.ttlMs ?? DEFAULT_MODEL_CATALOG_TTL_MS), models });
+        return models;
+    })().finally(() => {
+        if (videoCatalogInFlight.get(baseUrl) === request) videoCatalogInFlight.delete(baseUrl);
+    });
+    videoCatalogInFlight.set(baseUrl, request);
+    return request;
+}
 
 export function getCachedOpenRouterModels(baseUrl?: string, now: () => number = Date.now): DiscoveredModel[] | null {
     const entry = cache.get(normalizeBaseUrl(baseUrl));
@@ -217,4 +315,6 @@ export async function selectOpenRouterModel(input: {
 export function clearOpenRouterModelCache(): void {
     cache.clear();
     inFlight.clear();
+    videoCatalogCache.clear();
+    videoCatalogInFlight.clear();
 }

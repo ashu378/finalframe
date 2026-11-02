@@ -21,6 +21,15 @@ export type AuthorizedMember = AuthorizedUser & {
   role: StudioRole;
 };
 
+export type ProjectRole = "OWNER" | "EDITOR" | "REVIEWER" | "VIEWER";
+
+export type AuthorizedProject = AuthorizedMember & {
+  project: Doc<"projects">;
+  projectRole: ProjectRole;
+  /** True when access is granted through a migration fallback. */
+  migrationFallback: boolean;
+};
+
 async function getStudioByExternalId(ctx: AuthorizationCtx, studioExternalId: string) {
   return await ctx.db
     .query("studios")
@@ -71,8 +80,12 @@ export async function getUser(ctx: AuthorizationCtx): Promise<AuthorizedUser | n
 
   const user = await ctx.db
     .query("users")
-    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.externalId))
     .unique()
+    ?? await ctx.db
+      .query("users")
+      .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+      .unique()
     ?? await ctx.db
       .query("users")
       .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
@@ -86,8 +99,12 @@ export async function requireUser(ctx: AuthorizationCtx): Promise<AuthorizedUser
   const identity = await requireIdentity(ctx);
   const user = await ctx.db
     .query("users")
-    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+    .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.externalId))
     .unique()
+    ?? await ctx.db
+      .query("users")
+      .withIndex("by_auth_subject", (q) => q.eq("authSubject", identity.subject))
+      .unique()
     ?? await ctx.db
       .query("users")
       .withIndex("by_external_id", (q) => q.eq("externalId", identity.externalId))
@@ -201,6 +218,111 @@ export async function requireMemberById(
     throw new ConvexAuthorizationError("NOT_A_MEMBER", "You are not a member of this studio.");
   }
   return { ...authorizedUser, studio, role };
+}
+
+/**
+ * Resolve the user's current workspace using the same precedence as the
+ * account query. This keeps project creation available to canonical members,
+ * legacy members, and owner records while membership migration is in flight.
+ */
+export async function requireCurrentMember(ctx: AuthorizationCtx): Promise<AuthorizedMember> {
+  const authorizedUser = await requireUser(ctx);
+  const canonicalMembership = await ctx.db
+    .query("members")
+    .withIndex("by_user", (q) => q.eq("userId", authorizedUser.user._id))
+    .filter((q) => q.eq(q.field("status"), "active"))
+    .first();
+
+  const legacyMembership = !canonicalMembership
+    ? await ctx.db
+      .query("studioMembers")
+      .withIndex("by_user", (q) => q.eq("userExternalId", authorizedUser.identity.externalId))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .first()
+    : null;
+
+  const studio = canonicalMembership
+    ? await getStudioById(ctx, canonicalMembership.studioId)
+    : legacyMembership?.studioExternalId
+      ? await getStudioByExternalId(ctx, legacyMembership.studioExternalId)
+      : await ctx.db
+        .query("studios")
+        .withIndex("by_owner_user", (q) => q.eq("ownerUserId", authorizedUser.user._id))
+        .first()
+        ?? await ctx.db
+          .query("studios")
+          .withIndex("by_owner", (q) => q.eq("ownerExternalId", authorizedUser.identity.externalId))
+          .first();
+
+  if (!studio) {
+    throw new ConvexAuthorizationError("STUDIO_NOT_FOUND", "Create a studio before creating a project.");
+  }
+
+  const role = await resolveMembership(ctx, studio, authorizedUser);
+  if (!role) {
+    throw new ConvexAuthorizationError("NOT_A_MEMBER", "You are not a member of this studio.");
+  }
+  return { ...authorizedUser, studio, role };
+}
+
+function hasProjectRole(role: ProjectRole, allowedRoles?: readonly ProjectRole[]) {
+  return !allowedRoles || allowedRoles.includes(role);
+}
+
+/**
+ * Resolve project access before any project mutation or descendant query.
+ * Existing projects may not have a projectMembers row yet, so the creator and
+ * recorded creator/owner receive a temporary migration fallback. New projects
+ * always create an explicit OWNER membership.
+ */
+export async function requireProjectAccess(
+  ctx: AuthorizationCtx,
+  projectId: Doc<"projects">["_id"],
+  allowedRoles?: readonly ProjectRole[],
+  options?: { includeInactive?: boolean },
+): Promise<AuthorizedProject> {
+  const project = await ctx.db.get(projectId);
+  if (!project || (!options?.includeInactive && (project.deletedAt || project.status === "DELETED"))) {
+    throw new ConvexAuthorizationError("PROJECT_NOT_FOUND", "Project not found.");
+  }
+
+  const member = await requireMember(ctx, project.studioExternalId);
+  const explicitMembership = await ctx.db
+    .query("projectMembers")
+    .withIndex("by_project_user", (q) => q.eq("projectId", project._id).eq("userId", member.user._id))
+    .unique();
+
+  // An explicit suspension/removal must never fall through to a legacy
+  // creator or studio-owner shortcut.
+  if (explicitMembership && explicitMembership.status !== "ACTIVE") {
+    throw new ConvexAuthorizationError("PROJECT_ACCESS_DENIED", "You are not authorized to access this project.");
+  }
+
+  let projectRole: ProjectRole | null = explicitMembership?.status === "ACTIVE" ? explicitMembership.role : null;
+  let migrationFallback = false;
+
+  if (!projectRole && (project.ownerUserId === member.user._id || project.createdByUserId === member.user._id)) {
+    projectRole = "OWNER";
+    migrationFallback = true;
+  } else if (!projectRole && project.createdByExternalId === member.identity.externalId) {
+    projectRole = "OWNER";
+    migrationFallback = true;
+  }
+
+  if (!projectRole || !hasProjectRole(projectRole, allowedRoles)) {
+    throw new ConvexAuthorizationError("PROJECT_ACCESS_DENIED", "You are not authorized to access this project.");
+  }
+
+  return { ...member, project, projectRole, migrationFallback };
+}
+
+export async function requireProjectRole(
+  ctx: AuthorizationCtx,
+  projectId: Doc<"projects">["_id"],
+  allowedRoles: readonly ProjectRole[],
+  options?: { includeInactive?: boolean },
+) {
+  return await requireProjectAccess(ctx, projectId, allowedRoles, options);
 }
 
 /** Require an owner/admin role; the current schema only defines the owner role. */

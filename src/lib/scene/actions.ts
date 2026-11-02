@@ -36,8 +36,6 @@ async function workspace(projectId: string) {
     return { convex, data: await convex.query(api.productions.getWorkspaceByProject, { projectExternalId: projectId }) };
 }
 
-function unavailable(operation: string) { return { success: false as const, error: `${operation} is not available in the current Convex production contract.` }; }
-
 export async function getScenesForProject(projectId: string): Promise<{ success: boolean; scenes?: Scene[]; error?: string }> {
     try {
         const result = await workspace(projectId);
@@ -55,25 +53,79 @@ export async function createScene(projectId: string, sceneGoal: string, sceneTex
     if (!sceneText.trim()) return { success: false, error: 'Scene text is required' };
     const result = await workspace(projectId);
     if (!result.data) return { success: false, error: 'Project not found' };
-    return unavailable('Creating an individual scene');
+    const production = result.data.production;
+    const version = result.data.version;
+    if (!production || !version) return { success: false, error: 'Create a production plan before adding a scene' };
+    const convex = result.convex;
+    const sequence = result.data.sequences[0] || await convex.mutation(api.scenes.createSequence, {
+        productionId: production._id,
+        productionVersionId: version._id,
+        title: 'Main Story',
+        description: 'Primary production sequence',
+        orderIndex: 0,
+    });
+    if (!sequence) return { success: false, error: 'Unable to create a production sequence' };
+    const created = await convex.mutation(api.scenes.createScene, {
+        sequenceId: sequence._id,
+        title: `Scene ${(result.data.sequences.flatMap((item: any) => item.scenes).length || 0) + 1}`,
+        purpose: sceneGoal.trim(),
+        visualDirection: sceneText.trim(),
+    });
+    return { success: true, scene: mapScene(created as WorkspaceScene, projectId) };
 }
 
 export async function updateScene(sceneId: string, data: { scene_goal?: string; scene_text?: string; scene_title?: string; visual_description?: string; action_sequence?: string; emotional_beat?: string; differentiation_note?: string; camera_config?: CameraConfig; motion_config?: MotionConfig; scene_assets?: SceneAsset[]; asset_binding_id?: string | null; why_this_scene_exists?: string | null }): Promise<{ success: boolean; error?: string }> {
-    void data;
-    void sceneId;
-    return unavailable('Updating an individual scene');
+    try {
+        const convex = await getAuthenticatedConvexClient();
+        await convex.mutation(api.scenes.updateScene, {
+            sceneId: sceneId as any,
+            title: data.scene_title,
+            purpose: data.scene_goal,
+            visualDirection: data.visual_description || data.scene_text,
+            metadata: {
+                sceneText: data.scene_text,
+                actionSequence: data.action_sequence,
+                emotionalBeat: data.emotional_beat,
+                differentiationNote: data.differentiation_note,
+                cameraConfig: data.camera_config,
+                motionConfig: data.motion_config,
+                sceneAssets: data.scene_assets,
+                assetBindingId: data.asset_binding_id,
+                whyThisSceneExists: data.why_this_scene_exists,
+                updatedAt: Date.now(),
+            },
+        });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex updateScene failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to update scene' };
+    }
 }
 
 export async function reorderScenes(projectId: string, orderedSceneIds: string[]): Promise<{ success: boolean; error?: string }> {
-    const result = await workspace(projectId);
-    if (!result.data) return { success: false, error: 'Project not found' };
-    void orderedSceneIds;
-    return unavailable('Reordering scenes');
+    try {
+        const result = await workspace(projectId);
+        if (!result.data?.production || !result.data.version || !result.data.sequences[0]) return { success: false, error: 'Production sequence not found' };
+        await result.convex.mutation(api.scenes.reorderScenes, {
+            sequenceId: result.data.sequences[0]._id,
+            orderedSceneIds: orderedSceneIds as any,
+        });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex reorderScenes failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to reorder scenes' };
+    }
 }
 
 export async function deleteScene(sceneId: string): Promise<{ success: boolean; error?: string }> {
-    void sceneId;
-    return unavailable('Deleting an individual scene');
+    try {
+        const convex = await getAuthenticatedConvexClient();
+        await convex.mutation(api.scenes.deleteScene, { sceneId: sceneId as any });
+        return { success: true };
+    } catch (error) {
+        console.error('Convex deleteScene failed:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to delete scene' };
+    }
 }
 
 export async function createScenesFromBlueprint(projectId: string, scenes: Array<{ scene_goal: string; scene_text: string; scene_title?: string; visual_description?: string; action_sequence?: string; emotional_beat?: string; differentiation_note?: string; why_this_scene_exists?: string; camera_config: CameraConfig; motion_config: MotionConfig }>): Promise<{ success: boolean; error?: string }> {

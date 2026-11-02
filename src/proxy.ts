@@ -1,5 +1,5 @@
-import { convexAuthNextjsMiddleware, nextjsMiddlewareRedirect } from '@convex-dev/auth/nextjs/server';
-import { NextResponse } from 'next/server';
+import { convexAuthNextjsMiddleware } from '@convex-dev/auth/nextjs/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { MAINTENANCE_MODE, shouldBypassMaintenance } from '@/lib/config/maintenance';
 
 const PUBLIC_ROUTES = [
@@ -19,6 +19,15 @@ const ADMIN_ROUTES = ['/admin'];
 
 function matchesRoute(pathname: string, routes: string[]) {
     return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
+
+function routeRedirect(request: NextRequest, path: string) {
+    const target = new URL(path, request.url);
+    // Next's development proxy can normalize 127.0.0.1 to localhost. Keep
+    // local redirects on the browser's origin; accept only loopback hosts.
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    if (process.env.NODE_ENV === 'development' && host && /^(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(host)) target.host = host;
+    return NextResponse.redirect(target);
 }
 
 function isFastExit(pathname: string) {
@@ -42,7 +51,7 @@ export const proxy = convexAuthNextjsMiddleware(async (request, { convexAuth }) 
     if (isFastExit(pathname)) return NextResponse.next();
 
     if (MAINTENANCE_MODE && !shouldBypassMaintenance(pathname)) {
-        return NextResponse.redirect(new URL('/maintenance', request.url));
+        return routeRedirect(request, '/maintenance');
     }
 
     if (matchesRoute(pathname, PUBLIC_ROUTES)) return NextResponse.next();
@@ -54,15 +63,13 @@ export const proxy = convexAuthNextjsMiddleware(async (request, { convexAuth }) 
 
     if (matchesRoute(pathname, AUTH_ROUTES)) {
         return authenticated
-            ? nextjsMiddlewareRedirect(request, '/dashboard')
+            ? routeRedirect(request, '/dashboard')
             : NextResponse.next();
     }
 
     if (matchesRoute(pathname, PROTECTED_ROUTES) || matchesRoute(pathname, ADMIN_ROUTES)) {
         if (!authenticated) {
-            const login = new URL('/login', request.url);
-            login.searchParams.set('redirect', pathname);
-            return NextResponse.redirect(login);
+            return routeRedirect(request, `/login?${new URLSearchParams({ redirect: pathname })}`);
         }
     }
 

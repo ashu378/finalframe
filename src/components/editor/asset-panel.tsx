@@ -5,7 +5,7 @@ import { Loader2, Search, RefreshCw, FileVideo, FileAudio } from 'lucide-react';
 import Image from 'next/image';
 
 import { StudioAsset } from '@/lib/types/database';
-import { getAssets } from '@/lib/assets/actions';
+import { getProjectAssets } from '@/lib/assets/actions';
 import { UploadButton } from '@/components/assets/upload-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,14 +23,14 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
     const loadAssets = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await getAssets(studioId);
+            const data = await getProjectAssets(projectId);
             setAssets(data);
         } catch (error) {
             console.error('Failed to load assets', error);
         } finally {
             setLoading(false);
         }
-    }, [studioId]);
+    }, [projectId]);
 
     useEffect(() => {
         void loadAssets();
@@ -51,7 +51,7 @@ export function AssetPanel({ studioId, projectId }: AssetPanelProps) {
 
                 {/* Reuse existing upload button */}
                 <div className="w-full [&>div]:w-full [&_button]:w-full [&_button]:py-6 [&_button]:h-auto [&_button]:text-metadata [&_button]:font-black [&_button]:uppercase [&_button]:tracking-widest">
-                    <UploadButton studioId={studioId} />
+                    <UploadButton studioId={studioId} projectExternalId={projectId} />
                 </div>
 
                 <div className="relative group">

@@ -184,6 +184,7 @@ export type RenderPlatform = 'GENERIC' | 'YOUTUBE' | 'SHORTS' | 'REELS' | 'TIKTO
 export type RenderContainer = 'MP4' | 'WEBM' | 'MOV';
 export type VideoCodec = 'H264' | 'H265' | 'VP9' | 'AV1' | 'PRORES';
 export type AudioCodec = 'AAC' | 'OPUS' | 'PCM' | 'FLAC';
+export type RenderSelectionScope = 'FULL_PROJECT' | 'TIMELINE' | 'SCENES' | 'SHOTS';
 
 export interface RenderPreset {
     id: string;
@@ -259,6 +260,11 @@ export interface AssemblyManifest {
     createdAt: string;
     createdBy: string;
     manifestChecksum?: string;
+    projectId?: string;
+    contractVersion?: 4;
+    selection?: { scope: RenderSelectionScope; ids: string[] };
+    export?: { scope: RenderSelectionScope; format: RenderContainer };
+    items?: Array<Record<string, unknown>>;
 }
 
 export type RenderJobState =

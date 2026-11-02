@@ -79,7 +79,7 @@ async function main() {
 
   await check('callback authentication and replay are idempotent', async () => {
     const now = Date.parse('2026-08-25T10:00:00.000Z');
-    const envelope = { version: 1, eventId: 'event-render-1', eventType: 'render.completed', idempotencyKey: 'render-job-1', jobId: 'render-job-1', rendererVersion: 'qa-fixture', occurredAt: new Date(now).toISOString(), attempt: 1, payload: { outputPath: '/exports/render-1.mp4' } };
+    const envelope = { version: 1, eventId: 'event-render-1', eventType: 'render.completed', idempotencyKey: 'render-job-1', jobId: 'render-job-1', projectId: 'render-qa-project', rendererVersion: 'qa-fixture', occurredAt: new Date(now).toISOString(), attempt: 1, payload: { outputPath: '/exports/render-1.mp4' } };
     const rawBody = JSON.stringify(envelope);
     const secret = 'local-render-test-secret';
     const receipts = new Map();
@@ -98,7 +98,7 @@ async function main() {
   });
 
   await check('stale callbacks are rejected', async () => {
-    const envelope = { version: 1, eventId: 'stale-event', eventType: 'render.failed', idempotencyKey: 'stale-job', jobId: 'stale-job', rendererVersion: 'qa-fixture', occurredAt: '2026-08-25T09:00:00.000Z', attempt: 1, payload: { error: 'timeout' } };
+    const envelope = { version: 1, eventId: 'stale-event', eventType: 'render.failed', idempotencyKey: 'stale-job', jobId: 'stale-job', projectId: 'render-qa-project', rendererVersion: 'qa-fixture', occurredAt: '2026-08-25T09:00:00.000Z', attempt: 1, payload: { error: 'timeout' } };
     const rawBody = JSON.stringify(envelope);
     const result = await handleRendererCallback(rawBody, signCallbackBody(rawBody, 'stale-secret'), 'stale-secret', { get: async () => null, claim: async () => 'claimed' }, { now: () => Date.parse('2026-08-25T10:00:00.000Z'), maxAgeMs: 60_000 });
     assert.equal(result.result.status, 'rejected');

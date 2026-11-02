@@ -108,7 +108,9 @@ export type AuthorizationErrorCode =
   | "STUDIO_ACCESS_DENIED"
   | "NOT_A_MEMBER"
   | "ADMIN_REQUIRED"
-  | "MEMBERSHIP_NOT_CONFIGURED";
+  | "MEMBERSHIP_NOT_CONFIGURED"
+  | "PROJECT_NOT_FOUND"
+  | "PROJECT_ACCESS_DENIED";
 
 export type AuthErrorData = {
   code: AuthErrorCode;

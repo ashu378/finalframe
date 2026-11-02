@@ -2,7 +2,9 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireMember } from "./authorization";
+import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
+import { transitionResourceState } from "./approvals";
+import { ensureResourceState, getEffectiveResourceState, requireEditable } from "./resourceStates";
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -369,7 +371,11 @@ async function getTimelineForMember(ctx: ReadCtx, timelineId: Id<"timelines">) {
   const timeline = await ctx.db.get(timelineId);
   if (!timeline) throw new Error("Timeline not found.");
   const member = await requireMember(ctx, timeline.studioExternalId);
-  return { timeline, member };
+  const production = await ctx.db.get(timeline.productionId);
+  if (!production?.projectId) throw new Error("Timeline is not attached to a project.");
+  await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
+  const resourceState = await getEffectiveResourceState(ctx, production.projectId, "timeline", timeline._id.toString(), production._id);
+  return { timeline, member, production, resourceState };
 }
 
 async function getTimelineState(ctx: ReadCtx, timeline: Timeline): Promise<TimelineState> {
@@ -393,6 +399,7 @@ async function persistDraft(
   state: TimelineState,
   member: Awaited<ReturnType<typeof requireMember>>,
   sourceTimelineId: Id<"timelines">,
+  projectId: Id<"projects">,
 ) {
   const timelines = await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", source.productionId)).collect();
   const timestamp = now();
@@ -400,6 +407,9 @@ async function persistDraft(
   const provisional = await ctx.db.insert("timelines", {
     studioExternalId: member.studio.externalId,
     studioId: member.studio._id,
+    projectId,
+    manifestId: source.manifestId,
+    selectionScope: source.selectionScope,
     productionId: source.productionId,
     versionNumber,
     durationSeconds: 0,
@@ -410,6 +420,7 @@ async function persistDraft(
     createdAt: timestamp,
     updatedAt: timestamp,
   });
+  await ensureResourceState(ctx, { projectId, productionId: source.productionId, resourceType: "timeline", resourceId: provisional.toString() });
 
   const trackMap = new Map<string, string>();
   const clipMap = new Map<string, string>();
@@ -436,12 +447,12 @@ async function persistDraft(
       const assetId = clip.assetId ? clip.assetId as Id<"assets"> : undefined;
       if (assetId) {
         const asset = await ctx.db.get(assetId);
-        if (!asset || asset.studioExternalId !== member.studio.externalId) throw new Error("An edited clip references media outside this studio.");
+        if (!asset || asset.studioExternalId !== member.studio.externalId || asset.projectId !== projectId || asset.scope === "GLOBAL" || asset.deletedAt) throw new Error("An edited clip references media outside this project.");
       }
       const shotVersionId = clip.shotVersionId ? clip.shotVersionId as Id<"shotVersions"> : undefined;
       if (shotVersionId) {
         const shotVersion = await ctx.db.get(shotVersionId);
-        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId) throw new Error("An edited clip references a take outside this studio.");
+        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId || shotVersion.projectId !== projectId) throw new Error("An edited clip references a take outside this project.");
       }
       const clipId = await ctx.db.insert("timelineClips", {
         studioExternalId: member.studio.externalId,
@@ -508,14 +519,15 @@ export const getDraft = query({
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
-    await requireMember(ctx, production.studioExternalId);
+    if (!production.projectId) throw new Error("Production is not attached to a project.");
+    await requireProjectAccess(ctx, production.projectId);
     const timeline = args.timelineId
       ? await ctx.db.get(args.timelineId)
-      : (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").collect()).find((candidate) => candidate.status === "DRAFT");
+      : (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200)).find((candidate) => candidate.status === "DRAFT");
     if (!timeline) return null;
     if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId) throw new Error("Timeline does not belong to this production.");
     const state = await getTimelineState(ctx, timeline);
-    const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").collect();
+    const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
     return { timeline, ...state, operations: operations.slice(0, 50) };
   },
 });
@@ -525,26 +537,27 @@ export const apply = mutation({
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
     const existing = await findOperationByKey(ctx, key);
-    const { timeline, member } = await getTimelineForMember(ctx, args.timelineId);
+    const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
       return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
     }
     if (args.input === undefined || args.input === null) throw new Error("Edit input is required.");
+    await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const state = await getTimelineState(ctx, timeline);
     const before = JSON.stringify(state);
     const next = structuredClone(state);
     applyEdit(next, args.kind, args.input);
     ensureChanged(before, next);
-    const draft = await persistDraft(ctx, timeline, next, member, timeline._id);
+    const draft = await persistDraft(ctx, timeline, next, member, timeline._id, production.projectId!);
     const operation = await insertOperation(ctx, member, timeline, args.kind.toUpperCase(), key, { editKind: args.kind, editInput: args.input, sourceTimelineId: timelineKey(timeline._id), createdTimelineId: timelineKey(draft.timelineId), correlationId: args.correlationId }, [timelineKey(draft.timelineId), ...draft.createdTrackIds, ...draft.createdClipIds]);
     return { timelineId: draft.timelineId, operationId: operation, replayed: false };
   },
 });
 
 async function lastOperationForTimeline(ctx: ReadCtx, timeline: Timeline, kinds: string[]) {
-  const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", timeline.productionId)).order("desc").collect();
+  const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", timeline.productionId)).order("desc").take(200);
   return operations.find((operation) => kinds.includes(operation.kind) && operation.outputResourceIds.includes(timelineKey(timeline._id))) ?? null;
 }
 
@@ -552,12 +565,13 @@ export const undo = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
-    const { timeline, member } = await getTimelineForMember(ctx, args.timelineId);
+    const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
       return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
     }
+    await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "UNDO", "REDO"]);
     if (!original) throw new Error("There is no completed edit to undo for this timeline.");
@@ -566,7 +580,7 @@ export const undo = mutation({
     const source = await ctx.db.get(sourceTimelineId as Id<"timelines">);
     if (!source || source.productionId !== timeline.productionId || source.studioExternalId !== member.studio.externalId) throw new Error("The previous timeline version is unavailable.");
     const state = await getTimelineState(ctx, source);
-    const draft = await persistDraft(ctx, source, state, member, source._id);
+    const draft = await persistDraft(ctx, source, state, member, source._id, production.projectId!);
     const operation = await insertOperation(ctx, member, timeline, "UNDO", key, { sourceTimelineId: timelineKey(timeline._id), restoredTimelineId: timelineKey(source._id), createdTimelineId: timelineKey(draft.timelineId), originalOperationId: original._id.toString() }, [timelineKey(draft.timelineId), ...draft.createdTrackIds, ...draft.createdClipIds], { undoOfId: original._id });
     return { timelineId: draft.timelineId, operationId: operation, replayed: false };
   },
@@ -576,12 +590,13 @@ export const redo = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
-    const { timeline, member } = await getTimelineForMember(ctx, args.timelineId);
+    const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
       return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
     }
+    await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const undoOperation = await lastOperationForTimeline(ctx, timeline, ["UNDO"]);
     if (!undoOperation) throw new Error("There is no undone edit to redo for this timeline.");
@@ -593,7 +608,7 @@ export const redo = mutation({
     const editedTimeline = await ctx.db.get(editedTimelineId as Id<"timelines">);
     if (!editedTimeline || editedTimeline.productionId !== timeline.productionId || editedTimeline.studioExternalId !== member.studio.externalId) throw new Error("The original edit version is unavailable.");
     const state = await getTimelineState(ctx, editedTimeline);
-    const draft = await persistDraft(ctx, editedTimeline, state, member, editedTimeline._id);
+    const draft = await persistDraft(ctx, editedTimeline, state, member, editedTimeline._id, production.projectId!);
     const operation = await insertOperation(ctx, member, timeline, "REDO", key, { sourceTimelineId: timelineKey(timeline._id), restoredTimelineId: timelineKey(editedTimeline._id), createdTimelineId: timelineKey(draft.timelineId), originalOperationId: original._id.toString() }, [timelineKey(draft.timelineId), ...draft.createdTrackIds, ...draft.createdClipIds], { redoOfId: original._id });
     return { timelineId: draft.timelineId, operationId: operation, replayed: false };
   },
@@ -603,7 +618,7 @@ export const lockVersion = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
-    const { timeline, member } = await getTimelineForMember(ctx, args.timelineId);
+    const { timeline, member, production, resourceState } = await getTimelineForMember(ctx, args.timelineId);
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
@@ -611,9 +626,13 @@ export const lockVersion = mutation({
     }
     const status = timeline.status as string;
     const lockState = record(record(timeline.tracks).metadata).lockState;
-    if (status === "LOCKED" || lockState === "LOCKED") throw new Error("This timeline version is already locked.");
-    if (status === "APPROVED") throw new Error("An approved timeline cannot be locked again.");
+    if (resourceState.currentState === "LOCKED" || status === "LOCKED" || lockState === "LOCKED") throw new Error("This timeline version is already locked.");
+    if (resourceState.currentState !== "APPROVED") throw new Error("Approve the timeline before locking it.");
     if (timeline.status === "SUPERSEDED") throw new Error("A superseded timeline cannot be locked.");
+    await transitionResourceState(ctx, {
+      projectId: production.projectId!, productionId: production._id, resourceType: "timeline", resourceId: timeline._id.toString(),
+      targetState: "LOCKED", roles: ["OWNER", "EDITOR"], decision: "LOCKED",
+    });
     const payload = record(timeline.tracks);
     await ctx.db.patch(timeline._id, {
       // The current schema has no LOCKED literal. APPROVED is the existing

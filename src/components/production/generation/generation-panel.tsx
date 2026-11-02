@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, Clock3, Film, Info, Loader2, Play, RefreshCcw, Sparkles, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { createShotGenerationJob } from '@/lib/generation/actions';
+import { useQuery } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
+import type { Id } from '../../../../convex/_generated/dataModel';
 import type { GenerationJobView, GenerationSequenceView, GenerationShotView } from './types';
 
 interface GenerationPanelProps {
@@ -24,9 +27,12 @@ function statusCopy(status?: string): { label: string; description: string; tone
         case 'QUEUED': return { label: 'Waiting to start', description: 'Your take is safely in line.', tone: 'warm' };
         case 'PROCESSING':
         case 'SUBMITTED':
+        case 'PENDING':
+        case 'RETRYING':
         case 'POLLING':
         case 'DOWNLOADING': return { label: 'Making this take', description: 'FinalFrame is working through the visual direction.', tone: 'warm' };
         case 'COMPLETED': return { label: 'Ready to review', description: 'This take is ready for you to compare.', tone: 'success' };
+        case 'RECONCILIATION_REQUIRED': return { label: 'Needs an administrator check', description: 'This submission will not be purchased again automatically.', tone: 'danger' };
         case 'FAILED':
         case 'RETRYABLE_FAILURE': return { label: 'Needs another try', description: 'This take could not finish, but the rest of your plan is safe.', tone: 'danger' };
         default: return { label: 'Not made yet', description: 'The take is planned and ready when making is enabled.', tone: 'neutral' };
@@ -36,8 +42,8 @@ function statusCopy(status?: string): { label: string; description: string; tone
 function progressFor(job?: GenerationJobView): number {
     const status = normalizedStatus(job?.status);
     if (status === 'COMPLETED') return 100;
-    if (status === 'PROCESSING' || status === 'SUBMITTED' || status === 'POLLING' || status === 'DOWNLOADING') return Math.max(8, Math.min(92, job?.progress ?? 35));
-    if (status === 'QUEUED') return Math.max(2, Math.min(8, job?.progress ?? 4));
+    if (status === 'PROCESSING' || status === 'SUBMITTED' || status === 'PENDING' || status === 'RETRYING' || status === 'POLLING' || status === 'DOWNLOADING') return Math.max(0, Math.min(99, job?.progress ?? 0));
+    if (status === 'QUEUED') return Math.max(0, Math.min(99, job?.progress ?? 0));
     return 0;
 }
 
@@ -56,46 +62,34 @@ function statusClasses(tone: ReturnType<typeof statusCopy>['tone']): string {
 }
 
 function initialJobForShot(jobs: GenerationJobView[], shot: GenerationShotView): GenerationJobView | undefined {
-    return jobs.filter((job) => job.shotId === shot._id).sort((a, b) => progressFor(b) - progressFor(a))[0];
+    return jobs.find((job) => job.shotId === shot._id);
 }
 
 export function GenerationPanel({ productionId, sequences, jobs, enabled }: GenerationPanelProps) {
     const [localJobs, setLocalJobs] = useState<Record<string, LocalJob>>({});
     const [pendingShotId, setPendingShotId] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!pendingShotId) return;
-        const interval = window.setInterval(() => {
-            setLocalJobs((current) => {
-                const active = current[pendingShotId];
-                if (!active || normalizedStatus(active.status) === 'COMPLETED' || normalizedStatus(active.status) === 'FAILED') return current;
-                return { ...current, [pendingShotId]: { ...active, status: 'PROCESSING', progress: Math.min(92, Math.max(12, active.progress + 4)) } };
-            });
-        }, 1200);
-        return () => window.clearInterval(interval);
-    }, [pendingShotId]);
+    const liveJobs = useQuery(api.generationJobs.list, { productionId: productionId as Id<'productions'> }) as GenerationJobView[] | undefined;
+    const visibleJobs = liveJobs ?? jobs;
 
     const takeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.length, 0), 0), [sequences]);
-    const madeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.filter((shot) => normalizedStatus(localJobs[shot._id]?.status || initialJobForShot(jobs, shot)?.status || shot.status) === 'COMPLETED').length, 0), 0), [jobs, localJobs, sequences]);
+    const madeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.filter((shot) => normalizedStatus((visibleJobs.find((job) => (job._id || job.jobId) === localJobs[shot._id]?.jobId) || localJobs[shot._id] || initialJobForShot(visibleJobs, shot))?.status || shot.status) === 'COMPLETED').length, 0), 0), [visibleJobs, localJobs, sequences]);
 
     function jobFor(shot: GenerationShotView): GenerationJobView | undefined {
-        return localJobs[shot._id] || initialJobForShot(jobs, shot);
+        const local = localJobs[shot._id];
+        if (local) return visibleJobs.find((job) => (job._id || job.jobId) === local.jobId) || local;
+        return initialJobForShot(visibleJobs, shot);
     }
 
     async function makeTake(shot: GenerationShotView) {
-        if (!enabled || pendingShotId) return;
+        if (!enabled || pendingShotId || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(jobFor(shot)?.status))) return;
         setPendingShotId(shot._id);
-        setLocalJobs((current) => ({ ...current, [shot._id]: { shotId: shot._id, jobId: `pending-${shot._id}`, status: 'QUEUED', progress: 4 } }));
+        setLocalJobs((current) => ({ ...current, [shot._id]: { shotId: shot._id, jobId: `pending-${shot._id}`, status: 'QUEUED', progress: 0 } }));
         try {
-            const result = await createShotGenerationJob({ productionId, shotId: shot._id });
+            const result = await createShotGenerationJob({ productionId, shotId: shot._id, requestId: crypto.randomUUID() });
             if (!result.success || !result.jobId) throw new Error(result.error || 'FinalFrame could not queue this take.');
             const jobId = result.jobId;
-            setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId, status: 'PROCESSING', progress: 12 } }));
-            const response = await fetch(`/api/generation/${jobId}`, { method: 'POST' });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || !payload.success) throw new Error(payload.error || 'The making step could not finish this take.');
-            setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId, status: 'COMPLETED', progress: 100, assetId: payload.assetId } }));
-            toast.success(`${shot.title} is ready to review.`);
+            setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId, status: 'QUEUED', progress: 0 } }));
+            toast.success(`${shot.title} is queued. You can leave this page while FinalFrame works.`);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'The making step could not finish this take.';
             setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId: current[shot._id]?.jobId || `failed-${shot._id}`, status: 'FAILED', progress: 0, errorMessage: message } }));
@@ -117,9 +111,20 @@ export function GenerationPanel({ productionId, sequences, jobs, enabled }: Gene
 }
 
 function TakeCard({ shot, job, pending, enabled, onMake }: { shot: GenerationShotView; job?: GenerationJobView; pending: boolean; enabled: boolean; onMake: () => void }) {
-    const status = statusCopy(job?.status || shot.status);
+    const status = statusCopy(job?.executionStage === 'RECONCILIATION_REQUIRED' ? job.executionStage : job?.status || shot.status);
     const progress = progressFor(job);
     const completed = normalizedStatus(job?.status || shot.status) === 'COMPLETED';
     const failed = normalizedStatus(job?.status) === 'FAILED' || normalizedStatus(job?.status) === 'RETRYABLE_FAILURE';
-    return <article className="rounded-[1rem] border border-border/70 bg-secondary/25 p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-sm font-semibold">{shot.title}</p><p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{shot.prompt}</p></div><span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${statusClasses(status.tone)}`}><ToneIcon tone={status.tone} />{status.label}</span></div>{(pending || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'POLLING', 'DOWNLOADING'].includes(normalizedStatus(job?.status))) && <div className="mt-5 rounded-xl bg-card p-3" aria-live="polite"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>{status.description}</span><span>{progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} /></div></div>}{failed && <div className="mt-5 rounded-xl border border-[#ff9e9e]/45 bg-[#26171a] p-3 text-sm leading-6 text-[#ffd0d0]"><div className="flex gap-2"><AlertTriangle className="mt-1 size-4 shrink-0" aria-hidden="true" /><div><p className="font-semibold">We could not finish this take.</p><p className="mt-1">{job?.errorMessage || 'The making service stopped before a video was ready.'}</p><p className="mt-2 text-xs">Your other parts are unchanged. You can try this take again when the making service is available.</p></div></div></div>}{completed && <div className="mt-5 flex items-center gap-2 rounded-xl bg-[#9be3c3]/55 px-3 py-3 text-sm font-semibold text-[hsl(var(--success))]"><Check className="size-4" aria-hidden="true" /> Take ready for review</div>}<div className="mt-5 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted-foreground">{shot.durationSeconds}s · cost shown before making</span>{completed ? <button type="button" onClick={onMake} disabled={pending || !enabled} className="ff-button-quiet min-h-11 border border-border"><RefreshCcw className="size-4" aria-hidden="true" /> Regenerate take</button> : failed ? <button type="button" onClick={onMake} disabled={pending || !enabled} className="ff-button-primary min-h-11"><RefreshCcw className="size-4" aria-hidden="true" /> Try this take again</button> : <button type="button" onClick={onMake} disabled={pending || !enabled} className="ff-button-primary min-h-11"><Play className="size-4" aria-hidden="true" /> {pending ? 'Starting…' : 'Make this take'}</button>}</div>{job?.errorMessage && !failed && <details className="group mt-3 text-xs text-muted-foreground"><summary className="flex cursor-pointer list-none items-center gap-2"><ChevronDown className="size-3 transition group-open:rotate-180" aria-hidden="true" /> See technical details</summary><p className="mt-2 rounded-lg bg-background p-3 leading-5">{job.errorMessage}</p></details>}</article>;
+    const route = job?.request && typeof job.request === 'object' ? job.request : undefined;
+    const routeReason = typeof route?.routeReason === 'string' ? route.routeReason : undefined;
+    const qualityTier = typeof route?.qualityTier === 'string' ? route.qualityTier : undefined;
+    return <article className="rounded-[1rem] border border-border/70 bg-secondary/25 p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-sm font-semibold">{shot.title}</p><p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{shot.prompt}</p></div><span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${statusClasses(status.tone)}`}><ToneIcon tone={status.tone} />{status.label}</span></div>
+        {(pending || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING', 'POLLING', 'DOWNLOADING'].includes(normalizedStatus(job?.status))) && <div className="mt-5 rounded-xl bg-card p-3" aria-live="polite"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>{status.description}</span><span>{progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} /></div></div>}
+        {route && <div className="mt-4 rounded-xl border border-border/70 bg-card/70 p-3 text-xs leading-5"><p className="font-semibold">{qualityTier ? `${qualityTier} finish` : 'Video route'}{job?.provider && job.model ? ` · ${job.provider} / ${job.model}` : ''}</p>{routeReason && <p className="mt-1 text-muted-foreground">{routeReason}</p>}<p className="mt-1 text-muted-foreground">{job?.estimatedProviderCostUsd === undefined ? '' : `Estimated provider cost: $${job.estimatedProviderCostUsd.toFixed(4)}`}{job?.providerCostUsd === undefined ? '' : ` · Actual: $${job.providerCostUsd.toFixed(4)}`}</p></div>}
+        {failed && <div className="mt-5 rounded-xl border border-[#ff9e9e]/45 bg-[#26171a] p-3 text-sm leading-6 text-[#ffd0d0]"><div className="flex gap-2"><AlertTriangle className="mt-1 size-4 shrink-0" aria-hidden="true" /><div><p className="font-semibold">We could not finish this take.</p><p className="mt-1">{job?.errorMessage || 'The making service stopped before a video was ready.'}</p><p className="mt-2 text-xs">Your other parts are unchanged. You can try this take again when the making service is available.</p></div></div></div>}
+        {completed && <div className="mt-5 flex items-center gap-2 rounded-xl bg-[#9be3c3]/55 px-3 py-3 text-sm font-semibold text-[hsl(var(--success))]"><Check className="size-4" aria-hidden="true" /> Take ready for review</div>}
+        <div className="mt-5 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted-foreground">{shot.durationSeconds}s · cost shown before making</span>{completed ? <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-quiet min-h-11 border border-border"><RefreshCcw className="size-4" aria-hidden="true" /> Regenerate take</button> : failed ? <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-primary min-h-11"><RefreshCcw className="size-4" aria-hidden="true" /> Try this take again</button> : <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-primary min-h-11"><Play className="size-4" aria-hidden="true" /> {pending ? 'Starting…' : 'Make this take'}</button>}</div>
+        {job?.errorMessage && !failed && <details className="group mt-3 text-xs text-muted-foreground"><summary className="flex cursor-pointer list-none items-center gap-2"><ChevronDown className="size-3 transition group-open:rotate-180" aria-hidden="true" /> See technical details</summary><p className="mt-2 rounded-lg bg-background p-3 leading-5">{job.errorMessage}</p></details>}
+    </article>;
 }

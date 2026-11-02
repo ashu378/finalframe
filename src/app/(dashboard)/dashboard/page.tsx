@@ -10,6 +10,8 @@ import { requireAuth, getCurrentUserProfile } from '@/lib/guards';
 import { getProjectsForUser, getStudioContext } from '@/lib/project/actions';
 import { getDashboardOverview } from '@/lib/dashboard/actions';
 import { DashboardClient } from './dashboard-client';
+import { api } from '@/../convex/_generated/api';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
 export const metadata = {
     title: 'Productions | FinalFrame',
@@ -19,6 +21,11 @@ export const metadata = {
 export default async function DashboardPage() {
     // Ensure user is authenticated
     const { user } = await requireAuth();
+
+    // Next.js may render a parent layout and its page concurrently. Provision
+    // the starter workspace here before starting dashboard queries so new
+    // accounts never race the overview query and see a missing-studio error.
+    await (await getAuthenticatedConvexClient()).mutation(api.account.ensureAccount, {});
 
     // Fetch user's projects, studio context, overview stats, and profile
     const [projectRes, studioRes, overviewData, profile] = await Promise.all([

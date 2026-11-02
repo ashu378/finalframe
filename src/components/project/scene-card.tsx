@@ -35,6 +35,7 @@ interface SceneCardProps {
     index: number;
     studioAssets: StudioAsset[];
     studioId: string;
+    projectExternalId: string;
     isDragging?: boolean;
     onDragStart?: (e: React.DragEvent, sceneId: string) => void;
     onDragEnd?: () => void;
@@ -48,6 +49,7 @@ export function SceneCard({
     index,
     studioAssets,
     studioId,
+    projectExternalId,
     isDragging,
     onDragStart,
     onDragEnd,
@@ -156,9 +158,10 @@ export function SceneCard({
 
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('projectId', projectExternalId);
 
         try {
-            const result = await uploadAsset(studioId, formData);
+            const result = await uploadAsset(studioId, formData, `/productions/${projectExternalId}`);
             if (result.success && result.asset) {
                 // Optimistically add to local scene assets
                 // The revalidatePath will handle the long-term sync

@@ -15,6 +15,7 @@ import {
   type Validated,
   type VideoRenderItem,
   type LockedManifestMetadata,
+  type RenderSelectionScope,
 } from './types.js';
 import { SUPPORTED_MOTION_TEMPLATE_IDS } from './templates/contract.js';
 
@@ -42,6 +43,8 @@ const isFiniteInteger = (value: unknown): value is number =>
 
 const isBoundedString = (value: unknown, max: number = RENDER_LIMITS.maxStringLength): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
+
+const SELECTION_SCOPES: readonly RenderSelectionScope[] = ['FULL_PROJECT', 'TIMELINE', 'SCENES', 'SHOTS'];
 
 function isSafeMediaSource(value: unknown): value is string {
   if (!isBoundedString(value, 2_048) || /[\u0000\r\n]/.test(value)) return false;
@@ -129,6 +132,23 @@ function validateItem(value: unknown, index: number, outputDuration: number): { 
       issues.push({ path: `${path}.templateId`, message: `must be one of: ${SUPPORTED_MOTION_TEMPLATE_IDS.join(', ')}` });
     }
     if (isRecord(value.props)) issues.push(...validateTemplateProps(value.props, `${path}.props`));
+    if (isRecord(value.props) && isBoundedString(value.templateId, 128)) {
+      const props = value.props;
+      if (['kinetic-title', 'brand-card', 'feature-callout', 'end-card'].includes(value.templateId) && !isBoundedString(props.title, 240)) {
+        issues.push({ path: `${path}.props.title`, message: 'must be a non-empty string of at most 240 characters' });
+      }
+      if (value.templateId === 'feature-callout' && !isBoundedString(props.feature, 240)) {
+        issues.push({ path: `${path}.props.feature`, message: 'must be a non-empty string of at most 240 characters' });
+      }
+      for (const key of ['accentColor', 'backgroundColor', 'textColor']) {
+        if (props[key] !== undefined && (typeof props[key] !== 'string' || !/^#[\da-f]{6}$/i.test(props[key] as string))) {
+          issues.push({ path: `${path}.props.${key}`, message: 'must be a six-digit hex color' });
+        }
+      }
+      if (props.logoUrl !== undefined && !isSafeMediaSource(props.logoUrl)) {
+        issues.push({ path: `${path}.props.logoUrl`, message: 'must be a safe stored media URL' });
+      }
+    }
     return issues.length ? { issues } : { item: value as unknown as MotionGraphicsRenderItem, issues };
   }
 
@@ -207,9 +227,23 @@ export function validateManifest(input: unknown): ValidationResult {
   if (!isRecord(input)) return { ok: false, issues: [{ path: '$', message: 'manifest must be an object' }] };
 
   if (input.kind !== RENDER_MANIFEST_KIND) issues.push({ path: '$.kind', message: `must equal ${RENDER_MANIFEST_KIND}` });
-  if (!SUPPORTED_RENDER_MANIFEST_VERSIONS.includes(input.version as 1 | 2)) issues.push({ path: '$.version', message: `must be one of: ${SUPPORTED_RENDER_MANIFEST_VERSIONS.join(', ')}` });
+  if (!SUPPORTED_RENDER_MANIFEST_VERSIONS.includes(input.version as 1 | 2 | 4)) issues.push({ path: '$.version', message: `must be one of: ${SUPPORTED_RENDER_MANIFEST_VERSIONS.join(', ')}` });
   for (const key of ['manifestId', 'projectId', 'rendererVersion']) {
     if (!isBoundedString(input[key])) issues.push({ path: `$.${key}`, message: 'must be a non-empty bounded string' });
+  }
+
+  if (input.version === 4) {
+    if (!isRecord(input.selection)) issues.push({ path: '$.selection', message: 'manifest v4 requires a selection object' });
+    else {
+      if (!SELECTION_SCOPES.includes(input.selection.scope as RenderSelectionScope)) issues.push({ path: '$.selection.scope', message: 'must be a supported selection scope' });
+      if (!Array.isArray(input.selection.ids) || input.selection.ids.some((id) => !isBoundedString(id, 256))) issues.push({ path: '$.selection.ids', message: 'must be an array of bounded IDs' });
+      if (['SCENES', 'SHOTS'].includes(String(input.selection.scope)) && Array.isArray(input.selection.ids) && input.selection.ids.length === 0) issues.push({ path: '$.selection.ids', message: 'must contain selected IDs for a scoped manifest' });
+    }
+    if (!isRecord(input.export)) issues.push({ path: '$.export', message: 'manifest v4 requires an export object' });
+    else {
+      if (!SELECTION_SCOPES.includes(input.export.scope as RenderSelectionScope)) issues.push({ path: '$.export.scope', message: 'must be a supported export scope' });
+      if (!['MP4', 'WEBM', 'MOV'].includes(input.export.format as string)) issues.push({ path: '$.export.format', message: 'must be MP4, WEBM, or MOV' });
+    }
   }
 
   const output = input.output;

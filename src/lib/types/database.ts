@@ -10,12 +10,12 @@ export type Json =
  * FinalFrame — Database Types
  * Reference: MASTER_PRD.md § 8 — Project States
  * Reference: BUILD_PHASES.md — Phase 0 type definitions
- * 
+ *
  * Type definitions for database entities.
  * These are compatibility view models for the Convex-backed UI.
  */
 
-// ... (Existing types preserved by using replace_file_content essentially, but here I am rewriting the file. 
+// ... (Existing types preserved by using replace_file_content essentially, but here I am rewriting the file.
 // Ideally I should append or replace. I will use replace_file_content for safety next time.
 // Since I have to write the whole file to append cleanly without complex diffs in this interface:)
 // Wait, I can use replace_file_content to append at the end easily.
@@ -52,6 +52,9 @@ export interface Project {
 }
 
 export type ProjectContentType = 'commercial' | 'ugc' | 'explainer' | 'motion_graphics' | 'saas_demo' | 'avatar_video';
+export type FinalFrameVideoType =
+    | 'ANIMATED_COMEDY_2D' | 'REALISTIC_SKIT_UGC' | 'PRODUCT_SAAS_LAUNCH' | 'MOTION_GRAPHICS'
+    | 'EXPLAINER_STORY' | 'CINEMATIC_FILM' | 'MUSIC_VIDEO' | 'SOCIAL_CUTDOWN';
 
 export type OutcomeGoal = 'get_attention' | 'explain_value' | 'convert_sales' | 'go_viral' | 'build_authority';
 export type Platform = 'x_twitter' | 'tiktok_reels' | 'youtube' | 'website_landing';
@@ -344,6 +347,10 @@ export type GenerationJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILE
 
 export interface CreateIntent {
     projectId?: string;
+    productionId?: string;
+    continuityBibleId?: string;
+    continuityMode?: 'USE_APPROVED_BIBLE' | 'NEW_BLANK_BIBLE';
+    videoType?: FinalFrameVideoType;
     mode: ProductionInputMode;
     prompt?: string;
     script?: string;

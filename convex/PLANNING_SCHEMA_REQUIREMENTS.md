@@ -1,13 +1,14 @@
 # Planning persistence schema requirements
 
-`convex/planning.ts` is intentionally implemented against the current schema without editing `convex/schema.ts`.
+`convex/planning.ts` is a read-only compatibility surface. New plan and approval writes belong to `convex/productions.ts` and the canonical `productionVersions` table.
 
-The current schema has no dedicated idempotency-key columns on `createIntents`, `directorPlans`, or `productionVersions`. Planning stores its idempotency metadata in `createIntents.metadata.planning` and `directorPlans.approval`. This is safe for the current deployment, but a later schema-owned migration should add indexed fields:
+The canonical schema now stores optional idempotency and snapshot fields while legacy rows remain readable. Old records may still carry idempotency metadata inside `createIntents.metadata.planning` and `directorPlans.approval`; canonical reads use those envelopes as a migration fallback.
 
-- `createIntents.idempotencyKey`
-- `directorPlans.idempotencyKey`
-- `directorPlans.supersedesPlanId`
-- `productionVersions.approvalIdempotencyKey`
+Canonical fields and indexes are:
 
-The migration should add `by_studio_idempotency`, `by_production_idempotency`, and `by_source_plan` indexes, backfill values from the existing metadata, and retain the metadata envelope for backward compatibility.
+- `directorPlans.idempotencyKey` with `by_idempotency`.
+- `productionVersions.idempotencyKey` with `by_idempotency`.
+- `productionVersions.snapshot` for the plan snapshot.
+- `productionVersions.sourcePlanId` with `by_source_plan`.
 
+Draft production versions are created through `productions.createPlan`. Approval transitions that draft to an immutable approved snapshot. Later changes create a new director plan and draft production version; an approved version is never overwritten.

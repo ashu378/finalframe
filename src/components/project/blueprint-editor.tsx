@@ -371,6 +371,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
                                     index={activeSceneIndex}
                                     studioAssets={studioAssets}
                                     studioId={project.studio_id}
+                                    projectExternalId={project.id}
                                     isReadOnly={!canEdit}
                                 />
                             </div>
@@ -382,6 +383,7 @@ export function BlueprintEditor({ project, scenes: initialScenes, studioAssets }
                                     index={index}
                                     studioAssets={studioAssets}
                                     studioId={project.studio_id}
+                                    projectExternalId={project.id}
                                     isReadOnly={!canEdit}
                                     isDragging={draggedId === scene.id}
                                     onDragStart={canEdit ? handleDragStart : undefined}
