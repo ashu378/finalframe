@@ -9,6 +9,14 @@ const target = process.env.FINALFRAME_PROBE_TEST_URL;
 const secret = process.env.RENDER_WORKER_SHARED_SECRET;
 const fixtureKey = process.env.FINALFRAME_DEV_FIXTURE_KEY;
 if (!target || !secret || !fixtureKey) throw new Error('Configure the authenticated test renderer and online development fixture environment.');
+async function measuredProbe(payload, headers) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${target}/media/probe`, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(60_000) });
+    if (attempt >= 2 || ![429, 502, 503, 504].includes(response.status)) return response;
+    await response.body?.cancel();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+}
 const { client } = await createAuthenticatedClient();
 const project = await client.mutation(api.devFixtures.ensureProject, { fixtureKey, externalId: `finalframe-probe-${randomUUID()}`, name: 'FinalFrame online probe verification' });
 try {
@@ -29,7 +37,7 @@ try {
   const headers = { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret };
   const forbidden = await fetch(`${target}/media/probe`, { method: 'POST', headers, body: JSON.stringify({ url: 'http://127.0.0.1/private' }) });
   assert.equal(forbidden.status, 400);
-  const response = await fetch(`${target}/media/probe`, { method: 'POST', headers, body: JSON.stringify({ url }) });
+  const response = await measuredProbe({ url }, headers);
   assert.equal(response.status, 200);
   const probe = await response.json();
   assert(Math.abs(probe.durationSeconds - fixture.durationSeconds) < 0.3);
@@ -44,7 +52,7 @@ try {
   const audioStorage = await audioUpload.json();
   const audioAsset = await client.mutation(api.assetStorage.ingestAsset, { studioExternalId: project.studioExternalId, projectId: project.projectId, scope: 'PROJECT', storageId: audioStorage.storageId, source: 'fixture', roles: ['AUDIO'], mimeType: audio.mimeType, metadata: { fixtureMarker: 'online-audio-probe' } });
   const audioUrl = (await client.query(api.assetStorage.resolveAuthorizedMedia, { assetId: audioAsset.assetId })).url;
-  const audioResponse = await fetch(`${target}/media/probe`, { method: 'POST', headers, body: JSON.stringify({ url: audioUrl, kind: 'audio' }) });
+  const audioResponse = await measuredProbe({ url: audioUrl, kind: 'audio' }, headers);
   assert.equal(audioResponse.status, 200);
   const audioProbe = await audioResponse.json();
   assert.equal(audioProbe.hasAudio, true);

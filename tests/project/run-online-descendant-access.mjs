@@ -8,11 +8,18 @@ if (!fixtureKey || url.protocol !== 'https:' || !url.hostname.endsWith('.convex.
 function run(name, args, subject) {
   const command = ['node_modules/convex/bin/main.js', 'run', name, JSON.stringify(args)];
   if (subject) command.push('--identity', JSON.stringify({ subject, issuer: 'https://finalframe-test.invalid' }));
-  try {
-    const output = execFileSync(process.execPath, command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    return output ? JSON.parse(output) : null;
-  } catch (error) {
-    throw new Error(String(error.stderr || error.message).replaceAll(fixtureKey, '[redacted]'));
+  const readOnly = ['app:dashboard', 'productionGraph:get', 'timelineEditor:getDraft', 'productionOperations:previewImpact', 'generationJobs:list'].includes(name);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const output = execFileSync(process.execPath, command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      return output ? JSON.parse(output) : null;
+    } catch (error) {
+      const message = String(error.stderr || error.message).replaceAll(fixtureKey, '[redacted]');
+      // Never count a transport failure as an authorization denial, and never
+      // replay writes or provider actions after an ambiguous response.
+      if (readOnly && attempt < 2 && /fetch failed|ECONNRESET|ETIMEDOUT/.test(message)) continue;
+      throw new Error(message);
+    }
   }
 }
 const fixture = run('devFixtures:seedGenerationWorkerVerification', { fixtureKey, runId: randomUUID() });

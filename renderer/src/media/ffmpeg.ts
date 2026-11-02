@@ -59,13 +59,14 @@ function assertLocalMediaPath(value: string, label: string): void {
 export function buildNormalizeArgs(inputPath: string, outputPath: string, options: FFmpegAssemblyOptions): string[] {
   assertLocalMediaPath(inputPath, 'FFmpeg input');
   assertLocalMediaPath(outputPath, 'FFmpeg output');
-  const audioExpected = options.requireAudio || Boolean(options.output.audio);
   return [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath,
-    '-map', '0:v:0', ...(audioExpected ? ['-map', '0:a:0?'] : []),
+    // Preserve any mixed/native audio even when an older manifest did not
+    // declare a separate soundtrack. The optional map still permits silence.
+    '-map', '0:v:0', '-map', '0:a:0?',
     ...codecArgs(options.output.codec), '-pix_fmt', options.output.codec === 'prores' ? 'yuv422p10le' : 'yuv420p',
     '-r', String(options.output.fps), '-frames:v', String(options.output.durationInFrames),
-    ...(audioExpected ? ['-c:a', 'aac', '-ar', String(options.output.audio?.sampleRate ?? 48000), '-ac', String(options.output.audio?.channels ?? 2), '-b:a', '192k'] : ['-an']),
+    '-c:a', 'aac', '-ar', String(options.output.audio?.sampleRate ?? 48000), '-ac', String(options.output.audio?.channels ?? 2), '-b:a', '192k',
     ...(options.output.codec === 'h264' ? ['-movflags', '+faststart'] : []), outputPath,
   ];
 }

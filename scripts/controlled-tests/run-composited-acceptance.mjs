@@ -5,7 +5,7 @@ import path from 'node:path';
 import { api } from '../../convex/_generated/api.js';
 import { createAuthenticatedClient } from '../dev-fixture/client.mjs';
 assert.equal(process.env.NEXT_PUBLIC_CONVEX_URL, 'https://knowing-snail-785.convex.cloud');
-const name = process.argv[2]; assert(['saas-launch-composition', 'source-repurposing'].includes(name));
+const name = process.argv[2]; assert(['saas-launch-composition', 'source-repurposing', 'source-native-audio'].includes(name));
 const root = process.env.FINALFRAME_COMPLETE_TEST_DIR || '/tmp/finalframe-complete-acceptance';
 const file = path.join(root, name + '.json');
 const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { name, paidProviderCalls: 0, assets: {} };
@@ -22,7 +22,7 @@ async function approve(resourceType, resourceId) {
 const sources = saas ? [
   ['logo', path.resolve('public/brand/finalframe-mark.png'), 'image/png', {}],
   ['ui', root + '/finalframe-public-ui.png', 'image/png', {}],
-] : [['footage', '/tmp/finalframe-small-video-tests/product-launch.mp4', 'video/mp4', { durationSeconds: 4 }]];
+] : [['footage', name === 'source-native-audio' ? root + '/nigerian-comedy-story-shot-1.mp4' : '/tmp/finalframe-small-video-tests/product-launch.mp4', 'video/mp4', { durationSeconds: 4 }]];
 for (const [key, localFile, mimeType, metadata] of sources) {
   if (!state.assets[key]) {
     const url = await client.mutation(api.assetStorage.generateUploadUrl, { projectId: state.project.projectId });

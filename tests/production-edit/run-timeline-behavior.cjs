@@ -16,13 +16,19 @@ function actualFunctions(file, names) {
   return require(output);
 }
 const editor = actualFunctions('convex/timelineEditor.ts', ['record', 'stringValue', 'optionalString', 'numberValue', 'optionalNumber', 'findClip', 'applyEdit']);
-const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks']);
+const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks', 'rendererOutputAudio']);
 const composer = actualFunctions('src/lib/production/workspace-controls.ts', ['validateCompositionAudioTracks']);
 const clip = (id, startSeconds, durationSeconds, extra = {}) => ({ id, trackId: 'track', kind: 'VIDEO', startSeconds, durationSeconds, assetId: 'video', metadata: {}, ...extra });
 const state = clips => ({ metadata: {}, tracks: [{ id: 'track', kind: 'VIDEO', orderIndex: 0, metadata: {}, clips }] });
 let checks = 0;
 function check(name, fn) { fn(); checks++; console.log('PASS ' + name); }
 try {
+  check('measured native video audio is required through final normalization', () => {
+    assert.deepEqual(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: true, volume: 1 }]), { sampleRate: 48000, channels: 2 });
+    assert.deepEqual(assembly.rendererOutputAudio([{ trackKind: 'AUDIO', volume: .3 }]), { sampleRate: 48000, channels: 2 });
+    assert.equal(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: false }]), undefined);
+    assert.equal(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: true, volume: 0 }]), undefined);
+  });
   check('unwired captions and transitions cannot be saved or silently exported', () => {
     assert.throws(() => editor.applyEdit(state([clip('first', 0, 4)]), 'addTransition', { clipId: 'first', transitionKind: 'DISSOLVE', durationSeconds: .25 }), /Only cut/);
     assert.throws(() => editor.applyEdit(state([clip('first', 0, 4)]), 'updateCaptions', { clipId: 'first', cues: [{ startSeconds: 0, endSeconds: 1, text: 'Keep this line' }] }), /not connected/);

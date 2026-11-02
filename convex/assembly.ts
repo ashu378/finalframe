@@ -25,6 +25,7 @@ type SourceItem = {
   fadeInSeconds?: number;
   fadeOutSeconds?: number;
   audioRole?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx';
+  hasAudio?: boolean;
   assetId?: string;
   assetChecksum?: string;
   shotId?: string;
@@ -202,6 +203,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       if (!sourceUrl) throw new Error(`Media “${asset.name ?? asset._id}” is no longer available in canonical storage.`);
       source.assetId = asset._id.toString();
       source.assetChecksum = asset.checksum;
+      source.hasAudio = record(record(asset.metadata).technicalProbe).hasAudio === true;
       source.sourceUrl = sourceUrl;
       sourceIds.add(asset._id.toString());
     } else if (source.sourceKind === "MEDIA") {
@@ -297,6 +299,12 @@ function rendererAudioTracks(sources: SourceItem[], fps: number) {
   }));
 }
 
+function rendererOutputAudio(sources: SourceItem[]) {
+  return sources.some(source => source.volume !== 0 && (source.trackKind.toUpperCase() === "AUDIO" || source.trackKind.toUpperCase() === "VIDEO" && source.hasAudio))
+    ? { sampleRate: 48000 as const, channels: 2 as const }
+    : undefined;
+}
+
 export const createJob = mutation({
   args: { productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), idempotencyKey: v.optional(v.string()), selectionScope: v.optional(v.union(v.literal("FULL_PROJECT"), v.literal("TIMELINE"), v.literal("SCENES"), v.literal("SHOTS"))), selectedSceneIds: v.optional(v.array(v.id("scenes"))), shotVersionIds: v.optional(v.array(v.id("shotVersions"))), confirmOlderVersions: v.optional(v.boolean()), correlationId: v.optional(v.string()) },
   handler: async (ctx, args) => {
@@ -353,7 +361,7 @@ export const createJob = mutation({
       export: { scope: selectionScope, format: "MP4" },
       metadata: timelineState.currentState === "LOCKED" ? { lockState: "LOCKED", lockId: timeline._id.toString(), lockedAt: new Date(timelineState.state?.lockedAt ?? timestamp).toISOString(), lockedBy: timelineState.state?.lockedByUserId?.toString() ?? "FinalFrame" } : { lockState: "APPROVED" },
       preset,
-      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec },
+      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec, audio: rendererOutputAudio(built.sources) },
       totalDurationSeconds: built.durationInFrames / preset.fps,
       items,
       audioTracks,

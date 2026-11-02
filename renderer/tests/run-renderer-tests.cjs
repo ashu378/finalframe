@@ -68,6 +68,9 @@ async function main() {
 
   const args = ffmpeg.buildNormalizeArgs('/tmp/input.mp4', '/tmp/output.mp4', { output: imageManifest.output, requireAudio: true });
   assert.ok(args.includes('-map') && args.includes('0:a:0?'));
+  const optionalAudio = ffmpeg.buildNormalizeArgs('/tmp/input.mp4', '/tmp/output.mp4', { output: { ...imageManifest.output, audio: undefined }, requireAudio: false });
+  assert.ok(optionalAudio.includes('0:a:0?'), 'native audio remains mapped without a separate soundtrack declaration');
+  assert.ok(!optionalAudio.includes('-an'), 'normalization cannot silently strip a source video voice');
   assert.ok(args.includes('-frames:v') && args.includes('48'));
   assert.throws(() => ffmpeg.buildNormalizeArgs('https://example.test/input.mp4', '/tmp/output.mp4', { output: imageManifest.output }), /local worker path/);
 
