@@ -44,7 +44,6 @@ export function Footer() {
         </div>
         <div className="mt-14 flex flex-col gap-3 border-t border-border/70 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>© {new Date().getFullYear()} FinalFrame. Make something worth watching.</p>
-          <p className="flex items-center gap-2"><span className="size-2 rounded-full bg-[hsl(var(--success))]" /> Studio systems online</p>
         </div>
       </div>
     </footer>

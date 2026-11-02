@@ -8,6 +8,7 @@ import { getProduction, now } from "./_shared";
 import { cropCaptionTrack, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
 import { validateManifest } from '../renderer/src/manifest';
 import { serializeCaptionSidecars } from '../renderer/src/captions';
+import {GRAPHICS_V2_TEMPLATE_IDS,parseGraphicsV2Render} from '../renderer/src/templates/graphics-v2-contract';
 import type { CaptionTrack } from '../renderer/src/types';
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
@@ -353,14 +354,15 @@ function rendererItems(sources: SourceItem[], fps: number, version = 4) {
     const durationInFrames = Math.max(1, sourceFrame(source, 'durationInFrames', source.durationSeconds, fps, version === 5 ? 'round' : 'ceil'));
     const base = { id: source.timelineClipId, startFrame, durationInFrames, orderIndex: source.orderIndex, shotId: source.shotId, shotVersionId: source.shotVersionId, assetId: source.assetId, ...(version === 5 ? { trackId: source.trackId } : {}), ...(source.renderItem?.opacity !== undefined ? { opacity: Number(source.renderItem.opacity) } : {}) };
     if (source.sourceKind === "GRAPHIC" || source.sourceKind === "TEXT") {
-      const supportedTemplates = ["kinetic-title", "brand-card", "feature-callout", "end-card"];
+      const supportedTemplates:readonly string[] = GRAPHICS_V2_TEMPLATE_IDS;
       const requestedTemplate = source.graphicTemplateId;
       const templateId = requestedTemplate && supportedTemplates.includes(requestedTemplate) ? requestedTemplate : "kinetic-title";
       const props = { ...(source.graphicProps ?? {}) };
-      delete props.logoUrl;
-      if (source.sourceUrl && source.assetId) props.logoUrl = source.sourceUrl;
+      delete props.logoUrl; delete props.screenUrl;
+      if(source.sourceUrl&&source.assetId)props[templateId==='product-ui'?'screenUrl':'logoUrl']=source.sourceUrl;
       if (typeof props.title !== "string") props.title = typeof props.text === "string" ? props.text : "";
       if (templateId === "feature-callout" && typeof props.feature !== "string") props.feature = props.title;
+      if(props.layoutVersion===2){if(version!==5)throw new Error('Responsive graphics require manifest v5.');parseGraphicsV2Render(templateId,props,durationInFrames,fps);}
       return { ...base, kind: "motion-graphics" as const, templateId, props };
     }
     if (!source.sourceUrl) throw new Error("Assembly is blocked because a media source has no canonical URL.");

@@ -8,6 +8,8 @@ import { ensureResourceState, getEffectiveResourceState, requireEditable, requir
 import { cropCaptionTrack, finishingFps, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
 import type { CaptionTrack } from '../renderer/src/types';
 import { approvedBeatSource } from './beatAnalysis';
+import {resolveGraphicImage} from './graphicsAssets';
+import {graphicsV2Enabled,parseGraphicsV2Authoring} from './graphicsContracts';
 import { planBeatCuts } from './beatCutContracts';
 
 type ReadCtx = QueryCtx | MutationCtx;
@@ -54,6 +56,7 @@ const editKind = v.union(
   v.literal("reorder"),
   v.literal("replace"),
   v.literal("updateText"),
+  v.literal("updateGraphic"),
   v.literal("updateCaptions"),
   v.literal("adjustAudio"),
   v.literal("addTransition"),
@@ -319,13 +322,22 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     return state;
   }
 
+  if(kind==='updateGraphic'){
+    if(!graphicsV2Enabled())throw new Error('Responsive graphics authoring is not enabled.');
+    if(clip.kind!=='GRAPHIC')throw new Error('Choose an exact graphic clip.');
+    const fps=finishingFps(state.metadata);const spec=parseGraphicsV2Authoring(input.graphic,Math.round(clip.durationSeconds*fps),fps);
+    clip.assetId=spec.assetId;clip.shotVersionId=undefined;clip.metadata={...clip.metadata,motionTemplateId:spec.templateId,templateProps:spec.props,graphicAssetRole:spec.assetRole??null};
+    return state;
+  }
   if (kind === "updateText") {
+    if(record(clip.metadata.templateProps).layoutVersion===2)throw new Error('Use the complete graphic editor to revise responsive graphic text.');
     const text = stringValue(input.text, "Text");
     const field = optionalString(input.field, "Text field") ?? "text";
     clip.metadata = { ...clip.metadata, [field]: text };
     if (clip.kind === "GRAPHIC") {
-      const props = record(clip.props);
-      clip.props = { ...props, [field]: text };
+      const props=record(clip.metadata.templateProps);
+      if(!["title","subtitle","eyebrow","brandName","feature","detail","index","callToAction","url","text"].includes(field))throw new Error("Choose a supported graphic text field.");
+      clip.metadata.templateProps={...props,[field]:text};
     }
     return state;
   }
@@ -621,7 +633,7 @@ async function insertOperation(
 
 export const getDraft = query({
   args: { productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")) },
-  returns: v.union(v.null(), v.object({ timeline: v.any(), tracks: v.array(v.any()), metadata: v.any(), finishingV5Enabled: v.boolean(), operations: v.array(v.any()) })),
+  returns: v.union(v.null(), v.object({ timeline: v.any(), tracks: v.array(v.any()), metadata: v.any(), finishingV5Enabled: v.boolean(), graphicsV2Enabled:v.boolean(), operations: v.array(v.any()) })),
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
@@ -634,7 +646,7 @@ export const getDraft = query({
     if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId) throw new Error("Timeline does not belong to this production.");
     const state = await getTimelineState(ctx, timeline);
     const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
-    return { timeline, ...state, finishingV5Enabled: finishingV5Enabled(), operations: operations.slice(0, 50) };
+    return { timeline, ...state, finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
   },
 });
 
@@ -647,6 +659,10 @@ export const apply = mutation({
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
+      if(args.kind==='updateGraphic'){
+        const oldInput=operationInput(existing);const stable=(value:unknown):string=>JSON.stringify(value,(_key,row)=>row&&typeof row==='object'&&!Array.isArray(row)?Object.fromEntries(Object.entries(row).sort(([a],[b])=>a.localeCompare(b))):row);
+        if(oldInput.sourceTimelineId!==String(timeline._id)||oldInput.editKind!==args.kind||stable(oldInput.editInput)!==stable(args.input))throw new Error('This graphic request key belongs to another edit.');
+      }
       return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
     if (args.input === undefined || args.input === null) throw new Error("Edit input is required.");
@@ -657,6 +673,10 @@ export const apply = mutation({
     const before = JSON.stringify(state);
     const next = structuredClone(state);
     applyEdit(next, args.kind, args.input);
+    if(args.kind==='updateGraphic'){
+      const edited=findClip(next,String(record(args.input).clipId)).clip;
+      if(edited.assetId)await resolveGraphicImage(ctx,{assetId:edited.assetId,projectId:production.projectId!,studioExternalId:member.studio.externalId});
+    }
     ensureChanged(before, next);
     const draft = await persistDraft(ctx, timeline, next, member, timeline._id, production.projectId!);
     const operation = await insertOperation(ctx, member, timeline, args.kind.toUpperCase(), key, { editKind: args.kind, editInput: args.input, sourceTimelineId: timelineKey(timeline._id), createdTimelineId: timelineKey(draft.timelineId), correlationId: args.correlationId }, [timelineKey(draft.timelineId), ...draft.createdTrackIds, ...draft.createdClipIds]);
@@ -682,7 +702,7 @@ export const undo = mutation({
     }
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
-    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
+    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
     if (!original) throw new Error("There is no completed edit to undo for this timeline.");
     const sourceTimelineId = optionalString(operationInput(original).sourceTimelineId, "Source timeline ID");
     if (!sourceTimelineId) throw new Error("The previous edit does not contain a recoverable source version.");

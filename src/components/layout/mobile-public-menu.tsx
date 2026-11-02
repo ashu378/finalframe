@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const links = [
   { href: '/methodology', label: 'How it works' },
@@ -13,11 +13,15 @@ const links = [
 
 export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) {
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        trigger.current?.focus();
+      }
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
@@ -26,8 +30,9 @@ export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) 
   return (
     <div className="lg:hidden">
       <button
+        ref={trigger}
         type="button"
-        className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-border/70 text-foreground transition hover:bg-secondary focus-visible:outline-none"
+        className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-border/70 text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
         aria-expanded={open}
         aria-controls="mobile-public-navigation"
@@ -40,13 +45,10 @@ export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) 
         <div
           id="mobile-public-navigation"
           className="absolute inset-x-0 top-full border-b border-border/70 bg-background px-5 pb-5 pt-3 shadow-xl"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Mobile navigation"
         >
           <nav className="grid gap-1" aria-label="Mobile main navigation">
             {links.map((link) => (
-                <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className="flex min-h-12 items-center whitespace-nowrap rounded-xl px-4 text-base font-semibold transition hover:bg-secondary">
+                <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className="flex min-h-12 items-center whitespace-nowrap rounded-xl px-4 text-base font-semibold transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {link.label}
               </Link>
             ))}

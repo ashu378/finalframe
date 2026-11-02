@@ -1,6 +1,19 @@
+import { sha256Equal } from '../../../renderer/src/media/sha256';
 import { REVIEWED_OPERATION_CONTRACTS } from './model-registry';
 const row = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const json = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+/** Application acceptance bounds, not a provider minimum-duration guarantee.
+ * Stream completeness and exact decoded bytes remain separate requirements. */
+export const MUSIC_OUTPUT_POLICY = { version: 'MUSIC_CLIP_REVIEW_RANGE_V1', minimumSeconds: 20, maximumSeconds: 30.1, nominalSeconds: 30 } as const;
+export function musicQcError(code: string) { return Object.assign(new Error(code), { code }); }
+export function assertMusicOutputProbe(value: unknown, savedValue: unknown) {
+    const proof = row(value), saved = row(savedValue);
+    if (proof.hasAudio !== true || proof.hasVideo !== false || proof.audioCodec !== 'mp3' || proof.audioFormat !== 'mp3' || proof.channels !== 2 || ![44100,48000].includes(Number(proof.sampleRate)) || proof.durationMeasurement !== 'DECODED_PCM_SAMPLES_V1' || proof.decodedSampleRate !== 16000 || !Number.isSafeInteger(proof.decodedSampleCount) || proof.decodedSampleCount <= 0 || proof.durationSeconds !== proof.decodedSampleCount / 16000 || proof.byteSize !== saved.byteSize || !sha256Equal(proof.checksum,saved.checksum)) throw musicQcError('MUSIC_OUTPUT_INVALID');
+    if (proof.durationSeconds < MUSIC_OUTPUT_POLICY.minimumSeconds || proof.durationSeconds > MUSIC_OUTPUT_POLICY.maximumSeconds) throw musicQcError('MUSIC_DURATION_REVIEW_REQUIRED');
+    return proof.durationSeconds as number;
+}
+export function retryableMusicQc(code: string) { return ['MUSIC_QC_UNAVAILABLE','MUSIC_QC_LEASE_EXPIRED'].includes(code); }
+export function safeMusicQcCode(code: string) { return ['MUSIC_OUTPUT_INVALID','MUSIC_OUTPUT_CHANGED','MUSIC_DURATION_REVIEW_REQUIRED','MUSIC_QC_INVALID_RESPONSE','MUSIC_QC_AUTHORITY_DENIED'].includes(code) ? code : 'MUSIC_OUTPUT_REVIEW_REQUIRED'; }
 export const MUSIC_LIMITS = { maxPromptCharacters: 4000, maxDecodedBytes: 3 * 1024 * 1024, maxSseBytes: 5 * 1024 * 1024, maxTextBytes: 64 * 1024, maxEvents: 4096, timeoutMs: 180000 } as const;
 export interface MusicQuoteCertificate {
     version: string;

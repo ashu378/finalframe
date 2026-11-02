@@ -17,6 +17,7 @@ import {
   type LockedManifestMetadata,
   type RenderSelectionScope,
 } from './types.js';
+import { parseGraphicsV2Render } from './templates/graphics-v2-contract.js';
 import { SUPPORTED_MOTION_TEMPLATE_IDS } from './templates/contract.js';
 
 export const RENDER_LIMITS = {
@@ -94,7 +95,7 @@ function validateTemplateProps(value: unknown, path: string, depth = 0): Validat
   return keys.flatMap((key) => validateTemplateProps(value[key], `${path}.${key}`, depth + 1));
 }
 
-function validateItem(value: unknown, index: number, outputDuration: number): { item?: RenderItem; issues: ValidationIssue[] } {
+function validateItem(value: unknown, index: number, outputDuration: number, fps: number): { item?: RenderItem; issues: ValidationIssue[] } {
   const path = `items[${index}]`;
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
@@ -131,7 +132,12 @@ function validateItem(value: unknown, index: number, outputDuration: number): { 
     if (isBoundedString(value.templateId, 128) && !(SUPPORTED_MOTION_TEMPLATE_IDS as readonly string[]).includes(value.templateId)) {
       issues.push({ path: `${path}.templateId`, message: `must be one of: ${SUPPORTED_MOTION_TEMPLATE_IDS.join(', ')}` });
     }
-    if (isRecord(value.props)) issues.push(...validateTemplateProps(value.props, `${path}.props`));
+    if (isRecord(value.props) && value.props.layoutVersion === 2) {
+      try { parseGraphicsV2Render(value.templateId, value.props, Number(value.durationInFrames), fps); } catch (error) { issues.push({ path: `${path}.props`, message: error instanceof Error ? error.message : 'Invalid responsive graphic.' }); }
+    } else {
+      if (['product-ui', 'bar-chart', 'explainer-steps'].includes(String(value.templateId))) issues.push({ path: `${path}.props.layoutVersion`, message: 'requires layoutVersion2' });
+      if (isRecord(value.props)) issues.push(...validateTemplateProps(value.props, `${path}.props`));
+    }
     if (isRecord(value.props) && isBoundedString(value.templateId, 128)) {
       const props = value.props;
       if (['kinetic-title', 'brand-card', 'feature-callout', 'end-card'].includes(value.templateId) && !isBoundedString(props.title, 240)) {
@@ -370,7 +376,8 @@ export function validateManifest(input: unknown): ValidationResult {
     const outputDuration = isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0;
     const ids = new Set<string>();
     input.items.forEach((value, index) => {
-      const result = validateItem(value, index, outputDuration);
+      if(input.version!==5&&isRecord(value)&&value.kind==='motion-graphics'&&(isRecord(value.props)&&value.props.layoutVersion===2||['product-ui','bar-chart','explainer-steps'].includes(String(value.templateId))))issues.push({path:`items[${index}]`,message:'Responsive graphics require manifest v5.'});
+      const result = validateItem(value, index, outputDuration, isRecord(output)?Number(output.fps):0);
       issues.push(...result.issues);
       if (result.item) {
         if (ids.has(result.item.id)) issues.push({ path: `items[${index}].id`, message: 'must be unique within the manifest' });

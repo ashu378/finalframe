@@ -8,6 +8,7 @@ import { now } from "./_shared";
 import { canReconcileAcceptedCompletion, RENDER_ATTEMPT_MAX_MS, validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
 import { validateLockedManifest } from "../renderer/src/manifest";
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
+import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
 import { authorizeMovieRenderContext, movieActor, movieEnabled, movieWorkerEnabled, requiredMovieMediaAbi } from './movieAuthority';
 import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
 
@@ -250,15 +251,30 @@ export async function prepareRenderDispatch(ctx: MutationCtx, args: { jobId: Id<
 }
 
 export const recordAcceptance = internalMutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.string(), dispatchLeaseId: v.string(), rendererJobId: v.string() }, returns: v.null(),
+  args: { jobId: v.id("renderJobs"), leaseId: v.string(), dispatchLeaseId: v.string(), rendererJobId: v.string(), graphicsCertificate: v.optional(v.any()) }, returns: v.null(),
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || RENDER_TERMINAL.has(job.status)) return null;
     if (job.leaseId !== args.leaseId || job.dispatchLeaseId !== args.dispatchLeaseId) return null;
     assertLease(job, args.leaseId);
-    await ctx.db.patch(job._id, { status: "SUBMITTED", executionStage: "AWAITING_CALLBACK", providerJobId: args.rendererJobId, acceptedAt: now(), progress: Math.max(job.progress, 10), dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, updatedAt: now() });
+    const required = expectedGraphicsCertificate({ jobId: String(job._id), leaseId: args.leaseId, attempt: job.dispatchAttempt ?? 1, manifest: object(job.dispatchPayload).manifest });
+    if (required) assertGraphicsCertificate(args.graphicsCertificate, required);
+    await ctx.db.patch(job._id, { status: "SUBMITTED", executionStage: "AWAITING_CALLBACK", providerJobId: args.rendererJobId, acceptedAt: now(), ...(required ? { errorCode: undefined, errorMessage: undefined } : {}), progress: Math.max(job.progress, 10), dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, updatedAt: now() });
     await updateExports(ctx, job._id, "PROCESSING", Math.max(job.progress, 10));
     return null;
+  },
+});
+export const recordGraphicsHandshakeUnknown = internalMutation({
+  args: { jobId: v.id('renderJobs'), leaseId: v.string(), dispatchLeaseId: v.string() }, returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || RENDER_TERMINAL.has(job.status) || job.acceptedAt !== undefined || job.leaseId !== args.leaseId || job.dispatchLeaseId !== args.dispatchLeaseId) return false;
+    assertLease(job, args.leaseId);
+    if (!expectedGraphicsCertificate({ jobId: String(job._id), leaseId: args.leaseId, attempt: job.dispatchAttempt ?? 1, manifest: object(job.dispatchPayload).manifest })) throw new Error('RENDER_GRAPHICS_CERTIFICATE_INVALID');
+    // Persist the no-resubmit barrier before crossing the network boundary.
+    // Keep the HTTP lease so only this request's certified ACK can clear it.
+    await ctx.db.patch(job._id, { executionStage: 'NEEDS_ATTENTION', errorCode: 'RENDER_GRAPHICS_HANDOFF_UNKNOWN', nextDispatchAt: undefined, updatedAt: now() });
+    return true;
   },
 });
 export const recordDispatchFailure = internalMutation({
@@ -485,7 +501,7 @@ export const prepareForRenderer = internalMutation({
 });
 
 export const applyRendererCallback = internalMutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("COMPLETED"), v.literal("FAILED")), eventId: v.string(), idempotencyKey: v.string(), projectId: v.string(), eventType: v.union(v.literal("render.completed"), v.literal("render.failed")), occurredAt: v.number(), verifiedDeliveryAt: v.optional(v.number()), attempt: v.number(), payloadHash: v.string(), signature: v.optional(v.string()), rendererJobId: v.optional(v.string()), storageId: v.optional(v.id("_storage")), mimeType: v.optional(v.string()), checksum: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
+  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("COMPLETED"), v.literal("FAILED")), eventId: v.string(), idempotencyKey: v.string(), projectId: v.string(), eventType: v.union(v.literal("render.completed"), v.literal("render.failed")), occurredAt: v.number(), verifiedDeliveryAt: v.optional(v.number()), attempt: v.number(), payloadHash: v.string(), signature: v.optional(v.string()), rendererJobId: v.optional(v.string()), storageId: v.optional(v.id("_storage")), mimeType: v.optional(v.string()), checksum: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()), graphicsCertificate: v.optional(v.any()) },
   returns: v.any(),
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
@@ -506,6 +522,14 @@ export const applyRendererCallback = internalMutation({
     if (existingKey.some((receipt) => receipt.eventId !== args.eventId)) throw new Error("A different renderer callback already claimed this idempotency key.");
     const recoveringAcceptedOutput = canReconcileAcceptedCompletion(job, args, timestamp);
     if (!recoveringAcceptedOutput && (!job.leaseId || !args.leaseId || job.leaseId !== args.leaseId || job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= timestamp)) throw new Error('Renderer callback lease is invalid or expired.');
+    const storedManifest = job.manifestId ? await ctx.db.get(job.manifestId) : null;
+    const requiredGraphics = expectedGraphicsCertificate({ jobId: String(job._id), leaseId: args.leaseId ?? '', attempt: args.attempt, manifest: storedManifest?.manifest ?? object(job.dispatchPayload).manifest });
+    if (requiredGraphics) {
+      if (!storedManifest || storedManifest.projectId !== job.projectId || storedManifest.productionId !== job.productionId) throw new Error('Renderer completion manifest ownership is invalid.');
+      // An uncertified old reader cannot promote output OR release an unknown
+      // request into an automatic retry by reporting failure.
+      assertGraphicsCertificate(args.graphicsCertificate, requiredGraphics);
+    }
     const receiptId = await ctx.db.insert("renderCallbackReceipts", { jobId: job._id, projectId: job.projectId, eventId: args.eventId, idempotencyKey: args.idempotencyKey, eventType: args.eventType, attempt: args.attempt, occurredAt: args.occurredAt, receivedAt: timestamp, payloadHash: args.payloadHash, signature: args.signature, status: "CLAIMED" });
     if (RENDER_TERMINAL.has(job.status)) throw new Error("A terminal render cannot accept a new callback event.");
     if (!recoveringAcceptedOutput) assertLease(job, args.leaseId);
@@ -521,13 +545,12 @@ export const applyRendererCallback = internalMutation({
     const storage = await ctx.db.system.get("_storage", args.storageId);
     if (!storage || storage.size <= 0 || !["video/mp4", "video/webm", "video/quicktime"].includes(storage.contentType ?? "") || (args.mimeType && args.mimeType !== storage.contentType)) throw new Error("A stored video export with matching media type is required.");
     if (args.checksum !== undefined && args.checksum !== storage.sha256) throw new Error('Renderer completion checksum does not match stored media.');
-    const storedManifest = job.manifestId ? await ctx.db.get(job.manifestId) : null;
     if (!storedManifest || storedManifest.projectId !== job.projectId || storedManifest.productionId !== job.productionId) throw new Error('Renderer completion manifest ownership is invalid.');
     assertStoredRenderMediaType(storedManifest.manifest, storedManifest.contractVersion, storage.contentType, args.mimeType);
     const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100);
     if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
     else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });
-    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", ...(requiredGraphics ? { errorCode: undefined, errorMessage: undefined } : {}), dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await ctx.db.patch(receiptId, { status: "APPLIED" });
     return { job: await ctx.db.get(job._id), duplicate: false };
   },
@@ -547,6 +570,10 @@ export const expireLease = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || RENDER_TERMINAL.has(job.status) || job.leaseId !== args.leaseId || !job.leaseExpiresAt || job.leaseExpiresAt > now()) return null;
+    if (job.errorCode === 'RENDER_GRAPHICS_HANDOFF_UNKNOWN') {
+      await ctx.db.patch(job._id, { executionStage: 'NEEDS_ATTENTION', dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, nextDispatchAt: undefined, updatedAt: now() });
+      return null;
+    }
     if (job.acceptedAt !== undefined) {
       const maximum = job.acceptedAt + RENDER_ATTEMPT_MAX_MS;
       const needsAttention = now() >= maximum;

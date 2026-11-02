@@ -5,7 +5,7 @@ import { internal } from './_generated/api';
 import { generateImage, synthesizeSpeech, transcribeAudio, generateMusic } from '../src/lib/adapters/openrouter-adapter';
 import { quotePreparation, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { object } from './generationWorkerContracts';
-import {MUSIC_LIMITS,sameMusicQuote} from '../src/lib/ai/music';
+import {MUSIC_LIMITS,sameMusicQuote,musicQcError,assertMusicOutputProbe} from '../src/lib/ai/music';
 import { sha256Equal } from '../renderer/src/media/sha256';
 const jobs = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 const voices = (internal as unknown as { voices: { resolveForSynthesis: FunctionReference<'query', 'internal', any, any> } }).voices;
@@ -65,14 +65,14 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
 }
 
 async function boundedProbe(response: Response) { const reader = response.body?.getReader(); if (!reader)
-    throw new Error('MUSIC_QC_UNAVAILABLE'); const chunks: Uint8Array[] = []; let size = 0; try {
+    throw musicQcError('MUSIC_QC_UNAVAILABLE'); const chunks: Uint8Array[] = []; let size = 0; try {
     for (;;) {
         const next = await reader.read();
         if (next.done)
             break;
         size += next.value.length;
         if (size > 16384)
-            throw new Error('MUSIC_QC_UNAVAILABLE');
+            throw musicQcError('MUSIC_QC_INVALID_RESPONSE');
         chunks.push(next.value);
     }
 }
@@ -81,7 +81,7 @@ finally {
 } const bytes = new Uint8Array(size); let position = 0; for (const part of chunks) {
     bytes.set(part, position);
     position += part.length;
-} return JSON.parse(new TextDecoder().decode(bytes)); }
+} try{return JSON.parse(new TextDecoder().decode(bytes));}catch{throw musicQcError('MUSIC_QC_INVALID_RESPONSE');} }
 async function runMusicPreparation(ctx: ActionCtx, input: any, lease: {
     jobId: Id<'generationJobs'>;
     leaseId: string;
@@ -104,12 +104,13 @@ async function runMusicPreparation(ctx: ActionCtx, input: any, lease: {
         throw new Error('MUSIC_OUTPUT_UNAVAILABLE');
     const base = process.env.RENDER_WORKER_URL?.trim(), secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim();
     if (!base || !secret)
-        throw new Error('MUSIC_QC_UNAVAILABLE');
-    const response = await fetch(base.replace(/\/$/, '') + '/media/probe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret }, body: JSON.stringify({ kind: 'audio', url: saved.url, verifyAudioDuration: true, checksum: saved.checksum, byteSize: saved.byteSize }), redirect: 'error', signal: AbortSignal.timeout(70000) });
+        throw musicQcError('MUSIC_QC_UNAVAILABLE');
+    const response = await fetch(base.replace(/\/$/, '') + '/media/probe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret }, body: JSON.stringify({ kind: 'audio', url: saved.url, verifyAudioDuration: true, checksum: saved.checksum, byteSize: saved.byteSize }), redirect: 'error', signal: AbortSignal.timeout(70000) }).catch(()=>{throw musicQcError('MUSIC_QC_UNAVAILABLE');});
     if (!response.ok) {
         await response.body?.cancel();
-        throw new Error('MUSIC_QC_UNAVAILABLE');
+        throw musicQcError([408,429].includes(response.status)||response.status>=500?'MUSIC_QC_UNAVAILABLE':'MUSIC_QC_AUTHORITY_DENIED');
     }
-    const probe = await boundedProbe(response);
+    const probe = await boundedProbe(response).catch(error=>{if(error?.code)throw error;throw musicQcError('MUSIC_QC_UNAVAILABLE');});
+    assertMusicOutputProbe(probe,saved);
     await ctx.runMutation(jobs.completePreparation, { ...lease, storageId: saved.storageId, contentType: 'audio/mpeg', actualModel: job.model, providerRequestId: saved.providerRequestId, providerCostUsd: cost, musicProbe: probe });
 }

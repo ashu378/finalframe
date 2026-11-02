@@ -27,8 +27,8 @@ export function toTimelineVersion(draft: any, resourceState?: string): TimelineV
   const preset = String(draft.timeline.outputPreset || '').toLowerCase();
   const portrait = /vertical|9:16|1080x1920|tiktok|reel/.test(preset);
   const square = /square|1:1|1080x1080/.test(preset);
-  const width = Number(draft.metadata?.importedOutput?.width ?? (portrait || square ? 1080 : 1920));
-  const height = Number(draft.metadata?.importedOutput?.height ?? (portrait ? 1920 : 1080));
+  const width = Number(draft.metadata?.authoredOutput?.width ?? draft.metadata?.importedOutput?.width ?? (portrait || square ? 1080 : 1920));
+  const height = Number(draft.metadata?.authoredOutput?.height ?? draft.metadata?.importedOutput?.height ?? (portrait ? 1920 : 1080));
   const configuredFps = draft.metadata?.fps ?? draft.timeline.tracks?.metadata?.fps;
   const frameRate = [24, 25, 30, 50, 60].includes(configuredFps) ? configuredFps : 30;
   return { id: String(draft.timeline._id), productionId: String(draft.timeline.productionId), version: draft.timeline.versionNumber, status, width, height, frameRate, durationSeconds: draft.timeline.durationSeconds, tracks, captionTrackIds: [], createdAt: new Date(draft.timeline.createdAt).toISOString(), createdBy: String(draft.timeline.createdByUserId ?? 'FinalFrame') };

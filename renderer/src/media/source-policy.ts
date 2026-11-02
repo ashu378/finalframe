@@ -72,6 +72,7 @@ export function validateManifestMediaSources(manifest: RenderManifest, policy: W
   const sources: Array<[string, unknown]> = [];
   manifest.items.forEach((item, index) => {
     if ('src' in item) sources.push([`items[${index}].src`, item.src]);
+    if (item.kind === 'motion-graphics' && item.props.screenUrl !== undefined) sources.push([`items[${index}].props.screenUrl`, item.props.screenUrl]);
     if (item.kind === 'motion-graphics' && item.props.logoUrl !== undefined) sources.push([`items[${index}].props.logoUrl`, item.props.logoUrl]);
   });
   manifest.audioTracks?.forEach((track, index) => sources.push([`audioTracks[${index}].src`, track.src]));

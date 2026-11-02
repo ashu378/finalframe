@@ -2,7 +2,8 @@ import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import os from 'node:os';
 import { bundle } from '@remotion/bundler';
-import { renderMedia, selectComposition } from '@remotion/renderer';
+import { makeCancelSignal, openBrowser, renderMedia, selectComposition } from '@remotion/renderer';
+import { withRenderDeadline } from './render-deadline.js';
 import { normalizeWithFFmpeg, probeAndValidateOutput, type FFmpegAdapter, type FFprobeAdapter } from '../media/ffmpeg.js';
 import { assertLockedManifest, assertValidManifest } from '../manifest.js';
 import { assertManifestMediaSources } from '../media/source-policy.js';
@@ -56,12 +57,6 @@ export class RemotionRenderRuntime implements RenderRuntime {
     }
     const outputPath = safeOutputPath(request.outputPath);
     await mkdir(dirname(outputPath), { recursive: true });
-    const serveUrl = await this.bundledEntryPoint();
-    const composition = await selectComposition({
-      serveUrl,
-      id: plan.compositionId,
-      inputProps: { manifest },
-    });
     // Remotion's compressed AAC intermediate is ADTS, which cannot preserve
     // encoder skip-sample metadata. Copying it into MP4 shifts content before
     // normalization. Keep the mix as PCM in a supported container until the
@@ -73,9 +68,25 @@ export class RemotionRenderRuntime implements RenderRuntime {
     const remotionPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.remotion.${intermediateExtension}`);
     const normalizedPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.normalized.${normalizedExtension}`);
     try {
-      await renderMedia({
+      await withRenderDeadline(this.options.commandTimeoutMs ?? 900_000, async scope => {
+        const serveUrl = await this.bundledEntryPoint();
+        scope.check();
+        const browser = await openBrowser('chrome', { logLevel: 'error' });
+        scope.cleanup(() => browser.close({ silent: true }));
+        scope.check();
+        const { cancelSignal, cancel } = makeCancelSignal();
+        scope.cleanup(cancel);
+        const composition = await selectComposition({
+          serveUrl, id: plan.compositionId, inputProps: { manifest },
+          puppeteerInstance: browser, timeoutInMilliseconds: 30_000,
+        });
+        scope.check();
+        await renderMedia({
         composition: { ...composition, durationInFrames: plan.durationInFrames, fps: plan.fps, width: plan.width, height: plan.height },
         serveUrl,
+        puppeteerInstance: browser,
+        cancelSignal,
+        timeoutInMilliseconds: 30_000,
         codec: plan.outputCodec ?? 'h264',
         outputLocation: remotionPath,
         inputProps: { manifest },
@@ -85,6 +96,8 @@ export class RemotionRenderRuntime implements RenderRuntime {
         // audio mix exists. Known-silent visual plans need no synthetic mix;
         // video plans must keep their potentially undeclared native audio.
         ...(plan.audioTracks.length === 0 && !plan.items.some(item => item.kind === 'video') ? { muted: true } : {}),
+        });
+        scope.check();
       });
       if (this.options.ffmpeg) {
         await normalizeWithFFmpeg(this.options.ffmpeg, remotionPath, normalizedPath, { output: manifest.output, requireAudio: Boolean(manifest.output.audio) || plan.audioTracks.length > 0, timeoutMs: this.options.commandTimeoutMs, maxOutputBytes: this.options.maxOutputBytes });

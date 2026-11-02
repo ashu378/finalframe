@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {withRenderDeadline} from '../dist/remotion/render-deadline.js';
+let groups=0;
+const test=async(name,fn)=>{await fn();groups++;console.log('PASS '+name);};
+await test('success closes owned resources exactly once',async()=>{let closed=0;assert.equal(await withRenderDeadline(100,async scope=>{scope.cleanup(()=>{closed++;});return 'ok';}),'ok');assert.equal(closed,1);});
+await test('ordinary failure retains its cause and closes browser',async()=>{let closed=0;await assert.rejects(withRenderDeadline(100,async scope=>{scope.cleanup(()=>{closed++;});throw Error('actual-failure');}),/actual-failure/);assert.equal(closed,1);});
+await test('hung browser protocol is bounded and cancels rendering',async()=>{let canceled=0;const start=Date.now();await assert.rejects(withRenderDeadline(20,async scope=>{scope.cleanup(()=>{canceled++;});return new Promise(()=>{});}),/RENDER_PROCESSING_TIMEOUT/);assert.equal(canceled,1);assert(Date.now()-start<500);});
+await test('late acquired browser closes and cannot continue after timeout',async()=>{let close=0,continued=false;let resolve;const acquisition=new Promise(r=>{resolve=r;});await assert.rejects(withRenderDeadline(10,async scope=>{await acquisition;scope.cleanup(()=>{close++;});scope.check();continued=true;}),/RENDER_PROCESSING_TIMEOUT/);resolve();await new Promise(r=>setImmediate(r));assert.equal(close,1);assert.equal(continued,false);});
+await test('hung cleanup cannot permanently retain the render queue',async()=>{const start=Date.now();assert.equal(await withRenderDeadline(20,async scope=>{scope.cleanup(()=>new Promise(()=>{}));return 7;}),7);assert(Date.now()-start<1500);});
+await test('invalid bounds fail before work',async()=>{for(const timeout of [0,-1,NaN,Infinity,1.2]){let called=false;await assert.rejects(withRenderDeadline(timeout,async()=>{called=true;}),/Invalid render deadline/);assert.equal(called,false);}});
+console.log(JSON.stringify({groups,providerCalls:0,database:false}));

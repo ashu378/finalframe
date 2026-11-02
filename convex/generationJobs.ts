@@ -5,7 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { SchedulableFunctionReference, FunctionReference } from 'convex/server';
 import { v, type Infer } from 'convex/values';
 import { recipeExecutionScope, resolveRecipeSlotGrants, assertRecipeAdmission, bindRecipeGenerationJob, assertRecipeGenerationFence } from './recipeAdmissions';
-import { requireProjectAccess, requireProjectRole } from './authorization';
+import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from './authorization';
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
@@ -15,7 +15,7 @@ import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
-import {freshMusicQuote,sameMusicQuote,MUSIC_LIMITS} from '../src/lib/ai/music';
+import {freshMusicQuote,sameMusicQuote,MUSIC_LIMITS,assertMusicOutputProbe,MUSIC_OUTPUT_POLICY,retryableMusicQc,safeMusicQcCode} from '../src/lib/ai/music';
 import {normalizeSha256,sha256Equal} from '../renderer/src/media/sha256';
 import { resolvePortraitSourceCertificate } from './imageCertificates';
 import { studioRoleForUser, userExternalKey } from './studioMemberships';
@@ -73,7 +73,7 @@ async function requireUnlockedGraph(ctx: ReadCtx, projectId: Id<'projects'>, sho
 /** Read by provider identity, then verify every canonical relationship. Reused
  * at creation and the submission fence so withdrawn approval cannot purchase
  * a continuation after it was queued. */
-async function requireContinuationSource(ctx: ReadCtx, args: { projectId: Id<'projects'>; productionId: Id<'productions'>; model: string; previousJobId: string }) {
+async function requireContinuationSource(ctx: ReadCtx, args: { projectId: Id<'projects'>; productionId: Id<'productions'>; model: string; previousJobId: string }, actorId?:Id<'users'>) {
   if (!/^gen-vid-\d+-[0-9A-Za-z]{20}$/.test(args.previousJobId)) throw new Error('Choose an approved completed clip from this production to extend.');
   const previous = await ctx.db.query('generationJobs').withIndex('by_provider_job', q => q.eq('provider', 'openrouter').eq('providerJobId', args.previousJobId)).unique();
   if (!previous || previous.projectId !== args.projectId || previous.productionId !== args.productionId || previous.provider !== 'openrouter' || previous.model !== args.model || previous.status !== 'COMPLETED' || previous.operation !== 'SHOT_GENERATION' || previous.modality !== 'VIDEO' || !previous.shotVersionId) throw new Error('Continuation must use an approved compatible source job in this production.');
@@ -82,7 +82,10 @@ async function requireContinuationSource(ctx: ReadCtx, args: { projectId: Id<'pr
   if (!take || take.projectId !== args.projectId || take.productionId !== args.productionId || take.shotId !== previous.shotId || take.status !== 'COMPLETED' || take.model !== previous.model || take.provider !== previous.provider || !take.assetId || take.assetId !== assetId) throw new Error('The completed continuation take is unavailable.');
   const asset = await ctx.db.get(take.assetId);
   if (!asset || asset.projectId !== args.projectId || asset.productionId !== args.productionId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('video/')) throw new Error('The continuation source media is unavailable.');
-  const approval = await getEffectiveResourceState(ctx, args.projectId, 'shotVersion', take._id, args.productionId);
+  // Only private callers pass the actor already validated against the saved
+  // job/run. Public request fields never supply this authority.
+  if(actorId)await resolveProjectAccessForActor(ctx,args.projectId,actorId,['OWNER','EDITOR']);
+  const approval = await getEffectiveResourceState(ctx, args.projectId, 'shotVersion', take._id, args.productionId,actorId);
   if (!['APPROVED', 'LOCKED'].includes(approval.currentState)) throw new Error('Approve the completed source take before extending it.');
   return previous;
 }
@@ -183,7 +186,7 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
       normalizedRequest.duration = source.durationSeconds; normalizedRequest.durationSeconds = source.durationSeconds;
     }
     if (operation === 'EXTEND') {
-      const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') });
+      const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') },execution?access.user._id:undefined);
       normalizedRequest.previousModelId = previous.model;
     }
     if (operation === 'UPSCALE') {
@@ -283,7 +286,7 @@ export const cancel = mutation({ args: { ...jobArgs, reason: v.optional(v.string
   return { jobId: job._id, status: 'CANCELED' };
 } });
 
-async function resumeMusicQc(ctx:MutationCtx,job:Job,retryable:boolean){const response=object(job.response);const count=Number(response.musicQcRetries??0)+1;const retry=retryable&&count<=24;const delay=Math.min(count*10000,60000);await ctx.db.patch(job._id,{status:'PENDING',executionStage:retry?'AUDIO_QC':'RECONCILIATION_REQUIRED',response:{...response,musicQcRetries:count},errorCode:retry?'MUSIC_QC_PENDING':'RECONCILIATION_REQUIRED',leaseId:undefined,leaseExpiresAt:undefined,nextAttemptAt:retry?Date.now()+delay:undefined,updatedAt:Date.now()});if(retry)await schedule(ctx,job._id,delay);}
+async function resumeMusicQc(ctx:MutationCtx,job:Job,retryable:boolean,errorCode:string){const response=object(job.response);const count=Number(response.musicQcRetries??0)+1;const transient=retryable&&retryableMusicQc(errorCode);const retry=transient&&count<=24;const delay=Math.min(count*10000,60000);await ctx.db.patch(job._id,{status:'PENDING',executionStage:retry?'AUDIO_QC':'RECONCILIATION_REQUIRED',response:{...response,musicQcRetries:count,musicQcFailureCode:transient?'MUSIC_QC_UNAVAILABLE':safeMusicQcCode(errorCode)},errorCode:retry?'MUSIC_QC_PENDING':transient?'RECONCILIATION_REQUIRED':safeMusicQcCode(errorCode),leaseId:undefined,leaseExpiresAt:undefined,nextAttemptAt:retry?Date.now()+delay:undefined,updatedAt:Date.now()});if(retry)await schedule(ctx,job._id,delay);}
 async function musicReceipt(ctx:MutationCtx,job:Job){if(object(job.request).preparationKind==='MUSIC'&&/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??''))await ctx.scheduler.runAfter(0,ref('providerReceipts','reconcile'),{jobId:job._id});}
 /** No browser-visible function can claim leases or submit completion evidence. */
 export async function claimGenerationJob(ctx: MutationCtx, args: { jobId: Id<'generationJobs'> }, fixtureKey?: string) {
@@ -393,7 +396,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
         if (stable(audio) !== stable(source) || stable(image) !== stable(portrait) || args.liveEndpointFingerprint !== frozen.endpointFingerprint || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Supplied audio or portrait certificate changed.');
       }
       if (request.operation === 'EXTEND') {
-        await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') });
+        await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') },actor._id);
         const frozen = object(request.continuationQuote);
         if (args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Continuation catalog certification changed.');
       }
@@ -476,7 +479,7 @@ export const fail = internalMutation({ args: { ...leaseArgs, errorCode: v.string
   if (GENERATION_TERMINAL.has(job.status)) return null;
   assertLease(job, args.leaseId);
   const timestamp = Date.now();
-  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,args.retryable===true);return null;}
+  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,args.retryable===true,args.errorCode);return null;}
   const accepted = Boolean(job.providerJobId || args.ambiguous || (job.submissionStartedAt && !args.rejected));
   if (!job.providerJobId && accepted) {
     await ctx.db.patch(job._id, { status: 'PROCESSING', executionStage: 'RECONCILIATION_REQUIRED', errorCode: 'RECONCILIATION_REQUIRED', leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
@@ -495,7 +498,7 @@ export const wake = internalMutation({ args: jobArgs, returns: v.null(), handler
 export const expireLease = internalMutation({ args: leaseArgs, returns: v.null(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId);
   if (job.leaseId !== args.leaseId || !job.leaseExpiresAt || job.leaseExpiresAt > Date.now() || GENERATION_TERMINAL.has(job.status)) return null;
-  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,true);return null;}
+  if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,true,'MUSIC_QC_LEASE_EXPIRED');return null;}
   if (recoveryStage(job) === 'RECONCILIATION_REQUIRED') {
     await ctx.db.patch(job._id, { executionStage: 'RECONCILIATION_REQUIRED', errorCode: 'RECONCILIATION_REQUIRED', leaseId: undefined, leaseExpiresAt: undefined, updatedAt: Date.now() });
     await settle(ctx, job, true);await musicReceipt(ctx,job);
@@ -615,12 +618,12 @@ export const completePreparation = internalMutation({
     const request = object(job.request);const recordedCost=args.providerCostUsd??job.providerCostUsd;
     let assetId: Id<'assets'> | undefined;let transcriptId:Id<'transcripts'>|undefined;
     if (args.storageId) {
-      const music=request.preparationKind==='MUSIC';const proof=object(args.musicProbe);const saved=object(object(job.response).audioOutput);if(music&&(!hasStoredMusicOutput(job)||saved.storageId!==args.storageId||proof.hasVideo!==false||proof.audioCodec!=='mp3'||proof.channels!==2||![44100,48000].includes(Number(proof.sampleRate))||proof.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||proof.decodedSampleRate!==16000||!Number.isSafeInteger(proof.decodedSampleCount)||Number(proof.decodedSampleCount)<=0||proof.durationSeconds!==Number(proof.decodedSampleCount)/16000||Math.abs(Number(proof.durationSeconds)-30)>.1||proof.byteSize!==saved.byteSize||!sha256Equal(proof.checksum,saved.checksum)))throw new Error('MUSIC_OUTPUT_INVALID');
+      const music=request.preparationKind==='MUSIC';const proof=object(args.musicProbe);const saved=object(object(job.response).audioOutput);if(music){if(!hasStoredMusicOutput(job)||saved.storageId!==args.storageId)throw new Error('MUSIC_OUTPUT_INVALID');assertMusicOutputProbe(proof,saved);}
       const stored = await ctx.db.system.get('_storage', args.storageId);
       const expected = job.modality === 'IMAGE' ? 'image/' : 'audio/';
       if(music&&(!stored||stored.size!==saved.byteSize||!sha256Equal(stored.sha256,saved.checksum)||stored.contentType!=='audio/mpeg'))throw new Error('MUSIC_OUTPUT_CHANGED');
       if (!stored || !args.contentType?.startsWith(expected) || !stored.contentType?.startsWith(expected) || stored.size <= 0 || stored.size > 15 * 1024 * 1024) throw new Error('Preparation output is invalid.');
-      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : music?'MUSIC':'NARRATION'], name: job.modality === 'AUDIO' ? `${music?'Music clip':request.preparationKind === 'VOICE_PREVIEW' ? 'Voice preview' : 'Narration'} · ${String(request.text || '').slice(0, 60)}` : undefined, storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, ...(music?{durationSeconds:Number(proof.durationSeconds)}:{}),metadata: { generationJobId: job._id,...(music?{audioProbe:proof,generatedText:saved.generatedText}:{}), technicalStatus: music?'PASS':'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
+      assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: [job.modality === 'IMAGE' ? 'CHARACTER_REFERENCE' : music?'MUSIC':'NARRATION'], name: job.modality === 'AUDIO' ? `${music?'Music clip':request.preparationKind === 'VOICE_PREVIEW' ? 'Voice preview' : 'Narration'} · ${String(request.text || '').slice(0, 60)}` : undefined, storageId: args.storageId, mimeType: args.contentType, byteSize: stored.size, checksum: stored.sha256, ...(music?{durationSeconds:Number(proof.durationSeconds)}:{}),metadata: { generationJobId: job._id,...(music?{audioProbe:proof,generatedText:saved.generatedText,musicOutputPolicy:MUSIC_OUTPUT_POLICY.version,nominalDurationSeconds:MUSIC_OUTPUT_POLICY.nominalSeconds,actualDurationSeconds:Number(proof.durationSeconds)}:{}), technicalStatus: music?'PASS':'REQUIRES_REVIEW', visualApproval: 'REQUIRES_HUMAN_REVIEW', targetVoiceId: request.targetVoiceId }, provenance: { provider: job.provider, model: job.model, generationJobId: job._id, providerRequestId: args.providerRequestId }, createdAt: Date.now() });
       if(music)await ctx.db.insert('audio',{studioExternalId:job.studioExternalId,studioId:job.studioId,projectId:job.projectId,productionId:job.productionId,assetId,kind:'MUSIC',durationSeconds:Number(proof.durationSeconds),sampleRate:Number(proof.sampleRate),channels:2,metadata:{generationJobId:job._id,nominalDurationSeconds:30,requiresHumanReview:true},createdAt:Date.now()});
     } else if (request.preparationKind === 'TRANSCRIPT') {
       if (typeof args.text !== 'string' || args.text.length > 100_000 || typeof request.sourceAssetId !== 'string') throw new Error('Transcript output is invalid.');
@@ -633,7 +636,7 @@ export const completePreparation = internalMutation({
     const timestamp = Date.now();
     const attempt = await currentAttempt(ctx, job);
     if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', providerRequestId: args.providerRequestId, completedAt: timestamp, latencyMs: timestamp - (job.startedAt ?? job.createdAt) });
-    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, providerRequestId: args.providerRequestId, providerCostUsd: recordedCost, actualCost: job.estimatedCost, response: {...object(job.response), assetId,transcriptId, text: args.text, usage: args.usage, reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, errorCode:undefined,errorMessage:undefined,nextAttemptAt:undefined, providerRequestId: args.providerRequestId, providerCostUsd: recordedCost, actualCost: job.estimatedCost, response: {...object(job.response), assetId,transcriptId, text: args.text, usage: args.usage,...(request.preparationKind==='MUSIC'?{actualDurationSeconds:Number(object(args.musicProbe).durationSeconds),nominalDurationSeconds:MUSIC_OUTPUT_POLICY.nominalSeconds,musicOutputPolicy:MUSIC_OUTPUT_POLICY.version}:{}), reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await settle(ctx, job, true, recordedCost);
     if (job.modality === 'AUDIO' && recordedCost === undefined && (request.preparationKind==='MUSIC'?/^gen-[A-Za-z0-9._-]{1,180}$/:/^gen-tts-\d+-[A-Za-z0-9]+$/).test(args.providerRequestId ?? '')) {
       const receipts = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;

@@ -87,12 +87,13 @@ function workspaceActionFixture() {
     },
     mutation: async (ref, args) => { fixture.mutations.push({ ref, args }); return {}; },
   };
-  const actions = compile('src/lib/production/workspace-actions.ts', { 'next/cache': { revalidatePath: () => {} }, '../../../convex/_generated/api': { api }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client }, './workspace-controls': controls });
+  const outputSettings=compile('renderer/src/output-settings.ts');
+  const actions = compile('src/lib/production/workspace-actions.ts', { '../../../renderer/src/output-settings':outputSettings, 'next/cache': { revalidatePath: () => {} }, '../../../convex/_generated/api': { api }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client }, './workspace-controls': controls });
   fixture.save = selected => actions.saveShotOperationControls({ projectExternalId: 'project-external', productionId: 'production', shotId: 'shot', controls: selected });
   return fixture;
 }
 function backendFixture(metadata, referenceAssetIds = [], routingFactory, dependencies = {}) {
-  const state = { approval: 'APPROVED', routeChecks: [], writes: [], schedules: [], rows: new Map(), counter: 0, creditEstimates: [], creditReservations: [] };
+  const state = { approval: 'APPROVED', routeChecks: [], writes: [], schedules: [], rows: new Map(), counter: 0, creditEstimates: [], creditReservations: [], creditSettlements: [], providerSettlements: [] };
   const row = (table, value) => state.rows.set(value._id, { ...value, table });
   row('projects', { _id: 'project', studioExternalId: 'studio', ownerUserId: 'user' });
   row('users', { _id: 'user', status: 'active' });
@@ -124,10 +125,10 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   const jobs = compile('convex/generationJobs.ts', {
     './_generated/api': { internal: { generationWorker: { run: 'run' },generationJobs:{expireLease:'expireLease'},providerReceipts:{reconcile:'receipt-reconcile'} } },
     './_generated/server': { query: value => value, mutation: value => value, internalQuery: value => value, internalMutation: value => value },
-    './recipeAdmissions': recipeAdmissions, 'convex/values': { v }, './authorization': { requireProjectAccess: auth, requireProjectRole: auth },
-    './resourceStates': { ensureResourceState: async () => {}, getEffectiveResourceState: async (_, projectId, type, id) => ({ currentState: id === 'source-take' ? state.approval : 'DRAFT' }) },
-    './financial': { estimateGenerationCredits: args => { state.creditEstimates.push(args); return pricing.estimateGenerationCredits(args); }, reserveGenerationCreditsInTransaction: async (_, args) => { state.creditReservations.push(args); return { reservationId: 'credit-hold' }; }, settleGenerationCreditsInTransaction: async () => {} },
-    './providerBudget': { settleProviderBudget: async () => {}, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
+    './recipeAdmissions': recipeAdmissions, 'convex/values': { v }, './authorization': dependencies.authorization || { requireProjectAccess: auth, requireProjectRole: auth,resolveProjectAccessForActor:auth },
+    './resourceStates': dependencies.resourceStates || { ensureResourceState: async () => {}, getEffectiveResourceState: async (_, projectId, type, id) => ({ currentState: id === 'source-take' ? state.approval : 'DRAFT' }) },
+    './financial': { estimateGenerationCredits: args => { state.creditEstimates.push(args); return pricing.estimateGenerationCredits(args); }, reserveGenerationCreditsInTransaction: async (_, args) => { state.creditReservations.push(args); return { reservationId: 'credit-hold' }; }, settleGenerationCreditsInTransaction: async (_,args) => { state.creditSettlements.push(args); } },
+    './providerBudget': { settleProviderBudget: async (_,args) => { state.providerSettlements.push(args); }, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
     './videoRouting': routingFactory ? (state.routing = routingFactory(state, ctx, auth)) : { resolveUpscaleSourceCertificate: async () => ({ ...upscaleSource }), validateReviewedVideoJob: async (_, args) => { state.routeChecks.push(args.request); return { estimatedCostUsd: .04, selection: { provider: 'openrouter', modelId: args.modelId, path: 'AI_VIDEO', resolution: args.request.operation === 'UPSCALE' ? undefined : '720p', routeReason: 'Test-reviewed', policyVersion: 1, ...(args.request.operation === 'EXTEND' ? { continuationQuote: routing.quoteVideoContinuation(model, args.request) } : {}), ...(args.request.operation === 'UPSCALE' ? { upscaleQuote: routing.quoteVideoUpscale({ ...model, modelId: upscaleModelId, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: upscalePrices }, { ...args.request, upscaleSource }) } : {}) } }; } },
     './generationContinuity': { resolveGenerationContinuity: async (_, args) => ({ referenceAssetIds: args.referenceAssetIds, selectedResourceVersionIds: [], voiceIds: [], planningContextSnapshot: null }) },
     './studioMemberships': studioMemberships, './voices': dependencies.voices || {}, './audioCertificates': dependencies.audio || {}, './imageCertificates': dependencies.image || {}, '../src/lib/ai/preparation': dependencies.preparation || preparation, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,

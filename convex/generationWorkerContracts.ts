@@ -35,6 +35,7 @@ export function canClaim(job: { status: string; executionStage?: string; leaseEx
 
 export function safeGenerationError(code: string, preparation = false): string {
   if (preparation) {
+    if (['MUSIC_OUTPUT_INVALID','MUSIC_OUTPUT_CHANGED','MUSIC_DURATION_REVIEW_REQUIRED','MUSIC_QC_INVALID_RESPONSE','MUSIC_QC_AUTHORITY_DENIED','MUSIC_OUTPUT_REVIEW_REQUIRED'].includes(code)) return 'The saved music needs an administrator check. It will not be purchased again automatically.';
     if (code === 'RECONCILIATION_REQUIRED') return 'This preparation needs an administrator check. It will not be purchased again automatically.';
     if (code === 'MISSING_API_KEY' || code === 'WORKER_DISABLED') return 'Media preparation is not configured yet.';
     return 'This preparation could not finish. Your project and existing media are safe.';
@@ -103,6 +104,7 @@ export function publicJob(job: Record<string, unknown>) {
     model: typeof job.model === 'string' ? job.model : '',
     errorCode: typeof job.errorCode === 'string' ? job.errorCode : undefined,
     errorMessage: typeof job.errorCode === 'string' ? safeGenerationError(job.errorCode, job.operation === 'PREPARATION') : undefined,
+    ...(request.preparationKind==='MUSIC'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds),nominalDurationSeconds:30}:{}),
     assetId: typeof object(job.response).assetId === 'string' ? String(object(job.response).assetId) : undefined,
     transcriptText: job.operation === 'PREPARATION' && request.preparationKind === 'TRANSCRIPT' && typeof object(job.response).text === 'string' ? String(object(job.response).text) : undefined,
     request: { operation: request.operation, preparationKind: request.preparationKind, videoType: request.videoType, task: request.task, qualityTier: request.qualityTier, routeReason: request.routeReason, path: request.path },

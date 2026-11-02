@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const publicRoutes = ['/', '/about', '/methodology', '/case-studies', '/pricing', '/contact', '/legal/privacy', '/legal/terms'];
+const publicRoutes = ['/', '/about', '/methodology', '/case-studies', '/pricing', '/contact', '/legal/privacy', '/legal/terms', '/legal/cookies', '/legal/gdpr'];
 
 test.describe('public website', () => {
   for (const route of publicRoutes) {
@@ -11,15 +11,22 @@ test.describe('public website', () => {
     });
   }
 
-  test('mobile navigation opens and closes with Escape', async ({ page, isMobile }) => {
+  test('mobile navigation disclosure supports Tab and returns focus on Escape', async ({ page, isMobile }) => {
     test.skip(!isMobile, 'This check belongs to the mobile project.');
     await page.goto('/');
-    const menu = page.getByRole('button', { name: 'Open navigation menu' });
+    const menu = page.locator('button[aria-controls="mobile-public-navigation"]');
     await expect(menu).toBeVisible();
     await menu.click();
-    await expect(page.getByRole('dialog', { name: 'Mobile navigation' })).toBeVisible();
+    await expect(menu).toHaveAttribute('aria-expanded', 'true');
+    const navigation = page.getByRole('navigation', { name: 'Mobile main navigation' });
+    await expect(navigation).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.keyboard.press('Tab');
+    await expect(navigation.getByRole('link', { name: 'How it works' })).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Mobile navigation' })).toHaveCount(0);
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await expect(menu).toBeFocused();
   });
 });
 

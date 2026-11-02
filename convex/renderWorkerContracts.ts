@@ -11,6 +11,9 @@ export function safeRenderError(code?: string) {
   if (!code) return undefined;
   if (code === 'RENDER_CONFIGURATION_REQUIRED') return 'Export processing is not configured yet. Your approved timeline is saved.';
   if (code === 'RENDER_SOURCE_UNAVAILABLE') return 'A selected project asset or approval is unavailable. Review the timeline before exporting again.';
+  if (code === 'RENDER_GRAPHICS_CAPABILITY_REQUIRED') return 'These graphics need an updated renderer. Your approved timeline is saved.';
+  if (code === 'RENDER_GRAPHICS_CAPABILITY_UNAVAILABLE') return 'Renderer graphics support could not be verified. The saved export will retry safely.';
+  if (code === 'RENDER_GRAPHICS_HANDOFF_UNKNOWN') return 'The renderer may have accepted these graphics. FinalFrame will not start another render automatically.';
   if (code === 'RENDER_RECONCILIATION_REQUIRED') return 'The saved render result needs recovery. FinalFrame will not start another render automatically.';
   if (code === 'RENDER_RECOVERY_WINDOW_EXPIRED') return 'The retained render result needs an administrator check before it can be recovered.';
   if (code === 'RENDER_MAX_ATTEMPTS') return 'This export needs an administrator check before it can continue.';

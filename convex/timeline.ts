@@ -2,6 +2,8 @@ import { mutation, query } from "./_generated/server";
 import { v, type Infer } from "convex/values";
 import type { MutationCtx } from "./_generated/server";
 import { normalizeSha256, sha256Equal } from "../renderer/src/media/sha256";
+import {resolveGraphicImage} from './graphicsAssets';
+import {graphicsV2Enabled,parseGraphicsV2Authoring} from './graphicsContracts';
 import { normalizeCaptionTrack } from "./finishingContracts";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
@@ -75,7 +77,7 @@ export const createVersion = mutation({
       const shotVersionId = typeof item.shotVersionId === "string" ? ctx.db.normalizeId("shotVersions", item.shotVersionId) : null;
       if (shotVersionId) { const take = await ctx.db.get(shotVersionId); if (!take || take.projectId !== projectId || take.productionId !== production._id || take.assetId !== assetId) throw new Error("Imported take is outside this production."); await requireApprovedResource(ctx, projectId, "shotVersion", shotVersionId, production._id); }
       const transition = (Array.isArray(payload.transitions) ? payload.transitions.map(object) : []).find(row => row.fromItemId === item.id);
-      const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
+      const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props,...(object(item.props).layoutVersion===2?{graphicAssetRole:item.templateId==='product-ui'?'screen':'logo'}:{}) } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
       await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, shotVersionId: shotVersionId ?? undefined, startSeconds: Number(item.startFrame) / fps, durationSeconds: Number(item.durationInFrames) / fps, trimStartSeconds: typeof item.trimStartInFrames === "number" ? item.trimStartInFrames / fps : undefined, volume: typeof item.volume === "number" ? item.volume : undefined, ...(transition && payload.version === 5 ? { transition: { out: { kind: transition.kind, durationSeconds: Number(transition.durationInFrames) / fps, audioPolicy: transition.audioPolicy } } } : {}), metadata: JSON.parse(JSON.stringify(clipMetadata)) });
     }
     for (const [index, item] of audio.entries()) {
@@ -119,15 +121,10 @@ export const list = query({
   },
 });
 
-const graphicProps = v.object({
-  title: v.string(), subtitle: v.optional(v.string()), eyebrow: v.optional(v.string()), brandName: v.optional(v.string()),
-  feature: v.optional(v.string()), detail: v.optional(v.string()), index: v.optional(v.string()), callToAction: v.optional(v.string()),
-  url: v.optional(v.string()), accentColor: v.optional(v.string()), backgroundColor: v.optional(v.string()), textColor: v.optional(v.string()),
-});
 const draftClip = v.union(
   v.object({ kind: v.literal('TAKE'), shotVersionId: v.id('shotVersions') }),
   v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number(), trimStartSeconds:v.optional(v.number()), volume:v.optional(v.number()) }),
-  v.object({ kind: v.literal('GRAPHIC'), templateId: v.union(v.literal('kinetic-title'), v.literal('brand-card'), v.literal('feature-callout'), v.literal('end-card')), durationSeconds: v.number(), props: graphicProps, logoAssetId: v.optional(v.id('assets')) }),
+  v.object({ kind: v.literal('GRAPHIC'), templateId: v.union(v.literal('kinetic-title'), v.literal('brand-card'), v.literal('feature-callout'), v.literal('end-card'),v.literal('product-ui'),v.literal('bar-chart'),v.literal('explainer-steps')), durationSeconds: v.number(), props: v.any(), logoAssetId: v.optional(v.id('assets')),screenAssetId:v.optional(v.id('assets')) }),
 );
 
 /** Bootstrap authoring from deliberate selections. A draft does not require a
@@ -189,15 +186,19 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
         kind = asset.mimeType.startsWith('image/') ? 'IMAGE' : 'VIDEO';
       } else {
         kind = 'GRAPHIC'; duration = input.durationSeconds;
-        if (!input.props.title.trim()) throw new Error('A designed title needs text.');
-        for (const [name, value] of Object.entries(input.props)) {
-          if (typeof value !== 'string' || value.length > 2000 || (/Color$/.test(name) && !/^#[0-9a-f]{6}$/i.test(value))) throw new Error('Use bounded title text and hexadecimal colors.');
+        if(object(input.props).layoutVersion===2){
+          if(!graphicsV2Enabled())throw new Error('Responsive graphics authoring is not enabled.');
+          const spec=parseGraphicsV2Authoring({templateId:input.templateId,props:input.props,...(input.logoAssetId?{logoAssetId:input.logoAssetId}:{}),...(input.screenAssetId?{screenAssetId:input.screenAssetId}:{})},Math.round(duration*(args.fps??30)),args.fps??30);
+          if(spec.assetId)asset=await resolveGraphicImage(ctx,{assetId:spec.assetId,projectId,studioExternalId:production.studioExternalId,actorId});
+          metadata={motionTemplateId:spec.templateId,templateProps:spec.props,...(spec.assetRole?{graphicAssetRole:spec.assetRole}:{})};
+        }else{
+          if(!['kinetic-title','brand-card','feature-callout','end-card'].includes(input.templateId)||input.screenAssetId)throw new Error('This graphic requires the responsive graphics contract.');
+          if(typeof object(input.props).title!=='string'||!input.props.title.trim())throw new Error('A designed title needs text.');
+          const allowed=['title','subtitle','eyebrow','brandName','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor'];
+          for(const [name,value]of Object.entries(object(input.props)))if(!allowed.includes(name)||typeof value!=='string'||value.length>2000||(/Color$/.test(name)&&!/^#[0-9a-f]{6}$/i.test(value)))throw new Error('Use bounded title text and hexadecimal colors.');
+          if(input.logoAssetId){asset=await assetFor(input.logoAssetId);if(!asset.mimeType?.startsWith('image/'))throw new Error('Choose a project image for the exact logo.');}
+          metadata={motionTemplateId:input.templateId,templateProps:input.props};
         }
-        if (input.logoAssetId) {
-          asset = await assetFor(input.logoAssetId);
-          if (!asset.mimeType?.startsWith('image/')) throw new Error('Choose a project image for the exact logo.');
-        }
-        metadata = { motionTemplateId: input.templateId, templateProps: input.props };
       }
       if (!Number.isFinite(duration) || duration <= 0 || duration > 60 || elapsed + duration > 60) throw new Error('This composition must total at most 60 seconds.');
       if (kind === 'VIDEO' && asset?.durationSeconds !== undefined && duration > asset.durationSeconds + 0.05) throw new Error('Visual clip extends beyond its source media.');
@@ -243,3 +244,12 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
     await ctx.db.insert('productionOperations', { studioId: access.studio._id, studioExternalId: access.studio.externalId, productionId: production._id, kind: 'CREATE_TIMELINE', targetType: 'timeline', targetId: timelineId, targetVersionId: String(versionNumber), idempotencyKey: `compose:${key}`, input: { productionVersionId: version._id, clipCount: args.clips.length, audioCount: args.audioTracks?.length ?? 0 }, status: 'COMPLETED', actorUserId: access.user._id, outputResourceIds: [timelineId], createdAt: timestamp, updatedAt: timestamp, completedAt: timestamp });
     return { timelineId, versionNumber, replayed: false };
 }
+
+export const graphicsCapabilities=query({args:{projectId:v.id('projects')},returns:v.object({enabled:v.boolean()}),handler:async(ctx,args)=>{await requireProjectAccess(ctx,args.projectId);return {enabled:graphicsV2Enabled()};}});
+
+export const graphicsImages=query({args:{projectId:v.id('projects')},returns:v.object({enabled:v.boolean(),canEdit:v.boolean(),images:v.array(v.object({id:v.id('assets'),name:v.string()}))}),handler:async(ctx,args)=>{
+ const access=await requireProjectAccess(ctx,args.projectId);const canEdit=['OWNER','EDITOR'].includes(access.projectRole);if(!graphicsV2Enabled())return {enabled:false,canEdit,images:[]};
+ const rows=await ctx.db.query('assets').withIndex('by_project',q=>q.eq('projectId',args.projectId)).order('desc').take(201);const images=[];
+ for(const image of rows)if(image.scope==='PROJECT'&&!image.deletedAt&&image.mimeType?.startsWith('image/')){try{const approved=await resolveGraphicImage(ctx,{assetId:image._id,projectId:args.projectId,studioExternalId:access.studio.externalId});images.push({id:approved._id,name:approved.name??'Project image'});}catch{/* Only currently valid approved images are selectable. */}}
+ return {enabled:true,canEdit,images};
+}});

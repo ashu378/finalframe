@@ -59,7 +59,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
     const { client, project } = await projectContext(projectExternalId);
     const workspace = await client.query(api.productions.getWorkspaceByProject, { projectExternalId, productionId: productionId as Id<'productions'> });
     if (!workspace.production || workspace.production.projectId !== project._id) throw new Error('Production not found.');
-    const [resourcePage, bibleRows, assets, voices, timelines, episodes, sequences, continuationSources] = await Promise.all([
+    const [resourcePage, bibleRows, assets, voices, timelines, episodes, sequences, continuationSources,graphicsCapability] = await Promise.all([
         client.query(api.continuity.resourceVersionPage, { projectId: project._id, paginationOpts: { numItems: 50, cursor: null } }),
         client.query(api.continuity.listBibles, { projectId: project._id, limit: 50 }),
         client.query(api.assetStorage.listProjectAssets, { projectId: project._id }),
@@ -68,6 +68,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
         client.query(api.episodes.list, { projectId: project._id, paginationOpts: { numItems: 100, cursor: null } }),
         workspace.version ? client.query(api.scenes.list, { productionId: workspace.production._id, productionVersionId: workspace.version._id }) : Promise.resolve([]),
         loadContinuationSources(client, project, workspace.production._id),
+        client.query(api.timeline.graphicsCapabilities,{projectId:project._id}),
     ]);
     let episodeRows = [...episodes.page];
     let episodePage = episodes;
@@ -127,6 +128,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
         projectId: project._id.toString(), projectExternalId, studioExternalId: project.studioExternalId,
         productionId: workspace.production._id.toString(), versionId: workspace.version?._id.toString() ?? null,
         versionState: workspace.version?.status ?? null, episodeId: episode?._id.toString() ?? null,
+        graphicsV2Enabled:graphicsCapability.enabled===true,
         role: resourceRows.projectRole, canEdit: resourceRows.projectRole === 'OWNER' || resourceRows.projectRole === 'EDITOR',
         resources: resourceRows.page.filter((row) => !row.archived).map(resourceView), resourceCursor: resourceRows.isDone ? null : resourceRows.continueCursor,
         assets: await Promise.all(assetRows.map(async (asset) => { const state = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'asset', resourceId: asset._id }); return { id: asset._id.toString(), name: asset.name || (asset.roles.includes('NARRATION') ? `Narration · ${asset._id.toString().slice(-6)}` : 'Project media'), mimeType: asset.mimeType || 'application/octet-stream', url: asset.storageUrl ?? null, state: state.state as WorkspaceResourceState }; })),
@@ -274,7 +276,7 @@ export async function createWorkspaceTimeline(input: { projectExternalId: string
         if (workspace.production?.projectId !== project._id) throw new Error('Production does not belong to this project.');
         if (!/^[a-zA-Z0-9-]{16,100}$/.test(input.requestId)) throw new Error('Invalid request key.');
         const outputSettings = input.outputSettings === undefined ? undefined : validateAuthoringOutputSettings(input.outputSettings);
-        const clips = input.clips.map((clip) => clip.kind === 'TAKE' ? { ...clip, shotVersionId: clip.shotVersionId as Id<'shotVersions'> } : clip.kind === 'ASSET' ? { ...clip, assetId: clip.assetId as Id<'assets'> } : { ...clip, logoAssetId: clip.logoAssetId as Id<'assets'> | undefined });
+        const clips = input.clips.map((clip) => clip.kind === 'TAKE' ? { ...clip, shotVersionId: clip.shotVersionId as Id<'shotVersions'> } : clip.kind === 'ASSET' ? { ...clip, assetId: clip.assetId as Id<'assets'> } : { ...clip, logoAssetId: clip.logoAssetId as Id<'assets'> | undefined,screenAssetId:('screenAssetId' in clip?clip.screenAssetId:undefined) as Id<'assets'>|undefined });
         const result = await client.mutation(api.timeline.createDraft, { productionId: input.productionId as Id<'productions'>, productionVersionId: input.versionId as Id<'productionVersions'>, idempotencyKey: `workspace-timeline:${input.requestId}`, clips, audioTracks: input.audioTracks.map((track) => ({ ...track, assetId: track.assetId as Id<'assets'> })), ...(outputSettings ? { outputSettings } : {}), ...(input.fps === undefined ? {} : { fps: input.fps }) });
         revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
         return { success: true as const, timelineId: result.timelineId.toString() };

@@ -1,3 +1,4 @@
+import type {GraphicsCertificate} from './templates/graphics-v2-certificate.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -64,6 +65,7 @@ export interface CompletionRequest {
   heartbeatUrl?: string;
   durationInFrames?: number;
   mimeType?: RenderOutputMimeType;
+  graphicsCertificate?: GraphicsCertificate;
   movieContext?: {movieVersionId:string;movieExportId:string;planHash:string};
 }
 
@@ -117,7 +119,7 @@ export class CompletionOutbox {
       return previous;
     }
     const timestamp = this.now();
-    const record: CompletionRecord = { version: 1, key, fingerprint, request: { ...request }, stage: 'RENDERING', createdAt: timestamp, updatedAt: timestamp, nextAttemptAt: timestamp, transferAttempts: 0 };
+    const record: CompletionRecord = { version: 1, key, fingerprint, request: { ...request,...(request.graphicsCertificate?{graphicsCertificate:JSON.parse(JSON.stringify(request.graphicsCertificate)) as GraphicsCertificate}:{}) }, stage: 'RENDERING', createdAt: timestamp, updatedAt: timestamp, nextAttemptAt: timestamp, transferAttempts: 0 };
     await this.save(record);
     this.options.onPending?.(record);
     return record;
@@ -143,8 +145,8 @@ export class CompletionOutbox {
     const movieProof = proof ? {checkedBy:proof.checkedBy,checkedAt:proof.checkedAt,fileSizeBytes:proof.fileSizeBytes,width:proof.width,height:proof.height,fps:proof.fps,durationSeconds:proof.durationSeconds,videoCodec:proof.videoCodec,...(proof.audioCodec?{audioCodec:proof.audioCodec}:{}),hasAudio:proof.hasAudio,orderedPartIds:proof.orderedItemIds,durationInFrames:record.result!.durationInFrames} : undefined;
     return createCallbackBody({ eventId: randomUUID(), idempotencyKey: record.request.idempotencyKey, jobId: record.request.jobId, projectId: record.request.projectId, rendererVersion: record.request.rendererVersion, attempt: record.request.attempt, eventType,
       payload: eventType === 'render.completed'
-        ? { storageId: record.storageId, leaseId: record.request.leaseId, mimeType: outputFormatForMimeType(record.request.mimeType).mimeType, durationInFrames: record.result!.durationInFrames, ...(movie?{...movie,checksum:record.result!.checksum,verification:movieProof}:{}) }
-        : { leaseId: record.request.leaseId, errorCode: failure?.code??'RENDER_FAILED', errorMessage: failure?.message??'The renderer could not complete this export.', retryable: failure?.retryable??true, ...(movie??{}) },
+        ? { ...(record.request.graphicsCertificate?{graphicsCertificate:record.request.graphicsCertificate}:{}), storageId: record.storageId, leaseId: record.request.leaseId, mimeType: outputFormatForMimeType(record.request.mimeType).mimeType, durationInFrames: record.result!.durationInFrames, ...(movie?{...movie,checksum:record.result!.checksum,verification:movieProof}:{}) }
+        : { ...(record.request.graphicsCertificate?{graphicsCertificate:record.request.graphicsCertificate}:{}),leaseId: record.request.leaseId, errorCode: failure?.code??'RENDER_FAILED', errorMessage: failure?.message??'The renderer could not complete this export.', retryable: failure?.retryable??true, ...(movie??{}) },
     });
   }
 

@@ -1,3 +1,5 @@
+import {expectedGraphicsCertificate} from './templates/graphics-v2-certificate.js';
+import {SUPPORTED_MOTION_TEMPLATE_IDS} from './templates/contract.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -83,7 +85,8 @@ async function render(payload: any) {
   const jobId = String(payload.jobId);
   const manifest = assertValidManifest(payload.manifest);
   const format = outputFormatForManifest(manifest);
-  const completionRequest: CompletionRequest = { jobId, leaseId: payload.leaseId, attempt: payload.attempt ?? 1, projectId: String(manifest.projectId), manifestId: manifest.manifestId, durationInFrames: manifest.output.durationInFrames, idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${manifest.manifestId}`, callbackUrl: payload.callbackUrl, storageUploadUrl: payload.storageUploadUrl, heartbeatUrl: payload.heartbeatUrl, rendererVersion, mimeType: format.mimeType };
+  const graphicsCertificate=expectedGraphicsCertificate({jobId,leaseId:payload.leaseId,attempt:payload.attempt??1,manifest});
+  const completionRequest: CompletionRequest = { jobId, leaseId: payload.leaseId, attempt: payload.attempt ?? 1, projectId: String(manifest.projectId), manifestId: manifest.manifestId, durationInFrames: manifest.output.durationInFrames, idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${manifest.manifestId}`, callbackUrl: payload.callbackUrl, storageUploadUrl: payload.storageUploadUrl, heartbeatUrl: payload.heartbeatUrl, rendererVersion, mimeType: format.mimeType,...(graphicsCertificate?{graphicsCertificate}:{}) };
   // Never persist the shared secret. The request fingerprint binds the exact
   // original payload and prevents a restarted worker reusing another request.
   const { secret: _secret, ...originalPayload } = payload;
@@ -119,7 +122,7 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
     if (request.method !== 'POST' || !['/render', '/media/probe', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
@@ -174,7 +177,8 @@ createServer(async (request, response) => {
     if (!validateManifest(payload.manifest).ok) return json(response, 400, { error: 'Invalid render manifest.' });
     outputFormatForManifest(payload.manifest as RenderManifest);
     if (!heavyMedia.acceptsRender) return json(response, 429, { error: 'FinalFrame media processing is busy. Retry the existing job later.' });
-    return json(response, 202, renderQueue.accept(payload.jobId, payload, () => render({ ...payload, secret: headerSecret })));
+    const graphicsCertificate=expectedGraphicsCertificate({jobId:payload.jobId,leaseId:payload.leaseId,attempt:payload.attempt??1,manifest:payload.manifest});
+    return json(response, 202, {...renderQueue.accept(payload.jobId, payload, () => render({ ...payload, secret: headerSecret })),...(graphicsCertificate?{graphicsCertificate}:{})});
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
     return json(response, code === 'RENDER_QUEUE_FULL' ? 429 : code === 'RENDER_REQUEST_CONFLICT' ? 409 : 400,

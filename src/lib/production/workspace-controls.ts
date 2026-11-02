@@ -1,3 +1,4 @@
+import type {GraphicsV2Props,GraphicsV2TemplateId} from '../../../renderer/src/templates/graphics-v2-contract';
 export const PROJECT_RESOURCE_KINDS = ['CHARACTER', 'LOCATION', 'COSTUME', 'PROP', 'PRODUCT', 'BRAND', 'STYLE'] as const;
 export type ProjectResourceKind = (typeof PROJECT_RESOURCE_KINDS)[number];
 export type WorkspaceResourceState = 'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'LOCKED' | 'REVISION_REQUESTED';
@@ -67,6 +68,7 @@ export interface WorkspaceControlData {
     episodeId: string | null;
     role: 'OWNER' | 'EDITOR' | 'REVIEWER' | 'VIEWER';
     canEdit: boolean;
+    graphicsV2Enabled?: boolean;
     resources: ResourceVersionView[];
     resourceCursor: string | null;
     assets: WorkspaceAssetView[];
@@ -169,7 +171,8 @@ export function validateShotOperationControls(controls: ShotOperationControls, a
 
 export type CompositionClip = { kind: 'TAKE'; shotVersionId: string }
     | { kind: 'ASSET'; assetId: string; durationSeconds: number }
-    | { kind: 'GRAPHIC'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationSeconds: number; props: { title: string } & Record<string, string>; logoAssetId?: string };
+    | { kind: 'GRAPHIC'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationSeconds: number; props: { title: string } & Record<string, string>; logoAssetId?: string }
+    | {kind:'GRAPHIC';templateId:GraphicsV2TemplateId;durationSeconds:number;props:GraphicsV2Props;logoAssetId?:string;screenAssetId?:string};
 export interface CompositionAudioTrack { assetId: string; startSeconds: number; durationSeconds: number; volume?: number; trimStartSeconds?: number; fadeInSeconds?: number; fadeOutSeconds?: number; role?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx' }
 
 /** Client feedback only; Convex independently authorizes and validates every lane. */
