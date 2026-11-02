@@ -18,6 +18,30 @@ function run(name, args, subject) {
 const fixture = run('devFixtures:seedGenerationWorkerVerification', { fixtureKey, runId: randomUUID() });
 let checks = 0;
 try {
+  // Real, tiny fixture upload: exercise retained project media without AI.
+  const uploadUrl = run('assetStorage:generateUploadUrl', { projectId: fixture.projectId }, fixture.ownerSubject);
+  const upload = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB1sAAAAASUVORK5CYII=', 'base64') });
+  assert(upload.ok, 'Fixture storage upload must succeed');
+  const { storageId } = await upload.json();
+  const asset = run('assetStorage:ingestAsset', { studioExternalId: fixture.studioExternalId, scope: 'PROJECT', projectId: fixture.projectId, productionId: fixture.productionId, storageId, source: 'FIXTURE', roles: ['REFERENCE'], name: 'Private dashboard fixture', mimeType: 'image/png', metadata: { fixture: true } }, fixture.ownerSubject);
+  function overview(subject, visible) {
+    const data = run('app:dashboard', {}, subject);
+    assert.equal(data.projects.length, visible ? 1 : 0);
+    assert.equal(data.productions.length, visible ? 1 : 0);
+    assert.equal(data.assets.length, visible ? 1 : 0);
+    assert.equal(data.stats.totalProjects, visible ? 1 : 0);
+    assert.equal(data.stats.totalAssets, visible ? 1 : 0);
+    assert.equal(data.stats.activeJobs, visible ? 5 : 0);
+    if (visible) assert.equal(data.assets[0]._id, asset.assetId);
+    else {
+      const result = JSON.stringify(data);
+      for (const privateId of [fixture.projectId, fixture.productionId, asset.assetId]) assert(!result.includes(privateId));
+    }
+    checks += 1;
+  }
+  overview(fixture.ownerSubject, true);
+  overview(fixture.outsiderSubject, false);
+  console.log('PASS dashboard hides project names, media, production records and job counters from same-studio nonmembers');
   const requests = [
     ['productionGraph:get', { productionId: fixture.productionId }],
     ['timelineEditor:getDraft', { productionId: fixture.productionId }],
@@ -33,6 +57,15 @@ try {
   }
   assert.throws(() => run('assembly:createJob', { productionId: fixture.productionId }, fixture.outsiderSubject), /not authorized|PROJECT_ACCESS_DENIED/i);
   checks += 1;
+  run('projects:archive', { projectId: fixture.projectId }, fixture.ownerSubject);
+  overview(fixture.ownerSubject, false);
+  run('projects:restore', { projectId: fixture.projectId }, fixture.ownerSubject);
+  overview(fixture.ownerSubject, true);
+  run('projects:softDelete', { projectId: fixture.projectId }, fixture.ownerSubject);
+  overview(fixture.ownerSubject, false);
+  run('projects:restore', { projectId: fixture.projectId }, fixture.ownerSubject);
+  overview(fixture.ownerSubject, true);
+  console.log('PASS archived/deleted records disappear from the overview and restore retains assets, productions and jobs');
   console.log(JSON.stringify({ onlineConvex: true, simulatedCliIdentities: true, checks, paidProviderCalls: 0, renderSubmissions: 0 }));
 } finally {
   run('generationWorkerVerification:closeFixtureBudget', { fixtureKey, jobIds: fixture.jobIds });

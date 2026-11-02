@@ -39,10 +39,12 @@ A manually authored four-second `brand-card` production was created through cano
 3. **Old budget authority still allowed $40.** Lowered the aggregate configuration ceiling to $15, configured the single active budget to $10, and verified online that $15.01 is rejected before a write/provider call.
 4. **Seedance’s actual charge slightly exceeded the catalog-only estimate.** Added a five-percent plus one-cent video reservation margin. Settlement still uses the exact receipt and releases unused held funds. Added a regression using the observed live discrepancy.
 5. **Intermittent workstation-to-cloud connection timeouts interrupted setup/download operations.** The driver stopped and resumed only the affected no-cost operations. Accepted generations were retained and not repurchased. No customer data or unrelated server configuration was changed.
+6. **The dashboard summary leaked same-studio project names/media to nonmembers and counted retained inactive projects.** Reproduced the denial failure online, then applied the canonical project guard before returning records or computing counts. Archived/deleted descendants are excluded; restore retains them. Reads are bounded to 500 recent rows per category and the UI explicitly marks a limited summary. `PENDING` jobs now count as active.
 
 ## Verification
 
 - Seven live planning requests, canonical approvals and real generation jobs passed.
+- Fifteen real online project/descendant/dashboard authorization and lifecycle checks passed after the dashboard regression first failed against the old deployment. A tiny PNG was genuinely uploaded; archive/delete/restore retained its storage, production and jobs. The live worker was paused for these isolated no-network fixtures and restored afterward; fixture budgets were closed and fixture projects soft-deleted.
 - Seven duplicate-submission assertions passed; all video attempt counts remain one.
 - Durable jobs survived the browser/driver boundaries and stored their real results in Convex Storage.
 - Deployed Contabo FFprobe validated generated video dimensions, aspect ratio and duration before jobs became review-ready.
@@ -52,7 +54,7 @@ A manually authored four-second `brand-card` production was created through cano
 
 ## Deployment and configuration
 
-Fix commit **`7266ad6`** is deployed to Vercel **Preview**, deployment `7Sso5gLDXK6Qwvu6neAnUvhndu4g` (Ready). Backend changes were pushed to online development Convex. Preview-only `NEXT_PUBLIC_FF_VIDEO_TYPE_ROUTING=true` was saved; provider credentials remain in Convex and were not copied into browser configuration or Git. Additional harness/report changes are recorded in the following source checkpoint.
+Fix commit **`7266ad6`** is deployed to Vercel **Preview**, deployment `7Sso5gLDXK6Qwvu6neAnUvhndu4g` (Ready). Backend changes were pushed to online development Convex. Preview-only `NEXT_PUBLIC_FF_VIDEO_TYPE_ROUTING=true` was saved; provider credentials remain in Convex and were not copied into browser configuration or Git. The portrait driver and report checkpoint `60c7ea5` also reached Ready. A subsequent checkpoint contains the dashboard permission/retention regression fix and its 15 online checks. No schema changes or data migration were needed for these fixes.
 
 - Preview: https://finalframe-git-codex-finalframe-ready-check-ashu378s-projects.vercel.app
 - Local frontend: http://127.0.0.1:3000, started with `NEXT_PUBLIC_FF_VIDEO_TYPE_ROUTING=true`.
@@ -65,7 +67,7 @@ Fix commit **`7266ad6`** is deployed to Vercel **Preview**, deployment `7Sso5gLD
 
 This is a successful initial planning-to-generated-take acceptance pass, not a claim that every advertised workflow is production-ready. Still required: the owner-run genuine renderer/export/callback/download test; creative review of complete clips; narration/TTS, transcription, voice consent/cloning/lip sync; licensed music synchronization; reference and first/last-frame control; instructed editing, appearance/object/performance operations and extensions; real source-video repurposing; exact logo/product-UI compositing output; selected-scene/full-project assembly and long-form continuity; and valid completed-export client review. Seven text-to-video style samples do not prove those distinct capabilities.
 
-Known pre-launch follow-up: the legacy dashboard overview still derives summary counters/recent activity from studio-level records and can include retained inactive project records. Its project-permission filtering and counters need a dedicated regression pass before a public launch; project cards themselves use the project access list. No new production-readiness claim is made for that older summary path.
+Dashboard summary permission and retention filtering was corrected during this pass. The overview intentionally reports a bounded recent-record summary rather than scanning an unbounded history; large-workspace aggregate counters can be a later optimization.
 
 ## Reproduction and rollback
 

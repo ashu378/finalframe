@@ -1,7 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAdmin, requireCurrentMember, requireMember, requireProjectRole } from "./authorization";
+import { requireAdmin, requireCurrentMember, requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
+import { ConvexAuthorizationError } from "./auth";
 
 const now = () => Date.now();
 
@@ -15,16 +16,38 @@ async function accessibleStudio(ctx: QueryCtx | MutationCtx) {
 
 export const dashboard = query({
   args: {},
+  returns: v.object({ studio: v.any(), projects: v.array(v.any()), productions: v.array(v.any()), assets: v.array(v.any()), stats: v.object({ totalProjects: v.number(), activeJobs: v.number(), totalAssets: v.number(), creditsRemaining: v.number(), summaryLimited: v.boolean() }) }),
   handler: async (ctx) => {
     const { studio } = await accessibleStudio(ctx);
-    const [projects, assets, productions, jobs] = await Promise.all([
-      ctx.db.query("projects").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(20),
-      ctx.db.query("assets").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).collect(),
-      ctx.db.query("productions").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).collect(),
-      ctx.db.query("generationJobs").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).collect(),
+    // Bound the overview, then authorize before returning names, media or counts.
+    // Studio membership alone never grants visibility into another project.
+    const limit = 500;
+    const [projectRows, assetRows, productionRows, jobRows] = await Promise.all([
+      ctx.db.query("projects").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(limit + 1),
+      ctx.db.query("assets").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(limit + 1),
+      ctx.db.query("productions").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(limit + 1),
+      ctx.db.query("generationJobs").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(limit + 1),
     ]);
-    const activeJobs = jobs.filter(job => ["QUEUED", "PROCESSING", "RETRYING", "SUBMITTED", "POLLING"].includes(job.status)).length;
-    return { studio, projects, productions, stats: { totalProjects: projects.length, activeJobs, totalAssets: assets.length, creditsRemaining: studio.credits }, assets: assets.slice(0, 12) };
+    const authorized = await Promise.all(projectRows.slice(0, limit).map(async project => {
+      if (project.deletedAt !== undefined || project.archivedAt !== undefined || ["DELETED", "ARCHIVED"].includes(project.status ?? "")) return null;
+      try {
+        await requireProjectAccess(ctx, project._id);
+        return project;
+      } catch (error) {
+        if (error instanceof ConvexAuthorizationError) return null;
+        throw error;
+      }
+    }));
+    const projects = authorized.filter(project => project !== null);
+    const projectIds = new Set(projects.map(project => project._id));
+    const externalIds = new Set(projects.map(project => project.externalId));
+    const productions = productionRows.slice(0, limit).filter(production => production.projectId ? projectIds.has(production.projectId) : externalIds.has(production.externalProjectId));
+    const productionIds = new Set(productions.map(production => production._id));
+    const assets = assetRows.slice(0, limit).filter(asset => asset.deletedAt === undefined && (asset.projectId ? projectIds.has(asset.projectId) : asset.productionId ? productionIds.has(asset.productionId) : asset.scope !== "PROJECT"));
+    const jobs = jobRows.slice(0, limit).filter(job => job.projectId ? projectIds.has(job.projectId) : productionIds.has(job.productionId));
+    const activeJobs = jobs.filter(job => ["QUEUED", "PROCESSING", "RETRYING", "SUBMITTED", "POLLING", "PENDING"].includes(job.status)).length;
+    const summaryLimited = [projectRows, assetRows, productionRows, jobRows].some(rows => rows.length > limit);
+    return { studio, projects: projects.slice(0, 20), productions, stats: { totalProjects: projects.length, activeJobs, totalAssets: assets.length, creditsRemaining: studio.credits, summaryLimited }, assets: assets.slice(0, 12) };
   },
 });
 
