@@ -4,5 +4,5 @@ import { redirect } from 'next/navigation';
 export default async function WorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: routeId } = await params;
   const id = decodeProjectRouteId(routeId);
-  redirect(`/dashboard/projects/${id}/workspace/overview`);
+  redirect(`/dashboard/projects/${encodeURIComponent(id)}/workspace/overview`);
 }

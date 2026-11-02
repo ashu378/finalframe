@@ -24,6 +24,8 @@ const caseName = process.env.FINALFRAME_TEST_CASE || 'cinematic-first';
 assert(/^[a-z0-9-]{1,60}$/.test(caseName));
 const file = path.join(directory, caseName + '.json');
 const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { caseName, videoType: process.env.FINALFRAME_TEST_VIDEO_TYPE || 'CINEMATIC_FILM', model: process.env.FINALFRAME_TEST_VIDEO_MODEL, brief: process.env.FINALFRAME_TEST_BRIEF, createdAt: new Date().toISOString() };
+state.aspectRatio ||= state.constraints?.aspectRatio || process.env.FINALFRAME_TEST_ASPECT_RATIO || '16:9';
+assert(['16:9', '9:16'].includes(state.aspectRatio));
 const save = () => fs.writeFileSync(file, JSON.stringify(state, null, 2) + '\n');
 const { client } = await createAuthenticatedClient();
 const account = await client.query(api.account.current, {});
@@ -41,14 +43,14 @@ if (phase === 'prepare') {
   const raw = JSON.parse(fs.readFileSync(process.env.FINALFRAME_VIDEO_CATALOG_FILE || '/tmp/finalframe-live-video-catalog.json', 'utf8')).data;
   const catalog = raw.map(normalizeDiscoveredVideoModel).filter(Boolean);
   const selected = catalog.find(m => m.id === state.model); assert(selected);
-  assert(selected.supportedDurations.includes(4) && selected.supportedResolutions.includes('720p') && selected.supportedAspectRatios.includes('16:9'));
+  assert(selected.supportedDurations.includes(4) && selected.supportedResolutions.includes('720p') && selected.supportedAspectRatios.includes(state.aspectRatio));
   await client.mutation(api.videoRouting.refreshCatalog, { studioExternalId: state.studioExternalId, models: catalog.map(m => ({ provider: 'openrouter', modelId: m.id, name: m.name, supportedDurations: m.supportedDurations, supportedResolutions: m.supportedResolutions, supportedAspectRatios: m.supportedAspectRatios, supportedSizes: m.supportedSizes, supportedParameters: m.allowedPassthroughParameters, pricingSkus: m.pricingSkus })) });
   // This command initially reviews only documented text-to-video controls.
   // Advanced edit/reference capabilities require a separate evidence review.
   await client.mutation(api.videoRouting.reviewModelCapabilities, { studioExternalId: state.studioExternalId, modelId: state.model, available: true, supportsTextToVideo: true, supportsImageReferences: false, supportsFirstFrame: false, supportsLastFrame: false, supportsAudio: selected.raw.generate_audio === true, reviewedOperations: ['GENERATE'] });
   await client.mutation(api.videoRouting.savePolicy, { studioExternalId: state.studioExternalId, videoType: state.videoType, qualityTier: 'STANDARD', path: 'AI_VIDEO', preferredModelIds: [state.model], maxCostUsd: 0.75 });
   const config = await client.query(api.videoRouting.forGeneration, { studioExternalId: state.studioExternalId, videoType: state.videoType, qualityTier: 'STANDARD' });
-  const request = { videoType: state.videoType, task: 'GENERATE', qualityTier: 'STANDARD', durationSeconds: 4, aspectRatio: '16:9', resolution: '720p', requiresAudio: false, hasImageReferences: false, hasVideoReference: false, hasAudioReference: false, requiresFirstFrame: false, requiresLastFrame: false, maximumCostUsd: 0.75 };
+  const request = { videoType: state.videoType, task: 'GENERATE', qualityTier: 'STANDARD', durationSeconds: 4, aspectRatio: state.aspectRatio, resolution: '720p', requiresAudio: false, hasImageReferences: false, hasVideoReference: false, hasAudioReference: false, requiresFirstFrame: false, requiresLastFrame: false, maximumCostUsd: 0.75 };
   state.route = selectVideoRoute(request, config.catalog.filter(m => m.reviewedAt && m.available), config.policy);
   state.constraints = request;
   save();
@@ -59,7 +61,7 @@ if (phase === 'prepare') {
     state.textStartedAt = new Date().toISOString(); save();
     const response = await client.action(api.providerText.execute, { projectId: state.project.projectId, capability: 'STRUCTURED_PLANNING', messages: [
       { role: 'system', content: 'You are FinalFrame production planner. Return one production plan matching the JSON schema, exactly ONE sequence, ONE scene, ONE shot, exactly 4 seconds. The user intentionally approves this test plan for generation. No reference assets, no unrelated characters, no questions, no audio, no logos, no text overlays. requiredAssetIds must be empty. Use a detailed coherent video prompt. Do not invent provider metadata.' },
-      { role: 'user', content: state.brief + '\nVideo type: ' + state.videoType + '. Landscape 16:9, 720p, silent, four seconds.' },
+      { role: 'user', content: state.brief + '\nVideo type: ' + state.videoType + '. Aspect ratio ' + state.aspectRatio + ', 720p, silent, four seconds.' },
     ], structuredOutput: LEGACY_DIRECTOR_PLAN_SCHEMA });
     state.textReceipt = response;
     state.plan = JSON.parse(response.content);
@@ -67,7 +69,7 @@ if (phase === 'prepare') {
   }
   const shots = state.plan.sequences.flatMap(s => s.scenes.flatMap(c => c.shots));
   assert.equal(shots.length, 1); assert.equal(shots[0].durationSeconds, 4); assert.equal(shots[0].requiredAssetIds.length, 0);
-  if (!state.canonicalPlan) { state.canonicalPlan = await client.mutation(api.productions.createPlan, { studioExternalId: state.studioExternalId, projectExternalId: state.project.externalId, workflow: state.plan.workflow, inputMode: 'IDEA', durationSeconds: 4, language: 'en', outputPreset: 'WEBSITE_LANDSCAPE', input: { prompt: state.brief, videoType: state.videoType, textReceiptId: state.textReceipt.providerTextRequestId }, plan: state.plan, estimate: { qualityTier: 'STANDARD', estimatedProviderCostUsd: state.route.estimatedCostUsd }, idempotencyKey: 'paid-plan:' + state.project.projectId }); save(); }
+  if (!state.canonicalPlan) { state.canonicalPlan = await client.mutation(api.productions.createPlan, { studioExternalId: state.studioExternalId, projectExternalId: state.project.externalId, workflow: state.plan.workflow, inputMode: 'IDEA', durationSeconds: 4, language: 'en', outputPreset: state.aspectRatio === '9:16' ? 'SOCIAL_VERTICAL' : 'WEBSITE_LANDSCAPE', input: { prompt: state.brief, videoType: state.videoType, textReceiptId: state.textReceipt.providerTextRequestId }, plan: state.plan, estimate: { qualityTier: 'STANDARD', estimatedProviderCostUsd: state.route.estimatedCostUsd }, idempotencyKey: 'paid-plan:' + state.project.projectId }); save(); }
   if (!state.approved) { state.approved = await client.mutation(api.productions.approvePlan, { planId: state.canonicalPlan.planId }); save(); }
   const graph = await client.query(api.scenes.list, { productionId: state.canonicalPlan.productionId, productionVersionId: state.approved.versionId });
   state.shotId = graph[0].scenes[0].shots[0]._id; save();
@@ -79,7 +81,7 @@ if (phase === 'prepare') {
     save();
   }
   if (!state.job) {
-    const args = { productionId: state.canonicalPlan.productionId, shotId: state.shotId, provider: 'openrouter', model: state.route.modelId, estimatedCost: 1, estimatedProviderCostUsd: state.route.estimatedCostUsd, capability: 'VIDEO_PREVIEW', modality: 'VIDEO', modelVersion: String(state.route.policyVersion), correlationId: 'live-test:' + state.project.projectId, idempotencyKey: 'live-test:' + state.project.projectId, request: { ...state.constraints, duration: 4, ratio: '16:9', maximumCostUsd: 0.75 } };
+    const args = { productionId: state.canonicalPlan.productionId, shotId: state.shotId, provider: 'openrouter', model: state.route.modelId, estimatedCost: 1, estimatedProviderCostUsd: state.route.estimatedCostUsd, capability: 'VIDEO_PREVIEW', modality: 'VIDEO', modelVersion: String(state.route.policyVersion), correlationId: 'live-test:' + state.project.projectId, idempotencyKey: 'live-test:' + state.project.projectId, request: { ...state.constraints, duration: 4, ratio: state.aspectRatio, maximumCostUsd: 0.75 } };
     state.job = await client.mutation(api.generationJobs.create, args); save();
     const replay = await client.mutation(api.generationJobs.create, args); assert.equal(replay._id, state.job._id);
     state.idempotencyVerified = true; save();
