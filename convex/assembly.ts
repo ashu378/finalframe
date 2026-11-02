@@ -141,6 +141,42 @@ async function clipMatchesSelection(ctx: ReadCtx, clip: Doc<"timelineClips">, sc
   return selectedIds.has(String(record(clip.metadata).sceneId ?? ""));
 }
 
+/** Pack selected picture ranges and crop their soundtrack to the same edit. */
+function scopeSourceItems(sources: SourceItem[], scope: SelectionScope): SourceItem[] {
+  if (scope === "FULL_PROJECT" || scope === "TIMELINE") return sources;
+  const ranges: Array<{ start: number; end: number; offset: number }> = [];
+  for (const source of sources.filter(item => !["AUDIO", "CAPTIONS"].includes(item.trackKind.toUpperCase())).sort((a, b) => a.startSeconds - b.startSeconds)) {
+    const last = ranges.at(-1);
+    const end = source.startSeconds + source.durationSeconds;
+    if (last && source.startSeconds <= last.end) last.end = Math.max(last.end, end);
+    else ranges.push({ start: source.startSeconds, end, offset: 0 });
+  }
+  if (!ranges.length) throw new Error("The requested assembly selection contains no picture clips.");
+  let offset = 0;
+  for (const range of ranges) { range.offset = offset; offset += range.end - range.start; }
+  const selected: SourceItem[] = [];
+  for (const source of sources) {
+    const sourceEnd = source.startSeconds + source.durationSeconds;
+    const pieces = ranges.flatMap((range, index) => {
+      const start = Math.max(range.start, source.startSeconds);
+      const end = Math.min(range.end, sourceEnd);
+      if (end <= start) return [];
+      const croppedStart = start - source.startSeconds;
+      const croppedEnd = sourceEnd - end;
+      const fadeIn = source.fadeInSeconds ?? 0;
+      const fadeOut = source.fadeOutSeconds ?? 0;
+      // A partial ramp needs an envelope, which the current contract does not
+      // represent. Reject it instead of changing the approved audio silently.
+      if (source.trackKind.toUpperCase() === "AUDIO" && ((fadeIn > 0 && croppedStart > 0 && croppedStart < fadeIn) || (fadeIn > 0 && croppedStart === 0 && end - start < fadeIn) || (fadeOut > 0 && croppedEnd > 0 && croppedEnd < fadeOut) || (fadeOut > 0 && croppedEnd === 0 && end - start < fadeOut))) {
+        throw new Error("This selection cuts through an audio fade. Create a dedicated approved timeline for the selection.");
+      }
+      return [{ ...source, timelineClipId: `${source.timelineClipId}:selection:${index}`, startSeconds: range.offset + start - range.start, durationSeconds: end - start, trimStartSeconds: (source.trimStartSeconds ?? 0) + croppedStart, fadeInSeconds: croppedStart === 0 ? source.fadeInSeconds : undefined, fadeOutSeconds: croppedEnd === 0 ? source.fadeOutSeconds : undefined }];
+    });
+    selected.push(...pieces);
+  }
+  return selected.sort((a, b) => a.startSeconds - b.startSeconds || a.orderIndex - b.orderIndex).map((source, orderIndex) => ({ ...source, orderIndex }));
+}
+
 async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: Timeline, preset: RenderPreset, selectionScope: SelectionScope, selectedIds: Set<string>) {
   const tracks = await ctx.db.query("timelineTracks").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect();
   const clips = (await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect()).sort((a, b) => {
@@ -151,7 +187,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
     return aOrder - bOrder || a._id.toString().localeCompare(b._id.toString());
   });
   const selectedClips: Doc<"timelineClips">[] = [];
-  for (const clip of clips) if (await clipMatchesSelection(ctx, clip, selectionScope, selectedIds)) selectedClips.push(clip);
+  for (const clip of clips) if (await clipMatchesSelection(ctx, clip, selectionScope, selectedIds) || tracks.some(track => track._id === clip.trackId && track.kind.toUpperCase() === "AUDIO")) selectedClips.push(clip);
   if (!selectedClips.length) throw new Error("The requested assembly selection contains no timeline clips.");
 
   const timelineMeta = timelineMetadata(timeline);
@@ -259,8 +295,9 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
   }
 
   await assertDependenciesAreCurrent(ctx, production, timeline, sourceIds);
-  const durationInFrames = Math.max(1, Math.ceil(Math.max(...sources.map((source) => source.startSeconds + source.durationSeconds)) * preset.fps));
-  return { sources, sourceIds, durationInFrames };
+  const scopedSources = scopeSourceItems(sources, selectionScope);
+  const durationInFrames = Math.max(1, Math.ceil(Math.max(...scopedSources.map((source) => source.startSeconds + source.durationSeconds)) * preset.fps));
+  return { sources: scopedSources, sourceIds, durationInFrames };
 }
 
 function rendererItems(sources: SourceItem[], fps: number) {

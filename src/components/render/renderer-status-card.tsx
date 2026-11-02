@@ -15,7 +15,7 @@ const states: Record<RendererStatusCardProps['state'], { label: string; descript
   QUEUED: { label: 'Queued for finishing', description: 'Your request is safely queued. You can leave this page.', tone: 'border-primary/25 bg-[#151b25]' },
   LEASED: { label: 'Finishing slot reserved', description: 'The renderer is taking ownership of your request.', tone: 'border-primary/25 bg-[#151b25]' },
   RUNNING: { label: 'Preparing the finishing job', description: 'Sources and the locked timeline are being checked.', tone: 'border-primary/25 bg-[#151b25]' },
-  RENDERING: { label: 'Making your video', description: 'FinalFrame is rendering the ordered picture, sound, captions, and transitions.', tone: 'border-primary/25 bg-[#151b25]' },
+  RENDERING: { label: 'Making your video', description: 'FinalFrame is rendering your approved picture and soundtrack.', tone: 'border-primary/25 bg-[#151b25]' },
   UPLOADING: { label: 'Securing the finished file', description: 'The render is complete. We are verifying the file before exposing a download.', tone: 'border-primary/25 bg-[#151b25]' },
   VERIFYING: { label: 'Checking the finished file', description: 'We are checking duration, dimensions, audio, and playback before review.', tone: 'border-primary/25 bg-[#151b25]' },
   COMPLETED: { label: 'Finished file verified', description: 'The file passed the final checks and can now be reviewed or downloaded.', tone: 'border-[#9be3c3]/60 bg-[#10221b]' },

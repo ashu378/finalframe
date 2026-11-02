@@ -16,13 +16,35 @@ function actualFunctions(file, names) {
   return require(output);
 }
 const editor = actualFunctions('convex/timelineEditor.ts', ['record', 'stringValue', 'optionalString', 'numberValue', 'optionalNumber', 'findClip', 'applyEdit']);
-const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks', 'rendererOutputAudio']);
+const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks', 'rendererOutputAudio', 'scopeSourceItems']);
 const composer = actualFunctions('src/lib/production/workspace-controls.ts', ['validateCompositionAudioTracks']);
 const clip = (id, startSeconds, durationSeconds, extra = {}) => ({ id, trackId: 'track', kind: 'VIDEO', startSeconds, durationSeconds, assetId: 'video', metadata: {}, ...extra });
 const state = clips => ({ metadata: {}, tracks: [{ id: 'track', kind: 'VIDEO', orderIndex: 0, metadata: {}, clips }] });
 let checks = 0;
 function check(name, fn) { fn(); checks++; console.log('PASS ' + name); }
 try {
+  check('selected scenes pack picture ranges and crop shared music with correct source offsets', () => {
+    const source = (id, kind, start, duration, extra = {}) => ({ timelineClipId: id, trackKind: kind, startSeconds: start, durationSeconds: duration, orderIndex: 0, ...extra });
+    const inputs = [source('scene-one', 'VIDEO', 4, 4, { shotVersionId: 'take-one', assetId: 'project-asset' }), source('scene-three', 'VIDEO', 12, 4), source('music', 'AUDIO', 0, 20, { trimStartSeconds: 2, volume: .3 })];
+    const selected = assembly.scopeSourceItems(inputs, 'SCENES');
+    const picture = selected.filter(item => item.trackKind === 'VIDEO');
+    const audio = selected.filter(item => item.trackKind === 'AUDIO');
+    assert.deepEqual(picture.map(item => [item.startSeconds, item.durationSeconds]), [[0, 4], [4, 4]]);
+    assert.deepEqual(audio.map(item => [item.startSeconds, item.durationSeconds, item.trimStartSeconds, item.volume]), [[0, 4, 6, .3], [4, 4, 14, .3]]);
+    assert.equal(picture[0].shotVersionId, 'take-one'); assert.equal(picture[0].assetId, 'project-asset');
+    assert.equal(new Set(selected.map(item => item.timelineClipId)).size, selected.length);
+    assert.equal(inputs[0].startSeconds, 4, 'immutable approved input is not rewritten');
+    assert.equal(assembly.scopeSourceItems(inputs, 'FULL_PROJECT'), inputs);
+    assert.equal(assembly.scopeSourceItems(inputs, 'TIMELINE'), inputs);
+    assert.throws(() => assembly.scopeSourceItems([inputs[2]], 'SCENES'), /no picture/);
+  });
+  check('selected audio retains complete fades and rejects an unsupported partial envelope', () => {
+    const picture = { timelineClipId: 'picture', trackKind: 'VIDEO', startSeconds: 4, durationSeconds: 4, orderIndex: 0 };
+    const audio = { timelineClipId: 'music', trackKind: 'AUDIO', startSeconds: 0, durationSeconds: 8, orderIndex: 1, fadeInSeconds: 1, fadeOutSeconds: 1 };
+    const cropped = assembly.scopeSourceItems([picture, audio], 'SHOTS').find(item => item.trackKind === 'AUDIO');
+    assert.equal(cropped.fadeInSeconds, undefined); assert.equal(cropped.fadeOutSeconds, 1); assert.equal(cropped.trimStartSeconds, 4);
+    assert.throws(() => assembly.scopeSourceItems([{ ...picture, startSeconds: .5 }, audio], 'SCENES'), /cuts through an audio fade/);
+  });
   check('measured native video audio is required through final normalization', () => {
     assert.deepEqual(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: true, volume: 1 }]), { sampleRate: 48000, channels: 2 });
     assert.deepEqual(assembly.rendererOutputAudio([{ trackKind: 'AUDIO', volume: .3 }]), { sampleRate: 48000, channels: 2 });
