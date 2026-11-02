@@ -1,3 +1,4 @@
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 /**
  * FinalFrame — Blueprint Editor Page
  * Reference: MASTER_PRD.md § 5.II — AI Director Blueprint
@@ -30,7 +31,8 @@ interface BlueprintPageProps {
 
 export default async function BlueprintPage({ params, searchParams }: BlueprintPageProps) {
     await requireAuth();
-    const { id } = await params;
+    const { id: routeId } = await params;
+    const id = decodeProjectRouteId(routeId);
     const query = await searchParams;
     const navigation = await getEpisodeNavigation(id);
     if (!navigation) notFound();

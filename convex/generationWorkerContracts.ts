@@ -5,6 +5,13 @@ export const GENERATION_LEASE_MS = 5 * 60 * 1000;
 export const GENERATION_POLL_MS = 10_000;
 export const GENERATION_MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
+/** Catalog prices can exclude small prompt/token charges. Hold a margin before
+ * submission; settlement still records the exact provider receipt. */
+export function videoBudgetReservationUsd(estimate: number): number {
+  if (!Number.isFinite(estimate) || estimate <= 0) throw new Error('A positive provider estimate is required.');
+  return Math.ceil((estimate * 1.05 + 0.01) * 1_000_000) / 1_000_000;
+}
+
 export function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

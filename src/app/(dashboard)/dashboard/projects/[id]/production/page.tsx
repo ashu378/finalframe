@@ -1,3 +1,4 @@
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 import Link from 'next/link';
 import { ArrowLeft, Film } from 'lucide-react';
 import { notFound } from 'next/navigation';
@@ -15,7 +16,8 @@ interface ProductionPageProps { params: Promise<{ id: string }>; searchParams: P
 
 export default async function ProductionPage({ params, searchParams }: ProductionPageProps) {
     await requireAuth();
-    const { id } = await params;
+    const { id: routeId } = await params;
+    const id = decodeProjectRouteId(routeId);
     const query = await searchParams;
     const navigation = await getEpisodeNavigation(id);
     if (!navigation) notFound();

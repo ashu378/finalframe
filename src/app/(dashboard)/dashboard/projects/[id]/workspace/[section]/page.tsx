@@ -1,3 +1,4 @@
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowRight, Check, Film, Sparkles } from 'lucide-react';
@@ -27,7 +28,8 @@ const steps = [
 
 export default async function WorkspaceSectionPage({ params, searchParams }: { params: Promise<{ id: string; section: string }>; searchParams: Promise<{ production?: string }> }) {
   await requireOnboardingComplete();
-  const { id, section } = await params;
+  const { id: routeId, section } = await params;
+  const id = decodeProjectRouteId(routeId);
   if (!WORKSPACE_SECTIONS.some((item) => item.slug === section)) notFound();
   const active = section as WorkspaceSection;
   const query = await searchParams;

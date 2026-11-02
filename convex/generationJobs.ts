@@ -12,7 +12,7 @@ import { validateReviewedVideoJob } from './videoRouting';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, type PreparationKind } from '../src/lib/ai/preparation';
-import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, workerEnabled } from './generationWorkerContracts';
+import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Job = Doc<'generationJobs'>;
@@ -153,7 +153,7 @@ export const create = mutation({
     await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId });
     const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
     const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId });
-    const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: estimatedProviderCostUsd, idempotencyKey: `generation:${jobId}` });
+    const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: videoBudgetReservationUsd(estimatedProviderCostUsd), idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });
     await schedule(ctx, jobId);
     return publicJob((await load(ctx, jobId)) as unknown as Record<string, unknown>);

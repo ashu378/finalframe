@@ -1,3 +1,4 @@
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 /**
  * FinalFrame — Project Detail Page
  * Reference: MASTER_PRD.md § 5.II — Creative Studio
@@ -5,9 +6,10 @@
  */
 
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/guards';
 import { getProjectById } from '@/lib/project/actions';
+import { getProductionWorkspace } from '@/lib/production/actions';
 import { getScenesForProject } from '@/lib/scene/actions';
 import { getRenderJobs } from '@/lib/render/actions';
 import { ReviewPlayer } from '@/components/review/review-player';
@@ -32,12 +34,14 @@ interface ProjectPageProps {
 
 export default async function ProjectPage({ params }: ProjectPageProps) {
     await requireAuth();
-    const { id } = await params;
+    const { id: routeId } = await params;
+    const id = decodeProjectRouteId(routeId);
 
-    const [result, scenesResult, jobsResult] = await Promise.all([
+    const [result, scenesResult, jobsResult, workspace] = await Promise.all([
         getProjectById(id),
         getScenesForProject(id),
-        getRenderJobs(id)
+        getRenderJobs(id),
+        getProductionWorkspace(id),
     ]);
 
     if (!result.success || !result.project) {
@@ -46,6 +50,11 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
     }
 
     const project = result.project;
+    // Production approval and generated takes live in the canonical workspace.
+    // Project lifecycle state deliberately does not mirror blueprint approval.
+    if (workspace.success && workspace.production) {
+        redirect(`/dashboard/projects/${encodeURIComponent(project.id)}/workspace/overview`);
+    }
     const sceneCount = scenesResult.success ? (scenesResult.scenes?.length || 0) : 0;
     const completedJob = jobsResult.success ? jobsResult.jobs?.find(j => j.status === 'completed' && j.output_result?.video_url) : null;
     const videoUrl = completedJob?.output_result?.video_url;

@@ -13,6 +13,12 @@ const policy = require(file);
 let checked = 0;
 function check(name, fn) { fn(); checked += 1; console.log(`PASS ${name}`); }
 try {
+  check('video budget holds cover small charges above a catalog-only quote', () => {
+    // Observed live Seedance receipt: $0.3024945 on a $0.3024 video quote.
+    assert(policy.videoBudgetReservationUsd(0.3024) >= 0.3024945);
+    assert(policy.videoBudgetReservationUsd(0.12) > 0.12);
+    for (const invalid of [0, -1, NaN, Infinity]) assert.throws(() => policy.videoBudgetReservationUsd(invalid));
+  });
   check('a live worker lease cannot be claimed twice', () => {
     assert.equal(policy.canClaim({ status: 'QUEUED' }, 100), true);
     assert.equal(policy.canClaim({ status: 'PROCESSING', leaseExpiresAt: 101 }, 100), false);

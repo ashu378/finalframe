@@ -1,3 +1,4 @@
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
@@ -32,7 +33,8 @@ export default async function EditorPage({
     params: Promise<{ id: string }>;
     searchParams: Promise<{ snapshotId?: string }>;
 }) {
-    const { id } = await params;
+    const { id: routeId } = await params;
+    const id = decodeProjectRouteId(routeId);
     const { snapshotId } = await searchParams;
 
     const convex = await getAuthenticatedConvexClient();

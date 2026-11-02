@@ -3,7 +3,8 @@ import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
-const MAX_TEST_MICROS = 40_000_000;
+// Owner's current authorization: US$10 working budget, US$15 absolute ceiling.
+const MAX_TEST_MICROS = 15_000_000;
 
 export function usdToMicros(value: number) {
   if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(Math.ceil(value * 1_000_000))) {
@@ -20,7 +21,7 @@ export const configure = internalMutation({
   handler: async (ctx, args) => {
     const key = args.key.trim();
     const limitMicros = usdToMicros(args.limitUsd);
-    if (key.length < 8 || key.length > 120 || limitMicros <= 0 || limitMicros > MAX_TEST_MICROS) throw new Error("Testing budget must be positive and at most US$40.");
+    if (key.length < 8 || key.length > 120 || limitMicros <= 0 || limitMicros > MAX_TEST_MICROS) throw new Error("Testing budget must be positive and at most US$15.");
     const studios = [...new Set(args.allowedStudioExternalIds.map((id) => id.trim()).filter(Boolean))];
     if (!studios.length || studios.length > 10) throw new Error("Explicit test studios are required.");
     for (const studioId of studios) {
@@ -29,7 +30,7 @@ export const configure = internalMutation({
     const existing = await ctx.db.query("providerBudgets").withIndex("by_key", (q) => q.eq("key", key)).unique();
     // Creating a new key must not reset a previous run's approved allowance.
     const all = await ctx.db.query("providerBudgets").take(101);
-    if (all.length > 100 || all.reduce((sum, row) => sum + (row._id === existing?._id ? 0 : row.limitMicros), limitMicros) > MAX_TEST_MICROS) throw new Error("The total approved testing allowance is US$40.");
+    if (all.length > 100 || all.reduce((sum, row) => sum + (row._id === existing?._id ? 0 : row.limitMicros), limitMicros) > MAX_TEST_MICROS) throw new Error("The total approved testing allowance is US$15.");
     if (existing) {
       if (limitMicros < existing.spentMicros + existing.reservedMicros) throw new Error("Budget cannot be reduced below committed funds.");
       await ctx.db.patch(existing._id, { limitMicros, allowedStudioExternalIds: studios, status: args.active ? "ACTIVE" : "PAUSED", updatedAt: Date.now() });

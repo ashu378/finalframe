@@ -1,6 +1,6 @@
 # FinalFrame creator workflow implementation
 
-Approved scope: all eight video types, appearance/hairstyle edits, object/car transformations, performance-driven video, recorded audio, consented reference voice synthesis, lip sync, and episodic stories. OpenRouter first. Total paid verification allowance: **US$40 across every paid capability and retry**. Launch is acceptance-gated; it is not promised for a calendar date.
+Approved scope: all eight video types, appearance/hairstyle edits, object/car transformations, performance-driven video, recorded audio, consented reference voice synthesis, lip sync, and episodic stories. OpenRouter first. Current authorization (2 November 2026): **US$10 working budget, US$15 absolute ceiling across every paid capability and retry**. The owner’s newer instruction replaces the earlier US$40 allowance. Launch is acceptance-gated; it is not promised for a calendar date.
 
 ## Non-negotiable ownership
 
@@ -20,7 +20,7 @@ Approved scope: all eight video types, appearance/hairstyle edits, object/car tr
 - Internal generation worker authority, persisted leases and a pre-submit fence.
 - Scheduler-driven submission/poll/ingest recovery; accepted provider IDs are resumed, never blindly resubmitted.
 - Atomic generation job, product-credit reservation, and provider-dollar reservation.
-- Distinct provider-budget ledger with a total US$40 test ceiling; unknown accepted costs keep funds reserved.
+- Distinct provider-budget ledger with a total US$15 absolute test ceiling; unknown accepted costs keep funds reserved.
 - Authenticated bounded provider downloads into Convex Storage.
 - Renderer media probe with an exact Convex Storage host allowlist and bounded file size/time.
 - Technical checks separated from human visual approval; no automatic visual QC pass from a nonempty file.
@@ -64,18 +64,9 @@ Coordinator owns shared schema, generated files, financial authority, migrations
 
 No-cost: isolation, explicit global imports, immutable approved snapshots, lock enforcement, regeneration versions, project restore, episode selection, stale continuity, consent/revocation, concurrent claims, ambiguous submissions, download recovery, callback security and asynchronous exports. Database-backed checks must use online Convex. Pure transport/policy tests use mocks and create no database.
 
-Paid allowance:
+Paid allowance: keep the active backend budget at **US$10**, with the provider key capped at **US$15**. The deployment rejects aggregate configured test allowances above US$15. Start with one four-second clip and check the provider receipt before buying another capability. All failed requests, uncertain submissions and retests count toward the same run; retain uncertain-cost holds. Never reset the budget by creating a new run key.
 
-| Group | USD maximum |
-| --- | ---: |
-| Planning, QC, transcription, reference images | 4 |
-| Speech, reference cloning, lip sync | 6 |
-| Eight video-type samples | 10 |
-| Hair, object, performance transformations | 8 |
-| Fix-and-retest allowance | 8 |
-| Reserve | 4 |
-| Total | 40 |
-
+The reduced budget does not promise one paid sample for every advertised capability. Reuse real generated clips for no-cost relationship/preview checks and report any capability whose paid estimate does not fit.
 Use short 4–8 second clips, one paid job at a time initially, live prices and conservative bounds. A capped provider key is the external backstop. No automatic top-up, provider purchase, live billing, full AI movie test, or unrelated service cleanup. If estimates exceed remaining funds, report the unverified acceptance requirement.
 
 Owner test media: authorized performance recording, portrait/reference, clear voice sample with consent, desired product/car reference, logo/screenshot, and licensed music. Enter keys through secure provider/deployment settings, never chat or repository files.
