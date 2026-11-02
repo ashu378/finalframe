@@ -69,7 +69,10 @@ export function buildNormalizeArgs(inputPath: string, outputPath: string, option
     // declare a separate soundtrack. The optional map still permits silence.
     '-map', '0:v:0', '-map', '0:a:0?',
     ...codecArgs(options.output.codec), '-pix_fmt', options.output.codec === 'prores' ? 'yuv422p10le' : 'yuv420p',
-    '-r', String(options.output.fps), '-frames:v', String(options.output.durationInFrames),
+    // A video frame limit can stop the whole mux before AAC drains on FFmpeg
+    // 5.1 (the production image). The frame-derived -t below bounds every
+    // stream; ffprobe still requires the exact canonical video frame count.
+    '-r', String(options.output.fps),
     // Remotion/AAC packet padding can outlive the final picture. Normalize the
     // decoded audio to the canonical sample count and bound the mux duration,
     // so independent chunks do not accumulate encoder padding when joined.

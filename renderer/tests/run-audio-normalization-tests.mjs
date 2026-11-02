@@ -54,6 +54,11 @@ await check('long audio is trimmed to the exact picture duration despite AAC pac
   const before = await ffprobe.probe(input); assert.ok(Number(before.streams.find(stream => stream.codec_type === 'audio').duration) > 3.2);
   const { output } = await normalize('long', input); assert.ok(amplitude(decode(output), 440, 1) > .1);
 });
+await check('105-frame picture drains the final AAC samples on FFmpeg 5.1 and later', async () => {
+  const input = join(directory, '105-frames-input.mp4');
+  command(['-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=30:d=3.5', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3.6', '-c:v', 'libx264', '-threads', '1', '-c:a', 'aac', input]);
+  await normalize('105-frames', input, { ...base, durationInFrames: 105 });
+});
 await check('short audio is padded with silence without shortening or looping picture/audio', async () => {
   const input = await mux('short', .35, time => .14 * Math.sin(2 * Math.PI * 440 * time)); const { output } = await normalize('short', input); const samples = decode(output);
   assert.ok(amplitude(samples, 440, .15) > .1); const tail = samples.subarray(48000, 90000); const rms = Math.sqrt(tail.reduce((sum, sample) => sum + sample * sample, 0) / tail.length); assert.ok(rms < 1e-5, 'tail must be silent, not repeated sound: ' + rms);

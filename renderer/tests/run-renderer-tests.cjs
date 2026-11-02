@@ -71,7 +71,8 @@ async function main() {
   const optionalAudio = ffmpeg.buildNormalizeArgs('/tmp/input.mp4', '/tmp/output.mp4', { output: { ...imageManifest.output, audio: undefined }, requireAudio: false });
   assert.ok(optionalAudio.includes('0:a:0?'), 'native audio remains mapped without a separate soundtrack declaration');
   assert.ok(!optionalAudio.includes('-an'), 'normalization cannot silently strip a source video voice');
-  assert.ok(args.includes('-frames:v') && args.includes('48'));
+  assert.equal(args.includes('-frames:v'), false, 'frame-stop can truncate AAC on production FFmpeg 5.1');
+  assert.equal(args[args.indexOf('-t') + 1], String(imageManifest.output.durationInFrames / imageManifest.output.fps));
   assert.throws(() => ffmpeg.buildNormalizeArgs('https://example.test/input.mp4', '/tmp/output.mp4', { output: imageManifest.output }), /local worker path/);
 
   const validProbe = { streams: [{ codec_type: 'video', width: 640, height: 360, avg_frame_rate: '24/1', codec_name: 'h264' }, { codec_type: 'audio', codec_name: 'aac' }], format: { duration: '2' } };
