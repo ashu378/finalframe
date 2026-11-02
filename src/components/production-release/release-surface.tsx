@@ -31,7 +31,10 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   const exportDetails = useQuery(api.reviewExport.getExport, latestExport ? { exportId: latestExport._id } : 'skip');
   const latestJob = jobs?.find((item: any) => item.manifestId === manifest?._id);
   const canEdit = ['OWNER', 'EDITOR'].includes(state?.projectRole ?? ''); const canDecide = ['OWNER', 'EDITOR', 'REVIEWER'].includes(state?.projectRole ?? '');
-  const rendererState = latestJob ? rendererStateFor(latestJob.status) : 'UNAVAILABLE';
+  // An unexported assembly is not evidence of an unavailable renderer. Other
+  // immutable assembly versions can already have a verified downloadable file.
+  const rendererState = latestJob ? rendererStateFor(latestJob.status) : 'NOT_STARTED';
+  const completedManifests = state?.manifests?.filter((item: any) => state.exports?.some((output: any) => output.manifestId === item._id && output.status === 'COMPLETED' && output.storageId)) ?? [];
   const decision = review?.status === 'APPROVED' ? 'APPROVED' : review?.status === 'CHANGES_REQUESTED' ? 'CHANGES_REQUESTED' : 'PENDING';
   const availability = state === undefined ? 'WAITING' : review ? 'READY' : 'WAITING';
   const downloadStatus = latestExport?.status === 'COMPLETED' && exportDetails?.downloadUrl ? 'READY' : latestExport && !['FAILED', 'CANCELED'].includes(latestExport.status) ? 'VERIFYING' : 'NOT_READY';
@@ -53,6 +56,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
     <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
       <h2 className="text-lg font-semibold">Review and export an approved timeline</h2>
       {manifest ? <label className="block space-y-2 text-sm">Assembly version<select className="w-full rounded-lg border border-border bg-background p-3" value={manifest._id} onChange={event => setManifestChoice(event.target.value)}>{state?.manifests?.map((item: any) => <option key={item._id} value={item._id}>Assembly v{item.versionNumber} · {new Date(item.createdAt).toLocaleString()}</option>)}</select></label> : <p className="text-sm text-muted-foreground">Create and approve a timeline, then build its manifest in the edit workspace.</p>}
+      {completedManifests.some((item: any) => item._id !== manifest?._id) && <div className="space-y-2 text-sm"><p className="text-muted-foreground">Completed exports are retained on their exact assembly versions.</p><div className="flex flex-wrap gap-2">{completedManifests.filter((item: any) => item._id !== manifest?._id).map((item: any) => <Button key={item._id} variant="secondary" onClick={() => setManifestChoice(item._id)}>View completed Assembly v{item.versionNumber}</Button>)}</div></div>}
       <div className="flex flex-wrap gap-3"><Button disabled={!canEdit || saving || !manifest || Boolean(review)} onClick={createReview}>Request version review</Button><Button variant="secondary" disabled={!canEdit || saving || !manifest || review?.status !== 'APPROVED' || Boolean(latestJob && !['FAILED', 'CANCELED'].includes(latestJob.status))} onClick={queueExport}>Queue asynchronous export</Button></div>
       {latestJob?.status === 'QUEUED' && <p className="text-sm text-muted-foreground">Export queued. Your approved timeline is saved; processing has not started.</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

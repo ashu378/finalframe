@@ -228,6 +228,7 @@ export const createPlan = mutation({
     durationSeconds: v.number(), language: v.string(), outputPreset: v.string(), input: v.any(), plan: v.any(),
     estimate: v.any(), idempotencyKey: v.optional(v.string()), productionId: v.optional(v.id("productions")),
   },
+  returns: v.any(),
   handler: async (ctx, args) => {
     const member = await requireMember(ctx, args.studioExternalId);
     const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
@@ -275,7 +276,15 @@ export const createPlan = mutation({
     const bibleId = requestedBible ? ctx.db.normalizeId("continuityBibles", requestedBible) : undefined;
     if (requestedBible && !bibleId) throw new Error("Choose a valid approved project continuity bible.");
     const continuityContext = await resolvePlanningContinuity(ctx, project._id, production._id, bibleId ?? undefined);
-    if (sourceInput.continuityContext && fingerprint(sourceInput.continuityContext) !== fingerprint(continuityContext)) throw new Error("Continuity changed while the plan was being prepared. Refresh its references and create a revised plan.");
+    // Initial planning reads the bible before a production exists. Binding that
+    // otherwise identical snapshot to its newly created production is expected,
+    // not a continuity revision. Also accept an idempotent first-plan replay.
+    // Explicit production/episode selections must still match their exact IDs.
+    const sourceContext = record(sourceInput.continuityContext);
+    const comparisonContext = !args.productionId && sourceContext.productionId === null && sourceContext.episodeId === null && continuityContext?.episodeId === null
+      ? { ...continuityContext, productionId: null }
+      : continuityContext;
+    if (sourceInput.continuityContext && stableSerialize(sourceInput.continuityContext) !== stableSerialize(comparisonContext)) throw new Error("Continuity changed while the plan was being prepared. Refresh its references and create a revised plan.");
     const canonicalInput = continuityContext ? { ...sourceInput, continuityContext } : sourceInput;
 
     const idempotencyKey = requireIdempotencyKey(args.idempotencyKey?.trim() || `canonical-plan:${args.projectExternalId}:${fingerprint({ input: canonicalInput, plan: args.plan, estimate: args.estimate })}`);

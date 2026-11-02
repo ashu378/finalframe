@@ -29,7 +29,7 @@ assert.match(source, /requireEditable\(ctx, projectId, resourceType, resourceId\
 assert.match(source, /ensureResourceState\(ctx, \{ projectId, productionId, resourceType, resourceId \}\)/);
 assert.match(source, /asset\.projectId !== production\.projectId/);
 assert.match(source, /versionNumber: Math\.max\(0, \.\.\.takes\.map\(\(take\) => take\.versionNumber\)\) \+ 1/);
-assert.match(productions, /const workspaceVersionId = production\.currentVersionId \?\? draftVersion\?\._id/);
+assert.match(productions, /const workspaceVersionId = draftVersion\?\.status === "DRAFT" \? draftVersion\._id : production\.currentVersionId \?\? draftVersion\?\._id/);
 assert.match(actions, /api\.scenes\.createScene/);
 assert.match(actions, /api\.scenes\.updateScene/);
 assert.match(actions, /api\.scenes\.reorderScenes/);
@@ -41,6 +41,14 @@ const transpiled = ts.transpileModule(source, {
   fileName: path.join(root, 'convex/scenes.ts'),
 }).outputText;
 fs.writeFileSync(outputPath, transpiled, 'utf8');
+// Load the actual continuity helper and its pure policy dependency. Keeping
+// these production modules in the harness avoids bypassing new guards.
+for (const name of ['generationContinuity', 'generationWorkerContracts']) {
+  const file = path.join(root, 'convex', name + '.ts');
+  fs.writeFileSync(path.join(path.dirname(outputPath), name + '.js'), ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: file,
+  }).outputText);
+}
 
 const rows = new Map();
 let nextId = 1;

@@ -20,6 +20,7 @@ function compileModule(relativePath, outputRelativePath) {
 }
 
 compileModule('src/lib/ai/types.ts', 'types.js');
+compileModule('src/lib/ai/video-routing.ts', 'video-routing.js');
 compileModule('src/lib/ai/planning/quality.ts', 'planning/quality.js');
 compileModule('src/lib/ai/planning/generation.ts', 'planning/generation.js');
 compileModule('src/lib/ai/schemas.ts', 'schemas.js');
