@@ -1,21 +1,30 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { BoundedDeterministicRenderer, type RenderRequest } from './renderer.js';
 import { RemotionRenderRuntime } from './remotion/runtime.js';
 import { InjectableFFmpegAdapter, InjectableFFprobeAdapter } from './media/ffmpeg.js';
-import { createCallbackBody, sendRendererCallback } from './contracts/callback.js';
+import { sendRendererCallback } from './contracts/callback.js';
 import type { RenderManifest, RenderMode } from './types.js';
 import { probeRemoteMedia } from './media/remote-probe.js';
 import { validateManifest } from './manifest.js';
 import { RenderRequestQueue } from './request-queue.js';
+import { assertTransferUrl, transferOrigins, uploadRenderFile } from './worker-transfer.js';
+import { CompletionOutbox, FileRenderReceiptStore, type CompletionRequest } from './completion-outbox.js';
+import { LeaseHeartbeatMonitor } from './lease-heartbeat.js';
 
 const port = Number(process.env.PORT ?? 8080);
 const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim() ?? '';
 const outputRoot = process.env.RENDER_OUTPUT_ROOT ?? '/tmp/finalframe-renders';
 const rendererVersion = process.env.RENDERER_VERSION ?? 'finalframe-renderer-v1';
 const renderQueue = new RenderRequestQueue(4);
+const mediaHosts = (process.env.RENDER_MEDIA_ALLOWED_HOSTS ?? '').split(',').map(host => host.trim()).filter(Boolean);
+const callbackOrigins = transferOrigins(process.env.RENDER_CALLBACK_ORIGINS, mediaHosts, 'callback');
+const storageOrigins = transferOrigins(process.env.RENDER_STORAGE_ORIGINS, mediaHosts, 'storage');
+const stateRoot = process.env.RENDER_STATE_ROOT ?? join(outputRoot, '.worker-state');
+const receipts = new FileRenderReceiptStore(join(stateRoot, 'receipts'));
+const maxOutputBytes = Number(process.env.RENDER_MAX_OUTPUT_BYTES ?? 2_000_000_000);
+const heartbeatMonitor = new LeaseHeartbeatMonitor({ secret, allowedOrigins: callbackOrigins });
 let probing = false;
 
 function json(response: ServerResponse, status: number, body: unknown) {
@@ -39,12 +48,25 @@ const runtime = new RemotionRenderRuntime({
   maxConcurrency: Number(process.env.RENDER_MAX_CONCURRENCY ?? 1),
   commandTimeoutMs: Number(process.env.RENDER_COMMAND_TIMEOUT_MS ?? 900_000),
   maxOutputBytes: Number(process.env.RENDER_MAX_OUTPUT_BYTES ?? 2_000_000_000),
+  bundleCache: new Map(),
+  mediaPolicy: { allowedRemoteHosts: mediaHosts },
   requireMediaTools: true,
 });
 const renderer = new BoundedDeterministicRenderer(runtime, {
   maxDurationInFrames: Number(process.env.RENDER_MAX_FRAMES ?? 18_000),
   maxItems: Number(process.env.RENDER_MAX_ITEMS ?? 200),
   maxOutputBytes: Number(process.env.RENDER_MAX_OUTPUT_BYTES ?? 2_000_000_000),
+  allowedRemoteHosts: mediaHosts,
+}, receipts);
+
+const outbox = new CompletionOutbox({
+  root: join(stateRoot, 'outbox'), outputRoot, receipts,
+  keepOutput: process.env.RENDER_KEEP_OUTPUT === 'true',
+  onPending: record => heartbeatMonitor.track(record),
+  onDelivered: record => heartbeatMonitor.stop(record.key),
+  onAttention: record => { heartbeatMonitor.stop(record.key); console.error('FinalFrame worker finishing exceeded its recovery window; retained artifact requires administrator attention.'); },
+  upload: (request, result) => uploadRenderFile(request.storageUploadUrl, result.outputPath, { allowedOrigins: storageOrigins, maxBytes: maxOutputBytes, timeoutMs: Number(process.env.RENDER_UPLOAD_TIMEOUT_MS ?? 120_000) }),
+  callback: (request, exactBody) => sendRendererCallback(request.callbackUrl, exactBody, secret, { allowedOrigins: callbackOrigins, timeoutMs: Number(process.env.RENDER_CALLBACK_TIMEOUT_MS ?? 15_000) }),
 });
 
 async function render(payload: any) {
@@ -52,35 +74,31 @@ async function render(payload: any) {
   if (payload.secret !== secret) throw new Error('Invalid worker secret.');
   if (!payload.jobId || !payload.manifest) throw new Error('jobId and manifest are required.');
   const jobId = String(payload.jobId);
-  const outputPath = join(outputRoot, `${jobId.replace(/[^a-zA-Z0-9._-]/g, '_')}.mp4`);
+  const completionRequest: CompletionRequest = { jobId, leaseId: payload.leaseId, attempt: payload.attempt ?? 1, projectId: String(payload.manifest.projectId), manifestId: payload.manifest.manifestId, durationInFrames: payload.manifest.output.durationInFrames, idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${payload.manifest.manifestId}`, callbackUrl: payload.callbackUrl, storageUploadUrl: payload.storageUploadUrl, heartbeatUrl: payload.heartbeatUrl, rendererVersion };
+  // Never persist the shared secret. The request fingerprint binds the exact
+  // original payload and prevents a restarted worker reusing another request.
+  const { secret: _secret, ...originalPayload } = payload;
+  void _secret;
+  let completion = await outbox.begin(completionRequest, originalPayload);
+  if (completion.stage !== 'RENDERING') { await outbox.deliver(completion); return; }
+  const outputPath = join(outputRoot, `${completion.key}.mp4`);
   await mkdir(outputRoot, { recursive: true });
   const request: RenderRequest = { jobId, manifest: payload.manifest as RenderManifest, outputPath, idempotencyKey: payload.idempotencyKey, correlationId: payload.correlationId, attempt: payload.attempt, mode: (payload.mode ?? 'production') as RenderMode };
-  try {
-    const result = await renderer.render(request);
-    if (payload.storageUploadUrl) {
-      const file = await (await import('node:fs/promises')).readFile(result.outputPath);
-      const upload = await fetch(payload.storageUploadUrl, { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: file });
-      if (!upload.ok) throw new Error(`Storage upload failed with HTTP ${upload.status}.`);
-      const uploaded = await upload.json() as { storageId?: string };
-      if (!uploaded.storageId) throw new Error('Storage upload did not return a storageId.');
-      payload.storageId = uploaded.storageId;
-    }
-    if (payload.callbackUrl) {
-      if (!payload.storageId) throw new Error('storageId is required when callbackUrl is supplied.');
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}:${result.manifestId}`, jobId, projectId: String((payload.manifest as RenderManifest).projectId), rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.completed', payload: { storageId: payload.storageId, leaseId: payload.leaseId, mimeType: 'video/mp4', outputPath: result.outputPath, durationInFrames: result.durationInFrames } });
-      await sendRendererCallback(payload.callbackUrl, callbackBody, secret);
-    }
-    return result;
-  } catch (error) {
-    if (payload.callbackUrl) {
-      const callbackBody = createCallbackBody({ eventId: randomUUID(), idempotencyKey: payload.idempotencyKey ?? `render:${jobId}`, jobId, projectId: String((payload.manifest as RenderManifest).projectId), rendererVersion, attempt: payload.attempt ?? 1, eventType: 'render.failed', payload: { leaseId: payload.leaseId, errorCode: 'RENDER_FAILED', errorMessage: 'The renderer could not complete this export.', retryable: true } });
-      await sendRendererCallback(payload.callbackUrl, callbackBody, secret).catch(() => undefined);
-    }
-    throw error;
-  } finally {
-    if (process.env.RENDER_KEEP_OUTPUT !== 'true') await rm(outputPath, { force: true });
-  }
+  let result;
+  try { result = await renderer.render(request); }
+  catch (error) { completion = await outbox.failed(completion); await outbox.deliver(completion); throw error; }
+  completion = await outbox.rendered(completion, result);
+  await outbox.deliver(completion);
 }
+
+// Recover local verified receipts before accepting work. Transfer retries run
+// independently of HTTP acknowledgement and never purchase/re-render media.
+await outbox.recover();
+void outbox.drain().catch(() => console.error('FinalFrame worker finishing state requires administrator attention.'));
+const retryTimer = setInterval(() => { void outbox.drain().catch(() => console.error('FinalFrame worker finishing state requires administrator attention.')); }, 15_000);
+retryTimer.unref();
+const heartbeatTimer = setInterval(() => { void heartbeatMonitor.tick(); }, 30_000);
+heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
@@ -96,13 +114,25 @@ createServer(async (request, response) => {
       try {
         const result = await probeRemoteMedia(payload.url, {
           kind: payload.kind === 'audio' ? 'audio' : 'video',
-          allowedHosts: (process.env.RENDER_MEDIA_ALLOWED_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean),
+          allowedHosts: mediaHosts,
           ffprobe: new InjectableFFprobeAdapter(),
         });
         return json(response, 200, result);
       } finally { probing = false; }
     }
-    if (typeof payload.jobId !== 'string' || !/^[a-zA-Z0-9._-]{1,180}$/.test(payload.jobId) || !payload.callbackUrl || !payload.storageUploadUrl || !payload.leaseId) return json(response, 400, { error: 'A leased render job, storage upload, and callback are required.' });
+    if (
+      typeof payload.jobId !== 'string' || !/^[a-zA-Z0-9._-]{1,180}$/.test(payload.jobId)
+      || typeof payload.callbackUrl !== 'string' || typeof payload.storageUploadUrl !== 'string'
+      || typeof payload.leaseId !== 'string' || !payload.leaseId || payload.leaseId.length > 512 || /[\u0000\r\n]/.test(payload.leaseId)
+      || payload.attempt !== undefined && (!Number.isInteger(payload.attempt) || payload.attempt < 1)
+      || payload.idempotencyKey !== undefined && (typeof payload.idempotencyKey !== 'string' || !payload.idempotencyKey.trim() || payload.idempotencyKey.length > 1_024)
+    ) return json(response, 400, { error: 'A leased render job, storage upload, and callback are required.' });
+    assertTransferUrl(payload.callbackUrl, callbackOrigins);
+    assertTransferUrl(payload.storageUploadUrl, storageOrigins);
+    if (payload.heartbeatUrl !== undefined) {
+      const heartbeat = assertTransferUrl(payload.heartbeatUrl, callbackOrigins);
+      if (heartbeat.pathname !== '/renderer/heartbeat' || heartbeat.search) throw new Error('Invalid worker heartbeat endpoint.');
+    }
     if (!validateManifest(payload.manifest).ok) return json(response, 400, { error: 'Invalid render manifest.' });
     return json(response, 202, renderQueue.accept(payload.jobId, payload, () => render({ ...payload, secret: headerSecret })));
   } catch (error) {

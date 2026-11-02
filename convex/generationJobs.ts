@@ -8,10 +8,11 @@ import { requireProjectAccess, requireProjectRole } from './authorization';
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
-import { validateReviewedVideoJob } from './videoRouting';
+import { resolveUpscaleSourceCertificate, validateReviewedVideoJob } from './videoRouting';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, type PreparationKind } from '../src/lib/ai/preparation';
+import { validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '../src/lib/production/workspace-controls';
 import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
 
 type ReadCtx = QueryCtx | MutationCtx;
@@ -59,6 +60,23 @@ async function requireUnlockedGraph(ctx: ReadCtx, projectId: Id<'projects'>, sho
     if (state?.state === 'LOCKED') throw new Error(`Unlock the ${resourceType} before making a new take.`);
   }
 }
+/** Read by provider identity, then verify every canonical relationship. Reused
+ * at creation and the submission fence so withdrawn approval cannot purchase
+ * a continuation after it was queued. */
+async function requireContinuationSource(ctx: ReadCtx, args: { projectId: Id<'projects'>; productionId: Id<'productions'>; model: string; previousJobId: string }) {
+  if (!/^gen-vid-\d+-[0-9A-Za-z]{20}$/.test(args.previousJobId)) throw new Error('Choose an approved completed clip from this production to extend.');
+  const previous = await ctx.db.query('generationJobs').withIndex('by_provider_job', q => q.eq('provider', 'openrouter').eq('providerJobId', args.previousJobId)).unique();
+  if (!previous || previous.projectId !== args.projectId || previous.productionId !== args.productionId || previous.provider !== 'openrouter' || previous.model !== args.model || previous.status !== 'COMPLETED' || previous.operation !== 'SHOT_GENERATION' || previous.modality !== 'VIDEO' || !previous.shotVersionId) throw new Error('Continuation must use an approved compatible source job in this production.');
+  const take = await ctx.db.get(previous.shotVersionId);
+  const assetId = object(previous.response).assetId;
+  if (!take || take.projectId !== args.projectId || take.productionId !== args.productionId || take.shotId !== previous.shotId || take.status !== 'COMPLETED' || take.model !== previous.model || take.provider !== previous.provider || !take.assetId || take.assetId !== assetId) throw new Error('The completed continuation take is unavailable.');
+  const asset = await ctx.db.get(take.assetId);
+  if (!asset || asset.projectId !== args.projectId || asset.productionId !== args.productionId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('video/')) throw new Error('The continuation source media is unavailable.');
+  const approval = await getEffectiveResourceState(ctx, args.projectId, 'shotVersion', take._id, args.productionId);
+  if (!['APPROVED', 'LOCKED'].includes(approval.currentState)) throw new Error('Approve the completed source take before extending it.');
+  return previous;
+}
+
 function key(value: string) {
   const result = value.trim();
   if (result.length < 8 || result.length > 200) throw new Error('Idempotency key must be between 8 and 200 characters.');
@@ -77,6 +95,7 @@ export const create = mutation({
   returns: v.any(),
   handler: async (ctx, args) => {
     const { production, access } = await productionAccess(ctx, args.productionId, true);
+    if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new generation.');
     const shot = await ctx.db.get(args.shotId);
     const scene = shot ? await ctx.db.get(shot.sceneId) : null;
     if (!shot || !scene || shot.productionId !== production._id || scene.productionId !== production._id) throw new Error('Shot does not belong to this production.');
@@ -112,18 +131,21 @@ export const create = mutation({
     const lastFrame = typeof metadata.lastFrameAssetId === 'string' ? metadata.lastFrameAssetId : undefined;
     const inputFrameIds = new Set([firstFrame, lastFrame].filter(Boolean));
     for (const frameId of inputFrameIds) if (!sourceAssets.some((asset) => asset._id === frameId && asset.mimeType?.startsWith('image/'))) throw new Error('Required frames must be stored images in this project.');
+    const operation = (typeof metadata.operation === 'string' ? metadata.operation : typeof metadata.videoTask === 'string' ? metadata.videoTask : 'GENERATE') as ShotOperationControls['operation'];
     const normalizedRequest: Record<string, unknown> = {
       ...requested, ...object(requested.constraints), prompt: continuity.promptContext ? `${shot.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : shot.prompt, duration: shot.durationSeconds,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,
       durationSeconds: shot.durationSeconds, qualityTier,
       ratio: String(requested.ratio || '16:9'), aspectRatio: String(requested.ratio || '16:9'),
-      operation: typeof metadata.operation === 'string' ? metadata.operation : undefined,
-      previousJobId: typeof metadata.previousJobId === 'string' ? metadata.previousJobId : undefined,
+      operation, task: videoTaskForOperation(operation),
+      previousJobId: operation === 'EXTEND' && typeof metadata.previousJobId === 'string' ? metadata.previousJobId : undefined,
+      previousModelId: undefined,
       audioPolicy: typeof metadata.audioPolicy === 'string' ? metadata.audioPolicy : 'SILENT',
       requiresSourceAudioPreservation: metadata.audioPolicy === 'KEEP_SOURCE' || metadata.requiresSourceAudioPreservation === true,
+      requiresAudio: metadata.audioPolicy === 'GENERATE' || metadata.generateAudio === true,
       requiresMask: metadata.requiresMask === true,
-      upscaleFactor: typeof metadata.upscaleFactor === 'number' ? metadata.upscaleFactor : undefined,
-      creativity: typeof metadata.creativity === 'number' ? metadata.creativity : undefined,
+      upscaleFactor: operation === 'UPSCALE' && typeof metadata.upscaleFactor === 'number' ? metadata.upscaleFactor : undefined,
+      creativity: operation === 'UPSCALE' && typeof metadata.creativity === 'number' ? metadata.creativity : undefined,
       firstFrameAssetId: firstFrame, lastFrameAssetId: lastFrame,
       referenceAssetIds: continuity.referenceAssetIds,
       hasImageReferences: sourceAssets.some((asset) => asset.mimeType?.startsWith('image/') && !inputFrameIds.has(asset._id)),
@@ -132,21 +154,35 @@ export const create = mutation({
       hasAudioReference: sourceAssets.some((asset) => asset.mimeType?.startsWith('audio/')),
       requiresFirstFrame: Boolean(firstFrame) || metadata.requiresFirstFrame === true,
       requiresLastFrame: Boolean(lastFrame) || metadata.requiresLastFrame === true,
-      constraints: undefined,
+      upscaleSource: undefined, upscaleQuote: undefined, constraints: undefined,
     };
-    if (typeof normalizedRequest.previousJobId === 'string') {
-      const previous = await ctx.db.query('generationJobs').withIndex('by_provider_job', (q) => q.eq('provider', 'openrouter').eq('providerJobId', normalizedRequest.previousJobId as string)).unique();
-      if (!previous || previous.projectId !== access.project._id || previous.model !== args.model || previous.status !== 'COMPLETED') throw new Error('Continuation must use an approved compatible source job in this project.');
+    if (operation === 'EXTEND') {
+      const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') });
       normalizedRequest.previousModelId = previous.model;
     }
+    if (operation === 'UPSCALE') {
+      if (typeof metadata.resolution === 'string' && metadata.resolution || typeof normalizedRequest.resolution === 'string' && normalizedRequest.resolution) throw new Error('Upscale output dimensions come from the source and factor; remove the resolution constraint.');
+      const source = await resolveUpscaleSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds });
+      normalizedRequest.upscaleSource = source;
+      normalizedRequest.duration = source.durationSeconds;
+      normalizedRequest.durationSeconds = source.durationSeconds;
+      normalizedRequest.ratio = `${source.width}:${source.height}`;
+      normalizedRequest.aspectRatio = normalizedRequest.ratio;
+      normalizedRequest.resolution = undefined;
+    }
+    validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
     const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
+    if (operation === 'UPSCALE') {
+      if (!validated.selection.upscaleQuote) throw new Error('Upscale pricing certification is unavailable.');
+      normalizedRequest.upscaleQuote = validated.selection.upscaleQuote;
+    }
     normalizedRequest.routeReason = validated.selection.routeReason;
     normalizedRequest.path = validated.selection.path;
     normalizedRequest.policyVersion = validated.selection.policyVersion;
     normalizedRequest.resolution = validated.selection.resolution ?? normalizedRequest.resolution;
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
-    const estimatedCost = estimateGenerationCredits({ durationSeconds: shot.durationSeconds, qualityTier });
+    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'UPSCALE' ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
@@ -224,7 +260,7 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   const project = job.projectId ? await ctx.db.get(job.projectId) : null;
   if (!production || !project || production.projectId !== project._id) throw new Error('Generation ownership is invalid.');
   // Once accepted, retain and ingest the paid result even if a later draft becomes current.
-  if (!job.providerJobId && (project.deletedAt || project.archivedAt || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId))) throw new Error('This project or production version is no longer available for generation.');
+  if (!job.providerJobId && (project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId))) throw new Error('This project or production version is no longer available for generation.');
   const request = object(job.request);
   const references: Array<{ assetId: string; url: string; kind: 'image' | 'video' | 'audio'; mimeType?: string }> = [];
   for (const rawId of Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds : []) {
@@ -241,11 +277,11 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   const outputUrl = output?.projectId === project._id && output.storageId ? await ctx.storage.getUrl(output.storageId) : null;
   return { job, request, references, outputAssetId: output?._id, outputUrl };
 } });
-export const fenceSubmission = internalMutation({ args: leaseArgs, returns: v.any(), handler: async (ctx, args) => {
+export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCatalogFingerprint: v.optional(v.string()), liveCatalogCheckedAt: v.optional(v.number()) }, returns: v.any(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId); assertLease(job, args.leaseId);
   if (job.providerJobId || job.submissionStartedAt) return { allowed: false };
   const project = job.projectId ? await ctx.db.get(job.projectId) : null;
-  if (!project || project.deletedAt || project.archivedAt) throw new Error('Project is unavailable for generation.');
+  if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED') throw new Error('Project is unavailable or restricted for generation.');
   const production = await ctx.db.get(job.productionId);
   if (!production || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId)) throw new Error('Production version has changed.');
   const actor = job.createdByUserId ? await ctx.db.get(job.createdByUserId) : null;
@@ -276,7 +312,14 @@ export const fenceSubmission = internalMutation({ args: leaseArgs, returns: v.an
     dispatchValidation = { model: job.model, estimatedCostUsd: job.estimatedProviderCostUsd };
   } else {
     try {
+      if (request.operation === 'EXTEND') await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') });
+      if (request.operation === 'UPSCALE') {
+        const source = await resolveUpscaleSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
+        const frozen = object(request.upscaleQuote);
+        if (stable(source) !== stable(request.upscaleSource) || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Upscale input or current catalog certification changed.');
+      }
       const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
+      if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
       const estimatedMicros = Math.ceil(current.estimatedCostUsd * 1_000_000);
       if (!Number.isFinite(estimatedMicros) || estimatedMicros <= 0 || estimatedMicros > reserved.estimatedMicros || (typeof request.path === 'string' && current.selection.path !== request.path) || (typeof request.resolution === 'string' && current.selection.resolution !== request.resolution)) throw new Error('The frozen route or provider quote has changed.');
       dispatchValidation = { estimatedCostUsd: current.estimatedCostUsd, policyVersion: current.selection.policyVersion ?? null, resolution: current.selection.resolution ?? null, model: current.selection.modelId };
@@ -417,6 +460,7 @@ export const createPreparation = internalMutation({
   args: { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() }, returns: v.any(),
   handler: async (ctx, args) => {
     const { production, access } = await productionAccess(ctx, args.productionId, true);
+    if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new preparation.');
     if (!workerEnabled() || process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not enabled.');
     if (args.text.length > 4000 || (args.kind !== 'TRANSCRIPT' && !args.text.trim())) throw new Error('Use between one and 4000 characters.');
     if ((args.kind === 'NARRATION' || args.kind === 'VOICE_PREVIEW') && !args.targetVoiceId) throw new Error('Select an approved project voice.');

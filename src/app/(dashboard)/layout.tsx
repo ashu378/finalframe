@@ -2,7 +2,7 @@
  * FinalFrame — Dashboard Layout
  * Reference: MASTER_PRD.md § 5.II — User Dashboard
  * Reference: BUILD_PHASES.md — Phase 0 requires protected dashboard layout
- * 
+ *
  * Protected layout with sidebar. Auth guard enforced in the Next.js proxy.
  */
 
@@ -10,7 +10,7 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { requireOnboardingComplete } from '@/lib/guards';
 import Link from 'next/link';
 import Image from 'next/image';
-import { FolderOpen, Plus, Settings } from 'lucide-react';
+import { FolderOpen, Library, Plus, Settings } from 'lucide-react';
 import { SignOutButton } from '@/components/auth/sign-out-button';
 import { ScrollRevealRoot } from '@/components/threeui/scroll-reveal-root';
 import { api } from '@/../convex/_generated/api';
@@ -28,11 +28,11 @@ export default async function DashboardLayout({
 
     // Admin Access Control
     // If we're on a route starting with /admin, ensure the user is an admin
-    // In a Server Layout, we can't easily see the current path without headers 
+    // In a Server Layout, we can't easily see the current path without headers
     // or a client component, but we can rely on the page itself or proxy for the path-specific check.
     // However, since we moved it from proxy, we should ideally check it here if possible,
     // or just let the /admin/page fetch the profile.
-    // Given the proxy now allows it, we'll keep it simple: layout enforces onboarding, 
+    // Given the proxy now allows it, we'll keep it simple: layout enforces onboarding,
     // and admin pages check their own permissions.
 
     return (
@@ -41,8 +41,9 @@ export default async function DashboardLayout({
                 <Sidebar />
             </div>
             <nav className="sticky top-0 z-20 flex items-center justify-between border-b border-border/70 bg-background/95 px-4 py-3 backdrop-blur-xl md:hidden" aria-label="Mobile studio navigation">
-                <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold"><span className="grid size-8 place-items-center overflow-hidden rounded-lg border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={32} height={32} className="size-full object-cover" priority /></span>FinalFrame</Link>
+                <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold"><span className="grid size-8 place-items-center overflow-hidden rounded-lg border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={32} height={32} className="size-full object-cover" priority /></span><span className="hidden min-[380px]:inline">FinalFrame</span></Link>
                 <div className="flex items-center gap-1">
+                    <Link href="/dashboard/projects" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Project library"><Library className="size-4" /></Link>
                     <Link href="/dashboard/create" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground" aria-label="Create a video"><Plus className="size-4" /></Link>
                     <Link href="/dashboard/assets" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Media library"><FolderOpen className="size-4" /></Link>
                     <Link href="/dashboard/settings" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Settings and credits"><Settings className="size-4" /></Link>

@@ -1,5 +1,5 @@
 import { assertValidManifest } from '../manifest.js';
-import type { AudioTrack, CaptionTrack, RenderItem, RenderManifest, ShotManifestEntry } from '../types.js';
+import type { AudioTrack, CaptionTrack, ManifestTrack, RenderItem, RenderManifest, ShotManifestEntry, VisualTransition } from '../types.js';
 
 export interface AssemblyPlan {
   manifestId: string;
@@ -13,13 +13,21 @@ export interface AssemblyPlan {
   shots: ShotManifestEntry[];
   audioTracks: AudioTrack[];
   captionTracks: CaptionTrack[];
+  tracks: ManifestTrack[];
+  transitions: PlannedTransition[];
+  version: RenderManifest['version'];
 }
+
+export interface PlannedTransition extends VisualTransition { startFrame: number }
 
 /** Creates a stable, bounded render plan. No creative or ordering decisions are made here. */
 export function createAssemblyPlan(input: RenderManifest): AssemblyPlan {
   const manifest = assertValidManifest(input);
+  const tracks = manifest.version === 5 ? [...(manifest.tracks ?? [])].sort((a, b) => a.orderIndex - b.orderIndex || a.id.localeCompare(b.id)) : [];
+  const trackOrder = new Map(tracks.map((track, index) => [track.id, index]));
   const items = [...manifest.items].sort((a, b) =>
-    (a.orderIndex ?? Number.MAX_SAFE_INTEGER) - (b.orderIndex ?? Number.MAX_SAFE_INTEGER)
+    (manifest.version === 5 ? (trackOrder.get(a.trackId ?? '') ?? 0) - (trackOrder.get(b.trackId ?? '') ?? 0) : 0)
+    || (a.orderIndex ?? Number.MAX_SAFE_INTEGER) - (b.orderIndex ?? Number.MAX_SAFE_INTEGER)
     || a.startFrame - b.startFrame
     || a.id.localeCompare(b.id),
   );
@@ -29,6 +37,7 @@ export function createAssemblyPlan(input: RenderManifest): AssemblyPlan {
     ...track,
     cues: [...track.cues].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)),
   }));
+  const byId = new Map(items.map(item => [item.id, item]));
   return {
     manifestId: manifest.manifestId,
     compositionId: 'FinalFrameAssembly',
@@ -41,5 +50,8 @@ export function createAssemblyPlan(input: RenderManifest): AssemblyPlan {
     shots,
     audioTracks,
     captionTracks,
+    tracks,
+    transitions: manifest.version === 5 ? (manifest.transitions ?? []).map(transition => ({ ...transition, startFrame: byId.get(transition.toItemId)!.startFrame })) : [],
+    version: manifest.version,
   };
 }

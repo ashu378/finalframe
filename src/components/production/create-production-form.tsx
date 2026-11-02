@@ -10,6 +10,7 @@ import { uploadAsset } from '@/lib/assets/actions';
 import { PlanPreview } from '@/components/production/planning';
 import { VIDEO_TYPE_LABELS, VIDEO_TYPES } from '@/lib/ai/video-routing';
 import type { VideoType } from '@/lib/ai/video-routing';
+import type { TemplateDefaults } from '@/lib/templates/catalog';
 import type { CreateIntent, OutputPreset, ProductionInputMode, ProjectContentType, QualityTier } from '@/lib/types/database';
 
 const MODES: Array<{ id: ProductionInputMode; label: string; description: string; icon: typeof Sparkles }> = [
@@ -23,14 +24,14 @@ const MODES: Array<{ id: ProductionInputMode; label: string; description: string
 
 type SuccessfulPlan = Extract<CreateDirectorPlanResult, { success: true }> & { projectId: string; inputAssetIds: string[] };
 
-export function CreateProductionForm({ studioId, existingProjectId, productionId, continuityOptions }: { studioId?: string; existingProjectId?: string; productionId?: string; continuityOptions?: { requiresBible: boolean; bibles: Array<{ id: string; versionNumber: number }>; selectionError: string | null } }) {
+export function CreateProductionForm({ studioId, existingProjectId, productionId, continuityOptions, initialMode, templateDefaults }: { studioId?: string; existingProjectId?: string; productionId?: string; initialMode?: ProductionInputMode; templateDefaults?: TemplateDefaults; continuityOptions?: { requiresBible: boolean; bibles: Array<{ id: string; versionNumber: number }>; selectionError: string | null } }) {
     const router = useRouter();
-    const [mode, setMode] = useState<ProductionInputMode>('IDEA');
-    const [name, setName] = useState('');
-    const [prompt, setPrompt] = useState('');
-    const [videoType, setVideoType] = useState<VideoType>('SOCIAL_CUTDOWN');
-    const [duration, setDuration] = useState(30);
-    const [outputPreset, setOutputPreset] = useState<OutputPreset>('SOCIAL_VERTICAL');
+    const [mode, setMode] = useState<ProductionInputMode>(initialMode ?? templateDefaults?.mode ?? 'IDEA');
+    const [name, setName] = useState(templateDefaults?.name ?? '');
+    const [prompt, setPrompt] = useState(templateDefaults?.brief ?? '');
+    const [videoType, setVideoType] = useState<VideoType>(templateDefaults?.videoType ?? 'SOCIAL_CUTDOWN');
+    const [duration, setDuration] = useState(templateDefaults?.durationSeconds ?? 30);
+    const [outputPreset, setOutputPreset] = useState<OutputPreset>(templateDefaults?.outputPreset ?? 'SOCIAL_VERTICAL');
     const [qualityTier, setQualityTier] = useState<QualityTier>('STANDARD');
     const [files, setFiles] = useState<File[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);

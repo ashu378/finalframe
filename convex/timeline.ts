@@ -4,6 +4,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectAccess, requireProjectRole } from "./authorization";
 import { now } from "./_shared";
 import { ensureResourceState, requireApprovedResource } from "./resourceStates";
+import { validateManifest } from "../renderer/src/manifest";
+import { finishingV5Enabled } from "./finishingContracts";
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -11,6 +13,7 @@ function object(value: unknown): Record<string, unknown> {
 
 export const createVersion = mutation({
   args: { productionId: v.id("productions"), manifestId: v.id("manifests"), outputPreset: v.optional(v.string()), idempotencyKey: v.optional(v.string()), metadata: v.optional(v.any()) },
+  returns: v.any(),
   handler: async (ctx, args) => {
     const manifest = await ctx.db.get(args.manifestId);
     if (!manifest || manifest.productionId !== args.productionId) throw new Error("Manifest not found.");
@@ -19,42 +22,75 @@ export const createVersion = mutation({
     const production = await ctx.db.get(args.productionId);
     if (!production || production.projectId !== manifest.projectId || production.studioExternalId !== member.studio.externalId) throw new Error("Manifest project ownership does not match the production.");
     const payload = object(manifest.manifest);
-    if (payload.version !== 4 || manifest.contractVersion !== 4) throw new Error("Only canonical manifest v4 can create new timeline versions.");
+    if (![4, 5].includes(Number(payload.version)) || payload.version !== manifest.contractVersion || !validateManifest(payload).ok) throw new Error("Only valid canonical manifest v4/v5 can create new timeline versions.");
+    if (payload.productionId !== production._id || payload.projectId !== manifest.projectId || payload.manifestId !== manifest._id) throw new Error("Manifest ownership does not match its canonical record.");
     const projectId = manifest.projectId;
-    if (!projectId) throw new Error("Manifest is not attached to a project.");
-    const idempotencyKey = args.idempotencyKey?.trim() || `timeline:${args.manifestId}`;
-    const existing = (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200)).find((timeline) => object(timeline.tracks).idempotencyKey === idempotencyKey);
-    if (existing) return existing;
-    const items = Array.isArray(payload.items) ? payload.items as Array<Record<string, unknown>> : [];
-    if (!items.length) throw new Error("Cannot create a timeline without manifest items.");
-    const latest = await ctx.db.query("timelines").withIndex("by_production_version", (q) => q.eq("productionId", args.productionId)).order("desc").first();
-    const timestamp = now();
-    const output = object(payload.output);
-    const fps = typeof output.fps === "number" && output.fps > 0 ? output.fps : 30;
-    const durationSeconds = typeof payload.totalDurationSeconds === "number" ? payload.totalDurationSeconds : typeof output.durationInFrames === "number" ? output.durationInFrames / fps : items.reduce((sum, item) => sum + (typeof item.durationSeconds === "number" ? item.durationSeconds : 0), 0);
-    const selection = object(payload.selection);
-    const selectionScope = typeof selection.scope === "string" ? selection.scope : undefined;
-    const timelineId = await ctx.db.insert("timelines", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId, productionId: args.productionId, manifestId: args.manifestId, selectionScope, versionNumber: (latest?.versionNumber ?? 0) + 1, durationSeconds, tracks: { idempotencyKey, manifestId: args.manifestId.toString(), metadata: { ...object(args.metadata), productionVersionId: payload.productionVersionId }, productionVersionId: payload.productionVersionId, items }, outputPreset: args.outputPreset ?? String(payload.outputPreset ?? "SOCIAL_VERTICAL"), status: "DRAFT", createdByUserId: member.user._id, createdAt: timestamp, updatedAt: timestamp });
-    const trackId = await ctx.db.insert("timelineTracks", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, kind: "VIDEO", name: "Ordered takes", orderIndex: 0, metadata: { manifestId: args.manifestId.toString() } });
-    for (const [index, item] of items.entries()) {
-      const assetId = typeof item.assetId === "string" ? item.assetId as Id<"assets"> : undefined;
-      const shotVersionId = typeof item.shotVersionId === "string" ? item.shotVersionId as Id<"shotVersions"> : undefined;
-      if (assetId) {
-        const asset = await ctx.db.get(assetId);
-        if (!asset || asset.studioExternalId !== member.studio.externalId || asset.projectId !== projectId || asset.scope === "GLOBAL" || asset.deletedAt) throw new Error("Timeline contains media outside this project.");
-      }
-      const duration = typeof item.durationInFrames === "number" ? item.durationInFrames / fps : typeof item.durationSeconds === "number" ? item.durationSeconds : 0;
-      if (!Number.isFinite(duration) || duration <= 0) throw new Error("Manifest contains an invalid clip duration.");
-      const startSeconds = typeof item.startFrame === "number" ? item.startFrame / fps : typeof item.startSeconds === "number" ? item.startSeconds : index === 0 ? 0 : undefined;
-      if (startSeconds === undefined || !Number.isFinite(startSeconds) || startSeconds < 0) throw new Error("Manifest contains an invalid clip start time.");
-      await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, shotVersionId, startSeconds, durationSeconds: duration, metadata: { orderIndex: index, manifestItemId: String(item.id ?? index), selectionScope } });
+    const key = args.idempotencyKey?.trim() || `timeline:${args.manifestId}`;
+    if (key.length < 8 || key.length > 200) throw new Error("A bounded timeline import key is required.");
+    const prior = await ctx.db.query("timelines").withIndex("by_creation_key", q => q.eq("creationKey", key)).unique();
+    if (prior) {
+      if (prior.productionId !== production._id || prior.projectId !== projectId || prior.manifestId !== manifest._id) throw new Error("This import key belongs to another manifest.");
+      return prior;
     }
+    const items = payload.items as Array<Record<string, unknown>>;
+    const audio = Array.isArray(payload.audioTracks) ? payload.audioTracks as Array<Record<string, unknown>> : [];
+    const captions = Array.isArray(payload.captionTracks) ? payload.captionTracks as Array<Record<string, unknown>> : [];
+    const sources = Array.isArray(payload.sources) ? payload.sources.map(object) : [];
+    const bySourceId = new Map<string, Record<string, unknown>>();
+    for (const source of sources) for (const id of [source.timelineClipId, source.audioId]) if (typeof id === "string") bySourceId.set(id, source);
+    const output = object(payload.output); const fps = Number(output.fps);
+    const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq("productionId", args.productionId)).order("desc").first();
+    const timestamp = now();
+    const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output };
+    const timelineId = await ctx.db.insert("timelines", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId, productionId: args.productionId, manifestId: args.manifestId, creationKey: key, selectionScope: String(object(payload.selection).scope ?? "TIMELINE"), versionNumber: (latest?.versionNumber ?? 0) + 1, durationSeconds: Number(output.durationInFrames) / fps, tracks: { idempotencyKey: key, manifestId: args.manifestId.toString(), metadata, productionVersionId: payload.productionVersionId }, outputPreset: args.outputPreset ?? String(payload.outputPreset ?? "FULL_HD"), status: "DRAFT", createdByUserId: member.user._id, createdAt: timestamp, updatedAt: timestamp });
+    const importedTracks = new Map<string, Id<"timelineTracks">>();
+    const descriptors = Array.isArray(payload.tracks) ? payload.tracks.map(object) : [];
+    async function trackFor(key: string, kind: string, orderIndex: number, name?: string) {
+      const existing = importedTracks.get(key); if (existing) return existing;
+      const descriptor = descriptors.find(row => row.id === key);
+      const id = await ctx.db.insert("timelineTracks", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, kind: typeof descriptor?.kind === "string" ? descriptor.kind : kind, orderIndex: typeof descriptor?.orderIndex === "number" ? descriptor.orderIndex : orderIndex, name: typeof descriptor?.name === "string" ? descriptor.name : name, metadata: { importedTrackId: key } });
+      importedTracks.set(key, id); return id;
+    }
+    async function assetFor(item: Record<string, unknown>, mediaRequired: boolean) {
+      const source = bySourceId.get(String(item.id));
+      const rawId = typeof item.assetId === "string" ? item.assetId : source?.assetId;
+      const assetId = typeof rawId === "string" ? ctx.db.normalizeId("assets", rawId) : null;
+      if (!assetId) { if (mediaRequired) throw new Error("Imported media must resolve to a canonical project asset."); return undefined; }
+      const asset = await ctx.db.get(assetId);
+      if (!asset || asset.studioExternalId !== member.studio.externalId || asset.projectId !== projectId || asset.scope === "GLOBAL" || asset.deletedAt || !asset.storageId || !asset.checksum) throw new Error("Timeline contains media outside this project.");
+      if (source?.assetChecksum && source.assetChecksum !== asset.checksum) throw new Error("Imported media checksum changed.");
+      await requireApprovedResource(ctx, projectId, "asset", assetId);
+      return assetId;
+    }
+    const hasOverlap = items.some((item, index) => items.some((other, otherIndex) => index !== otherIndex && Number(item.startFrame) < Number(other.startFrame) + Number(other.durationInFrames) && Number(other.startFrame) < Number(item.startFrame) + Number(item.durationInFrames)));
+    for (const [index, item] of items.entries()) {
+      const kind = item.kind === "motion-graphics" ? "GRAPHIC" : item.kind === "image" ? "IMAGE" : "VIDEO";
+      const laneKey = typeof item.trackId === "string" ? item.trackId : payload.version === 4 && hasOverlap ? `visual-${index}` : "visual";
+      const trackId = await trackFor(laneKey, "VIDEO", index, "Imported pictures");
+      const assetId = await assetFor(item, item.kind !== "motion-graphics");
+      const shotVersionId = typeof item.shotVersionId === "string" ? ctx.db.normalizeId("shotVersions", item.shotVersionId) : null;
+      if (shotVersionId) { const take = await ctx.db.get(shotVersionId); if (!take || take.projectId !== projectId || take.productionId !== production._id || take.assetId !== assetId) throw new Error("Imported take is outside this production."); await requireApprovedResource(ctx, projectId, "shotVersion", shotVersionId, production._id); }
+      const transition = (Array.isArray(payload.transitions) ? payload.transitions.map(object) : []).find(row => row.fromItemId === item.id);
+      const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
+      await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, shotVersionId: shotVersionId ?? undefined, startSeconds: Number(item.startFrame) / fps, durationSeconds: Number(item.durationInFrames) / fps, trimStartSeconds: typeof item.trimStartInFrames === "number" ? item.trimStartInFrames / fps : undefined, volume: typeof item.volume === "number" ? item.volume : undefined, ...(transition && payload.version === 5 ? { transition: { out: { kind: transition.kind, durationSeconds: Number(transition.durationInFrames) / fps, audioPolicy: transition.audioPolicy } } } : {}), metadata: JSON.parse(JSON.stringify(clipMetadata)) });
+    }
+    for (const [index, item] of audio.entries()) {
+      const trackId = await trackFor(typeof item.trackId === "string" ? item.trackId : `audio-${index}`, "AUDIO", items.length + index, "Imported soundtrack");
+      const assetId = await assetFor(item, true);
+      await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, startSeconds: Number(item.startFrame) / fps, durationSeconds: Number(item.durationInFrames) / fps, trimStartSeconds: Number(item.trimStartInFrames ?? 0) / fps, volume: typeof item.volume === "number" ? item.volume : 1, metadata: { manifestItemId: item.id, clipKind: "AUDIO", audioRole: item.role ?? "music", audio: { fadeInSeconds: Number(item.fadeInFrames ?? 0) / fps, fadeOutSeconds: Number(item.fadeOutFrames ?? 0) / fps }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames ?? 0 } } });
+    }
+    for (const [index, caption] of captions.entries()) {
+      const trackId = await trackFor(`caption-${index}`, "CAPTIONS", items.length + audio.length + index, `Captions · ${caption.language}`);
+      await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, startSeconds: 0, durationSeconds: Number(output.durationInFrames) / fps, metadata: { clipKind: "CAPTIONS", captionTrack: caption, captionFps: fps } });
+    }
+    await ensureResourceState(ctx, { projectId, productionId: production._id, resourceType: "timeline", resourceId: timelineId });
     return await ctx.db.get(timelineId);
   },
 });
 
 export const get = query({
   args: { timelineId: v.id("timelines") },
+  returns: v.any(),
   handler: async (ctx, args) => {
     const timeline = await ctx.db.get(args.timelineId);
     if (!timeline) throw new Error("Timeline not found.");
@@ -69,6 +105,7 @@ export const get = query({
 
 export const list = query({
   args: { productionId: v.id("productions") },
+  returns: v.any(),
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
@@ -172,17 +209,17 @@ export const createDraft = mutation({
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
     const timestamp = now();
     const timelineId = await ctx.db.insert('timelines', { projectId, productionId: production._id, studioId: access.studio._id, studioExternalId: access.studio.externalId, versionNumber, creationKey: key, creationHash: hash, durationSeconds: elapsed, outputPreset: production.outputPreset, tracks: { metadata: { approvalStatus: 'DRAFT', productionVersionId: version._id }, productionVersionId: version._id }, status: 'DRAFT', createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
-    for (const [orderIndex, kind] of ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO'].entries()) {
-      const selected = clips.filter(clip => clip.kind === kind);
+    for (const [orderIndex, kind] of (finishingV5Enabled() ? ['PICTURE', 'AUDIO'] : ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO']).entries()) {
+      const selected = clips.filter(clip => kind === 'PICTURE' ? clip.kind !== 'AUDIO' : clip.kind === kind);
       if (!selected.length) continue;
       // Narration and music intentionally overlap. Separate lanes preserve the
       // single-lane non-overlap contract used by assembly and the editor.
       const lanes = kind === 'AUDIO' ? selected.map(clip => [clip]) : [selected];
       for (const [laneIndex, lane] of lanes.entries()) {
-        const trackId = await ctx.db.insert('timelineTracks', { timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId, kind, name: kind === 'AUDIO' ? String(lane[0].metadata.audioRole ?? 'music') : kind === 'GRAPHIC' ? 'Designed graphics' : 'Selected visuals', orderIndex: orderIndex + laneIndex });
+        const trackId = await ctx.db.insert('timelineTracks', { timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId, kind: kind === 'PICTURE' ? 'VIDEO' : kind, name: kind === 'AUDIO' ? String(lane[0].metadata.audioRole ?? 'music') : kind === 'GRAPHIC' ? 'Designed graphics' : 'Selected visuals', orderIndex: orderIndex + laneIndex });
         for (const clip of lane) {
           const { kind: _kind, ...values } = clip; void _kind;
-          await ctx.db.insert('timelineClips', { ...values, trackId, timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId });
+          await ctx.db.insert('timelineClips', { ...values, ...(finishingV5Enabled() ? { metadata: { ...values.metadata, clipKind: _kind } } : {}), trackId, timelineId, studioId: access.studio._id, studioExternalId: access.studio.externalId });
         }
       }
     }

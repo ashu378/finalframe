@@ -3,6 +3,8 @@ import { internal } from './_generated/api';
 import type { FunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { buildVideoGenerationRequest, generateVideo, pollVideo, downloadVideo } from '../src/lib/adapters/openrouter-adapter';
+import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
+import { videoCatalogFingerprint } from '../src/lib/ai/video-routing';
 import { runPreparation } from './preparationWorker';
 import { GENERATION_MAX_MEDIA_BYTES, object, validateMediaProbe, workerEnabled } from './generationWorkerContracts';
 
@@ -50,19 +52,23 @@ export const run = internalAction({
         const videoRequest = {
           model: job.model,
           prompt: String(request.prompt),
-          duration: Number(request.duration),
-          aspectRatio: String(request.ratio || '16:9'),
-          resolution: typeof constraints.resolution === 'string' ? constraints.resolution : undefined,
+          ...(request.operation === 'UPSCALE' ? {} : { duration: Number(request.duration), aspectRatio: String(request.ratio || '16:9'), resolution: typeof constraints.resolution === 'string' ? constraints.resolution : undefined }),
           generateAudio: constraints.requiresAudio === true,
-          frameImages,
+          ...(request.operation === 'UPSCALE' ? {} : { frameImages }),
           inputReferences: references.filter((asset) => !frameIds.includes(asset.assetId)).map((asset) => ({ url: asset.url, kind: asset.kind })),
           ...(typeof request.upscaleFactor === 'number' ? { upscaleFactor: request.upscaleFactor } : {}),
           ...(typeof request.creativity === 'number' ? { creativity: request.creativity } : {}),
           ...(typeof request.previousJobId === 'string' ? { previousJobId: request.previousJobId } : {}),
         };
+        let liveCatalog: { liveCatalogFingerprint: string; liveCatalogCheckedAt: number } | undefined;
+        if (request.operation === 'UPSCALE') {
+          const current = (await discoverOpenRouterVideoModels({ force: true, staleIfError: false, fetch: (url, init) => fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }) })).find(model => model.id === job.model);
+          if (!current) throw Object.assign(new Error('The upscale model is no longer available.'), { code: 'ROUTE_CHANGED' });
+          liveCatalog = { liveCatalogFingerprint: videoCatalogFingerprint({ provider: 'openrouter', modelId: current.id, ...current, supportedParameters: current.allowedPassthroughParameters }), liveCatalogCheckedAt: Date.now() };
+        }
         buildVideoGenerationRequest(videoRequest, { allowDiscoveredModel: true });
         const submitted = await generateVideo(videoRequest, { ...options, beforeMediaSubmit: async () => {
-          const fenced = await ctx.runMutation(jobs.fenceSubmission, lease);
+          const fenced = await ctx.runMutation(jobs.fenceSubmission, { ...lease, ...liveCatalog });
           if (!fenced.allowed) throw Object.assign(new Error('This submission is already fenced.'), { code: 'SUBMISSION_FENCED' });
           submissionAttempted = true;
         } });

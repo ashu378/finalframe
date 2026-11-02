@@ -2,6 +2,9 @@ import { AbsoluteFill, Audio, Img, Sequence, Video, interpolate, useCurrentFrame
 import { createAssemblyPlan } from '../assembly/plan.js';
 import type { RenderManifest } from '../types.js';
 import { renderMotionTemplate } from '../templates/renderer.js';
+import { useMemo } from 'react';
+import { nativeVideoVolume, visualPresentation } from '../assembly/transitions.js';
+import { CaptionLayer } from './caption-layer.js';
 
 export interface FinalFrameCompositionProps extends Record<string, unknown> {
   manifest: RenderManifest;
@@ -9,17 +12,24 @@ export interface FinalFrameCompositionProps extends Record<string, unknown> {
 
 export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) {
   const frame = useCurrentFrame();
-  const plan = createAssemblyPlan(manifest);
+  const plan = useMemo(() => createAssemblyPlan(manifest), [manifest]);
+  const captionCues = useMemo(() => plan.captionTracks.flatMap(track => track.cues.map(cue => ({ ...cue, trackId: track.id }))), [plan]);
+  const transitions = useMemo(() => ({ incoming: new Map(plan.transitions.map(transition => [transition.toItemId, transition])), outgoing: new Map(plan.transitions.map(transition => [transition.fromItemId, transition])) }), [plan]);
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
-      {plan.items.map((item) => (
+      {plan.items.map((item) => {
+        const incoming = transitions.incoming.get(item.id);
+        const outgoing = transitions.outgoing.get(item.id);
+        const crossfade = incoming?.audioPolicy === 'CROSSFADE' || outgoing?.audioPolicy === 'CROSSFADE';
+        return (
         <Sequence key={item.id} from={item.startFrame} durationInFrames={item.durationInFrames} layout="none">
+          <AbsoluteFill style={visualPresentation(item, frame, incoming, outgoing)}>
           {item.kind === 'video' ? (
             <Video
               src={item.src}
               startFrom={item.trimStartInFrames ?? 0}
-              volume={item.volume ?? 1}
-              style={{ width: '100%', height: '100%', opacity: item.opacity ?? 1, objectFit: 'cover' }}
+              volume={crossfade ? localFrame => nativeVideoVolume(item.volume ?? 1, item.startFrame + localFrame, incoming, outgoing) : item.volume ?? 1}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
           ) : item.kind === 'image' ? (
             <Img
@@ -27,16 +37,16 @@ export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) 
               style={{
                 width: '100%',
                 height: '100%',
-                opacity: item.opacity ?? 1,
                 objectFit: item.fit ?? 'cover',
                 objectPosition: item.position ?? 'center',
               }}
             />
           ) : item.kind === 'motion-graphics' ? (
-            <AbsoluteFill style={{ opacity: item.opacity ?? 1 }}>{renderMotionTemplate(item)}</AbsoluteFill>
+            <AbsoluteFill>{renderMotionTemplate(item)}</AbsoluteFill>
           ) : null}
+          </AbsoluteFill>
         </Sequence>
-      ))}
+      ); })}
       {plan.audioTracks.map((track) => (
         <Sequence key={`audio-${track.id}`} from={track.startFrame} durationInFrames={track.durationInFrames} layout="none">
           <Audio
@@ -51,12 +61,12 @@ export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) 
           />
         </Sequence>
       ))}
-      {plan.captionTracks.flatMap((track) => track.cues).map((cue) => {
+      {plan.version === 5 ? <CaptionLayer key={plan.manifestId} tracks={plan.captionTracks} width={plan.width} height={plan.height} /> : captionCues.map((cue) => {
         const visible = frame >= cue.startFrame && frame < cue.startFrame + cue.durationInFrames;
         if (!visible) return null;
         return (
           <div
-            key={`caption-${cue.id}`}
+            key={`caption-${cue.trackId}-${cue.id}`}
             aria-label={cue.text}
             style={{
               position: 'absolute',

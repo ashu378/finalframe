@@ -11,6 +11,8 @@ export function safeRenderError(code?: string) {
   if (!code) return undefined;
   if (code === 'RENDER_CONFIGURATION_REQUIRED') return 'Export processing is not configured yet. Your approved timeline is saved.';
   if (code === 'RENDER_SOURCE_UNAVAILABLE') return 'A selected project asset or approval is unavailable. Review the timeline before exporting again.';
+  if (code === 'RENDER_RECONCILIATION_REQUIRED') return 'The saved render result needs recovery. FinalFrame will not start another render automatically.';
+  if (code === 'RENDER_RECOVERY_WINDOW_EXPIRED') return 'The retained render result needs an administrator check before it can be recovered.';
   if (code === 'RENDER_MAX_ATTEMPTS') return 'This export needs an administrator check before it can continue.';
   return 'This export could not finish. Your project and approved media are unchanged.';
 }
@@ -20,7 +22,7 @@ export function publicRenderJob<T extends Record<string, unknown>>(job: T) {
   return { ...safe, errorMessage: safeRenderError(typeof job.errorCode === 'string' ? job.errorCode : undefined) };
 }
 export function dispatchCanRun(job: { status: string; executionStage?: string; acceptedAt?: number; nextDispatchAt?: number; dispatchLeaseExpiresAt?: number }, timestamp: number) {
-  if (RENDER_TERMINAL.has(job.status) || job.acceptedAt || job.executionStage === 'AWAITING_CALLBACK') return false;
+  if (RENDER_TERMINAL.has(job.status) || job.acceptedAt !== undefined || ['AWAITING_CALLBACK', 'RECONCILIATION_REQUIRED', 'NEEDS_ATTENTION'].includes(job.executionStage || '')) return false;
   if (job.nextDispatchAt && job.nextDispatchAt > timestamp) return false;
   return !job.dispatchLeaseExpiresAt || job.dispatchLeaseExpiresAt <= timestamp;
 }

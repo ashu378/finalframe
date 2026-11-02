@@ -78,15 +78,18 @@ export function createCallbackBody(options: CallbackRequestOptions): string {
 export interface CallbackSenderOptions {
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
+  allowedOrigins?: readonly string[];
 }
 
 /** Sends the exact signed body and never retries with a new event ID. */
 export async function sendRendererCallback(url: string, body: string, secret: string, options: CallbackSenderOptions = {}): Promise<void> {
-  if (!/^https:\/\//i.test(url) && !/^http:\/\/localhost(?::\d+)?\//i.test(url)) throw new Error('Renderer callback URL must use HTTPS (localhost HTTP is allowed for development).');
   if (url.length > 2_048) throw new Error('Renderer callback URL is too long.');
   try {
     const parsed = new URL(url);
+    const localHttp = parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    if (!localHttp && parsed.protocol !== 'https:') throw new Error('Renderer callback URL must use HTTPS.');
     if (parsed.username || parsed.password || parsed.hash) throw new Error('Renderer callback URL must not contain credentials or a fragment.');
+    if (options.allowedOrigins && !options.allowedOrigins.includes(parsed.origin)) throw new Error('Renderer callback origin must not fall outside the configured allowlist.');
   } catch (error) {
     if (error instanceof Error && error.message.includes('must not contain')) throw error;
     throw new Error('Renderer callback URL is invalid.');
@@ -95,9 +98,11 @@ export async function sendRendererCallback(url: string, body: string, secret: st
   const fetcher = options.fetch ?? globalThis.fetch;
   if (!fetcher) throw new Error('No fetch implementation is available for renderer callbacks.');
   const controller = new AbortController();
-  const timeout = options.timeoutMs ? setTimeout(() => controller.abort(), options.timeoutMs) : undefined;
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(options.timeoutMs) && options.timeoutMs! > 0 ? Math.min(options.timeoutMs!, 30_000) : 15_000);
+  const deliveryTimestamp = new Date().toISOString();
   try {
-    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-finalframe-renderer-signature': signCallbackBody(body, secret), 'x-finalframe-worker-secret': secret }, body, signal: controller.signal });
+    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-finalframe-renderer-signature': signCallbackBody(body, secret), 'x-finalframe-worker-secret': secret, 'x-finalframe-delivery-timestamp': deliveryTimestamp, 'x-finalframe-delivery-signature': signCallbackBody(`${deliveryTimestamp}\n${body}`, secret) }, body, signal: controller.signal, redirect: 'error' });
+    await response.body?.cancel();
     if (!response.ok) throw new Error(`Renderer callback failed with HTTP ${response.status}.`);
   } finally {
     if (timeout) clearTimeout(timeout);

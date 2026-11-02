@@ -28,6 +28,8 @@ export interface DiscoveredVideoModel {
     supportedSizes: string[];
     allowedPassthroughParameters: string[];
     pricingSkus: Record<string, number>;
+    upscaleFactor?: { min: number; max: number };
+    creativityLevels?: number[];
     raw: unknown;
 }
 
@@ -131,6 +133,9 @@ export function normalizeDiscoveredVideoModel(value: unknown): DiscoveredVideoMo
     const item = asRecord(value);
     const id = asString(item.id);
     if (!id) return null;
+    const upscale = asRecord(item.upscale_factor);
+    const prices = asNumericRecord(item.pricing_skus);
+    if (item.upscale_factor != null && (typeof upscale.min !== 'number' || typeof upscale.max !== 'number' || !Number.isFinite(upscale.min) || !Number.isFinite(upscale.max) || !Array.isArray(item.creativity) || item.creativity.some(level => typeof level !== 'number' || !Number.isInteger(level)) || Object.keys(prices).length !== Object.keys(asRecord(item.pricing_skus)).length)) return null;
     return {
         id,
         canonicalSlug: asString(item.canonical_slug),
@@ -141,7 +146,9 @@ export function normalizeDiscoveredVideoModel(value: unknown): DiscoveredVideoMo
         supportedAspectRatios: asStringArray(item.supported_aspect_ratios),
         supportedSizes: asStringArray(item.supported_sizes),
         allowedPassthroughParameters: asStringArray(item.allowed_passthrough_parameters),
-        pricingSkus: asNumericRecord(item.pricing_skus),
+        pricingSkus: prices,
+        ...(typeof asRecord(item.upscale_factor).min === 'number' && typeof asRecord(item.upscale_factor).max === 'number' ? { upscaleFactor: { min: Number(asRecord(item.upscale_factor).min), max: Number(asRecord(item.upscale_factor).max) } } : {}),
+        ...(Array.isArray(item.creativity) ? { creativityLevels: asNumberArray(item.creativity) } : {}),
         raw: value,
     };
 }
@@ -231,7 +238,7 @@ export async function discoverOpenRouterVideoModels(options: ModelDiscoveryOptio
     const cached = videoCatalogCache.get(baseUrl);
     if (!options.force && cached && cached.expiresAt > currentTime) return cached.models;
     const pending = videoCatalogInFlight.get(baseUrl);
-    if (pending) return pending;
+    if (pending && !options.force) return pending;
 
     const request = (async () => {
         const fetcher = options.fetch || globalThis.fetch;

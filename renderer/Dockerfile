@@ -1,7 +1,9 @@
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    RENDER_OUTPUT_ROOT=/var/lib/finalframe/output \
+    RENDER_STATE_ROOT=/var/lib/finalframe/state
 
 # FFmpeg/ffprobe and Chrome Headless Shell's Debian runtime dependencies.
 # Keep these in sync with https://www.remotion.dev/docs/docker.
@@ -29,7 +31,9 @@ COPY fixtures ./fixtures
 RUN pnpm build
 
 RUN useradd --create-home --uid 10001 appuser \
-  && chown -R appuser:appuser /app/dist /app/fixtures
+  && mkdir -p /var/lib/finalframe/output /var/lib/finalframe/state \
+  && chown -R appuser:appuser /app/dist /app/fixtures /var/lib/finalframe \
+  && chmod 0700 /var/lib/finalframe /var/lib/finalframe/output /var/lib/finalframe/state
 USER appuser
 
 EXPOSE 8080

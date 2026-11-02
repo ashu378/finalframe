@@ -62,6 +62,18 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   const dimensions = /^(\d+)x(\d+)$/.exec(resolution);
   const expectedShortEdge = dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : ({ '4k': 2160, '2k': 1440 } as Record<string, number>)[resolution] || (/^\d+p$/.test(resolution) ? Number.parseInt(resolution, 10) : 0);
   if (expectedShortEdge && Math.abs(Math.min(width, height) - expectedShortEdge) > Math.max(8, expectedShortEdge * 0.05)) throw new Error('MEDIA_VALIDATION_FAILED');
+  if (request.operation === 'UPSCALE') {
+    const source = object(request.upscaleSource);
+    const quote = object(request.upscaleQuote);
+    const sourceWidth = Number(source.width); const sourceHeight = Number(source.height); const factor = Number(request.upscaleFactor);
+    const maximumPixels = Number(quote.maximumOutputPixels);
+    if (!Number.isFinite(factor) || factor < 1.5 || factor > 3 || !Number.isFinite(maximumPixels) || maximumPixels !== 13_750_000 || width * height > maximumPixels || !sourceWidth || !sourceHeight) throw new Error('MEDIA_VALIDATION_FAILED');
+    const expectedFactor = Math.min(factor, Math.sqrt(maximumPixels / (sourceWidth * sourceHeight)));
+    // This technical tolerance accommodates encoded dimension grids; it is
+    // not a provider promise of exact pixel rounding. Cost uses the hard cap.
+    const expectedWidth = sourceWidth * expectedFactor; const expectedHeight = sourceHeight * expectedFactor;
+    if (Math.abs(width - expectedWidth) > Math.max(16, expectedWidth * .03) || Math.abs(height - expectedHeight) > Math.max(16, expectedHeight * .03) || width <= sourceWidth || height <= sourceHeight || Math.abs(duration - Number(source.durationSeconds)) > Math.max(.25, Number(source.durationSeconds) * .02)) throw new Error('MEDIA_VALIDATION_FAILED');
+  }
   if ((constraints.requiresAudio === true || constraints.requiresSourceAudioPreservation === true) && probe.hasAudio !== true) throw new Error('MEDIA_VALIDATION_FAILED');
   return { durationSeconds: duration, width, height, videoCodec: probe.videoCodec, hasAudio: probe.hasAudio === true, ...(typeof probe.audioCodec === 'string' ? { audioCodec: probe.audioCodec } : {}) };
 }
@@ -80,6 +92,6 @@ export function publicJob(job: Record<string, unknown>) {
     errorMessage: typeof job.errorCode === 'string' ? safeGenerationError(job.errorCode, job.operation === 'PREPARATION') : undefined,
     assetId: typeof object(job.response).assetId === 'string' ? String(object(job.response).assetId) : undefined,
     transcriptText: job.operation === 'PREPARATION' && request.preparationKind === 'TRANSCRIPT' && typeof object(job.response).text === 'string' ? String(object(job.response).text) : undefined,
-    request: { preparationKind: request.preparationKind, videoType: request.videoType, task: request.task, qualityTier: request.qualityTier, routeReason: request.routeReason, path: request.path },
+    request: { operation: request.operation, preparationKind: request.preparationKind, videoType: request.videoType, task: request.task, qualityTier: request.qualityTier, routeReason: request.routeReason, path: request.path },
   };
 }

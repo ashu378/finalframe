@@ -170,7 +170,11 @@ async function main() {
   record('soft-delete and restore', { deletedAt: hiddenProject.deletedAt, restored: true });
 
   const jobId = state.render.job._id;
-  const claim = await client.mutation(api.renderJobs.claim, { jobId, leaseDurationMs: 10 * 60 * 1000 });
+  // Lease authority is internal/private. Never pass it through a browser API.
+  assert(process.env.FINALFRAME_DEV_FIXTURES === 'true' && process.env.FINALFRAME_DEV_FIXTURE_ENV === 'development' && process.env.FINALFRAME_DEV_FIXTURE_KEY, 'Private development fixture flags/key are required.');
+  const deploymentName = new URL(onlineConvexUrl).hostname.replace(/\.convex\.cloud$/, '');
+  const claimResult = await exec('./node_modules/.bin/convex', ['run', 'renderJobs:claim', JSON.stringify({ fixtureKey: process.env.FINALFRAME_DEV_FIXTURE_KEY, jobId, leaseDurationMs: 10 * 60 * 1000 }), '--deployment', deploymentName, '--codegen', 'disable', '--typecheck', 'disable'], { timeout: 60_000, maxBuffer: 1024 * 1024 });
+  const claim = JSON.parse(claimResult.stdout);
   const uploadUrl = await client.mutation(api.assetStorage.generateUploadUrl, { projectId: state.graph.projectId, studioExternalId: state.project.studioExternalId });
   const proxy = await startCallbackProxy(`${siteUrl.replace(/\/$/, '')}/renderer/callback`);
   let status;

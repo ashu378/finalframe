@@ -74,10 +74,19 @@ export interface WorkspaceControlData {
     bibles: BibleView[];
     boundResources: Array<{ id: string; resourceId: string; name: string; kind: ProjectResourceKind; versionNumber: number; state: WorkspaceResourceState }>;
     plannedBibleId: string | null;
+    continuationSources: ContinuationSourceView[];
     scenes: Array<{ id: string; title: string; purpose: string; shots: ShotControlView[] }>;
     timelines: Array<{ id: string; versionNumber: number; state: WorkspaceResourceState; matchesProductionVersion: boolean }>;
     acceptedStoryStateId: string | null;
     acceptedStory: StorySnapshotView | null;
+}
+
+export interface ContinuationSourceView {
+    jobId: string;
+    providerJobId: string;
+    model: string;
+    shotVersionId: string;
+    label: string;
 }
 
 export interface ShotOperationControls {
@@ -86,9 +95,57 @@ export interface ShotOperationControls {
     referenceAssetIds: string[];
     firstFrameAssetId: string;
     lastFrameAssetId: string;
+    previousJobId?: string;
+    upscaleFactor?: number;
+    upscaleMode?: 'PRECISE' | 'CREATIVE';
 }
 
-export function validateShotOperationControls(controls: ShotOperationControls, assets: Array<Pick<WorkspaceAssetView, 'id' | 'mimeType'>>) {
+/** Shared by authoring and generation: requirements follow the operation,
+ * rather than the legacy EDIT task (which also includes portrait lip sync). */
+export function videoTaskForOperation(operation: ShotOperationControls['operation']): import('../ai/video-routing').VideoTask {
+    if (operation === 'GENERATE' || operation === 'FRAME_TO_VIDEO' || operation === 'EXTEND') return operation;
+    return 'EDIT';
+}
+
+export function validateVideoOperationRequirements(input: {
+    operation: ShotOperationControls['operation'];
+    audioPolicy?: ShotOperationControls['audioPolicy'];
+    hasVideoReference: boolean;
+    hasImageReferences: boolean;
+    hasAudioReference: boolean;
+    firstFrameAssetId?: string;
+    previousJobId?: string;
+    previousModelId?: string;
+    upscaleFactor?: number;
+    upscaleMode?: ShotOperationControls['upscaleMode'];
+}) {
+    if (!['GENERATE', 'FRAME_TO_VIDEO', 'EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE', 'PERFORMANCE_TRANSFER', 'EXTEND', 'LIP_SYNC', 'UPSCALE'].includes(input.operation)) throw new Error('Choose a supported video operation.');
+    if (['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE', 'PERFORMANCE_TRANSFER', 'UPSCALE'].includes(input.operation) && !input.hasVideoReference) throw new Error('Select a source video for this operation.');
+    if (input.operation === 'PERFORMANCE_TRANSFER' && !input.hasImageReferences) throw new Error('Select a character reference image for performance transfer.');
+    if (input.operation === 'LIP_SYNC' && (!input.hasAudioReference || (!input.hasImageReferences && !input.hasVideoReference))) throw new Error('Lip sync needs a portrait or video and a project audio recording.');
+    if (input.operation === 'LIP_SYNC' && input.audioPolicy !== 'USE_RECORDING') throw new Error('Lip sync needs the selected recording audio policy.');
+    if (input.operation === 'FRAME_TO_VIDEO' && !input.firstFrameAssetId) throw new Error('Choose the first frame.');
+    if (input.operation === 'EXTEND' && (!input.previousJobId || !input.previousModelId)) throw new Error('Choose an approved completed clip from this production to extend.');
+    if (input.audioPolicy === 'KEEP_SOURCE' && !input.hasVideoReference && input.operation !== 'EXTEND') throw new Error('Keeping source audio requires a source video.');
+    if (input.audioPolicy === 'USE_RECORDING' && !input.hasAudioReference) throw new Error('Select a project audio recording.');
+    if (input.operation === 'UPSCALE') {
+        // Current reviewed OpenRouter upscale controls: factor 1.5–3 and
+        // creativity 0 (precise) / 1 (creative). Routes still certify support.
+        if (!Number.isFinite(input.upscaleFactor) || input.upscaleFactor! < 1.5 || input.upscaleFactor! > 3) throw new Error('Choose an upscale factor between 1.5 and 3.');
+        if (!['PRECISE', 'CREATIVE'].includes(input.upscaleMode || '')) throw new Error('Choose precise or creative upscaling.');
+    }
+}
+
+/** Public catalog facts are required for both upscale-specific controls.
+ * A provider review alone must not silently accept unsupported settings. */
+export function supportsCatalogUpscaleControls(raw: unknown, factor: number | undefined, creativity: number | undefined): boolean {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Number.isFinite(factor) || !Number.isInteger(creativity)) return false;
+    const catalog = raw as { upscale_factor?: { min?: unknown; max?: unknown } | null; creativity?: unknown };
+    const range = catalog.upscale_factor;
+    return Boolean(range && typeof range.min === 'number' && typeof range.max === 'number' && Number.isFinite(range.min) && Number.isFinite(range.max) && factor! >= range.min && factor! <= range.max && Array.isArray(catalog.creativity) && catalog.creativity.includes(creativity));
+}
+
+export function validateShotOperationControls(controls: ShotOperationControls, assets: Array<Pick<WorkspaceAssetView, 'id' | 'mimeType'>>, continuationSources: ContinuationSourceView[] = []) {
     const operations = ['GENERATE', 'FRAME_TO_VIDEO', 'EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE', 'PERFORMANCE_TRANSFER', 'EXTEND', 'LIP_SYNC', 'UPSCALE'];
     if (!operations.includes(controls.operation)) throw new Error('Choose a supported video operation.');
     if (!['KEEP_SOURCE', 'USE_RECORDING', 'GENERATE', 'SILENT'].includes(controls.audioPolicy)) throw new Error('Choose an audio policy.');
@@ -105,12 +162,8 @@ export function validateShotOperationControls(controls: ShotOperationControls, a
     const hasVideo = selected.some((asset) => asset.mimeType.startsWith('video/'));
     const hasImage = selected.some((asset) => asset.mimeType.startsWith('image/')) || Boolean(controls.firstFrameAssetId);
     const hasAudio = selected.some((asset) => asset.mimeType.startsWith('audio/'));
-    if (['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE', 'PERFORMANCE_TRANSFER', 'UPSCALE'].includes(controls.operation) && !hasVideo) throw new Error('Select a source video for this operation.');
-    if (controls.operation === 'PERFORMANCE_TRANSFER' && !hasImage) throw new Error('Select a character reference image for performance transfer.');
-    if (controls.operation === 'LIP_SYNC' && (!hasAudio || (!hasImage && !hasVideo))) throw new Error('Lip sync needs a portrait or video and a project audio recording.');
-    if (controls.operation === 'FRAME_TO_VIDEO' && !controls.firstFrameAssetId) throw new Error('Choose the first frame.');
-    if (controls.audioPolicy === 'KEEP_SOURCE' && !hasVideo) throw new Error('Keeping source audio requires a source video.');
-    if (controls.audioPolicy === 'USE_RECORDING' && !hasAudio) throw new Error('Select a project audio recording.');
+    const previous = controls.operation === 'EXTEND' ? continuationSources.find(source => source.providerJobId === controls.previousJobId) : undefined;
+    validateVideoOperationRequirements({ ...controls, hasVideoReference: hasVideo, hasImageReferences: hasImage, hasAudioReference: hasAudio, previousJobId: previous?.providerJobId, previousModelId: previous?.model });
     return [...new Set([...controls.referenceAssetIds, controls.firstFrameAssetId, controls.lastFrameAssetId].filter(Boolean))];
 }
 

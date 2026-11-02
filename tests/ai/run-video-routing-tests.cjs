@@ -248,6 +248,10 @@ async function testMockedProviderContract() {
   assert.deepEqual(typedPayload.input_references.map((reference) => reference.type), ['video_url', 'audio_url']);
   assert.equal(typedPayload.input_references[0].video_url.url, 'https://fixture.test/source.mp4');
   assert.equal(typedPayload.previous_job_id, 'gen-vid-123-abcdefghijklmnopqrst');
+  const upscalePayload = adapter.buildVideoGenerationRequest({ model: 'local/test-video', prompt: 'Finish approved footage', inputReferences: [{ kind: 'video', url: 'https://fixture.test/source.mp4' }], upscaleFactor: 2.5, creativity: 1 }, { allowDiscoveredModel: true });
+  assert.equal(upscalePayload.upscale_factor, 2.5);
+  assert.equal(upscalePayload.creativity, 1);
+  assert.equal(upscalePayload.input_references[0].type, 'video_url');
   let downloadAuthorization;
   const downloaded = await adapter.downloadVideo('accepted', { apiKey: 'fixture-key', fetch: async (_url, init) => {
     downloadAuthorization = new Headers(init.headers).get('authorization');

@@ -15,7 +15,8 @@
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "build": "tsc --project tsconfig.json",
     "check": "npm run typecheck",
-    "test": "node tests/run-renderer-tests.cjs"
+    "test": "npm run build && node tests/run-renderer-tests.cjs && node tests/run-transfer-outbox-tests.cjs && node tests/run-v5-contract-tests.mjs",
+    "test:visual": "npm run build && node tests/run-v5-visual-tests.mjs"
   },
   "engines": {
     "node": ">=20"

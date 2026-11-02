@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
-import { type StudioAsset, type AssetType } from '@/lib/types/database';
+import { type StudioAsset, type AssetType, type Template } from '@/lib/types/database';
+import { getTemplates, setTemplateSaved } from '@/lib/templates/actions';
 
 function toIsoDate(value: unknown): string {
     if (typeof value === 'string') return value;
@@ -188,15 +189,13 @@ export async function importAssetToProject(sourceAssetId: string, projectExterna
     }
 }
 
-export async function getStudioPresets(): Promise<StudioAsset[]> {
-    // Preset templates are not yet a project asset type. Returning an empty
-    // collection keeps the library honest while the tab remains available for
-    // the later template phase.
-    return [];
+/** Studio presets are reusable briefs, not synthetic media assets. */
+export async function getStudioPresets(): Promise<Template[]> {
+    const current = await (await getAuthenticatedConvexClient()).query(api.account.current, {});
+    if (!current.studio) return [];
+    return (await getTemplates(current.studio.externalId)).sort((a, b) => Number(b.blueprint_data.saved) - Number(a.blueprint_data.saved));
 }
 
 export async function stowPreset(studioId: string, presetId: string): Promise<{ success: boolean; error?: string }> {
-    void studioId;
-    void presetId;
-    return { success: false, error: 'UNSUPPORTED_CONVEX_OPERATION: Preset templates are not exposed by the current Convex API.' };
+    return setTemplateSaved(studioId, presetId, true);
 }

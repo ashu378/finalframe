@@ -5,6 +5,8 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
 import { transitionResourceState } from "./approvals";
 import { ensureResourceState, getEffectiveResourceState, requireEditable } from "./resourceStates";
+import { cropCaptionTrack, finishingFps, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
+import type { CaptionTrack } from '../renderer/src/types';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -156,7 +158,7 @@ function normalizedState(tracks: TimelineTrack[], clips: TimelineClip[]): TrackS
         .map((clip) => ({
           id: clip._id.toString(),
           trackId: track._id.toString(),
-          kind: track.kind,
+          kind: typeof record(clip.metadata).clipKind === 'string' ? String(record(clip.metadata).clipKind) : track.kind,
           assetId: clip.assetId?.toString(),
           shotVersionId: clip.shotVersionId?.toString(),
           startSeconds: clip.startSeconds,
@@ -238,7 +240,9 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
 
   if (kind === "trim") {
     if (!clipId) throw new Error("A clip ID is required for trimming.");
-    const { clip } = findClip(state, clipId);
+    const { clip, track } = findClip(state, clipId);
+    if (track.clips.some(candidate => Object.values(record(candidate.transition)).some(value => record(value).kind && record(value).kind !== 'CUT'))) throw new Error('Remove the transition on this picture lane before trimming or splitting its clips.');
+    const oldTrim = clip.trimStartSeconds ?? 0;
     const trimStart = optionalNumber(input.trimStartSeconds, "Trim start", 0) ?? clip.trimStartSeconds ?? 0;
     const trimEnd = optionalNumber(input.trimEndSeconds, "Trim end", 0) ?? clip.trimEndSeconds ?? (clip.trimStartSeconds ?? 0) + clip.durationSeconds;
     if (trimEnd <= trimStart) throw new Error("Trim end must be after trim start.");
@@ -247,6 +251,7 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     clip.trimStartSeconds = trimStart;
     clip.trimEndSeconds = trimStart + duration;
     clip.durationSeconds = duration;
+    if (record(clip.metadata.captionTrack).cues) clip.metadata.captionTrack = cropCaptionTrack(clip.metadata.captionTrack as unknown as CaptionTrack, trimStart - oldTrim, trimStart - oldTrim + duration, finishingFps(state.metadata));
     const start = optionalNumber(input.startSeconds, "Timeline start", 0);
     if (start !== undefined) clip.startSeconds = start;
     return state;
@@ -255,6 +260,7 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
   if (kind === "split") {
     if (!clipId) throw new Error("A clip ID is required for splitting.");
     const { track, clip } = findClip(state, clipId);
+    if (track.clips.some(candidate => Object.values(record(candidate.transition)).some(value => record(value).kind && record(value).kind !== 'CUT'))) throw new Error('Remove the transition on this picture lane before trimming or splitting its clips.');
     const splitAt = optionalNumber(input.splitAtSeconds, "Split position", 0) ?? optionalNumber(input.atSeconds, "Split position", 0);
     if (splitAt === undefined || splitAt <= 0 || splitAt >= clip.durationSeconds) throw new Error("Split position must be inside the clip.");
     const first: ClipState = { ...clip, metadata: { ...clip.metadata, splitPart: 1 } };
@@ -268,6 +274,11 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
       trimStartSeconds: (clip.trimStartSeconds ?? 0) + splitAt,
       metadata: { ...clip.metadata, splitPart: 2, splitFrom: clip.id },
     };
+    if (record(clip.metadata.captionTrack).cues) {
+      const fps = finishingFps(state.metadata);
+      first.metadata.captionTrack = cropCaptionTrack(clip.metadata.captionTrack as unknown as CaptionTrack, 0, splitAt, fps);
+      second.metadata.captionTrack = cropCaptionTrack(clip.metadata.captionTrack as unknown as CaptionTrack, splitAt, clip.durationSeconds, fps);
+    }
     track.clips.splice(track.clips.indexOf(clip), 1, first, second);
     return state;
   }
@@ -275,6 +286,8 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
   if (kind === "reorder") {
     if (!clipId) throw new Error("A clip ID is required for reordering.");
     const { track, clip } = findClip(state, clipId);
+    if (track.clips.some(candidate => Object.values(record(candidate.transition)).some(value => record(value).kind && record(value).kind !== 'CUT'))) throw new Error('Remove transitions on this lane before changing clip order.');
+    if (state.tracks.some(lane => lane.kind === 'CAPTIONS' && lane.clips.some(candidate => Array.isArray(record(candidate.metadata.captionTrack).cues) && (record(candidate.metadata.captionTrack).cues as unknown[]).length))) throw new Error('Revise standalone imported captions before reordering pictures. Clip-bound captions can follow their clips.');
     const targetTrackId = optionalString(input.targetTrackId, "Target track ID") ?? track.id;
     const targetTrack = state.tracks.find((candidate) => candidate.id === targetTrackId);
     if (!targetTrack) throw new Error("The target timeline track was not found.");
@@ -320,9 +333,16 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     const cues = input.cues;
     if (cues !== undefined && !Array.isArray(cues)) throw new Error("Caption cues must be an array.");
     if (captionTrackId === undefined && cues === undefined) throw new Error("Caption track ID or cues are required.");
-    if (captionTrackId || Array.isArray(cues) && cues.length) throw new Error("Caption authoring is not connected to canonical export yet. No edit was saved.");
-    clip.metadata = { ...clip.metadata, ...(captionTrackId ? { captionTrackId } : {}), ...(cues !== undefined ? { cues } : {}) };
-    if (captionTrackId) clip.captionTrackId = captionTrackId;
+    if (process.env.FINALFRAME_MANIFEST_V5_ENABLED !== 'true') {
+      if (captionTrackId || Array.isArray(cues) && cues.length) throw new Error("Caption authoring is not connected to canonical export yet. No edit was saved.");
+      clip.metadata = { ...clip.metadata, ...(cues !== undefined ? { cues } : {}) }; return state;
+    }
+    if (captionTrackId) throw new Error('Load the exact authorized caption cue snapshot before editing; raw caption IDs are not accepted.');
+    if (!['VIDEO', 'IMAGE', 'GRAPHIC', 'CAPTIONS'].includes(clip.kind)) throw new Error('Attach captions to picture clips or a caption lane.');
+    const caption = normalizeCaptionTrack(input, clip.durationSeconds, finishingFps(state.metadata), `${clip.id}:captions`);
+    const metadata = { ...clip.metadata };
+    for (const key of ['captionId', 'captionTrackId', 'captionsId', 'cues']) delete metadata[key];
+    clip.metadata = { ...metadata, captionTrack: caption, captionFps: finishingFps(state.metadata) };
     return state;
   }
 
@@ -355,12 +375,61 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
     if (position !== "in" && position !== "out") throw new Error("Transition position must be 'in' or 'out'.");
     const transitionKind = stringValue(input.transitionKind ?? input.type, "Transition type");
     if (!["CUT", "DISSOLVE", "FADE", "WIPE", "SLIDE"].includes(transitionKind)) throw new Error("Transition type is not supported.");
-    if (transitionKind !== "CUT") throw new Error("Only cut transitions are connected to canonical export yet. No edit was saved.");
+    if (process.env.FINALFRAME_MANIFEST_V5_ENABLED !== 'true') {
+      if (transitionKind !== "CUT") throw new Error("Only cut transitions are connected to canonical export yet. No edit was saved.");
+      const durationSeconds = numberValue(input.durationSeconds, "Transition duration");
+      if (durationSeconds > clip.durationSeconds) throw new Error("Transition cannot be longer than the clip.");
+      clip.transition = { ...record(clip.transition), [position]: { kind: transitionKind, durationSeconds } }; return state;
+    }
+    const { track } = findClip(state, clipId);
+    if (!['VIDEO', 'IMAGE', 'GRAPHIC'].includes(clip.kind)) throw new Error('Transitions require two adjacent picture clips on the same lane.');
+    const ordered = track.clips.slice().sort((a, b) => a.startSeconds - b.startSeconds);
+    const selectedIndex = ordered.indexOf(clip); const fromIndex = position === 'out' ? selectedIndex : selectedIndex - 1;
+    const from = ordered[fromIndex]; const to = ordered[fromIndex + 1];
+    if (!from || !to) throw new Error('Choose a boundary with a following picture clip on the same lane.');
+    const fps = finishingFps(state.metadata);
     const durationSeconds = numberValue(input.durationSeconds, "Transition duration");
-    if (durationSeconds > clip.durationSeconds) throw new Error("Transition cannot be longer than the clip.");
-    const transition = { kind: transitionKind, durationSeconds };
-    const existing = record(clip.transition);
-    clip.transition = { ...existing, [position]: transition };
+    const duration = transitionKind === 'CUT' ? 0 : Math.round(durationSeconds * fps) / fps;
+    if (transitionKind !== 'CUT' && (duration <= 0 || duration > 2 || duration > Math.min(from.durationSeconds, to.durationSeconds) / 2)) throw new Error('Transition overlap must fit within two seconds and half of each adjacent picture clip.');
+    const previous = record(record(from.transition).out);
+    const previousDuration = previous.kind && previous.kind !== 'CUT' ? Number(previous.durationSeconds) : 0;
+    if (!Number.isFinite(previousDuration) || Math.abs(to.startSeconds - (from.startSeconds + from.durationSeconds - previousDuration)) > 1 / fps / 100) throw new Error('Close the gap or remove the ambiguous overlap between these picture clips first.');
+    const audioPolicy = input.audioPolicy ?? 'PRESERVE';
+    if (!['PRESERVE', 'CROSSFADE'].includes(String(audioPolicy))) throw new Error('Choose preserve audio or an explicit native-audio crossfade.');
+    if (input.trimSoundtrackToPicture !== undefined && typeof input.trimSoundtrackToPicture !== 'boolean') throw new Error('Soundtrack tail trimming requires an explicit choice.');
+    const boundary = to.startSeconds; const delta = previousDuration - duration;
+    for (let index = fromIndex + 1; index < ordered.length; index++) { ordered[index].startSeconds = Math.round((ordered[index].startSeconds + delta) * fps) / fps; delete ordered[index].metadata.rendererOrderIndex; }
+    const pictureEnd = Math.max(...state.tracks.flatMap(lane => lane.clips.filter(candidate => ['VIDEO', 'IMAGE', 'GRAPHIC'].includes(candidate.kind)).map(candidate => candidate.startSeconds + candidate.durationSeconds)));
+    for (const lane of state.tracks) for (const candidate of lane.clips) {
+      if (candidate.kind === 'AUDIO' && candidate.startSeconds + candidate.durationSeconds > pictureEnd + 0.000001) {
+        const role = String(candidate.metadata.audioRole ?? '');
+        if (input.trimSoundtrackToPicture !== true || !['music', 'ambience'].includes(role)) throw new Error('This edit shortens the picture. Explicitly allow music/ambience tail trimming, or trim/move dialogue, voiceover and SFX first.');
+        const remaining = pictureEnd - candidate.startSeconds; const audio = record(candidate.metadata.audio);
+        if (remaining <= 0 || Number(audio.fadeInSeconds ?? 0) > remaining) throw new Error('Move this soundtrack or revise its fade before shortening the picture.');
+        candidate.durationSeconds = remaining; candidate.trimEndSeconds = (candidate.trimStartSeconds ?? 0) + remaining;
+        candidate.metadata.audio = { ...audio, fadeOutSeconds: Math.min(Number(audio.fadeOutSeconds ?? 0), remaining) };
+      }
+      if (candidate.kind === 'CAPTIONS' && Array.isArray(record(candidate.metadata.captionTrack).cues)) {
+        const original = candidate.metadata.captionTrack as unknown as CaptionTrack;
+        const cues = original.cues.map(cue => {
+          const start = candidate.startSeconds + cue.startFrame / fps; const end = start + cue.durationInFrames / fps;
+          const shiftedStart = start >= boundary ? start + delta : start; const shiftedEnd = end >= boundary ? end + delta : end;
+          return { ...cue, startSeconds: shiftedStart - candidate.startSeconds, durationSeconds: shiftedEnd - shiftedStart };
+        });
+        candidate.durationSeconds = pictureEnd - candidate.startSeconds;
+        candidate.metadata.captionTrack = normalizeCaptionTrack({ ...original, cues }, candidate.durationSeconds, fps, original.id);
+      }
+    }
+    const captions = state.tracks.flatMap(lane => lane.clips.flatMap(candidate => {
+      const caption = candidate.metadata.captionTrack as unknown as CaptionTrack | undefined;
+      return caption?.cues?.map(cue => ({ start: candidate.startSeconds + cue.startFrame / fps, end: candidate.startSeconds + (cue.startFrame + cue.durationInFrames) / fps, key: `${caption.language}:${String(caption.style?.position ?? 'BOTTOM')}` })) ?? [];
+    }));
+    for (const key of new Set(captions.map(cue => cue.key))) {
+      const cues = captions.filter(cue => cue.key === key).sort((a, b) => a.start - b.start);
+      for (let index = 1; index < cues.length; index++) if (cues[index].start < cues[index - 1].end - 0.000001) throw new Error('Caption cues collide after this transition. Revise their timing or placement first.');
+    }
+    from.transition = { ...record(from.transition), out: { kind: transitionKind, durationSeconds: duration, audioPolicy } };
+    state.metadata = { ...state.metadata, fps, finishingVersion: 5, soundtrackRetiming: { mode: 'ABSOLUTE', trimMusicTail: input.trimSoundtrackToPicture === true } };
     return state;
   }
 
@@ -391,19 +460,21 @@ async function getTimelineForMember(ctx: ReadCtx, timelineId: Id<"timelines">) {
   const member = await requireMember(ctx, timeline.studioExternalId);
   const production = await ctx.db.get(timeline.productionId);
   if (!production?.projectId) throw new Error("Timeline is not attached to a project.");
+  if (timeline.projectId && timeline.projectId !== production.projectId) throw new Error('Timeline project ownership is invalid.');
   await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
   const resourceState = await getEffectiveResourceState(ctx, production.projectId, "timeline", timeline._id.toString(), production._id);
   return { timeline, member, production, resourceState };
 }
 
 async function getTimelineState(ctx: ReadCtx, timeline: Timeline): Promise<TimelineState> {
-  const tracks = await ctx.db.query("timelineTracks").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect();
-  const clips = await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).collect();
+  const tracks = await ctx.db.query("timelineTracks").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).take(501);
+  const clips = await ctx.db.query("timelineClips").withIndex("by_timeline", (q) => q.eq("timelineId", timeline._id)).take(501);
+  if (tracks.length > 500 || clips.length > 500) throw new Error('This timeline exceeds the bounded editing graph. Use shorter components.');
   return await loadState(ctx, timeline, tracks, clips);
 }
 
 async function findOperationByKey(ctx: ReadCtx, key: string): Promise<Operation | null> {
-  const operations = await ctx.db.query("productionOperations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", key)).collect();
+  const operations = await ctx.db.query("productionOperations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", key)).take(2);
   return operations[0] ?? null;
 }
 
@@ -419,9 +490,9 @@ async function persistDraft(
   sourceTimelineId: Id<"timelines">,
   projectId: Id<"projects">,
 ) {
-  const timelines = await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", source.productionId)).collect();
+  const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq('productionId', source.productionId)).order('desc').first();
   const timestamp = now();
-  const versionNumber = Math.max(0, ...timelines.map((timeline) => timeline.versionNumber)) + 1;
+  const versionNumber = (latest?.versionNumber ?? 0) + 1;
   const provisional = await ctx.db.insert("timelines", {
     studioExternalId: member.studio.externalId,
     studioId: member.studio._id,
@@ -462,6 +533,13 @@ async function persistDraft(
     const nextClips: ClipState[] = [];
 
     for (const [clipIndex, clip] of track.clips.entries()) {
+      if (finishingV5Enabled()) {
+        const fps = finishingFps(state.metadata);
+        clip.startSeconds = Math.round(clip.startSeconds * fps) / fps;
+        clip.durationSeconds = Math.round(clip.durationSeconds * fps) / fps;
+        if (clip.trimStartSeconds !== undefined) clip.trimStartSeconds = Math.round(clip.trimStartSeconds * fps) / fps;
+        if (clip.trimEndSeconds !== undefined) clip.trimEndSeconds = (clip.trimStartSeconds ?? 0) + clip.durationSeconds;
+      }
       const trimStart = clip.trimStartSeconds ?? 0;
       if (!Number.isFinite(clip.startSeconds) || clip.startSeconds < 0 || !Number.isFinite(clip.durationSeconds) || clip.durationSeconds <= 0 || clip.startSeconds + clip.durationSeconds > 60 || !Number.isFinite(trimStart) || trimStart < 0 || (clip.trimEndSeconds !== undefined && (!Number.isFinite(clip.trimEndSeconds) || clip.trimEndSeconds < trimStart + clip.durationSeconds - 0.000001))) throw new Error("Edited clip timing exceeds the supported source or 60-second composition.");
       const assetId = clip.assetId ? clip.assetId as Id<"assets"> : undefined;
@@ -490,7 +568,7 @@ async function persistDraft(
         trimEndSeconds: clip.trimEndSeconds,
         volume: clip.volume,
         transition: clip.transition,
-        metadata: { ...clip.metadata, orderIndex: clipIndex },
+        metadata: { ...clip.metadata, clipKind: clip.kind, orderIndex: clipIndex },
       });
       clipMap.set(clip.id, clipId.toString());
       createdClipIds.push(clipId.toString());
@@ -501,6 +579,7 @@ async function persistDraft(
   }
 
   const encoded = encodeState({ ...state, tracks: normalizedTracks }, timelineKey(sourceTimelineId), source.versionNumber, { tracks: trackMap, clips: clipMap });
+  if (new TextEncoder().encode(JSON.stringify(encoded)).length > 512 * 1024) throw new Error('This edit is too large for one timeline. Split it into shorter components.');
   await ctx.db.patch(provisional, { durationSeconds, tracks: encoded, updatedAt: timestamp });
   return { timelineId: provisional, createdTrackIds, createdClipIds, durationSeconds };
 }
@@ -539,6 +618,7 @@ async function insertOperation(
 
 export const getDraft = query({
   args: { productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")) },
+  returns: v.union(v.null(), v.object({ timeline: v.any(), tracks: v.array(v.any()), metadata: v.any(), finishingV5Enabled: v.boolean(), operations: v.array(v.any()) })),
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
@@ -551,21 +631,23 @@ export const getDraft = query({
     if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId) throw new Error("Timeline does not belong to this production.");
     const state = await getTimelineState(ctx, timeline);
     const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
-    return { timeline, ...state, operations: operations.slice(0, 50) };
+    return { timeline, ...state, finishingV5Enabled: finishingV5Enabled(), operations: operations.slice(0, 50) };
   },
 });
 
 export const apply = mutation({
   args: { timelineId: v.id("timelines"), kind: editKind, input: v.any(), idempotencyKey: v.string(), correlationId: v.optional(v.string()) },
+  returns: v.object({ timelineId: v.id("timelines"), operationId: v.id("productionOperations"), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
     const existing = await findOperationByKey(ctx, key);
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
-      return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
+      return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
     if (args.input === undefined || args.input === null) throw new Error("Edit input is required.");
+    if (new TextEncoder().encode(JSON.stringify(args.input)).length > 128 * 1024) throw new Error('This edit input is too large. Use shorter caption or timing edits.');
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const state = await getTimelineState(ctx, timeline);
@@ -586,13 +668,14 @@ async function lastOperationForTimeline(ctx: ReadCtx, timeline: Timeline, kinds:
 
 export const undo = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
+  returns: v.object({ timelineId: v.id("timelines"), operationId: v.id("productionOperations"), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
-      return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
+      return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
@@ -611,13 +694,14 @@ export const undo = mutation({
 
 export const redo = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
+  returns: v.object({ timelineId: v.id("timelines"), operationId: v.id("productionOperations"), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
-      return { timelineId: existing.outputResourceIds[0], operationId: existing._id, replayed: true };
+      return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
@@ -639,6 +723,7 @@ export const redo = mutation({
 
 export const lockVersion = mutation({
   args: { timelineId: v.id("timelines"), idempotencyKey: v.string() },
+  returns: v.object({ timelineId: v.id("timelines"), operationId: v.id("productionOperations"), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const key = idempotencyKey(args.idempotencyKey);
     const { timeline, member, production, resourceState } = await getTimelineForMember(ctx, args.timelineId);

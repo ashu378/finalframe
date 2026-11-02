@@ -45,6 +45,8 @@ export interface VideoModelCapabilities {
     supportsPerformanceTransfer?: boolean;
     supportsLipSync?: boolean;
     supportsUpscale?: boolean;
+    upscaleFactor?: { min: number; max: number };
+    creativityLevels?: number[];
     supportsSourceAudioPreservation?: boolean;
     supportsCombinedFrameReferences?: boolean;
     /** Advanced operations require explicit endpoint review; catalog presence is insufficient. */
@@ -67,6 +69,9 @@ export interface VideoRoutingRequest {
     previousModelId?: string;
     requiresSourceAudioPreservation?: boolean;
     requiresMask?: boolean;
+    upscaleFactor?: number;
+    creativity?: number;
+    upscaleSource?: UpscaleSourceCertificate;
     qualityTier: QualityTier;
     durationSeconds: number;
     aspectRatio: string;
@@ -99,6 +104,7 @@ export interface VideoRouteSelection {
     estimatedCostUsd?: number;
     resolution?: string;
     policyVersion?: number;
+    upscaleQuote?: UpscaleQuoteCertificate;
 }
 
 export function buildVideoRouteMetadata(
@@ -116,6 +122,7 @@ export function buildVideoRouteMetadata(
         policyVersion: selection.policyVersion,
         modelVersion: options.modelVersion,
         estimatedProviderCostUsd: selection.estimatedCostUsd,
+        ...(selection.upscaleQuote ? { upscaleQuote: selection.upscaleQuote } : {}),
         maximumCostUsd: options.costCeilingUsd,
         referenceAssetIds: options.referenceAssetIds || [],
         audioAssetIds: options.audioAssetIds || [],
@@ -142,11 +149,70 @@ export function defaultVideoProductionPath(videoType: VideoType): VideoProductio
     return 'AI_VIDEO';
 }
 
+/** Certified against the provider's OpenAPI and OpenRouter's output-MP-second
+ * SKUs. Sources checked 2026-11-02: https://api.bfl.ai/openapi.json and
+ * https://openrouter.ai/api/v1/videos/models . This is a billing contract,
+ * not a preferred generation route. */
+export const UPSCALE_BILLING_VERSION = 'FLUX_OUTPUT_MEGAPIXEL_SECOND_V1' as const;
+export const UPSCALE_MAX_OUTPUT_PIXELS = 13_750_000;
+export interface UpscaleSourceCertificate {
+    assetId: string;
+    storageId: string;
+    checksum: string;
+    byteSize: number;
+    width: number;
+    height: number;
+    durationSeconds: number;
+}
+export interface UpscaleQuoteCertificate {
+    version: typeof UPSCALE_BILLING_VERSION;
+    catalogFingerprint: string;
+    source: UpscaleSourceCertificate;
+    factor: number;
+    creativity: number;
+    maximumOutputPixels: number;
+    billableDurationSeconds: number;
+    sku: string;
+    rateUsdPerMegapixelSecond: number;
+    costUsd: number;
+}
+
+export function validUpscaleSource(source: UpscaleSourceCertificate | undefined): source is UpscaleSourceCertificate {
+    return Boolean(source && typeof source.assetId === 'string' && source.assetId && typeof source.storageId === 'string' && source.storageId && typeof source.checksum === 'string' && source.checksum && Number.isSafeInteger(source.byteSize) && source.byteSize > 0 && source.byteSize <= 50_000_000 && Number.isInteger(source.width) && Number.isInteger(source.height) && source.width > 0 && source.height > 0 && Math.max(source.width, source.height) <= 2560 && Math.min(source.width, source.height) <= 1440 && source.width * source.height <= 2560 * 1440 && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 20);
+}
+
+export function videoCatalogFingerprint(model: { provider: string; modelId: string; supportedDurations: number[]; supportedResolutions: string[]; supportedAspectRatios: string[]; supportedSizes?: string[]; supportedParameters: string[]; upscaleFactor?: { min: number; max: number }; creativityLevels?: number[]; pricingSkus?: Record<string, number> }) {
+    const controls = [model.provider, model.modelId, [...model.supportedDurations].sort((a, b) => a - b), [...model.supportedResolutions].sort(), [...model.supportedAspectRatios].sort(), [...(model.supportedSizes || [])].sort(), [...model.supportedParameters].sort()];
+    // Preserve historical non-upscale review fingerprints. Upscale certification
+    // includes exact controls and prices, so changes withdraw that review.
+    return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...controls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : controls);
+}
+
+export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoRoutingRequest): UpscaleQuoteCertificate | undefined {
+    if ((request.operation || request.task) !== 'UPSCALE' || model.provider !== 'openrouter' || model.modelId !== 'black-forest-labs/flux-video-upscale' || !validUpscaleSource(request.upscaleSource)) return undefined;
+    if (model.upscaleFactor?.min !== 1.5 || model.upscaleFactor.max !== 3 || !Array.isArray(model.creativityLevels) || model.creativityLevels.length !== 2 || !model.creativityLevels.includes(0) || !model.creativityLevels.includes(1)) return undefined;
+    const factor = request.upscaleFactor;
+    const creativity = request.creativity;
+    if (!Number.isFinite(factor) || factor! < model.upscaleFactor.min || factor! > model.upscaleFactor.max || (creativity !== 0 && creativity !== 1)) return undefined;
+    const expectedSkus = ['cents_per_megapixel_second_precise', 'cents_per_megapixel_second_creative'];
+    const prices = model.pricingSkus || {};
+    if (Object.keys(prices).length !== expectedSkus.length || expectedSkus.some(sku => !Number.isFinite(prices[sku]) || prices[sku] <= 0) || Object.keys(prices).some(sku => !expectedSkus.includes(sku))) return undefined;
+    const sku = expectedSkus[creativity];
+    const rateUsdPerMegapixelSecond = prices[sku] / 100;
+    // The source, not the shot's requested trim, determines billed duration.
+    // No output alignment rule is documented. Use the hard 13.75MP output cap
+    // rather than assuming width*factor is an exact billed pixel count.
+    const billableDurationSeconds = Math.ceil(request.upscaleSource.durationSeconds);
+    const costUsd = Math.ceil(UPSCALE_MAX_OUTPUT_PIXELS / 1_000_000 * billableDurationSeconds * rateUsdPerMegapixelSecond * 1_000_000) / 1_000_000;
+    if (!Number.isFinite(costUsd) || costUsd <= 0) return undefined;
+    return { version: UPSCALE_BILLING_VERSION, catalogFingerprint: videoCatalogFingerprint(model), source: { ...request.upscaleSource }, factor: factor!, creativity, maximumOutputPixels: UPSCALE_MAX_OUTPUT_PIXELS, billableDurationSeconds, sku, rateUsdPerMegapixelSecond, costUsd };
+}
+
 export function videoModelSupportsRequest(model: VideoModelCapabilities, request: VideoRoutingRequest): boolean {
     if (!model.available) return false;
-    if (!Number.isFinite(request.durationSeconds) || request.durationSeconds < 1) return false;
-    if (request.maximumCostUsd !== undefined && (!Number.isFinite(request.maximumCostUsd) || request.maximumCostUsd < 0)) return false;
     const operation = request.operation || request.task;
+    if (!Number.isFinite(request.durationSeconds) || (operation === 'UPSCALE' ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
+    if (request.maximumCostUsd !== undefined && (!Number.isFinite(request.maximumCostUsd) || request.maximumCostUsd < 0)) return false;
     if (!(VIDEO_OPERATIONS as readonly string[]).includes(operation)) return false;
     // The portable API has no mask contract. Never silently drop a requested mask.
     if (request.requiresMask) return false;
@@ -157,7 +223,7 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     if (operation === 'PERFORMANCE_TRANSFER' && (!model.supportsPerformanceTransfer || !request.hasVideoReference || !request.hasImageReferences)) return false;
     if (operation === 'EXTEND' && (!model.supportsVideoExtension || !request.previousJobId || request.previousModelId !== model.modelId)) return false;
     if (operation === 'LIP_SYNC' && (!model.supportsLipSync || !request.hasAudioReference || (!request.hasImageReferences && !request.hasVideoReference))) return false;
-    if (operation === 'UPSCALE' && (!model.supportsUpscale || !request.hasVideoReference)) return false;
+    if (operation === 'UPSCALE' && (!model.supportsUpscale || !request.hasVideoReference || !quoteVideoUpscale(model, request))) return false;
     if (request.hasAudioReference && !model.supportsAudioReferences) return false;
     if (request.requiresSourceAudioPreservation && !model.supportsSourceAudioPreservation) return false;
     // Several endpoints give frame_images precedence and ignore all references.
@@ -167,9 +233,15 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     if (request.requiresFirstFrame && !model.supportsFirstFrame) return false;
     if (request.requiresLastFrame && !model.supportsLastFrame) return false;
     if (request.requiresAudio && !model.supportsAudio) return false;
-    if (!model.supportedDurations.includes(request.durationSeconds)) return false;
-    if (request.resolution && !model.supportedResolutions.includes(request.resolution)) return false;
-    if (!model.supportedAspectRatios.includes(request.aspectRatio)) return false;
+    if (operation === 'UPSCALE') {
+        // This operation inherits duration/framing from its single certified
+        // source. Null generation catalog lists are not unsupported controls.
+        if (request.resolution || request.requiresFirstFrame || request.requiresLastFrame || request.hasImageReferences || request.hasAudioReference || request.requiresAudio) return false;
+    } else {
+        if (!model.supportedDurations.includes(request.durationSeconds)) return false;
+        if (request.resolution && !model.supportedResolutions.includes(request.resolution)) return false;
+        if (!model.supportedAspectRatios.includes(request.aspectRatio)) return false;
+    }
     const estimatedCostUsd = estimateVideoCost(model, request);
     if (estimatedCostUsd === undefined) return false;
     if (request.maximumCostUsd !== undefined && estimatedCostUsd > request.maximumCostUsd) return false;
@@ -177,6 +249,7 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
 }
 
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
+    if ((request.operation || request.task) === 'UPSCALE') return quoteVideoUpscale(model, request)?.costUsd;
     const skus = Object.entries(model.pricingSkus || {}).filter(([, value]) => Number.isFinite(value) && value >= 0);
     const resolution = request.resolution?.toLowerCase();
     const taskPrefix = request.task === 'FRAME_TO_VIDEO' ? 'image_to_video_' : request.task === 'GENERATE' ? 'text_to_video_' : '';
@@ -287,7 +360,7 @@ export function selectVideoRoute(
     if (request.qualityTier === 'PREMIUM' && maximumCostUsd === undefined) throw new Error('An administrator must set a premium spending cap before premium video generation is available.');
     const requests = models.map((model) => ({
         model,
-        request: { ...checkedRequest, resolution: checkedRequest.resolution || defaultResolution(model, checkedRequest.aspectRatio) },
+        request: { ...checkedRequest, resolution: checkedRequest.operation === 'UPSCALE' ? checkedRequest.resolution : checkedRequest.resolution || defaultResolution(model, checkedRequest.aspectRatio) },
     }));
     const capable = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, { ...candidate, maximumCostUsd: undefined }));
     const eligible = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, candidate));
@@ -314,5 +387,6 @@ export function selectVideoRoute(
         estimatedCostUsd: estimateVideoCost(selected, selectedRequest),
         resolution: selectedRequest.resolution,
         policyVersion: policy?.updatedAt,
+        ...(selectedRequest.operation === 'UPSCALE' ? { upscaleQuote: quoteVideoUpscale(selected, selectedRequest) } : {}),
     };
 }

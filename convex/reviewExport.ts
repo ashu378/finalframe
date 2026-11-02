@@ -69,7 +69,7 @@ export const requestReview = mutation({
     const manifest = await ctx.db.get(args.manifestId);
     if (!manifest || manifest.productionId !== production._id || manifest.studioExternalId !== member.studio.externalId) throw new Error("Assembly manifest not found.");
     const manifestData = record(manifest.manifest);
-    if (manifestData.version !== 4 || manifest.contractVersion !== 4 || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString() || !manifestData.timelineId || !Array.isArray(manifestData.items)) throw new Error("This assembly manifest is not ready for review.");
+    if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString() || !manifestData.timelineId || !Array.isArray(manifestData.items)) throw new Error("This assembly manifest is not ready for review.");
     const timeline = await ctx.db.get(String(manifestData.timelineId) as Id<"timelines">);
     if (!timeline || timeline.projectId !== production.projectId || timeline.productionId !== production._id) throw new Error("This timeline is outside this production.");
     await requireApprovedResource(ctx, production.projectId, "timeline", timeline._id, production._id);
@@ -181,7 +181,7 @@ export const requestExport = mutation({
     if (!review || review.productionId !== production._id || review.studioExternalId !== member.studio.externalId || review.status !== "APPROVED") throw new Error("Approve the review before requesting an export.");
     if (production.projectId) await requireApprovedResource(ctx, production.projectId, "review", review._id.toString(), production._id);
     const manifestData = record(manifest.manifest);
-    if (manifestData.version !== 4 || manifest.contractVersion !== 4 || !manifest.projectId || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString()) throw new Error("Only canonical manifest v4 for this project can be exported.");
+    if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion || !manifest.projectId || !production.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString()) throw new Error("Only canonical manifest v4/v5 for this project can be exported.");
     if (!review.manifestId || review.manifestId !== manifest._id || review.timelineId !== manifestData.timelineId) throw new Error("This approval belongs to a different assembly version. Request a review of this exact manifest.");
     await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
     const reviewedTimeline = review.timelineId ? await ctx.db.get(review.timelineId) : null;
@@ -232,9 +232,9 @@ async function exactReviewScope(ctx: ReadCtx, link: Doc<'reviewLinks'>) {
   const [project, production, review, timeline, manifest, exportRecord] = await Promise.all([
     ctx.db.get(link.projectId), ctx.db.get(link.productionId), ctx.db.get(link.reviewId), ctx.db.get(link.timelineId), ctx.db.get(link.manifestId), link.exportId ? ctx.db.get(link.exportId) : null,
   ]);
-  if (!project || project.deletedAt || project.archivedAt || !production || production.projectId !== project._id || !review || review.projectId !== project._id || review.productionId !== production._id || review.timelineId !== link.timelineId || review.manifestId !== link.manifestId || review.exportId !== link.exportId || review.timelineVersionNumber !== link.timelineVersionNumber || !timeline || timeline.projectId !== project._id || timeline.productionId !== production._id || timeline.versionNumber !== link.timelineVersionNumber || !manifest || manifest.projectId !== project._id || manifest.productionId !== production._id || !exportRecord || exportRecord.projectId !== project._id || exportRecord.productionId !== production._id || exportRecord.manifestId !== manifest._id || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId) throw new Error('This review version is unavailable.');
+  if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !review || review.projectId !== project._id || review.productionId !== production._id || review.timelineId !== link.timelineId || review.manifestId !== link.manifestId || review.exportId !== link.exportId || review.timelineVersionNumber !== link.timelineVersionNumber || !timeline || timeline.projectId !== project._id || timeline.productionId !== production._id || timeline.versionNumber !== link.timelineVersionNumber || !manifest || manifest.projectId !== project._id || manifest.productionId !== production._id || !exportRecord || exportRecord.projectId !== project._id || exportRecord.productionId !== production._id || exportRecord.manifestId !== manifest._id || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId) throw new Error('This review version is unavailable.');
   const manifestData = record(manifest.manifest);
-  if (manifestData.timelineId !== timeline._id || manifestData.version !== 4) throw new Error('This review version is unavailable.');
+  if (manifestData.timelineId !== timeline._id || (manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion) throw new Error('This review version is unavailable.');
   return { project, production, review, timeline, manifest, exportRecord };
 }
 async function sharedReview(ctx: ReadCtx, token: string) {
@@ -257,7 +257,7 @@ export const createShareLink = mutation({
     const manifest = exportRecord?.manifestId ? await ctx.db.get(exportRecord.manifestId) : null;
     const timelineId = typeof record(manifest?.manifest).timelineId === 'string' ? ctx.db.normalizeId('timelines', record(manifest?.manifest).timelineId as string) : null;
     const timeline = timelineId ? await ctx.db.get(timelineId) : null;
-    if (!exportRecord || exportRecord.projectId !== args.projectId || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId || !manifest || manifest.projectId !== args.projectId || manifest.productionId !== exportRecord.productionId || manifest.contractVersion !== 4 || !timeline || timeline.projectId !== args.projectId || timeline.productionId !== exportRecord.productionId) throw new Error('Choose a completed export from this project.');
+    if (!exportRecord || exportRecord.projectId !== args.projectId || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId || !manifest || manifest.projectId !== args.projectId || manifest.productionId !== exportRecord.productionId || (manifest.contractVersion !== 4 && manifest.contractVersion !== 5) || record(manifest.manifest).version !== manifest.contractVersion || !timeline || timeline.projectId !== args.projectId || timeline.productionId !== exportRecord.productionId) throw new Error('Choose a completed export from this project.');
     const production = await ctx.db.get(exportRecord.productionId);
     if (!production || production.projectId !== args.projectId) throw new Error('This production is outside this project.');
     const storage = await ctx.db.system.get('_storage', exportRecord.storageId);

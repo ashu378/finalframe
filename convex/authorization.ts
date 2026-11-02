@@ -279,11 +279,14 @@ export async function requireProjectAccess(
   ctx: AuthorizationCtx,
   projectId: Doc<"projects">["_id"],
   allowedRoles?: readonly ProjectRole[],
-  options?: { includeInactive?: boolean },
+  options?: { includeInactive?: boolean; allowRestrictedRead?: boolean },
 ): Promise<AuthorizedProject> {
   const project = await ctx.db.get(projectId);
   if (!project || (!options?.includeInactive && (project.deletedAt || project.status === "DELETED"))) {
     throw new ConvexAuthorizationError("PROJECT_NOT_FOUND", "Project not found.");
+  }
+  if (project.moderationStatus === 'RESTRICTED' && !options?.allowRestrictedRead) {
+    throw new ConvexAuthorizationError('PROJECT_ACCESS_DENIED', 'This project is restricted. Contact support.');
   }
 
   const member = await requireMember(ctx, project.studioExternalId);
@@ -322,7 +325,7 @@ export async function requireProjectRole(
   allowedRoles: readonly ProjectRole[],
   options?: { includeInactive?: boolean },
 ) {
-  return await requireProjectAccess(ctx, projectId, allowedRoles, options);
+  return await requireProjectAccess(ctx, projectId, allowedRoles, { includeInactive: options?.includeInactive });
 }
 
 /** Require an owner/admin role; the current schema only defines the owner role. */

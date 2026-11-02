@@ -5,9 +5,10 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
 import type { QualityTier } from '@/lib/types/database';
-import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, VIDEO_OPERATIONS, type VideoOperation, type VideoModelCapabilities, type VideoTask } from '@/lib/ai/video-routing';
+import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, VIDEO_OPERATIONS, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate } from '@/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
+import { supportsCatalogUpscaleControls, validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '@/lib/production/workspace-controls';
 
 function object(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -55,14 +56,14 @@ export async function createShotGenerationJob(input: { productionId: string; sho
         const capability = assertCapability(capabilityId);
         const tier = input.qualityTier || 'STANDARD';
         const shotMetadata = object(shot.metadata);
-        const requestedTask = generationTask(shotMetadata.videoTask);
-        const operation: VideoOperation | undefined = (VIDEO_OPERATIONS as readonly unknown[]).includes(shotMetadata.operation) ? shotMetadata.operation as VideoOperation : undefined;
-        const operationControls = { operation, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, previousModelId: typeof shotMetadata.previousModelId === 'string' ? shotMetadata.previousModelId : undefined, requiresSourceAudioPreservation: shotMetadata.audioPolicy === 'KEEP_SOURCE' || shotMetadata.requiresSourceAudioPreservation === true, requiresMask: shotMetadata.requiresMask === true };
+        const operation: VideoOperation = (VIDEO_OPERATIONS as readonly unknown[]).includes(shotMetadata.operation) ? shotMetadata.operation as VideoOperation : generationTask(shotMetadata.videoTask);
+        const requestedTask = videoTaskForOperation(operation);
+        const operationControls = { operation, upscaleFactor: operation === 'UPSCALE' && typeof shotMetadata.upscaleFactor === 'number' ? shotMetadata.upscaleFactor : undefined, creativity: operation === 'UPSCALE' && typeof shotMetadata.creativity === 'number' ? shotMetadata.creativity : undefined, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, previousModelId: typeof shotMetadata.previousModelId === 'string' ? shotMetadata.previousModelId : undefined, requiresSourceAudioPreservation: shotMetadata.audioPolicy === 'KEEP_SOURCE' || shotMetadata.requiresSourceAudioPreservation === true, requiresMask: shotMetadata.requiresMask === true };
         const videoType = normalizeVideoType(shotContext.project?.projectType || production.projectType || production.preset || production.workflow);
         const outputPreset = String(production.outputPreset || 'LANDSCAPE');
         const typeRoutingEnabled = isFeatureEnabled('videoTypeRouting');
-        const aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : outputPreset === 'SQUARE' ? '1:1' : '16:9');
-        const durationSeconds = Number(shot.durationSeconds);
+        let aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : outputPreset === 'SQUARE' ? '1:1' : '16:9');
+        let durationSeconds = Number(shot.durationSeconds);
         const requestedResolution = typeof shotMetadata.resolution === 'string' ? shotMetadata.resolution : undefined;
         const firstFrameAssetId = typeof shotMetadata.firstFrameAssetId === 'string' ? shotMetadata.firstFrameAssetId : undefined;
         const lastFrameAssetId = typeof shotMetadata.lastFrameAssetId === 'string' ? shotMetadata.lastFrameAssetId : undefined;
@@ -73,23 +74,32 @@ export async function createShotGenerationJob(input: { productionId: string; sho
         const frameAssetIds = new Set([firstFrameAssetId, lastFrameAssetId].filter((value): value is string => Boolean(value)));
         const hasImageReferences = references.some((asset) => String(asset.mimeType).startsWith('image/') && !frameAssetIds.has(asset.assetId));
         const hasVideoReference = references.some((asset) => String(asset.mimeType).startsWith('video/'));
-        if (requestedTask === 'EDIT' || requestedTask === 'EXTEND') {
-            if (!hasVideoReference) return { success: false, error: 'Add a video reference to this project before editing or extending a clip.' };
+        try {
+            validateVideoOperationRequirements({ operation, audioPolicy: shotMetadata.audioPolicy as ShotOperationControls['audioPolicy'], hasImageReferences, hasVideoReference, hasAudioReference: shotContext.hasAudioReference === true, firstFrameAssetId, previousJobId: operationControls.previousJobId, previousModelId: operationControls.previousModelId, upscaleFactor: operationControls.upscaleFactor, upscaleMode: operationControls.creativity === 0 ? 'PRECISE' : operationControls.creativity === 1 ? 'CREATIVE' : undefined });
+        } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : 'Check the operation source media.' };
         }
         if (requiresFirstFrame && !firstFrameAssetId) return { success: false, error: 'Choose a project image for the first frame before generating this shot.' };
         if (requiresLastFrame && !lastFrameAssetId) return { success: false, error: 'Choose a project image for the last frame before generating this shot.' };
         if (firstFrameAssetId && !references.some((asset) => asset.assetId === firstFrameAssetId && String(asset.mimeType).startsWith('image/'))) return { success: false, error: 'The first frame must be an image stored in this project.' };
         if (lastFrameAssetId && !references.some((asset) => asset.assetId === lastFrameAssetId && String(asset.mimeType).startsWith('image/'))) return { success: false, error: 'The last frame must be an image stored in this project.' };
-        if (!typeRoutingEnabled && (hasImageReferences || shotContext.hasAudioReference || requiresFirstFrame || requiresLastFrame || requiresAudio || requestedResolution)) {
+        if (!typeRoutingEnabled && (operation !== 'GENERATE' || hasImageReferences || shotContext.hasAudioReference || requiresFirstFrame || requiresLastFrame || requiresAudio || requestedResolution)) {
             return { success: false, error: 'This shot needs a verified style-aware route for its media or output controls. Ask an administrator to enable and configure video routing.' };
         }
         if (!typeRoutingEnabled && videoType === 'MOTION_GRAPHICS') {
             return { success: false, error: 'Motion graphics use deterministic renderer templates. Open the production editor and add a designed graphics clip.' };
         }
+        let upscaleSource: UpscaleSourceCertificate | undefined;
+        if (operation === 'UPSCALE') {
+            if (requestedResolution) return { success: false, error: 'Upscale output dimensions come from the source and factor. Remove the resolution constraint first.' };
+            upscaleSource = await convex.action(api.videoRouting.prepareUpscaleSource, { productionId: input.productionId as any, shotId: input.shotId as any });
+            durationSeconds = upscaleSource!.durationSeconds;
+            aspectRatio = `${upscaleSource!.width}:${upscaleSource!.height}`;
+        }
         let provider = capability.provider;
         let model = capability.model;
         let route: Record<string, unknown> = {
-            videoType, task: requestedTask, ...operationControls, path: 'AI_VIDEO', routingMode: 'legacy', routeReason: 'Existing generic route retained while type-based routing is disabled.',
+            videoType, task: requestedTask, ...operationControls, upscaleSource, path: 'AI_VIDEO', routingMode: 'legacy', routeReason: 'Existing generic route retained while type-based routing is disabled.',
             constraints: { durationSeconds, aspectRatio, resolution: requestedResolution, hasImageReferences, hasVideoReference, hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio },
             referenceAssetIds: references.map((asset) => asset.assetId),
             audioAssetIds: shotContext.audioAssetIds || [],
@@ -108,7 +118,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
                 const live = await discoverOpenRouterVideoModels({ staleIfError: false });
                 const liveById = new Map(live.map((entry) => [entry.id, entry]));
                 const models: VideoModelCapabilities[] = configuration.catalog
-                    .filter((entry: any) => entry.provider === 'openrouter' && entry.available && entry.reviewedAt && liveById.has(entry.modelId))
+                    .filter((entry: any) => entry.provider === 'openrouter' && entry.available && entry.reviewedAt && liveById.has(entry.modelId) && (operation !== 'UPSCALE' || supportsCatalogUpscaleControls(liveById.get(entry.modelId)!.raw, operationControls.upscaleFactor, operationControls.creativity)))
                     .map((entry: any) => {
                         const current = liveById.get(entry.modelId)!;
                         return {
@@ -124,7 +134,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
                             supportsAudioReferences: entry.supportsAudioReferences,
                             supportsPerformanceTransfer: entry.supportsPerformanceTransfer,
                             supportsLipSync: entry.supportsLipSync,
-                            supportsUpscale: entry.supportsUpscale,
+                            supportsUpscale: entry.supportsUpscale, upscaleFactor: current.upscaleFactor, creativityLevels: current.creativityLevels,
                             supportsSourceAudioPreservation: entry.supportsSourceAudioPreservation,
                             supportsCombinedFrameReferences: entry.supportsCombinedFrameReferences,
                             reviewedOperations: entry.reviewedOperations,
@@ -146,7 +156,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
                     updatedAt: configuration.policy.updatedAt,
                 } : undefined;
                 const selection = selectVideoRoute({
-                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls,
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource,
                     resolution: requestedResolution, hasImageReferences, hasVideoReference,
                     hasAudioReference: shotContext.hasAudioReference,
                     requiresFirstFrame, requiresLastFrame, requiresAudio,
@@ -160,7 +170,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
                 const selectedResolution = selection.resolution || requestedResolution;
                 modelVersion = `video-catalog:${configuration.catalog.reduce((latest: number, entry: any) => Math.max(latest, entry.lastSeenAt || 0), 0)}:policy:${selection.policyVersion || 0}`;
                 route = buildVideoRouteMetadata({
-                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls,
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource,
                     resolution: selectedResolution, hasImageReferences, hasVideoReference,
                     hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio,
                 }, selection, {
@@ -173,7 +183,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
         }
         const estimate = await estimateProductionCost({
             shotCount: 1,
-            videoSeconds: Math.ceil(Number(shot.durationSeconds)),
+            videoSeconds: Math.ceil(durationSeconds),
             qualityTier: tier,
             needsAssembly: false,
         });

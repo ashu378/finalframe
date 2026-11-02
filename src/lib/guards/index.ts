@@ -16,6 +16,7 @@ type VerifiedUser = {
 };
 
 const currentUserQuery = makeFunctionReference<'query', {}, VerifiedUser | null>('auth:currentUser');
+const platformRoleQuery = makeFunctionReference<'query', {}, { userId: string; role: 'ADMIN' | 'SUPPORT' | 'MODERATOR' } | null>('platformAdministration:currentRole');
 
 async function getVerifiedUser(): Promise<VerifiedUser | null> {
     if (!process.env.NEXT_PUBLIC_CONVEX_URL) return null;
@@ -77,8 +78,12 @@ export async function requireOnboardingComplete(): Promise<UserProfile> {
 export async function requireAdmin(): Promise<UserProfile> {
     const user = await getVerifiedUser();
     if (!user) redirect('/login');
-    if (!user.isAdmin) redirect('/dashboard');
-    return profileFromUser(user);
+    const token = await convexAuthNextjsToken();
+    if (!token || !process.env.NEXT_PUBLIC_CONVEX_URL) redirect('/login');
+    const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL, { auth: token, logger: false });
+    const platform = await client.query(platformRoleQuery, {});
+    if (platform?.role !== 'ADMIN') redirect('/dashboard');
+    return { ...profileFromUser(user), is_admin: true, role: 'admin' };
 }
 
 /** Get the verified current user without redirecting. */

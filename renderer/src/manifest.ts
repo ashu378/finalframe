@@ -173,7 +173,25 @@ function validateAudioTrack(value: unknown, index: number, outputDuration: numbe
   return issues.length ? { issues } : { value: value as unknown as AudioTrack, issues };
 }
 
-function validateCaptionTrack(value: unknown, index: number, outputDuration: number): { value?: CaptionTrack; issues: ValidationIssue[] } {
+export function validateCaptionStyle(style: unknown, path = 'caption.style'): ValidationIssue[] {
+  if (!isRecord(style)) return [{ path, message: 'must be a caption style object' }];
+  const issues: ValidationIssue[] = [];
+  const keys = ['fontSize', 'color', 'backgroundColor', 'position', 'maxLines'];
+  for (const key of Object.keys(style)) if (!keys.includes(key)) issues.push({ path: `${path}.${key}`, message: 'is not an allowed caption style property' });
+  if (style.fontSize !== undefined && (!isFiniteInteger(style.fontSize) || style.fontSize < 12 || style.fontSize > 120)) issues.push({ path: `${path}.fontSize`, message: 'must be an integer from 12 to 120 pixels' });
+  if (style.color !== undefined && (typeof style.color !== 'string' || !/^#[\da-f]{6}$/i.test(style.color))) issues.push({ path: `${path}.color`, message: 'must be a six-digit hex color' });
+  if (style.backgroundColor !== undefined && (typeof style.backgroundColor !== 'string' || !/^#[\da-f]{6}([\da-f]{2})?$/i.test(style.backgroundColor))) issues.push({ path: `${path}.backgroundColor`, message: 'must be a six- or eight-digit hex color' });
+  if (style.position !== undefined && !['TOP', 'CENTER', 'BOTTOM'].includes(String(style.position))) issues.push({ path: `${path}.position`, message: 'must be TOP, CENTER, or BOTTOM' });
+  if (style.maxLines !== undefined && (!isFiniteInteger(style.maxLines) || style.maxLines < 1 || style.maxLines > 4)) issues.push({ path: `${path}.maxLines`, message: 'must be an integer from 1 to 4' });
+  return issues;
+}
+
+export function validateCaptionText(text: unknown, path = 'caption.text'): ValidationIssue[] {
+  if (typeof text !== 'string' || !text.trim() || /[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) || /\r(?!\n)/.test(text) || text.replace(/\r\n/g, '\n').split('\n').some(line => !line.trim())) return [{ path, message: 'must be complete plain caption text without markup, control characters, or blank separator lines' }];
+  return [];
+}
+
+function validateCaptionTrack(value: unknown, index: number, outputDuration: number, version: unknown): { value?: CaptionTrack; issues: ValidationIssue[] } {
   const path = `captionTracks[${index}]`;
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
@@ -192,10 +210,92 @@ function validateCaptionTrack(value: unknown, index: number, outputDuration: num
     if (!isFiniteInteger(cue.durationInFrames) || cue.durationInFrames <= 0) issues.push({ path: `${cuePath}.durationInFrames`, message: 'must be a positive integer' });
     if (isFiniteInteger(cue.startFrame) && isFiniteInteger(cue.durationInFrames) && cue.startFrame + cue.durationInFrames > outputDuration) issues.push({ path: cuePath, message: 'frame window must fit inside output.durationInFrames' });
     if (!isBoundedString(cue.text, 1_024)) issues.push({ path: `${cuePath}.text`, message: 'must be a non-empty string of at most 1024 characters' });
+    if (version === 5) issues.push(...validateCaptionText(cue.text, `${cuePath}.text`));
     if (cue.speaker !== undefined && !isBoundedString(cue.speaker, 128)) issues.push({ path: `${cuePath}.speaker`, message: 'must be a bounded string' });
   });
   if (value.style !== undefined && !isRecord(value.style)) issues.push({ path: `${path}.style`, message: 'must be a JSON object' });
+  else if (value.style !== undefined && version === 5) issues.push(...validateCaptionStyle(value.style, `${path}.style`));
   return issues.length ? { issues } : { value: value as unknown as CaptionTrack, issues };
+}
+
+function validateV5Composition(input: Record<string, unknown>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const tracks = new Map<string, Record<string, unknown>>();
+  const kinds = ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO', 'CAPTIONS'];
+  if (input.tracks !== undefined && !Array.isArray(input.tracks)) issues.push({ path: '$.tracks', message: 'must be an array' });
+  if (Array.isArray(input.tracks)) {
+    if (input.tracks.length > RENDER_LIMITS.maxItems + RENDER_LIMITS.maxAudioTracks + RENDER_LIMITS.maxCaptionTracks) issues.push({ path: '$.tracks', message: 'exceeds the bounded track count' });
+    input.tracks.forEach((track, index) => {
+      const path = `tracks[${index}]`;
+      if (!isRecord(track)) { issues.push({ path, message: 'must be a track object' }); return; }
+      if (!isBoundedString(track.id, 128)) issues.push({ path: `${path}.id`, message: 'must be a bounded track ID' });
+      if (!kinds.includes(String(track.kind))) issues.push({ path: `${path}.kind`, message: 'must be a supported track kind' });
+      if (!isFiniteInteger(track.orderIndex) || track.orderIndex < 0) issues.push({ path: `${path}.orderIndex`, message: 'must be a non-negative integer' });
+      if (track.name !== undefined && !isBoundedString(track.name, 160)) issues.push({ path: `${path}.name`, message: 'must be a bounded track name' });
+      if (typeof track.id === 'string') {
+        if (tracks.has(track.id)) issues.push({ path: `${path}.id`, message: 'must be unique within the manifest' });
+        tracks.set(track.id, track);
+      }
+    });
+  }
+  function checkTrack(row: Record<string, unknown>, path: string, audio: boolean) {
+    if (row.trackId === undefined) return;
+    if (!isBoundedString(row.trackId, 128)) { issues.push({ path: `${path}.trackId`, message: 'must be a bounded track ID' }); return; }
+    const track = tracks.get(row.trackId);
+    if (!track || (audio ? track.kind !== 'AUDIO' : !['VIDEO', 'IMAGE', 'GRAPHIC'].includes(String(track.kind)))) issues.push({ path: `${path}.trackId`, message: audio ? 'must resolve to an AUDIO track' : 'must resolve to a visual track' });
+  }
+  const items = (Array.isArray(input.items) ? input.items : []).filter(isRecord);
+  items.forEach((item, index) => {
+    checkTrack(item, `items[${index}]`, false);
+    if (item.orderIndex !== undefined && (!isFiniteInteger(item.orderIndex) || item.orderIndex < 0)) issues.push({ path: `items[${index}].orderIndex`, message: 'must be a non-negative integer' });
+  });
+  if (Array.isArray(input.audioTracks)) input.audioTracks.forEach((track, index) => {
+    if (!isRecord(track)) return;
+    checkTrack(track, `audioTracks[${index}]`, true);
+    for (const key of ['fadeInFrames', 'fadeOutFrames']) if (isFiniteInteger(track[key]) && isFiniteInteger(track.durationInFrames) && track[key] > track.durationInFrames) issues.push({ path: `audioTracks[${index}].${key}`, message: 'must fit inside the audio clip duration' });
+  });
+  const byId = new Map(items.map(item => [item.id, item]));
+  const lanes = new Map<unknown, Record<string, unknown>[]>();
+  for (const item of items) {
+    const lane = lanes.get(item.trackId) ?? [];
+    lane.push(item); lanes.set(item.trackId, lane);
+  }
+  for (const lane of lanes.values()) lane.sort((a, b) => Number(a.startFrame) - Number(b.startFrame) || Number(a.orderIndex ?? 0) - Number(b.orderIndex ?? 0));
+  const transitionIds = new Set<string>();
+  const incoming = new Set<unknown>();
+  const outgoing = new Set<unknown>();
+  const pairs = new Set<string>();
+  if (input.transitions !== undefined && !Array.isArray(input.transitions)) issues.push({ path: '$.transitions', message: 'must be an array' });
+  if (Array.isArray(input.transitions)) {
+    if (input.transitions.length > RENDER_LIMITS.maxItems) issues.push({ path: '$.transitions', message: 'exceeds the bounded transition count' });
+    input.transitions.forEach((transition, index) => {
+      const path = `transitions[${index}]`;
+      if (!isRecord(transition)) { issues.push({ path, message: 'must be a transition object' }); return; }
+      if (!isBoundedString(transition.id, 128) || transitionIds.has(String(transition.id))) issues.push({ path: `${path}.id`, message: 'must be a unique bounded transition ID' });
+      transitionIds.add(String(transition.id));
+      if (!['DISSOLVE', 'FADE', 'WIPE', 'SLIDE'].includes(String(transition.kind))) issues.push({ path: `${path}.kind`, message: 'must be DISSOLVE, FADE, WIPE, or SLIDE; CUT is represented by no transition' });
+      if (!['PRESERVE', 'CROSSFADE'].includes(String(transition.audioPolicy))) issues.push({ path: `${path}.audioPolicy`, message: 'must explicitly specify PRESERVE or CROSSFADE' });
+      const from = byId.get(transition.fromItemId);
+      const to = byId.get(transition.toItemId);
+      const duration = transition.durationInFrames;
+      const fps = isRecord(input.output) ? input.output.fps : undefined;
+      if (!isFiniteInteger(duration) || duration < 1 || !isFiniteInteger(fps) || duration > 2 * fps) issues.push({ path: `${path}.durationInFrames`, message: 'must be a positive integer of at most two seconds' });
+      if (!from || !to || from === to) { issues.push({ path, message: 'must reference two distinct visual item IDs' }); return; }
+      if (from.trackId !== to.trackId) issues.push({ path, message: 'transition items must be on the same visual track' });
+      const lane = lanes.get(from.trackId) ?? [];
+      if (lane.indexOf(to) !== lane.indexOf(from) + 1 || (isFiniteInteger(from.orderIndex) && isFiniteInteger(to.orderIndex) && from.orderIndex >= to.orderIndex)) issues.push({ path, message: 'transition items must be adjacent in forward timeline order' });
+      if (!isFiniteInteger(duration) || !isFiniteInteger(from.durationInFrames) || !isFiniteInteger(to.durationInFrames) || duration > from.durationInFrames / 2 || duration > to.durationInFrames / 2) issues.push({ path: `${path}.durationInFrames`, message: 'must not exceed half of either item duration' });
+      if (!isFiniteInteger(from.startFrame) || !isFiniteInteger(from.durationInFrames) || !isFiniteInteger(to.startFrame) || to.startFrame !== from.startFrame + from.durationInFrames - Number(duration)) issues.push({ path, message: 'explicit item overlap must equal the transition duration' });
+      if (outgoing.has(from.id) || incoming.has(to.id)) issues.push({ path, message: 'an item may have at most one incoming and one outgoing transition' });
+      outgoing.add(from.id); incoming.add(to.id);
+      pairs.add(JSON.stringify([from.id, to.id]));
+    });
+  }
+  for (const lane of lanes.values()) for (let index = 1; index < lane.length; index++) {
+    const from = lane[index - 1]; const to = lane[index];
+    if (Number(from.startFrame) + Number(from.durationInFrames) > Number(to.startFrame) && !pairs.has(JSON.stringify([from.id, to.id]))) issues.push({ path: '$.items', message: 'same-track picture overlaps require an explicit transition' });
+  }
+  return issues;
 }
 
 function validatePoster(value: unknown): { value?: PosterSpec; issues: ValidationIssue[] } {
@@ -227,12 +327,12 @@ export function validateManifest(input: unknown): ValidationResult {
   if (!isRecord(input)) return { ok: false, issues: [{ path: '$', message: 'manifest must be an object' }] };
 
   if (input.kind !== RENDER_MANIFEST_KIND) issues.push({ path: '$.kind', message: `must equal ${RENDER_MANIFEST_KIND}` });
-  if (!SUPPORTED_RENDER_MANIFEST_VERSIONS.includes(input.version as 1 | 2 | 4)) issues.push({ path: '$.version', message: `must be one of: ${SUPPORTED_RENDER_MANIFEST_VERSIONS.join(', ')}` });
+  if (!SUPPORTED_RENDER_MANIFEST_VERSIONS.includes(input.version as 1 | 2 | 4 | 5)) issues.push({ path: '$.version', message: `must be one of: ${SUPPORTED_RENDER_MANIFEST_VERSIONS.join(', ')}` });
   for (const key of ['manifestId', 'projectId', 'rendererVersion']) {
     if (!isBoundedString(input[key])) issues.push({ path: `$.${key}`, message: 'must be a non-empty bounded string' });
   }
 
-  if (input.version === 4) {
+  if (input.version === 4 || input.version === 5) {
     if (!isRecord(input.selection)) issues.push({ path: '$.selection', message: 'manifest v4 requires a selection object' });
     else {
       if (!SELECTION_SCOPES.includes(input.selection.scope as RenderSelectionScope)) issues.push({ path: '$.selection.scope', message: 'must be a supported selection scope' });
@@ -292,7 +392,14 @@ export function validateManifest(input: unknown): ValidationResult {
 
   if (Array.isArray(input.captionTracks)) {
     if (input.captionTracks.length > RENDER_LIMITS.maxCaptionTracks) issues.push({ path: '$.captionTracks', message: `must contain at most ${RENDER_LIMITS.maxCaptionTracks} tracks` });
-    input.captionTracks.forEach((value, index) => issues.push(...validateCaptionTrack(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0).issues));
+    const trackIds = new Set<string>();
+    input.captionTracks.forEach((value, index) => {
+      issues.push(...validateCaptionTrack(value, index, isRecord(output) && isFiniteInteger(output.durationInFrames) ? output.durationInFrames : 0, input.version).issues);
+      if (input.version === 5 && isRecord(value) && typeof value.id === 'string') {
+        if (trackIds.has(value.id)) issues.push({ path: `captionTracks[${index}].id`, message: 'must be unique within the manifest' });
+        trackIds.add(value.id);
+      }
+    });
   } else if (input.captionTracks !== undefined) issues.push({ path: '$.captionTracks', message: 'must be an array' });
 
   if (Array.isArray(input.shots)) {
@@ -306,7 +413,7 @@ export function validateManifest(input: unknown): ValidationResult {
       if (result.value && ids.has(result.value.itemId)) issues.push({ path: `shots[${index}].itemId`, message: 'must be unique within the manifest' });
       if (result.value) {
         ids.add(result.value.itemId);
-        if (input.version === 4) {
+        if (input.version === 4 || input.version === 5) {
           const item = Array.isArray(input.items) ? input.items.find(value => isRecord(value) && value.id === result.value?.itemId) : undefined;
           if (!isRecord(item) || item.shotId !== result.value.shotId || item.shotVersionId !== result.value.shotVersionId || item.assetId !== result.value.assetId) issues.push({ path: `shots[${index}].itemId`, message: 'must resolve to the same shot, take, and asset as its timeline item' });
         }
@@ -316,6 +423,7 @@ export function validateManifest(input: unknown): ValidationResult {
 
   if (input.poster !== undefined) issues.push(...validatePoster(input.poster).issues);
   if (input.metadata !== undefined && !isRecord(input.metadata)) issues.push({ path: '$.metadata', message: 'must be a JSON object' });
+  if (input.version === 5) issues.push(...validateV5Composition(input));
 
   return { ok: issues.length === 0, issues };
 }

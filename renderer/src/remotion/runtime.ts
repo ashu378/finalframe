@@ -30,7 +30,20 @@ function safeOutputPath(value: string): string {
 
 /** Real Remotion runtime. FFmpeg normalization and ffprobe verification are mandatory when adapters are supplied. */
 export class RemotionRenderRuntime implements RenderRuntime {
-  constructor(private readonly options: RemotionRuntimeOptions) {}
+  private readonly bundleCache: Map<string, string>;
+  private pendingBundle?: Promise<string>;
+  constructor(private readonly options: RemotionRuntimeOptions) { this.bundleCache = options.bundleCache ?? new Map(); }
+
+  private async bundledEntryPoint(): Promise<string> {
+    const cached = this.bundleCache.get(this.options.entryPoint);
+    if (cached) return cached;
+    if (this.pendingBundle) return this.pendingBundle;
+    this.pendingBundle = bundle({ entryPoint: this.options.entryPoint }).then(serveUrl => {
+      this.bundleCache.set(this.options.entryPoint, serveUrl);
+      return serveUrl;
+    });
+    try { return await this.pendingBundle; } finally { this.pendingBundle = undefined; }
+  }
 
   async render(plan: AssemblyPlan, request: RenderRequest): Promise<{ outputPath: string; durationInFrames: number; verification?: RenderArtifactVerification }> {
     const production = (request.mode ?? 'production') === 'production';
@@ -41,9 +54,7 @@ export class RemotionRenderRuntime implements RenderRuntime {
     }
     const outputPath = safeOutputPath(request.outputPath);
     await mkdir(dirname(outputPath), { recursive: true });
-    const cacheKey = this.options.entryPoint;
-    const serveUrl = this.options.bundleCache?.get(cacheKey) ?? await bundle({ entryPoint: this.options.entryPoint });
-    this.options.bundleCache?.set(cacheKey, serveUrl);
+    const serveUrl = await this.bundledEntryPoint();
     const composition = await selectComposition({
       serveUrl,
       id: plan.compositionId,

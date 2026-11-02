@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { type StudioAsset, type AssetType } from '@/lib/types/database';
+import { type StudioAsset, type AssetType, type Template } from '@/lib/types/database';
 import { AssetSearch } from './asset-search';
 import { AssetGrid } from './asset-grid';
 import { cn } from '@/lib/utils';
+import { TemplateList } from '@/components/templates/template-list';
 
 interface AssetLibraryClientProps {
     initialAssets: StudioAsset[];
-    presets: StudioAsset[];
+    presets: Template[];
     studioId: string;
 }
 
@@ -31,7 +32,7 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
                                 : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
                         )}
                     >
-                        My_Materials
+                        My media
                     </button>
                     <button
                         onClick={() => setActiveTab('studio_presets')}
@@ -42,25 +43,24 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
                                 : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
                         )}
                     >
-                        Studio_Presets
+                        Studio presets
                     </button>
                 </div>
 
-                <AssetSearch
+                {activeTab === 'my_materials' ? <AssetSearch
                     query={searchQuery}
                     onQueryChange={setSearchQuery}
                     selectedType={filterType}
                     onTypeChange={setFilterType}
-                />
+                /> : <label className="text-sm font-medium">Search presets<input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="ml-3 min-h-11 rounded-xl border border-border bg-background px-3" /></label>}
             </div>
 
-            <AssetGrid
-                initialAssets={activeTab === 'my_materials' ? initialAssets : presets}
+            {activeTab === 'my_materials' ? <AssetGrid
+                initialAssets={initialAssets}
                 studioId={studioId}
                 searchQuery={searchQuery}
                 filterType={filterType}
-                isPresetMode={activeTab === 'studio_presets'}
-            />
+            /> : <TemplateList key={presets.map((preset) => `${preset.id}:${preset.blueprint_data.saved}`).join(',')} templates={presets.filter((preset) => `${preset.name} ${preset.description ?? ''}`.toLowerCase().includes(searchQuery.toLowerCase()))} studioId={studioId} />}
         </div>
     );
 }

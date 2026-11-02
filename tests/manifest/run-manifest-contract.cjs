@@ -38,6 +38,7 @@ const valid = {
 };
 
 assert.equal(manifest.validateManifest(valid).ok, true, 'v4 manifest validates');
+assert.equal(manifest.validateManifest({ ...valid, version: 5 }).ok, true, 'v5 reader retains canonical shot selection');
 assert.equal(manifest.validateManifest({ ...valid, selection: { scope: 'SHOTS', ids: [] } }).ok, false, 'scoped manifest requires selected IDs');
 assert.equal(manifest.validateManifest({ ...valid, version: 3 }).ok, false, 'v3 is not a writable renderer contract');
 const split = { ...valid, items: [
@@ -55,19 +56,26 @@ const assembly = read('convex/assembly.ts');
 const timeline = read('convex/timeline.ts');
 const renderJobs = read('convex/renderJobs.ts');
 const reviewExport = read('convex/reviewExport.ts');
-assert.match(assembly, /version: 4/);
+assert.match(assembly, /const version = finishingV5Enabled\(\) \? 5 : 4/, 'writer defaults to v4 and explicitly gates v5');
+assert.match(assembly, /contractVersion: version/, 'stored contract uses the selected writer version');
 assert.match(assembly, /selectionScope/);
 assert.match(assembly, /selectedSceneIds/);
 assert.match(assembly, /items = rendererItems/);
-assert.match(assembly, /manifestData\.version === 4/);
-assert.match(timeline, /payload\.version !== 4/);
+assert.match(assembly, /\[4, 5\]\.includes\(Number\(manifestData\.version\)\)/, 'idempotent assembly reads both supported canonical versions');
+assert.match(timeline, /!\[4, 5\]\.includes\(Number\(payload\.version\)\)/, 'timeline rejects other manifest versions');
+assert.match(timeline, /payload\.version !== manifest\.contractVersion/, 'timeline rejects payload/stored contract mismatch');
+assert.match(timeline, /!validateManifest\(payload\)\.ok/, 'timeline validates the canonical payload before creating a version');
 assert.match(timeline, /item\.startFrame/);
 assert.match(renderJobs, /manifestData\.version !== 4/);
+assert.match(renderJobs, /manifestData\.version !== 5/);
+assert.match(renderJobs, /manifestData\.version !== manifest\.contractVersion/);
 assert.match(renderJobs, /export const getStatus/);
 assert.match(renderJobs, /status: "COMPLETED", progress: 100/);
 assert.match(reviewExport, /manifestData\.version !== 4/);
+assert.match(reviewExport, /manifestData\.version !== 5/);
+assert.match(reviewExport, /manifestData\.version !== manifest\.contractVersion/);
 assert.match(reviewExport, /by_idempotency/);
 assert.match(reviewExport, /status: "QUEUED", progress: 0/);
 assert.match(reviewExport, /downloadUrl/);
 
-console.log(JSON.stringify({ ok: true, checked: 'manifest-v4-selection-async-export' }));
+console.log(JSON.stringify({ ok: true, checked: 'manifest-v4-v5-selection-async-export' }));

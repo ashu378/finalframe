@@ -8,6 +8,7 @@ import { ProductionReleaseView } from './production-release-view';
 import { Button } from '@/components/ui/button';
 import { ShareButton } from '@/components/review/share-button';
 import type { RenderJobState } from '@/lib/render/contracts';
+import { captionTrackDownloadName } from '@/lib/production/caption-controls';
 
 function rendererStateFor(status: string): RenderJobState | 'UNAVAILABLE' {
   if (status === 'QUEUED') return 'QUEUED';
@@ -30,6 +31,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   const review = state?.reviews?.filter((item: any) => item.manifestId === manifest?._id && !item.exportId).sort((a: any, b: any) => b.createdAt - a.createdAt)[0];
   const latestExport = state?.exports?.find((item: any) => item.manifestId === manifest?._id);
   const exportDetails = useQuery(api.reviewExport.getExport, latestExport ? { exportId: latestExport._id } : 'skip');
+  const captionFiles = useQuery(api.assembly.captionSidecars, manifest && latestExport?.status === 'COMPLETED' && Array.isArray((manifest.manifest as any)?.captionTracks) && (manifest.manifest as any).captionTracks.length ? { manifestId: manifest._id, exportId: latestExport._id } : 'skip');
   const latestJob = jobs?.find((item: any) => item.manifestId === manifest?._id);
   const canEdit = ['OWNER', 'EDITOR'].includes(state?.projectRole ?? ''); const canDecide = ['OWNER', 'EDITOR', 'REVIEWER'].includes(state?.projectRole ?? '');
   // An unexported assembly is not evidence of an unavailable renderer. Other
@@ -53,6 +55,11 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
     if (!selected || !approved) return;
     await save(() => requestExport({ productionId: id, manifestId: selected._id, reviewId: approved._id, idempotencyKey: `release-export:${selected._id}:${approved._id}` }));
   }
+  function downloadCaptions(text: string, language: string, trackId: string, format: 'srt' | 'vtt') {
+    const url = URL.createObjectURL(new Blob([text], { type: format === 'vtt' ? 'text/vtt;charset=utf-8' : 'application/x-subrip;charset=utf-8' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = captionTrackDownloadName(language, trackId, format);
+    document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
   return <div className="space-y-6">
     <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
       <h2 className="text-lg font-semibold">Review and export an approved timeline</h2>
@@ -62,6 +69,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
       {latestJob?.status === 'QUEUED' && <p className="text-sm text-muted-foreground">Export queued. Your approved timeline is saved; processing has not started.</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {latestExport?.status === 'COMPLETED' && canEdit && state?.projectExternalId && <ShareButton projectId={state.projectExternalId} />}
+      {captionFiles?.length ? <div className="space-y-2"><p className="text-sm text-muted-foreground">Caption files match this exact completed export. Tracks download separately; caption styling is included in the video.</p><div className="space-y-3">{captionFiles.map((file, index) => <div key={file.trackId} className="space-y-2 rounded-lg border border-border p-3"><p className="break-all text-xs text-muted-foreground">Caption track {index + 1} · {file.language} · {file.trackId}</p><div className="flex flex-wrap gap-2"><Button variant="secondary" aria-label={`Download ${file.language} caption track ${file.trackId} as SRT`} onClick={() => downloadCaptions(file.srt, file.language, file.trackId, 'srt')}>Download track {index + 1} SRT</Button><Button variant="secondary" aria-label={`Download ${file.language} caption track ${file.trackId} as VTT`} onClick={() => downloadCaptions(file.vtt, file.language, file.trackId, 'vtt')}>Download track {index + 1} VTT</Button></div></div>)}</div></div> : null}
     </section>
     <ProductionReleaseView review={{ availability, videoUrl: exportDetails?.downloadUrl ?? undefined, decision, canDecide: Boolean(canDecide && review && review.status === 'REQUESTED') }} renderer={{ state: rendererState, message: latestJob?.errorMessage ?? undefined }} download={{ status: downloadStatus, href: exportDetails?.downloadUrl ?? undefined, fileName: exportDetails?.mimeType === 'video/webm' ? 'finalframe-export.webm' : exportDetails?.mimeType === 'video/quicktime' ? 'finalframe-export.mov' : 'finalframe-export.mp4' }} savingDecision={saving} retryingRender={saving} onRetryRender={canEdit && latestJob?.status === 'FAILED' ? () => save(() => retryRender({ jobId: latestJob._id })) : undefined} onApprove={review ? () => save(() => approve({ reviewId: review._id })) : undefined} onRequestChanges={review ? note => save(() => requestRevision({ reviewId: review._id, note })) : undefined} />
   </div>;

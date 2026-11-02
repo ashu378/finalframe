@@ -1,6 +1,6 @@
 export const RENDER_MANIFEST_KIND = 'finalframe.render-manifest' as const;
 export const RENDER_MANIFEST_VERSION = 4 as const;
-export const SUPPORTED_RENDER_MANIFEST_VERSIONS = [1, 2, 4] as const;
+export const SUPPORTED_RENDER_MANIFEST_VERSIONS = [1, 2, 4, 5] as const;
 
 export type RenderSelectionScope = 'FULL_PROJECT' | 'TIMELINE' | 'SCENES' | 'SHOTS';
 
@@ -27,6 +27,7 @@ export interface RenderItemBase {
   shotId?: string;
   shotVersionId?: string;
   assetId?: string;
+  trackId?: string;
 }
 
 export interface VideoRenderItem extends RenderItemBase {
@@ -53,6 +54,7 @@ export type RenderItem = VideoRenderItem | ImageRenderItem | MotionGraphicsRende
 
 export interface AudioTrack {
   id: string;
+  trackId?: string;
   src: string;
   startFrame: number;
   durationInFrames: number;
@@ -78,6 +80,31 @@ export interface CaptionTrack {
   style?: Record<string, unknown>;
 }
 
+/** v5 only. Older manifests retain their original unstyled caption behavior. */
+export interface CaptionStyle {
+  fontSize?: number;
+  color?: string;
+  backgroundColor?: string;
+  position?: 'TOP' | 'CENTER' | 'BOTTOM';
+  maxLines?: number;
+}
+
+export interface ManifestTrack {
+  id: string;
+  kind: 'VIDEO' | 'IMAGE' | 'GRAPHIC' | 'AUDIO' | 'CAPTIONS';
+  orderIndex: number;
+  name?: string;
+}
+
+export interface VisualTransition {
+  id: string;
+  fromItemId: string;
+  toItemId: string;
+  kind: 'DISSOLVE' | 'FADE' | 'WIPE' | 'SLIDE';
+  durationInFrames: number;
+  audioPolicy: 'PRESERVE' | 'CROSSFADE';
+}
+
 export interface PosterSpec {
   src: string;
   width: number;
@@ -99,7 +126,7 @@ export interface ShotManifestEntry {
 
 export interface RenderManifest {
   kind: typeof RENDER_MANIFEST_KIND;
-  version: 1 | 2 | typeof RENDER_MANIFEST_VERSION;
+  version: 1 | 2 | typeof RENDER_MANIFEST_VERSION | 5;
   manifestId: string;
   projectId: string;
   rendererVersion: string;
@@ -116,6 +143,8 @@ export interface RenderManifest {
   shots?: ShotManifestEntry[];
   audioTracks?: AudioTrack[];
   captionTracks?: CaptionTrack[];
+  tracks?: ManifestTrack[];
+  transitions?: VisualTransition[];
   poster?: PosterSpec;
   metadata?: Record<string, unknown>;
 }

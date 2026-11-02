@@ -98,7 +98,8 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
         if (event.type === 'trim') { kind = 'trim'; input = { clipId: event.clipId, trimStartSeconds: event.startSeconds, trimEndSeconds: event.endSeconds }; }
         if (event.type === 'split') { kind = 'split'; input = { clipId: event.clipId, splitAtSeconds: Math.max(0.1, (selectedClip?.durationSeconds ?? 1) / 2) }; }
         if (event.type === 'move') { kind = 'reorder'; input = { clipId: event.clipId, toIndex: event.direction === 'earlier' ? 0 : 999 }; }
-        if (event.type === 'transition') { kind = 'addTransition'; input = { clipId: event.clipId, position: 'out', transitionKind: event.transition, durationSeconds: event.transition === 'CUT' ? 0 : 0.25 }; }
+        if (event.type === 'transition') { kind = 'addTransition'; input = { clipId: event.clipId, position: 'out', transitionKind: event.transition, durationSeconds: event.durationSeconds, audioPolicy: event.audioPolicy, trimSoundtrackToPicture: event.trimSoundtrackToPicture }; }
+        if (event.type === 'captions') { kind = 'updateCaptions'; input = { clipId: event.clipId, cues: event.cues, language: event.language, style: event.style }; }
         if (event.type === 'audio-level') { kind = 'adjustAudio'; input = { clipId: event.clipId, volume: Math.pow(10, event.volumeDb / 20) }; }
         const result = await applyTimelineEdit({ timelineId, kind, input, idempotencyKey });
         setActiveTimelineId(result.timelineId as Id<'timelines'>);
@@ -107,7 +108,8 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
       setMessage('A new editable version is ready. Your previous version is still preserved.');
     } catch (error) {
       setSaveStatus('error');
-      setMessage('We could not save that edit. Check project permissions and whether the timeline is locked.');
+      const detail = error instanceof Error ? error.message.match(/Uncaught Error: ([^\n]+)/)?.[1] : undefined;
+      setMessage(detail && /caption|transition|soundtrack|picture|dialogue|voiceover|frame|gap|overlap/i.test(detail) ? detail.slice(0, 300) : 'This edit could not be saved. Review timing, captions, project permissions and version locks.');
     }
   }
 
@@ -116,7 +118,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   return <div className="space-y-8">
     <section className="ff-card p-5 sm:p-7"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow">Editing workspace</p><h2 className="ff-display mt-2 text-3xl font-semibold">Change one part without losing the rest.</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Use a plain-language request for a creative change, or select a clip below for practical timing and audio edits.</p></div><label className="grid gap-2 text-sm font-semibold sm:min-w-64">Editing <select value={selectedNode.id} onChange={(event) => { const node = nodes.find((candidate) => candidate.id === event.target.value); if (node) selectNode(node); }} className="h-11 rounded-xl border border-input bg-background px-3 font-normal outline-none focus:border-primary focus:ring-2 focus:ring-ring/40">{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label></div></section>
     <PromptEditPanel selectedNode={selectedNode} impact={impact} impactLoading={impactRequested && impactQuery === undefined} impactError={impactError} onPreviewImpact={handlePromptPreview} onSubmitOperation={handlePromptSubmit} />
-    <TimelineEditor timeline={timeline} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
+    <TimelineEditor timeline={timeline} frameRate={timeline?.frameRate} finishingV5Enabled={draft?.finishingV5Enabled === true} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
     {message ? <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/45 p-4 text-sm" role="status"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[hsl(var(--success))]" aria-hidden="true" /><span>{message}</span></div> : null}
     {impactError ? <div className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive" role="alert"><CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{impactError}</span></div> : null}
   </div>;

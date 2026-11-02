@@ -28,7 +28,7 @@ export function TestCreditGrantForm() {
         <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[.16em] text-[#b99b5f]">Development only</p>
             <h2 id="test-credit-title" className="mt-3 text-xl font-semibold">Grant controlled test credits</h2>
-            <p className="mt-2 text-sm leading-6 text-[#91a0b8]">This form is available to admins, but Convex still requires the development test-credit flag. It creates an auditable ledger entry and never creates a payment record.</p>
+            <p className="mt-2 text-sm leading-6 text-[#91a0b8]">This form is available to studio administrators, but Convex still requires the development test-credit flag. It creates an auditable ledger entry and never creates a payment record.</p>
         </div>
         <form action={submit} className="mt-6 grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-medium">Amount

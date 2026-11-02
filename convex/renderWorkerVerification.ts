@@ -22,9 +22,9 @@ export const prepare = internalMutation({ args: fixtureArgs, returns: v.any(), h
   enabled(args.fixtureKey); await fixture(ctx, args.jobId);
   return await prepareRenderDispatch(ctx, { jobId: args.jobId }, args.fixtureKey);
 } });
-export const makeDue = internalMutation({ args: { ...fixtureArgs, expireRender: v.optional(v.boolean()) }, returns: v.any(), handler: async (ctx, args) => {
+export const makeDue = internalMutation({ args: { ...fixtureArgs, expireRender: v.optional(v.boolean()), pastRecoveryWindow: v.optional(v.boolean()) }, returns: v.any(), handler: async (ctx, args) => {
   enabled(args.fixtureKey); const job = await fixture(ctx, args.jobId);
-  await ctx.db.patch(job._id, { nextDispatchAt: undefined, dispatchLeaseExpiresAt: Date.now() - 1, ...(args.expireRender ? { leaseExpiresAt: Date.now() - 1 } : {}) });
+  await ctx.db.patch(job._id, { nextDispatchAt: undefined, dispatchLeaseExpiresAt: Date.now() - 1, ...(args.expireRender ? { leaseExpiresAt: Date.now() - 1 } : {}), ...(args.pastRecoveryWindow ? { acceptedAt: Date.now() - 2 * 60 * 60_000 - 1 } : {}) });
   return { leaseId: job.leaseId };
 } });
 export const snapshot = internalQuery({ args: fixtureArgs, returns: v.any(), handler: async (ctx, args) => {
@@ -73,8 +73,20 @@ export const run = internalAction({ args: { fixtureKey: v.string(), runId: v.str
     assert(retry.leaseId === first.leaseId && retry.attempt === 1 && JSON.stringify(retry.payload) === JSON.stringify(first.payload), 'unknown HTTP acceptance retries the exact payload and lease');
     await ctx.runMutation(refs.renderJobs.recordAcceptance, { jobId, leaseId: retry.leaseId, dispatchLeaseId: 'stale-dispatch', rendererJobId: jobId });
     assert(!(await snapshot()).job.acceptedAt, 'stale dispatch acknowledgements cannot claim a current lease');
+    const pending = await ctx.runMutation(refs.renderHeartbeat.applyFixture, { fixtureKey: args.fixtureKey, jobId, projectId: seeded.projectId, leaseId: retry.leaseId, attempt: 1, occurredAt: Date.now(), stage: 'RENDERING' });
+    assert(pending.pendingAcceptance === true && pending.leaseExpiresAt === (await snapshot()).job.leaseExpiresAt, 'valid pending acceptance heartbeat grants no new lease authority');
     await ctx.runMutation(refs.renderJobs.recordAcceptance, { jobId, leaseId: retry.leaseId, dispatchLeaseId: retry.dispatchLeaseId, rendererJobId: jobId });
     assert((await snapshot()).job.executionStage === 'AWAITING_CALLBACK' && await prepare() === null, 'accepted renderer work is not automatically resubmitted');
+    const heartbeat = { fixtureKey: args.fixtureKey, jobId, projectId: seeded.projectId, leaseId: retry.leaseId, attempt: 1, occurredAt: Date.now(), stage: 'UPLOADING', progress: 40 };
+    const renewed = await ctx.runMutation(refs.renderHeartbeat.applyFixture, heartbeat);
+    assert(renewed.leaseExpiresAt > Date.now() && (await snapshot()).job.progress === 40, 'heartbeat renews exact accepted online lease and progress');
+    const replayHeartbeat = await ctx.runMutation(refs.renderHeartbeat.applyFixture, heartbeat);
+    assert(replayHeartbeat.leaseExpiresAt === renewed.leaseExpiresAt, 'same heartbeat replay does not renew online authority again');
+    for (const [label, patch] of [['lease', { leaseId: 'wrong-lease' }], ['attempt', { attempt: 2 }], ['timestamp', { occurredAt: Date.now() - 120_000 }]] as const) {
+      let deniedHeartbeat = false;
+      try { await ctx.runMutation(refs.renderHeartbeat.applyFixture, { ...heartbeat, ...patch }); } catch { deniedHeartbeat = true; }
+      assert(deniedHeartbeat, `wrong heartbeat ${label} denied without changing online lease`);
+    }
     const callback = { jobId, leaseId: retry.leaseId, event: 'FAILED', eventId: `${args.runId}:failed:1`, idempotencyKey: retry.idempotencyKey, projectId: seeded.projectId, eventType: 'render.failed', occurredAt: Date.now(), attempt: 1, payloadHash: `${args.runId}:hash:1`, errorCode: 'FIXTURE_FAILURE', retryable: true };
     const callbackUrl = `${process.env.CONVEX_SITE_URL?.replace(/\/$/, '')}/renderer/callback`;
     const unauthorized = await fetch(callbackUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -112,11 +124,13 @@ export const run = internalAction({ args: { fixtureKey: v.string(), runId: v.str
     const second = await prepare();
     assert(second.attempt === 2 && second.leaseId !== first.leaseId && second.idempotencyKey !== first.idempotencyKey, 'a failed render starts a distinct lease and callback key');
     denied = false;
-    try { await ctx.runMutation(refs.renderJobs.applyRendererCallback, callback); } catch { denied = true; }
-    assert(denied, 'old attempt callbacks cannot mutate a newer render');
+    const oldReceiptReplay = await ctx.runMutation(refs.renderJobs.applyRendererCallback, callback);
+    assert(oldReceiptReplay.duplicate === true && (await snapshot()).job.dispatchAttempt === 2, 'exact prior-attempt receipt replay is acknowledged without changing the newer attempt');
+    try { await ctx.runMutation(refs.renderJobs.applyRendererCallback, { ...callback, eventId: `${args.runId}:unapplied-old-attempt` }); } catch { denied = true; }
+    assert(denied, 'a new callback from an old attempt cannot mutate a newer render');
     await due(true);
     await ctx.runMutation(refs.renderJobs.expireLease, { jobId, leaseId: second.leaseId });
-    assert((await snapshot()).job.status === 'RETRYING', 'expired accepted or unacknowledged work recovers durably');
+    assert((await snapshot()).job.status === 'RETRYING', 'expired unacknowledged work recovers durably');
     await ctx.runMutation(refs.renderJobs.wake, { jobId }); await due();
     const third = await prepare();
     assert(third.attempt === 3, 'retry attempt count persists across recovery');
@@ -124,6 +138,17 @@ export const run = internalAction({ args: { fixtureKey: v.string(), runId: v.str
     const exhausted = await snapshot();
     assert(exhausted.job.status === 'FAILED' && exhausted.exports.every((row: Doc<'exports'>) => row.status === 'FAILED'), 'attempt exhaustion fails both render and asynchronous export');
     assert(!exhausted.exports.some((row: Doc<'exports'>) => row.storageId || row.status === 'COMPLETED'), 'no video artifact or completed export is fabricated');
+    const accepted = await ctx.runMutation(refs.renderWorkerVerification.prepare, jobArgs(secondJobId));
+    await ctx.runMutation(refs.renderJobs.recordAcceptance, { jobId: secondJobId, leaseId: accepted.leaseId, dispatchLeaseId: accepted.dispatchLeaseId, rendererJobId: secondJobId });
+    await ctx.runMutation(refs.renderWorkerVerification.makeDue, { ...jobArgs(secondJobId), expireRender: true });
+    await ctx.runMutation(refs.renderJobs.expireLease, { jobId: secondJobId, leaseId: accepted.leaseId });
+    const retained = await ctx.runQuery(refs.renderWorkerVerification.snapshot, jobArgs(secondJobId));
+    assert(retained.job.executionStage === 'RECONCILIATION_REQUIRED' && retained.job.leaseId === accepted.leaseId && retained.job.callbackIdempotencyKey === accepted.idempotencyKey && retained.job.dispatchAttempt === accepted.attempt && retained.job.acceptedAt !== undefined, 'expired accepted attempt retains exact identity for completion reconciliation');
+    assert(await ctx.runMutation(refs.renderWorkerVerification.prepare, jobArgs(secondJobId)) === null, 'expired accepted output never starts another render automatically');
+    await ctx.runMutation(refs.renderWorkerVerification.makeDue, { ...jobArgs(secondJobId), expireRender: true, pastRecoveryWindow: true });
+    await ctx.runMutation(refs.renderJobs.expireLease, { jobId: secondJobId, leaseId: accepted.leaseId });
+    const attention = await ctx.runQuery(refs.renderWorkerVerification.snapshot, jobArgs(secondJobId));
+    assert(attention.job.executionStage === 'NEEDS_ATTENTION' && attention.job.leaseId === accepted.leaseId && !attention.exports.some((row: Doc<'exports'>) => row.storageId || row.status === 'COMPLETED'), 'past-window accepted output retains evidence for administration without a fabricated export');
     return { ok: true, checks: checked, count: checked.length, projectId: seeded.projectId, jobIds: seeded.jobIds, paidProviderCalls: 0, rendererCalls: 0, convexHttpChecks, mp4Rendered: false };
   } finally { await ctx.runMutation(refs.renderWorkerVerification.finish, { fixtureKey: args.fixtureKey, jobIds: seeded.jobIds }); }
 } });

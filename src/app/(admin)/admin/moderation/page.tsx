@@ -1,14 +1,7 @@
-import Link from 'next/link';
-import { AlertTriangle, ArrowLeft, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { requireAdmin } from '@/lib/guards';
-import { api } from '@/../convex/_generated/api';
-import { getAuthenticatedConvexClient } from '@/lib/convex/server';
-import { ThreeUIAmbient } from '@/components/threeui/ambient';
+import { PlatformInventory } from '@/components/admin/platform-inventory';
 
-export const metadata = { title: 'Moderation | Admin', description: 'FinalFrame content and job review.' };
-
-export default async function AdminModerationPage() {
-  await requireAdmin();
-  const { counts } = await (await getAuthenticatedConvexClient()).query(api.app.adminOverview, {});
-  return <div className="space-y-9"><div><Link href="/admin" className="inline-flex items-center gap-2 text-sm text-[#91a0b8] transition hover:text-[#eaf0fa]"><ArrowLeft className="size-4" /> Overview</Link><p className="mt-9 text-xs font-semibold uppercase tracking-[.16em] text-[#91a0b8]">Review queues</p><h1 className="ff-display mt-4 text-4xl font-semibold">Keep the studio safe and useful.</h1><p className="mt-4 max-w-2xl leading-7 text-[#91a0b8]">Operational signals are shown from Convex records. User-generated content review will appear here when a moderation source is enabled.</p></div><div className="relative h-36 overflow-hidden rounded-2xl border border-[#263143] bg-[#101722]"><ThreeUIAmbient variant="diagnostics" className="opacity-40" label="Moderation diagnostics background" /><div className="relative z-10 flex h-full items-end justify-between p-6"><div><p className="text-metadata text-[#86a7ff]">Queue signal</p><p className="mt-2 text-lg font-semibold">Review surface online</p></div><span className="font-mono text-xs text-[#91a0b8]">LIVE / READ ONLY</span></div></div><div className="grid gap-5 md:grid-cols-2"><div className="rounded-[1.25rem] border border-[#263143]/45 bg-[#151b25] p-7"><div className="flex items-center justify-between"><div className="grid size-11 place-items-center rounded-2xl bg-[#ff9e9e]"><AlertTriangle className="size-5 text-[#0b0d12]" /></div><span className="rounded-full bg-[#ff9e9e] px-3 py-1.5 text-xs font-semibold text-[#0b0d12]">{counts.failedJobs} jobs</span></div><h2 className="mt-10 text-2xl font-semibold">Failed generation</h2><p className="mt-3 leading-7 text-[#91a0b8]">Review interruptions, understand the failure, and help the creator recover without losing their credits.</p></div><div className="rounded-[1.25rem] border border-[#263143]/45 bg-[#151b25] p-7"><div className="grid size-11 place-items-center rounded-2xl bg-[#9be3c3]"><ShieldCheck className="size-5 text-[#0b0d12]" /></div><h2 className="mt-10 text-2xl font-semibold">Content reports</h2><p className="mt-3 leading-7 text-[#91a0b8]">No moderation queue is connected yet. When reports are enabled, this area will show only records requiring review.</p><div className="mt-7 flex items-center gap-2 text-sm font-semibold text-[#9be3c3]"><CheckCircle2 className="size-4" /> No active reports</div></div></div></div>;
+export default async function AdminModerationPage({ searchParams }: { searchParams: Promise<{ cursor?: string; status?: string }> }) {
+  const query = await searchParams;
+  const reportStatus = query.status === 'RESOLVED' || query.status === 'DISMISSED' ? query.status : 'OPEN';
+  return <PlatformInventory kind="reports" reportStatus={reportStatus} cursor={typeof query.cursor === 'string' ? query.cursor : undefined} />;
 }

@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireMember, requireProjectRole } from "./authorization";
 import { now } from "./_shared";
+import { canReconcileAcceptedCompletion, RENDER_ATTEMPT_MAX_MS, validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
 import { validateLockedManifest } from "../renderer/src/manifest";
 import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
 
@@ -77,9 +78,9 @@ async function authorizedJob(ctx: MutationCtx | QueryCtx, jobId: Id<"renderJobs"
 type RenderJob = Doc<"renderJobs">;
 type ReadCtx = MutationCtx | QueryCtx;
 
-async function requireLegacyFixtureLease(ctx: ReadCtx, job: RenderJob) {
+async function requireLegacyFixtureLease(ctx: ReadCtx, job: RenderJob, fixtureKey?: string) {
   const project = job.projectId ? await ctx.db.get(job.projectId) : null;
-  if (renderWorkerEnabled() || process.env.FINALFRAME_DEV_FIXTURES !== "true" || process.env.FINALFRAME_DEV_FIXTURE_ENV !== "development" || !project || object(project.metadata).fixtureMarker !== "finalframe-dev-fixture-v1") throw new Error("Renderer leases are managed internally.");
+  if (renderWorkerEnabled() || process.env.FINALFRAME_DEV_FIXTURES !== "true" || process.env.FINALFRAME_DEV_FIXTURE_ENV !== "development" || !process.env.FINALFRAME_DEV_FIXTURE_KEY || fixtureKey !== process.env.FINALFRAME_DEV_FIXTURE_KEY || !project || !["finalframe-dev-fixture-v1", RENDER_FIXTURE_MARKER].includes(String(object(project.metadata).fixtureMarker))) throw new Error("Renderer leases are managed internally.");
 }
 
 async function updateExports(ctx: MutationCtx, jobId: Id<"renderJobs">, status: "QUEUED" | "PROCESSING" | "FAILED" | "CANCELED", progress: number) {
@@ -111,9 +112,9 @@ async function approvedState(ctx: ReadCtx, projectId: Id<"projects">, resourceTy
 async function authorizedManifest(ctx: MutationCtx, job: RenderJob) {
   const { project } = await internalProject(ctx, job);
   const stored = job.manifestId ? await ctx.db.get(job.manifestId) : null;
-  if (!stored || stored.productionId !== job.productionId || stored.projectId !== project._id || stored.contractVersion !== 4) throw new Error("Canonical render manifest is unavailable.");
+  if (!stored || stored.productionId !== job.productionId || stored.projectId !== project._id || (stored.contractVersion !== 4 && stored.contractVersion !== 5)) throw new Error("Canonical render manifest is unavailable.");
   const raw = object(stored.manifest);
-  if (raw.version !== 4 || raw.projectId !== project._id || raw.productionId !== job.productionId || raw.manifestId !== stored._id) throw new Error("Render manifest ownership is invalid.");
+  if ((raw.version !== 4 && raw.version !== 5) || raw.version !== stored.contractVersion || raw.projectId !== project._id || raw.productionId !== job.productionId || raw.manifestId !== stored._id) throw new Error("Render manifest ownership is invalid.");
   const timelineId = typeof raw.timelineId === "string" ? ctx.db.normalizeId("timelines", raw.timelineId) : null;
   const timeline = timelineId ? await ctx.db.get(timelineId) : null;
   if (!timeline || timeline.productionId !== job.productionId || (timeline.projectId && timeline.projectId !== project._id)) throw new Error("Render timeline ownership is invalid.");
@@ -192,6 +193,13 @@ export async function prepareRenderDispatch(ctx: MutationCtx, args: { jobId: Id<
     if (renderWorkerEnabled() || process.env.FINALFRAME_DEV_FIXTURES !== "true" || process.env.FINALFRAME_DEV_FIXTURE_ENV !== "development" || !process.env.FINALFRAME_DEV_FIXTURE_KEY || fixtureKey !== process.env.FINALFRAME_DEV_FIXTURE_KEY || object(project?.metadata).fixtureMarker !== RENDER_FIXTURE_MARKER) throw new Error("Private renderer dispatch verification is not enabled.");
   } else if (!renderWorkerEnabled()) return null;
   const timestamp = now();
+  if (project?.moderationStatus === 'RESTRICTED') {
+    if (!job.acceptedAt) {
+      await ctx.db.patch(job._id, { status: "FAILED", executionStage: "FAILED", errorCode: "RENDER_SOURCE_UNAVAILABLE", updatedAt: timestamp });
+      await updateExports(ctx, job._id, "FAILED", job.progress);
+    }
+    return null;
+  }
   if (!dispatchCanRun(job, timestamp)) return null;
   if (!job.dispatchPayload) {
     // A single active render protects the shared host. Expired owners are
@@ -216,7 +224,7 @@ export async function prepareRenderDispatch(ctx: MutationCtx, args: { jobId: Id<
   const callbackIdempotencyKey = job.dispatchPayload ? job.callbackIdempotencyKey ?? job.idempotencyKey : `${job.idempotencyKey}:attempt:${attempt}`;
   const callbackBase = process.env.CONVEX_SITE_URL?.trim();
   if (!callbackBase) throw new Error("Renderer callback site is not configured.");
-  const payload = job.dispatchPayload ?? { jobId: job._id, idempotencyKey: callbackIdempotencyKey, manifest, storageUploadUrl: await ctx.storage.generateUploadUrl(), callbackUrl: `${callbackBase.replace(/\/$/, "")}/renderer/callback`, leaseId, attempt, mode: "production" };
+  const payload = job.dispatchPayload ?? { jobId: job._id, idempotencyKey: callbackIdempotencyKey, manifest, storageUploadUrl: await ctx.storage.generateUploadUrl(), callbackUrl: `${callbackBase.replace(/\/$/, "")}/renderer/callback`, heartbeatUrl: `${callbackBase.replace(/\/$/, "")}/renderer/heartbeat`, leaseId, attempt, mode: "production" };
   const leaseExpiresAt = job.dispatchPayload ? job.leaseExpiresAt ?? timestamp + RENDER_LEASE_MS : timestamp + RENDER_LEASE_MS;
   if (leaseExpiresAt <= timestamp) { await schedule(ctx, "expireLease", 0, { jobId: job._id, leaseId }); return null; }
   await ctx.db.patch(job._id, { status: "PROCESSING", executionStage: "DISPATCHING", leaseId, leaseExpiresAt, dispatchLeaseId, dispatchLeaseExpiresAt: timestamp + RENDER_DISPATCH_LEASE_MS, dispatchAttempt: attempt, dispatchPayload: payload, callbackIdempotencyKey, dispatchStartedAt: job.dispatchStartedAt ?? timestamp, nextDispatchAt: undefined, startedAt: job.startedAt ?? timestamp, progress: Math.max(job.progress, 5), updatedAt: timestamp });
@@ -266,7 +274,7 @@ export const create = mutation({
     const member = await requireMember(ctx, manifest.studioExternalId);
     if (production.projectId) await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
     const manifestData = object(manifest.manifest);
-    if (manifestData.version !== 4 || manifest.contractVersion !== 4) throw new Error("Only canonical manifest v4 can create new render jobs.");
+    if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion) throw new Error("Only canonical manifest v4/v5 can create new render jobs.");
     if (!production.projectId || !manifest.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString()) throw new Error("Manifest and production belong to different projects.");
     if (args.timelineId) {
       const timeline = await ctx.db.get(args.timelineId);
@@ -328,33 +336,41 @@ export const list = query({
   },
 });
 
-export const claim = mutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), leaseDurationMs: v.optional(v.number()) },
+export const claim = internalMutation({
+  args: { fixtureKey: v.string(), jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), leaseDurationMs: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const { job } = await authorizedJob(ctx, args.jobId, true);
-    await requireLegacyFixtureLease(ctx, job);
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error('Render job not found.');
+    await requireLegacyFixtureLease(ctx, job, args.fixtureKey);
     if (job.status !== "QUEUED" && job.status !== "RETRYING") throw new Error(`Render job cannot be claimed from ${job.status}.`);
     const leaseId = args.leaseId?.trim() || `${job._id}:${now()}`;
     const duration = Math.min(Math.max(args.leaseDurationMs ?? 5 * 60 * 1000, 30_000), 30 * 60 * 1000);
     const timestamp = now();
-    await ctx.db.patch(job._id, { status: "PROCESSING", progress: Math.max(job.progress, 5), leaseId, leaseExpiresAt: timestamp + duration, startedAt: job.startedAt ?? timestamp, updatedAt: timestamp, errorCode: undefined, errorMessage: undefined });
-    await schedule(ctx, "expireLease", duration, { jobId: job._id, leaseId });
+    const maximum = (job.startedAt ?? timestamp) + RENDER_ATTEMPT_MAX_MS;
+    if (timestamp >= maximum) throw new Error('Fixture render attempt wallclock exceeded.');
+    const leaseExpiresAt = Math.min(timestamp + duration, maximum);
+    await ctx.db.patch(job._id, { status: "PROCESSING", progress: Math.max(job.progress, 5), leaseId, leaseExpiresAt, startedAt: job.startedAt ?? timestamp, updatedAt: timestamp, errorCode: undefined, errorMessage: undefined });
+    await schedule(ctx, "expireLease", leaseExpiresAt - timestamp, { jobId: job._id, leaseId });
     return { job: await ctx.db.get(job._id), leaseId };
   },
 });
 
-export const renewLease = mutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.string(), leaseDurationMs: v.optional(v.number()) },
+export const renewLease = internalMutation({
+  args: { fixtureKey: v.string(), jobId: v.id("renderJobs"), leaseId: v.string(), leaseDurationMs: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const { job } = await authorizedJob(ctx, args.jobId, true);
-    await requireLegacyFixtureLease(ctx, job);
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error('Render job not found.');
+    await requireLegacyFixtureLease(ctx, job, args.fixtureKey);
     assertLease(job, args.leaseId);
     if (job.status !== "PROCESSING" && job.status !== "SUBMITTED") throw new Error("Render job is not actively leased.");
     const duration = Math.min(Math.max(args.leaseDurationMs ?? 5 * 60 * 1000, 30_000), 30 * 60 * 1000);
-    await ctx.db.patch(job._id, { leaseExpiresAt: now() + duration, updatedAt: now() });
-    await schedule(ctx, "expireLease", duration, { jobId: job._id, leaseId: args.leaseId });
+    const maximum = (job.startedAt ?? now()) + RENDER_ATTEMPT_MAX_MS;
+    if (now() >= maximum) throw new Error('Fixture render attempt wallclock exceeded.');
+    const leaseExpiresAt = Math.min(now() + duration, maximum);
+    await ctx.db.patch(job._id, { leaseExpiresAt, updatedAt: now() });
+    await schedule(ctx, "expireLease", leaseExpiresAt - now(), { jobId: job._id, leaseId: args.leaseId });
     return await ctx.db.get(job._id);
   },
 });
@@ -362,11 +378,11 @@ export const renewLease = mutation({
 // Renderer callbacks must arrive through the signed HTTP endpoint. Keep this
 // compatibility mutation internal so a browser cannot forge job completion.
 export const callback = internalMutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("SUBMITTED"), v.literal("PROGRESS"), v.literal("COMPLETED"), v.literal("FAILED")), rendererJobId: v.optional(v.string()), progress: v.optional(v.number()), storageId: v.optional(v.id("_storage")), checksum: v.optional(v.string()), mimeType: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
+  args: { fixtureKey: v.string(), jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("SUBMITTED"), v.literal("PROGRESS"), v.literal("COMPLETED"), v.literal("FAILED")), rendererJobId: v.optional(v.string()), progress: v.optional(v.number()), storageId: v.optional(v.id("_storage")), checksum: v.optional(v.string()), mimeType: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
     const { job, member } = await authorizedJob(ctx, args.jobId);
-    await requireLegacyFixtureLease(ctx, job);
+    await requireLegacyFixtureLease(ctx, job, args.fixtureKey);
     if (job.status === "COMPLETED") return job;
     assertLease(job, args.leaseId);
     const timestamp = now();
@@ -446,28 +462,30 @@ export const prepareForRenderer = internalMutation({
 });
 
 export const applyRendererCallback = internalMutation({
-  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("COMPLETED"), v.literal("FAILED")), eventId: v.string(), idempotencyKey: v.string(), projectId: v.string(), eventType: v.union(v.literal("render.completed"), v.literal("render.failed")), occurredAt: v.number(), attempt: v.number(), payloadHash: v.string(), signature: v.optional(v.string()), rendererJobId: v.optional(v.string()), storageId: v.optional(v.id("_storage")), mimeType: v.optional(v.string()), checksum: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
+  args: { jobId: v.id("renderJobs"), leaseId: v.optional(v.string()), event: v.union(v.literal("COMPLETED"), v.literal("FAILED")), eventId: v.string(), idempotencyKey: v.string(), projectId: v.string(), eventType: v.union(v.literal("render.completed"), v.literal("render.failed")), occurredAt: v.number(), verifiedDeliveryAt: v.optional(v.number()), attempt: v.number(), payloadHash: v.string(), signature: v.optional(v.string()), rendererJobId: v.optional(v.string()), storageId: v.optional(v.id("_storage")), mimeType: v.optional(v.string()), checksum: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()), retryable: v.optional(v.boolean()), actualCost: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) throw new Error("Render job not found.");
     const timestamp = now();
     if (!job.projectId || args.projectId !== job.projectId.toString()) throw new Error("Renderer callback project does not match the render job.");
-    if (args.idempotencyKey !== (job.callbackIdempotencyKey ?? job.idempotencyKey)) throw new Error("Renderer callback idempotency key does not match the render job.");
-    if (args.attempt !== (job.dispatchAttempt ?? 1) || !Number.isInteger(args.attempt)) throw new Error("Renderer callback attempt is invalid.");
-    if (!Number.isFinite(args.occurredAt) || Math.abs(timestamp - args.occurredAt) > 10 * 60 * 1000) throw new Error("Renderer callback timestamp is invalid.");
-    if ((args.event === "COMPLETED" && args.eventType !== "render.completed") || (args.event === "FAILED" && args.eventType !== "render.failed")) throw new Error("Renderer callback event type does not match the event.");
-    const existingEvent = await ctx.db.query("renderCallbackReceipts").withIndex("by_event_id", (q) => q.eq("eventId", args.eventId)).unique();
+    if ((args.event === 'COMPLETED' && args.eventType !== 'render.completed') || (args.event === 'FAILED' && args.eventType !== 'render.failed')) throw new Error('Renderer callback event type does not match the event.');
+    const existingEvent = await ctx.db.query('renderCallbackReceipts').withIndex('by_event_id', q => q.eq('eventId', args.eventId)).unique();
     if (existingEvent) {
-      if (existingEvent.jobId !== job._id || existingEvent.idempotencyKey !== args.idempotencyKey || existingEvent.payloadHash !== args.payloadHash) throw new Error("Renderer callback event ID was already used for another job.");
+      if (existingEvent.status !== 'APPLIED' || existingEvent.jobId !== job._id || existingEvent.projectId !== job.projectId || existingEvent.idempotencyKey !== args.idempotencyKey || existingEvent.attempt !== args.attempt || existingEvent.eventType !== args.eventType || existingEvent.payloadHash !== args.payloadHash) throw new Error('Renderer callback event ID was already used for another payload.');
+      if (!validCallbackTime(args.occurredAt, timestamp, args.verifiedDeliveryAt) && !validCallbackReceiptReplayTime(args.occurredAt, timestamp, args.verifiedDeliveryAt)) throw new Error('Renderer receipt replay timestamp is invalid.');
       return { job, duplicate: true };
     }
+    if (args.idempotencyKey !== (job.callbackIdempotencyKey ?? job.idempotencyKey)) throw new Error('Renderer callback idempotency key does not match the render job.');
+    if (args.attempt !== (job.dispatchAttempt ?? 1) || !Number.isInteger(args.attempt)) throw new Error('Renderer callback attempt is invalid.');
+    if (!validCallbackTime(args.occurredAt, timestamp, args.verifiedDeliveryAt)) throw new Error('Renderer callback timestamp is invalid.');
     const existingKey = await ctx.db.query("renderCallbackReceipts").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", args.idempotencyKey)).take(100);
     if (existingKey.some((receipt) => receipt.eventId !== args.eventId)) throw new Error("A different renderer callback already claimed this idempotency key.");
-    if (!job.leaseId || !args.leaseId || job.leaseId !== args.leaseId || job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= timestamp) throw new Error("Renderer callback lease is invalid or expired.");
+    const recoveringAcceptedOutput = canReconcileAcceptedCompletion(job, args, timestamp);
+    if (!recoveringAcceptedOutput && (!job.leaseId || !args.leaseId || job.leaseId !== args.leaseId || job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= timestamp)) throw new Error('Renderer callback lease is invalid or expired.');
     const receiptId = await ctx.db.insert("renderCallbackReceipts", { jobId: job._id, projectId: job.projectId, eventId: args.eventId, idempotencyKey: args.idempotencyKey, eventType: args.eventType, attempt: args.attempt, occurredAt: args.occurredAt, receivedAt: timestamp, payloadHash: args.payloadHash, signature: args.signature, status: "CLAIMED" });
     if (RENDER_TERMINAL.has(job.status)) throw new Error("A terminal render cannot accept a new callback event.");
-    assertLease(job, args.leaseId);
+    if (!recoveringAcceptedOutput) assertLease(job, args.leaseId);
     if (args.event === "FAILED") {
       const retryable = args.retryable === true && (job.dispatchAttempt ?? 1) < RENDER_MAX_ATTEMPTS;
       await ctx.db.patch(job._id, { status: retryable ? "RETRYING" : "FAILED", executionStage: retryable ? "QUEUED" : "FAILED", errorCode: args.errorCode ?? "RENDER_FAILED", errorMessage: undefined, acceptedAt: undefined, dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, dispatchRetryCount: 0, nextDispatchAt: retryable ? timestamp + RENDER_RETRY_MS : undefined, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: timestamp });
@@ -479,9 +497,12 @@ export const applyRendererCallback = internalMutation({
     if (!args.storageId) throw new Error("Renderer completion is missing storageId.");
     const storage = await ctx.db.system.get("_storage", args.storageId);
     if (!storage || storage.size <= 0 || !["video/mp4", "video/webm", "video/quicktime"].includes(storage.contentType ?? "") || (args.mimeType && args.mimeType !== storage.contentType)) throw new Error("A stored video export with matching media type is required.");
+    if (args.checksum !== undefined && args.checksum !== storage.sha256) throw new Error('Renderer completion checksum does not match stored media.');
+    const storedManifest = job.manifestId ? await ctx.db.get(job.manifestId) : null;
+    if (!storedManifest || storedManifest.projectId !== job.projectId || storedManifest.productionId !== job.productionId) throw new Error('Renderer completion manifest ownership is invalid.');
     const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100);
-    if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: args.checksum ?? storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
-    else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: args.checksum ?? storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });
+    if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
+    else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });
     await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await ctx.db.patch(receiptId, { status: "APPLIED" });
     return { job: await ctx.db.get(job._id), duplicate: false };
@@ -502,6 +523,14 @@ export const expireLease = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || RENDER_TERMINAL.has(job.status) || job.leaseId !== args.leaseId || !job.leaseExpiresAt || job.leaseExpiresAt > now()) return null;
+    if (job.acceptedAt !== undefined) {
+      const maximum = job.acceptedAt + RENDER_ATTEMPT_MAX_MS;
+      const needsAttention = now() >= maximum;
+      await ctx.db.patch(job._id, { status: 'SUBMITTED', executionStage: needsAttention ? 'NEEDS_ATTENTION' : 'RECONCILIATION_REQUIRED', errorCode: needsAttention ? 'RENDER_RECOVERY_WINDOW_EXPIRED' : 'RENDER_RECONCILIATION_REQUIRED', dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, nextDispatchAt: undefined, updatedAt: now() });
+      await updateExports(ctx, job._id, 'PROCESSING', job.progress);
+      if (!needsAttention) await schedule(ctx, 'expireLease', maximum - now() + 1000, args);
+      return null;
+    }
     const exhausted = (job.dispatchAttempt ?? 0) >= RENDER_MAX_ATTEMPTS;
     await ctx.db.patch(job._id, { status: exhausted ? "FAILED" : "RETRYING", executionStage: exhausted ? "FAILED" : "QUEUED", acceptedAt: undefined, dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, dispatchRetryCount: 0, errorCode: exhausted ? "RENDER_MAX_ATTEMPTS" : "RENDER_LEASE_EXPIRED", errorMessage: undefined, leaseId: undefined, leaseExpiresAt: undefined, nextDispatchAt: exhausted ? undefined : now() + RENDER_RETRY_MS, updatedAt: now() });
     await updateExports(ctx, job._id, exhausted ? "FAILED" : "PROCESSING", job.progress);

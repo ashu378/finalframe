@@ -80,6 +80,16 @@ async function main() {
   assert.equal(probe.validateOutputProbe({ streams: [] }, imageManifest.output).ok, false);
   assert.equal(sourcePolicy.validateWorkerMediaSource('http://127.0.0.1/private.mp4', { mode: 'production' }).ok, false);
   assert.equal(sourcePolicy.validateWorkerMediaSource('https://media.finalframe.app/video.mp4', { mode: 'production' }).ok, true);
+  for (const logoUrl of ['file:///etc/private-logo.png', 'http://127.0.0.1/logo.png', 'https://other.example/logo.png']) {
+    const rejectedLogo = structuredClone(graphicsManifest);
+    rejectedLogo.items[0].props.logoUrl = logoUrl;
+    const checked = sourcePolicy.validateManifestMediaSources(rejectedLogo, { mode: 'production', allowedRemoteHosts: ['media.finalframe.app'] });
+    assert.equal(checked.ok, false, 'nested logo media must obey the production source policy');
+    assert.ok(checked.issues.some(issue => issue.path === 'items[0].props.logoUrl'));
+  }
+  const approvedLogo = structuredClone(graphicsManifest);
+  approvedLogo.audioTracks = [];
+  assert.equal(sourcePolicy.validateManifestMediaSources(approvedLogo, { mode: 'production', allowedRemoteHosts: ['media.finalframe.app'] }).ok, true);
 
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'finalframe-renderer-'));
   const outputPath = path.join(tmp, 'final.mp4');

@@ -1,0 +1,11 @@
+import Link from 'next/link';
+import { requireAuth } from '@/lib/guards';
+import { getMyModerationReports } from '@/lib/platform-admin/actions';
+
+export const metadata = { title: 'Your content reports | FinalFrame' };
+export default async function MyReportsPage({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
+  await requireAuth();
+  const query = await searchParams;
+  const result = await getMyModerationReports(typeof query.cursor === 'string' ? query.cursor : undefined);
+  return <div className="mx-auto max-w-4xl space-y-7 py-5"><Link href="/dashboard/settings" className="ff-link text-sm">Settings</Link><header><p className="ff-eyebrow">Your reports</p><h1 className="ff-display mt-3 text-3xl font-semibold">Follow a content concern.</h1><p className="mt-4 text-sm leading-6 text-muted-foreground">These are reports you submitted. Other reporters' evidence and private project media are not included.</p></header>{result.reports.length ? result.reports.map((report) => <article key={report.reportId} className="ff-card p-6"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">{report.category.toLowerCase().replaceAll('_', ' ')}</h2><span className="rounded-full bg-secondary px-3 py-2 text-xs">{report.status.toLowerCase()}</span></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6">{report.reason}</p>{report.decisionReason ? <p className="mt-4 border-t border-border pt-4 text-sm leading-6"><span className="font-semibold">Review decision: </span>{report.decisionReason}</p> : null}<p className="mt-4 text-xs text-muted-foreground">Submitted {new Date(report.createdAt).toLocaleString('en-GB')}</p></article>) : <p className="ff-card p-6 text-sm text-muted-foreground">You have no reports on this page. Use a project's Report concern link in the project library to submit one.</p>}<div className="flex flex-wrap gap-3">{query.cursor ? <Link href="/dashboard/settings/reports" className="ff-button-quiet min-h-11">First page</Link> : null}{result.continueCursor ? <Link href={`/dashboard/settings/reports?${new URLSearchParams({ cursor: result.continueCursor })}`} className="ff-button-primary min-h-11">More reports</Link> : null}</div></div>;
+}

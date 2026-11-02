@@ -1,13 +1,6 @@
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
-import { requireAdmin } from '@/lib/guards';
-import { getAdminOperations } from '@/lib/admin/actions';
-import { OperationsTable } from '@/components/admin/operations-table';
+import { PlatformInventory } from '@/components/admin/platform-inventory';
 
-export const metadata = { title: 'Jobs | Admin', description: 'FinalFrame generation operations.' };
-
-export default async function AdminJobsPage() {
-  await requireAdmin();
-  const data = await getAdminOperations();
-  return <div className="space-y-8"><Link href="/admin" className="inline-flex items-center gap-2 text-sm text-[#91a0b8] hover:text-[#eaf0fa]"><ArrowLeft className="size-4" /> Overview</Link><div><p className="text-xs font-semibold uppercase tracking-[.16em] text-[#91a0b8]">Operations</p><h1 className="ff-display mt-3 text-4xl font-semibold">Generation jobs</h1><p className="mt-3 max-w-2xl leading-7 text-[#91a0b8]">See what is queued, processing, complete, or needs attention.</p></div><OperationsTable data={data} kind="jobs" /></div>;
+export default async function AdminInventoryPage({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
+  const query = await searchParams;
+  return <PlatformInventory kind="jobs" cursor={typeof query.cursor === 'string' ? query.cursor : undefined} />;
 }

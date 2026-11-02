@@ -2,7 +2,7 @@
 
 import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
-import { requireAdmin } from '@/lib/guards';
+import { requireStudioAdmin } from '@/lib/guards/platform';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 
 export async function getAdminOperations() {
@@ -19,10 +19,10 @@ export async function grantDevelopmentTestCredits(input: {
   reason: string;
   idempotencyKey: string;
 }) {
-  const profile = await requireAdmin();
+  const profile = await requireStudioAdmin();
   const client = await getAuthenticatedConvexClient();
   const current = await client.query(api.account.current, {});
-  const studioExternalId = current.studio?.externalId ?? profile.studio_name;
+  const studioExternalId = current.studio?.externalId ?? profile.studio.externalId;
   if (!studioExternalId) throw new Error('No studio is associated with the admin account.');
   try {
     return await client.mutation(api.credits.grantTestCredits, {
@@ -37,7 +37,7 @@ export async function grantDevelopmentTestCredits(input: {
 }
 
 export async function refreshVideoModelCatalog() {
-  await requireAdmin();
+  await requireStudioAdmin();
   const client = await getAuthenticatedConvexClient();
   const current = await client.query(api.account.current, {});
   const studioExternalId = current.studio?.externalId;
@@ -52,7 +52,7 @@ export async function refreshVideoModelCatalog() {
       supportedAspectRatios: model.supportedAspectRatios,
       supportedSizes: model.supportedSizes,
       supportedParameters: model.allowedPassthroughParameters,
-      pricingSkus: model.pricingSkus,
+      pricingSkus: model.pricingSkus, upscaleFactor: model.upscaleFactor, creativityLevels: model.creativityLevels,
       estimatedCostPerSecond: model.pricingSkus['per-video-second'] ?? (perSecondPrices.length ? Math.max(...perSecondPrices) : undefined),
     };
   });
@@ -60,7 +60,7 @@ export async function refreshVideoModelCatalog() {
 }
 
 export async function reviewVideoModelCapabilities(formData: FormData) {
-  await requireAdmin();
+  await requireStudioAdmin();
   const client = await getAuthenticatedConvexClient();
   const current = await client.query(api.account.current, {});
   const studioExternalId = current.studio?.externalId;
@@ -89,7 +89,7 @@ export async function reviewVideoModelCapabilities(formData: FormData) {
 }
 
 export async function saveVideoRoutePolicy(formData: FormData) {
-  await requireAdmin();
+  await requireStudioAdmin();
   const client = await getAuthenticatedConvexClient();
   const current = await client.query(api.account.current, {});
   const studioExternalId = current.studio?.externalId;

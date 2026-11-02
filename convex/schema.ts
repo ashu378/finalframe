@@ -133,6 +133,19 @@ export default defineSchema({
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_external_id", ["externalId"]).index("by_owner", ["ownerExternalId"]).index("by_owner_id", ["ownerId"]).index("by_owner_user", ["ownerUserId"]),
 
+  platformRoles: defineTable({
+    userId: v.id('users'), role: v.union(v.literal('ADMIN'), v.literal('SUPPORT'), v.literal('MODERATOR')),
+    status: v.union(v.literal('ACTIVE'), v.literal('REVOKED')), grantedByUserId: v.optional(v.id('users')), revokedByUserId: v.optional(v.id('users')), createdAt: timestamp, updatedAt: timestamp,
+  }).index('by_user', ['userId']).index('by_role_status', ['role', 'status']),
+
+  moderationReports: defineTable({
+    projectId: v.id('projects'), assetId: v.optional(v.id('assets')), exportId: v.optional(v.id('exports')), reporterUserId: v.id('users'),
+    category: v.union(v.literal('CONSENT'), v.literal('RIGHTS'), v.literal('HARMFUL_CONTENT'), v.literal('OTHER')), reason: v.string(),
+    status: v.union(v.literal('OPEN'), v.literal('RESOLVED'), v.literal('DISMISSED')), idempotencyKey: v.string(),
+    decision: v.optional(v.union(v.literal('DISMISSED'), v.literal('QUARANTINED'))), decisionReason: v.optional(v.string()),
+    decidedByUserId: v.optional(v.id('users')), decidedAt: v.optional(timestamp), createdAt: timestamp, updatedAt: timestamp,
+  }).index('by_status', ['status']).index('by_project', ['projectId']).index('by_reporter', ['reporterUserId']).index('by_idempotency', ['idempotencyKey']),
+
   studioMembers: defineTable({
     studioExternalId: v.string(), studioId: v.optional(v.id("studios")), userExternalId: v.string(),
     userId: v.optional(v.id("users")),
@@ -157,6 +170,7 @@ export default defineSchema({
     description: v.optional(v.string()), projectType: v.optional(v.string()), status: v.optional(status), metadata: v.optional(json),
     createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")),
     ownerUserId: v.optional(v.id("users")), archivedAt: v.optional(timestamp), deletedAt: v.optional(timestamp),
+    moderationStatus: v.optional(v.union(v.literal('RESTRICTED'), v.literal('CLEAR'))), moderationReportId: v.optional(v.id('moderationReports')),
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"])
     .index("by_studio_id", ["studioId"]).index("by_studio_status", ["studioExternalId", "status"]),
@@ -165,7 +179,7 @@ export default defineSchema({
     projectId: v.id("projects"), userId: v.id("users"), role: projectRole, status: projectMemberStatus,
     invitedByUserId: v.optional(v.id("users")), createdAt: timestamp, updatedAt: timestamp,
   }).index("by_project", ["projectId"]).index("by_project_user", ["projectId", "userId"])
-    .index("by_user", ["userId"]).index("by_project_status", ["projectId", "status"]),
+    .index("by_user", ["userId"]).index("by_project_status", ["projectId", "status"]).index('by_project_role_status', ['projectId', 'role', 'status']),
 
   episodes: defineTable({
     projectId: v.id("projects"), productionId: v.id("productions"), episodeNumber: v.number(), title: v.string(),
@@ -430,6 +444,8 @@ export default defineSchema({
     supportsCombinedFrameReferences: v.optional(v.boolean()),
     reviewedOperations: v.optional(v.array(v.string())), catalogFingerprint: v.optional(v.string()), reviewedCatalogFingerprint: v.optional(v.string()),
     supportedResolutions: v.array(v.string()), supportedAspectRatios: v.array(v.string()), supportedSizes: v.optional(v.array(v.string())), supportedParameters: v.array(v.string()),
+    upscaleFactor: v.optional(v.object({ min: v.number(), max: v.number() })), creativityLevels: v.optional(v.array(v.number())),
+    platformQuarantinedAt: v.optional(timestamp), platformQuarantinedByUserId: v.optional(v.id('users')), platformQuarantineReason: v.optional(v.string()),
     estimatedCostPerSecond: v.optional(v.number()), pricingSkus: v.optional(json), available: v.boolean(), lastSeenAt: timestamp, reviewedAt: v.optional(timestamp),
   }).index("by_studio", ["studioExternalId"]).index("by_studio_model", ["studioExternalId", "modelId"]),
 
@@ -477,11 +493,17 @@ export default defineSchema({
     transition: v.optional(json), metadata: v.optional(json),
   }).index("by_timeline", ["timelineId"]).index("by_track", ["trackId"]).index("by_studio", ["studioExternalId"]),
 
+  verifiedMediaProbes: defineTable({
+    projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
+    width: v.number(), height: v.number(), durationSeconds: v.number(), videoCodec: v.string(), hasAudio: v.boolean(), audioCodec: v.optional(v.string()), probedAt: timestamp,
+  }).index('by_asset', ['assetId']),
+
   renderJobs: defineTable({
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), operation: v.string(), preset: v.string(),
     status, idempotencyKey: v.string(), requestHash: v.optional(v.string()), progress: v.number(), estimatedCost: v.optional(v.number()), actualCost: v.optional(v.number()),
     createdByUserId: v.optional(v.id("users")), executionStage: v.optional(v.string()), dispatchAttempt: v.optional(v.number()),
     dispatchPayload: v.optional(json), dispatchStartedAt: v.optional(timestamp), acceptedAt: v.optional(timestamp),
+    lastHeartbeatAt: v.optional(timestamp), lastHeartbeatOccurredAt: v.optional(timestamp),
     dispatchLeaseId: v.optional(v.string()), dispatchLeaseExpiresAt: v.optional(timestamp), nextDispatchAt: v.optional(timestamp),
     callbackIdempotencyKey: v.optional(v.string()),
     dispatchRetryCount: v.optional(v.number()),

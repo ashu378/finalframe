@@ -9,15 +9,16 @@ export function toTimelineVersion(draft: any, resourceState?: string): TimelineV
     const trackId = String(track.id ?? track._id);
     const sourceClips = Array.isArray(track.clips) ? track.clips : (draft.clips ?? []).filter((clip: any) => String(clip.trackId) === trackId);
     const clips: TimelineClip[] = sourceClips.map((clip: any) => {
-      const base = { id: String(clip.id ?? clip._id), trackId, kind, startSeconds: clip.startSeconds, durationSeconds: clip.durationSeconds, sourceStartSeconds: clip.trimStartSeconds ?? 0, sourceDurationSeconds: clip.durationSeconds, metadata: clip.metadata ?? {}, transitionIn: undefined, transitionOut: undefined };
-      if (kind === 'GRAPHIC') {
+      const clipKind = String(clip.kind ?? clip.metadata?.clipKind ?? kind) as TrackKind;
+      const base = { id: String(clip.id ?? clip._id), trackId, kind: clipKind, startSeconds: clip.startSeconds, durationSeconds: clip.durationSeconds, sourceStartSeconds: clip.trimStartSeconds ?? 0, sourceDurationSeconds: clip.durationSeconds, metadata: clip.metadata ?? {}, transitionIn: clip.transition?.in, transitionOut: clip.transition?.out, opacity: clip.metadata?.renderItem?.opacity };
+      if (clipKind === 'GRAPHIC') {
         const metadata = clip.metadata ?? {};
         const templateId = typeof metadata.motionTemplateId === 'string' ? metadata.motionTemplateId : typeof metadata.templateId === 'string' ? metadata.templateId : 'kinetic-title';
         const props = metadata.templateProps && typeof metadata.templateProps === 'object' && !Array.isArray(metadata.templateProps) ? metadata.templateProps : metadata.props && typeof metadata.props === 'object' && !Array.isArray(metadata.props) ? metadata.props : metadata;
         return { ...base, kind: 'GRAPHIC', templateId, props } as TimelineClip;
       }
-      if (kind === 'CAPTIONS') return { ...base, kind: 'CAPTIONS', captionTrackId: String(clip.metadata?.captionTrackId ?? clip._id) } as TimelineClip;
-      return { ...base, kind, media: { assetId: String(clip.assetId ?? 'unresolved') }, ...(kind === 'AUDIO' ? { volumeDb: clip.volume === undefined ? 0 : clip.volume > 0 ? 20 * Math.log10(clip.volume) : -60 } : {}) } as TimelineClip;
+      if (clipKind === 'CAPTIONS') return { ...base, kind: 'CAPTIONS', captionTrackId: String(clip.metadata?.captionTrack?.id ?? clip.metadata?.captionTrackId ?? clip.id ?? clip._id) } as TimelineClip;
+      return { ...base, kind: clipKind, media: { assetId: String(clip.assetId ?? 'unresolved') }, ...(clipKind === 'IMAGE' ? { fit: clip.metadata?.renderItem?.fit } : {}), ...(clipKind === 'AUDIO' ? { volumeDb: clip.volume === undefined ? 0 : clip.volume > 0 ? 20 * Math.log10(clip.volume) : -60, fadeInSeconds: clip.metadata?.audio?.fadeInSeconds, fadeOutSeconds: clip.metadata?.audio?.fadeOutSeconds } : {}) } as TimelineClip;
     });
     return { id: trackId, kind, name: track.name ?? 'Track', orderIndex: track.orderIndex, muted: false, locked: false, clips };
   });
@@ -26,8 +27,8 @@ export function toTimelineVersion(draft: any, resourceState?: string): TimelineV
   const preset = String(draft.timeline.outputPreset || '').toLowerCase();
   const portrait = /vertical|9:16|1080x1920|tiktok|reel/.test(preset);
   const square = /square|1:1|1080x1080/.test(preset);
-  const width = portrait || square ? 1080 : 1920;
-  const height = portrait ? 1920 : 1080;
+  const width = Number(draft.metadata?.importedOutput?.width ?? (portrait || square ? 1080 : 1920));
+  const height = Number(draft.metadata?.importedOutput?.height ?? (portrait ? 1920 : 1080));
   const configuredFps = draft.metadata?.fps ?? draft.timeline.tracks?.metadata?.fps;
   const frameRate = [24, 25, 30, 50, 60].includes(configuredFps) ? configuredFps : 30;
   return { id: String(draft.timeline._id), productionId: String(draft.timeline.productionId), version: draft.timeline.versionNumber, status, width, height, frameRate, durationSeconds: draft.timeline.durationSeconds, tracks, captionTrackIds: [], createdAt: new Date(draft.timeline.createdAt).toISOString(), createdBy: String(draft.timeline.createdByUserId ?? 'FinalFrame') };

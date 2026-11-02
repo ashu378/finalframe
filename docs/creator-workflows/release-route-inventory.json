@@ -1,0 +1,515 @@
+{
+  "version": 1,
+  "description": "Discovered route inventory; PENDING is not proof of acceptance. Browser results must bind route/test identity to revision, role, expected response and persisted effects.",
+  "emailAndPayments": "LAST_DISABLED",
+  "routes": [
+    {
+      "route": "/",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/page.tsx",
+      "testId": "route:page:/",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/about",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/about/page.tsx",
+      "testId": "route:page:/about",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/page.tsx",
+      "testId": "route:page:/admin",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/audit",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/audit/page.tsx",
+      "testId": "route:page:/admin/audit",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/credits",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/credits/page.tsx",
+      "testId": "route:page:/admin/credits",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/jobs",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/jobs/page.tsx",
+      "testId": "route:page:/admin/jobs",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/moderation",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/moderation/page.tsx",
+      "testId": "route:page:/admin/moderation",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/payments",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/payments/page.tsx",
+      "testId": "route:page:/admin/payments",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/roles",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/roles/page.tsx",
+      "testId": "route:page:/admin/roles",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/users",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/users/page.tsx",
+      "testId": "route:page:/admin/users",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/admin/video-routing",
+      "kind": "page",
+      "area": "platform",
+      "source": "src/app/(admin)/admin/video-routing/page.tsx",
+      "testId": "route:page:/admin/video-routing",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/api/generation/[id]",
+      "kind": "api",
+      "area": "api",
+      "source": "src/app/api/generation/[id]/route.ts",
+      "testId": "route:api:/api/generation/[id]",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/api/payments/bachs/webhook",
+      "kind": "api",
+      "area": "api",
+      "source": "src/app/api/payments/bachs/webhook/route.ts",
+      "testId": "route:api:/api/payments/bachs/webhook",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/api/reset-render",
+      "kind": "api",
+      "area": "api",
+      "source": "src/app/api/reset-render/route.ts",
+      "testId": "route:api:/api/reset-render",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/auth/callback",
+      "kind": "api",
+      "area": "authentication",
+      "source": "src/app/auth/callback/route.ts",
+      "testId": "route:api:/auth/callback",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/case-studies",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/case-studies/page.tsx",
+      "testId": "route:page:/case-studies",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/contact",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/contact/page.tsx",
+      "testId": "route:page:/contact",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/page.tsx",
+      "testId": "route:page:/dashboard",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/assets",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/assets/page.tsx",
+      "testId": "route:page:/dashboard/assets",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/create",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/create/page.tsx",
+      "testId": "route:page:/dashboard/create",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/page.tsx",
+      "testId": "route:page:/dashboard/projects",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/blueprint",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/blueprint/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/blueprint",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/editor",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/editor/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/editor",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/production",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/production/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/production",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/report",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/report/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/report",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/workspace",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/workspace/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/workspace",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/workspace/[section]",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/workspace/[section]/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/workspace/[section]",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/settings/page.tsx",
+      "testId": "route:page:/dashboard/settings",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings/operations",
+      "kind": "page",
+      "area": "studio-operations",
+      "source": "src/app/(dashboard)/dashboard/settings/operations/page.tsx",
+      "testId": "route:page:/dashboard/settings/operations",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings/operations/video-routing",
+      "kind": "page",
+      "area": "studio-operations",
+      "source": "src/app/(dashboard)/dashboard/settings/operations/video-routing/page.tsx",
+      "testId": "route:page:/dashboard/settings/operations/video-routing",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings/reports",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/settings/reports/page.tsx",
+      "testId": "route:page:/dashboard/settings/reports",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/settings/team",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/settings/team/page.tsx",
+      "testId": "route:page:/dashboard/settings/team",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/templates",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/templates/page.tsx",
+      "testId": "route:page:/dashboard/templates",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/forgot-password",
+      "kind": "page",
+      "area": "authentication",
+      "source": "src/app/(auth)/forgot-password/page.tsx",
+      "testId": "route:page:/forgot-password",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/legal/cookies",
+      "kind": "page",
+      "area": "policy",
+      "source": "src/app/(public)/legal/cookies/page.tsx",
+      "testId": "route:page:/legal/cookies",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/legal/gdpr",
+      "kind": "page",
+      "area": "policy",
+      "source": "src/app/(public)/legal/gdpr/page.tsx",
+      "testId": "route:page:/legal/gdpr",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/legal/privacy",
+      "kind": "page",
+      "area": "policy",
+      "source": "src/app/(public)/legal/privacy/page.tsx",
+      "testId": "route:page:/legal/privacy",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/legal/terms",
+      "kind": "page",
+      "area": "policy",
+      "source": "src/app/(public)/legal/terms/page.tsx",
+      "testId": "route:page:/legal/terms",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/login",
+      "kind": "page",
+      "area": "authentication",
+      "source": "src/app/(auth)/login/page.tsx",
+      "testId": "route:page:/login",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/maintenance",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/maintenance/page.tsx",
+      "testId": "route:page:/maintenance",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/methodology",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/methodology/page.tsx",
+      "testId": "route:page:/methodology",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/page.tsx",
+      "testId": "route:page:/onboarding",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/assets",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/assets/page.tsx",
+      "testId": "route:page:/onboarding/assets",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/confirm",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/confirm/page.tsx",
+      "testId": "route:page:/onboarding/confirm",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/creative-dna",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/creative-dna/page.tsx",
+      "testId": "route:page:/onboarding/creative-dna",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/goal",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/goal/page.tsx",
+      "testId": "route:page:/onboarding/goal",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/identity",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/identity/page.tsx",
+      "testId": "route:page:/onboarding/identity",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/message",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/message/page.tsx",
+      "testId": "route:page:/onboarding/message",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/platform",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/platform/page.tsx",
+      "testId": "route:page:/onboarding/platform",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/studio",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/studio/page.tsx",
+      "testId": "route:page:/onboarding/studio",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/onboarding/welcome",
+      "kind": "page",
+      "area": "legacy-onboarding",
+      "source": "src/app/(onboarding)/onboarding/welcome/page.tsx",
+      "testId": "route:page:/onboarding/welcome",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/pricing",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/pricing/page.tsx",
+      "testId": "route:page:/pricing",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/reset-password",
+      "kind": "page",
+      "area": "authentication",
+      "source": "src/app/(auth)/reset-password/page.tsx",
+      "testId": "route:page:/reset-password",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/review/[token]",
+      "kind": "page",
+      "area": "client-review",
+      "source": "src/app/(public)/review/[token]/page.tsx",
+      "testId": "route:page:/review/[token]",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/signup",
+      "kind": "page",
+      "area": "authentication",
+      "source": "src/app/(auth)/signup/page.tsx",
+      "testId": "route:page:/signup",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/verify-email",
+      "kind": "page",
+      "area": "authentication",
+      "source": "src/app/(auth)/verify-email/page.tsx",
+      "testId": "route:page:/verify-email",
+      "acceptance": "PENDING"
+    }
+  ],
+  "workspaceSections": [
+    "overview",
+    "plan",
+    "storyboard",
+    "canvas",
+    "media",
+    "takes",
+    "edit",
+    "review",
+    "export"
+  ],
+  "requiredStates": [
+    "anonymous",
+    "authorized",
+    "wrong-role-or-project",
+    "loading",
+    "empty",
+    "validation-error",
+    "runtime-error",
+    "desktop",
+    "mobile",
+    "keyboard",
+    "reduced-motion",
+    "webgl-unavailable"
+  ],
+  "requiredRecipeIds": [
+    "ANIMATED_COMEDY_2D",
+    "REALISTIC_SKIT_UGC",
+    "PRODUCT_SAAS_LAUNCH",
+    "MOTION_GRAPHICS",
+    "EXPLAINER_STORY",
+    "CINEMATIC_FILM",
+    "MUSIC_VIDEO",
+    "SOCIAL_CUTDOWN"
+  ],
+  "requiredOperationIds": [
+    "GENERATE",
+    "FRAME_TO_VIDEO",
+    "EDIT",
+    "APPEARANCE_EDIT",
+    "OBJECT_REPLACE",
+    "PERFORMANCE_TRANSFER",
+    "EXTEND",
+    "LIP_SYNC",
+    "UPSCALE",
+    "MASKED_EDIT",
+    "REFERENCE_VOICE",
+    "STT",
+    "TTS",
+    "MUSIC_GENERATION",
+    "SFX_GENERATION"
+  ]
+}

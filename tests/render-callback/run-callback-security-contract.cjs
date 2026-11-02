@@ -61,6 +61,7 @@ const store = {
   const jobs = fs.readFileSync(path.join(root, 'convex/renderJobs.ts'), 'utf8');
   const schema = fs.readFileSync(path.join(root, 'convex/schema.ts'), 'utf8');
 
+  compile('convex/renderHeartbeatPolicy.ts', 'renderHeartbeatPolicy.js');
   const renderJobsPath = compile('convex/renderJobs.ts', 'renderJobs.js');
   const manifestPath = compile('renderer/src/manifest.ts', 'renderer-manifest.js');
   compile('renderer/src/types.ts', 'types.js');
@@ -74,7 +75,7 @@ const store = {
   const fakeExports = new Map();
   const context = {
     db: {
-      get: async (id) => id === job._id ? job : id === 'storage-1' ? { _id: id, sha256: 'sha256:fixture', contentType: 'video/mp4', size: 10 } : receipts.get(id) ?? fakeExports.get(id) ?? null,
+      get: async (id) => id === job._id ? job : id === 'manifest-1' ? { _id: id, projectId: job.projectId, productionId: job.productionId, contractVersion: 5 } : id === 'storage-1' ? { _id: id, sha256: 'sha256:fixture', contentType: 'video/mp4', size: 10 } : receipts.get(id) ?? fakeExports.get(id) ?? null,
       query: (table) => ({ withIndex: (_index, builderCallback) => {
         const constraints = {};
         const builder = { eq: (field, value) => { constraints[field] = value; return builder; } };

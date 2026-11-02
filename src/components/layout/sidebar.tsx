@@ -7,7 +7,8 @@ import { FolderOpen, LayoutGrid, LayoutTemplate, Plus, Settings, Sparkles, Walle
 import { SignOutButton } from '@/components/auth/sign-out-button';
 
 const navItems = [
-  { href: '/dashboard', label: 'Projects', icon: LayoutGrid },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
+  { href: '/dashboard/projects', label: 'Projects', icon: FolderOpen },
   { href: '/dashboard/assets', label: 'Media library', icon: FolderOpen },
   { href: '/dashboard/templates', label: 'Templates', icon: LayoutTemplate },
   { href: '/dashboard/settings', label: 'Settings & credits', icon: Settings },
