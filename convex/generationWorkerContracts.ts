@@ -15,6 +15,12 @@ export function videoBudgetReservationUsd(estimate: number): number {
 export function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+/** Database metadata must never contain a provider body, base64 media, URLs,
+ * prompts or arbitrary nested receipt objects. */
+export function boundedProviderUsage(value: unknown) {
+  const usage=object(value);
+  return Object.fromEntries(['promptTokens','completionTokens','totalTokens','inputTokens','outputTokens','cachedTokens','reasoningTokens','seconds','costUsd','cost','prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens'].filter(key=>typeof usage[key]==='number'&&Number.isFinite(usage[key])&&Number(usage[key])>=0).map(key=>[key,usage[key]]));
+}
 
 export function workerEnabled() {
   return process.env.FINALFRAME_GENERATION_WORKER_ENABLED === 'true';
@@ -112,3 +118,7 @@ export function publicJob(job: Record<string, unknown>) {
 }
 
 export function hasStoredMusicOutput(job:{operation?:string;request?:unknown;response?:unknown;model?:string;submissionStartedAt?:number;providerRequestId?:string}){const output=object(object(job.response).audioOutput);return job.operation==='PREPARATION'&&object(job.request).preparationKind==='MUSIC'&&Boolean(job.submissionStartedAt)&&output.streamCompleted===true&&typeof output.storageId==='string'&&typeof output.checksum==='string'&&Number.isSafeInteger(output.byteSize)&&Number(output.byteSize)>0&&Number(output.byteSize)<=3*1024*1024&&output.contentType==='audio/mpeg'&&output.model===job.model&&typeof output.providerRequestId==='string'&&output.providerRequestId===job.providerRequestId;}
+export function hasStoredImageOutput(job:{operation?:string;request?:unknown;response?:unknown;model?:string;submissionStartedAt?:number;providerRequestId?:string}) {
+  const saved=object(object(job.response).imageOutput);
+  return job.operation==='PREPARATION' && object(job.request).preparationKind==='CHARACTER_REFERENCE' && Boolean(job.submissionStartedAt) && saved.completed===true && saved.model===job.model && typeof saved.storageId==='string' && typeof saved.checksum==='string' && Number.isSafeInteger(saved.byteSize) && Number(saved.byteSize)>0 && Number(saved.byteSize)<=15*1024*1024 && ['image/png','image/jpeg','image/webp'].includes(String(saved.contentType)) && saved.providerRequestId===job.providerRequestId;
+}

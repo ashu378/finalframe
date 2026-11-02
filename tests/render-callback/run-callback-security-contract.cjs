@@ -67,6 +67,8 @@ const store = {
   const outputFormatPath = compile('renderer/src/output-format.ts', 'output-format.js');
   compile('renderer/src/types.ts', 'types.js');
   compile('renderer/src/templates/contract.ts', 'templates/contract.js');
+  compile('renderer/src/templates/graphics-v2-contract.ts', 'templates/graphics-v2-contract.js');
+  const graphicsCertificatePath = compile('renderer/src/templates/graphics-v2-certificate.ts', 'templates/graphics-v2-certificate.js');
   const workerPolicyPath = compile('convex/renderWorkerContracts.ts', 'renderWorkerContracts.js');
   const Module = require('node:module');
   const originalLoad = Module._load;
@@ -95,6 +97,9 @@ const store = {
     if (request === './_generated/server') return { internalAction: (definition) => definition, internalMutation: (definition) => definition, mutation: (definition) => definition, query: (definition) => definition };
     if (request === '../renderer/src/manifest') return originalLoad.call(this, manifestPath, parent, isMain);
     if (request === '../renderer/src/output-format') return originalLoad.call(this, outputFormatPath, parent, isMain);
+    if (request === '../renderer/src/templates/graphics-v2-certificate') return originalLoad.call(this, graphicsCertificatePath, parent, isMain);
+    if (request === './graphicsAssets') return { resolveGraphicImage: async () => { throw new Error('Poster dispatch is outside this accepted-callback fixture.'); } };
+    if (request === '../renderer/src/media/sha256') return require(compile('renderer/src/media/sha256.ts', 'sha256.js'));
     if (request === './movieAuthority') return { authorizeMovieRenderContext: async () => { throw new Error('Ordinary callback fixture cannot authorize movie rendering.'); } };
     if (request === './renderWorkerContracts') return originalLoad.call(this, workerPolicyPath, parent, isMain);
     if (request === './_generated/api') return { internal: { renderJobs: {} } };

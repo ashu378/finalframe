@@ -9,6 +9,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 import { now } from "./_shared";
 import { ensureResourceState, requireApprovedResource } from "./resourceStates";
+import {importedOutputAudio,posterSpec,type ImportedPosterBinding} from '../renderer/src/poster';
 import { validateManifest } from "../renderer/src/manifest";
 import { finishingV5Enabled } from "./finishingContracts";
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
@@ -34,10 +35,6 @@ export const createVersion = mutation({
     const key = args.idempotencyKey?.trim() || `timeline:${args.manifestId}`;
     if (key.length < 8 || key.length > 200) throw new Error("A bounded timeline import key is required.");
     const prior = await ctx.db.query("timelines").withIndex("by_creation_key", q => q.eq("creationKey", key)).unique();
-    if (prior) {
-      if (prior.productionId !== production._id || prior.projectId !== projectId || prior.manifestId !== manifest._id) throw new Error("This import key belongs to another manifest.");
-      return prior;
-    }
     const items = payload.items as Array<Record<string, unknown>>;
     const audio = Array.isArray(payload.audioTracks) ? payload.audioTracks as Array<Record<string, unknown>> : [];
     const captions = Array.isArray(payload.captionTracks) ? payload.captionTracks as Array<Record<string, unknown>> : [];
@@ -45,9 +42,26 @@ export const createVersion = mutation({
     const bySourceId = new Map<string, Record<string, unknown>>();
     for (const source of sources) for (const id of [source.timelineClipId, source.audioId]) if (typeof id === "string") bySourceId.set(id, source);
     const output = object(payload.output); const fps = Number(output.fps);
+    importedOutputAudio(output.audio);
+    if(Object.prototype.hasOwnProperty.call(object(args.metadata),'importedPoster'))throw new Error('Poster bindings must come from the canonical manifest, not import metadata.');
+    let importedPoster:ImportedPosterBinding|undefined;
+    if(payload.poster!==undefined){
+      const poster=posterSpec(payload.poster);const matches=sources.filter(source=>source.sourceUrl===poster.src&&typeof source.assetId==='string');
+      const ids=[...new Set(matches.map(source=>String(source.assetId)))];const rawId=poster.assetId??(ids.length===1?ids[0]:undefined);
+      if(!rawId)throw new Error('Imported poster is unbound or ambiguous. Choose an exact approved project image.');
+      const image=await resolveGraphicImage(ctx,{assetId:rawId,projectId,studioExternalId:member.studio.externalId});
+      const storage=await ctx.db.system.get('_storage',image.storageId!);const url=await ctx.storage.getUrl(image.storageId!);
+      if(!storage||!url||url!==poster.src||!['image/jpeg','image/png','image/webp'].includes(storage.contentType??'')||poster.mimeType!==undefined&&poster.mimeType!==storage.contentType||matches.some(source=>source.assetId===image._id&&source.assetChecksum!==image.checksum))throw new Error('Imported poster no longer matches its canonical storage, checksum or media type.');
+      importedPoster={assetId:image._id,assetChecksum:image.checksum!,storageId:image.storageId!,storageChecksum:storage.sha256,byteSize:storage.size,storageMimeType:storage.contentType as ImportedPosterBinding['storageMimeType'],width:poster.width,height:poster.height,...(poster.mimeType===undefined?{}:{mimeType:poster.mimeType})};
+    }
+
+    if (prior) {
+      if (prior.productionId !== production._id || prior.projectId !== projectId || prior.manifestId !== manifest._id) throw new Error("This import key belongs to another manifest.");
+      return prior;
+    }
     const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq("productionId", args.productionId)).order("desc").first();
     const timestamp = now();
-    const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output };
+    const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output,...(importedPoster?{importedPoster}:{}) };
     const timelineId = await ctx.db.insert("timelines", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId, productionId: args.productionId, manifestId: args.manifestId, creationKey: key, selectionScope: String(object(payload.selection).scope ?? "TIMELINE"), versionNumber: (latest?.versionNumber ?? 0) + 1, durationSeconds: Number(output.durationInFrames) / fps, tracks: { idempotencyKey: key, manifestId: args.manifestId.toString(), metadata, productionVersionId: payload.productionVersionId }, outputPreset: args.outputPreset ?? String(payload.outputPreset ?? "FULL_HD"), status: "DRAFT", createdByUserId: member.user._id, createdAt: timestamp, updatedAt: timestamp });
     const importedTracks = new Map<string, Id<"timelineTracks">>();
     const descriptors = Array.isArray(payload.tracks) ? payload.tracks.map(object) : [];

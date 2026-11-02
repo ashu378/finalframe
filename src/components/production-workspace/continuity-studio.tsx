@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ApprovalControls, controlInput } from './resource-approval-controls';
 import { VoiceSetup } from './voice-setup';
 import { PreparationPanel } from './preparation-panel';
+import { AudioExtractionPanel } from './audio-extraction-panel';
 import { UploadButton } from '@/components/assets/upload-button';
 import { acceptEpisodeStory, loadMoreResourceVersions, saveProjectBible, saveProjectResource } from '@/lib/production/workspace-actions';
 import { PROJECT_RESOURCE_KINDS, type ResourceVersionView, type WorkspaceControlData } from '@/lib/production/workspace-controls';
@@ -46,6 +47,7 @@ export function ContinuityStudio({ data, showStory = false }: { data: WorkspaceC
         <section className="ff-card space-y-5 p-5 sm:p-7" aria-label="Project media library"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-semibold">Project media</h2><p className="mt-2 text-sm text-muted-foreground">Only media deliberately added to this project can be used by its productions.</p></div>{data.canEdit ? <UploadButton studioId={data.studioExternalId} projectExternalId={data.projectExternalId} /> : null}</div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{data.assets.map((asset) => <div key={asset.id} className="min-w-0 rounded-xl border border-border p-3"><p className="break-words text-sm font-medium">{asset.name}</p><p className="mt-1 text-xs text-muted-foreground">{asset.mimeType}</p>{asset.url ? <a href={asset.url} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center text-sm text-primary underline">Open project asset</a> : null}<div className="mt-3"><ApprovalControls data={data} resourceType="asset" resourceId={asset.id} state={asset.state} /></div></div>)}</div>{!data.assets.length ? <p className="text-sm text-muted-foreground">Upload a reference image, footage, or an authorized voice recording to begin.</p> : null}
         </section>
+        <AudioExtractionPanel projectId={data.projectId} assets={data.assets} canEdit={data.canEdit} />
         <VoiceSetup key={data.voices.map((voice) => `${voice.id}:${voice.status}:${voice.state}:${voice.hasConsent}`).join(',')} data={data} />
         <PreparationPanel projectId={data.projectId} productionId={data.productionId} voices={data.voices} assets={data.assets} canEdit={data.canEdit} />
         <section className="ff-card space-y-6 p-5 sm:p-7" aria-label="Project resource versions"><div><h2 className="text-xl font-semibold">Characters, locations, and brand references</h2><p className="mt-2 text-sm text-muted-foreground">Each revision creates a separate version. Approved references remain unchanged.</p></div>

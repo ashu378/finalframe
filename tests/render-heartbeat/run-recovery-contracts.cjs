@@ -16,6 +16,8 @@ function load(file, imports = {}) {
 const policy = load('convex/renderHeartbeatPolicy.ts');
 const worker = load('convex/renderWorkerContracts.ts');
 const outputFormats = load('renderer/src/output-format.ts');
+const graphicsContract = load('renderer/src/templates/graphics-v2-contract.ts');
+const graphicsCertificate = load('renderer/src/templates/graphics-v2-certificate.ts', {'./graphics-v2-contract.js':graphicsContract});
 const internal = new Proxy({}, { get: (_, module) => new Proxy({}, { get: (_, fn) => String(module) + '.' + String(fn) }) });
 const server = { internalMutation: value => ({ ...value, visibility: 'internal' }), internalAction: value => value, mutation: value => ({ ...value, visibility: 'public' }), query: value => value };
 let checks = 0;
@@ -33,7 +35,7 @@ function fixture() {
     patch: async (id, patch) => { state.rows.set(id, { ...state.rows.get(id), ...patch }); state.writes.push({ id, patch }); },
     query: table => { const filters = []; const matches = () => [...state.rows.values()].filter(row => row.table === table && filters.every(([key, value]) => row[key] === value)); const chain = { withIndex: (_, select) => { const q = { eq: (key, value) => { filters.push([key, value]); return q; } }; select(q); return chain; }, unique: async () => matches()[0] || null, take: async n => matches().slice(0, n) }; return chain; },
   }, scheduler: { runAfter: async (...args) => state.scheduled.push(args) } };
-  const jobs = load('convex/renderJobs.ts', { './_generated/api': { internal }, './_generated/server': server, './authorization': { requireMember: async () => ({ studio: { externalId: 'studio' } }), requireProjectRole: async () => ({ project: state.rows.get('project'), user: { _id: 'user' } }) }, './_shared': { now: () => state.time }, './renderHeartbeatPolicy': policy, '../renderer/src/manifest': { validateLockedManifest: () => ({ ok: true }) }, '../renderer/src/output-format': outputFormats, './movieAuthority': { authorizeMovieRenderContext: async () => { throw new Error('Ordinary recovery fixture cannot authorize movie rendering.'); } }, './renderWorkerContracts': worker });
+  const jobs = load('convex/renderJobs.ts', { './_generated/api': { internal }, './_generated/server': server, './authorization': { requireMember: async () => ({ studio: { externalId: 'studio' } }), requireProjectRole: async () => ({ project: state.rows.get('project'), user: { _id: 'user' } }) }, './_shared': { now: () => state.time }, '../renderer/src/templates/graphics-v2-certificate':graphicsCertificate, './graphicsAssets': { resolveGraphicImage: async () => { throw new Error('Poster dispatch is outside this accepted-callback fixture.'); } }, '../renderer/src/media/sha256': load('renderer/src/media/sha256.ts'), './renderHeartbeatPolicy': policy, '../renderer/src/manifest': { validateLockedManifest: () => ({ ok: true }) }, '../renderer/src/output-format': outputFormats, './movieAuthority': { authorizeMovieRenderContext: async () => { throw new Error('Ordinary recovery fixture cannot authorize movie rendering.'); } }, './renderWorkerContracts': worker });
   const heartbeats = load('convex/renderHeartbeat.ts', { './_generated/api': { internal }, './_generated/server': server, './renderHeartbeatPolicy': policy, './renderWorkerContracts': worker });
   state.invoke = async (definition, args) => {
     const rows = structuredClone(state.rows); const beforeWrites = state.writes.length; const beforeSchedules = state.scheduled.length;

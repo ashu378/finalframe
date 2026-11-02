@@ -3,9 +3,11 @@ import { internalAction, internalMutation, mutation, query } from "./_generated/
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireMember, requireProjectRole } from "./authorization";
+import { requireMember, requireProjectRole, resolveProjectAccessForActor } from "./authorization";
 import { now } from "./_shared";
 import { canReconcileAcceptedCompletion, RENDER_ATTEMPT_MAX_MS, validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
+import {resolveGraphicImage} from './graphicsAssets';
+import {sha256Equal} from '../renderer/src/media/sha256';
 import { validateLockedManifest } from "../renderer/src/manifest";
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
@@ -98,10 +100,11 @@ async function updateExports(ctx: MutationCtx, jobId: Id<"renderJobs">, status: 
 async function internalProject(ctx: ReadCtx, job: RenderJob) {
   const [project, production] = await Promise.all([job.projectId ? ctx.db.get(job.projectId) : null, ctx.db.get(job.productionId)]);
   if (!project || project.deletedAt || project.archivedAt || !production || production.projectId !== project._id || project.studioExternalId !== job.studioExternalId) throw new Error("Render project ownership is unavailable.");
-  const actor = job.createdByUserId ? await ctx.db.get(job.createdByUserId) : null;
-  const membership = actor ? await ctx.db.query("projectMembers").withIndex("by_project_user", (q) => q.eq("projectId", project._id).eq("userId", actor._id)).unique() : null;
-  const ownsProject = actor && (project.ownerUserId === actor._id || project.createdByUserId === actor._id);
-  if (!actor || actor.status === "disabled" || (membership ? membership.status !== "ACTIVE" || !["OWNER", "EDITOR"].includes(membership.role) : !ownsProject)) throw new Error("Render permission has changed.");
+  if (!job.createdByUserId) throw new Error("Render permission has changed.");
+  // Dispatch uses the durable actor, including current canonical studio and
+  // project tombstones. Accepted callbacks reconcile through their own exact
+  // lease/receipt path and do not call this first-dispatch authority fence.
+  await resolveProjectAccessForActor(ctx, project._id, job.createdByUserId, ["OWNER", "EDITOR"]);
   return { project, production };
 }
 
@@ -143,6 +146,12 @@ async function authorizedManifest(ctx: MutationCtx, job: RenderJob) {
     const asset = assetId ? await ctx.db.get(assetId) : null;
     if (!asset || asset.projectId !== project._id || asset.scope !== "PROJECT" || asset.deletedAt || !asset.storageId || !asset.checksum || source.assetChecksum !== asset.checksum) throw new Error("A render asset is missing or has changed.");
     await approvedState(ctx, project._id, "asset", asset._id);
+    if(source.sourceKind==='POSTER'){
+      const image=await resolveGraphicImage(ctx,{assetId:asset._id,projectId:project._id,studioExternalId:job.studioExternalId,actorId:job.createdByUserId});
+      const storage=await ctx.db.system.get('_storage',image.storageId!);
+      if(image.storageId!==source.assetStorageId||!storage||!sha256Equal(storage.sha256,source.assetStorageChecksum)||storage.size!==source.assetStorageByteSize||storage.contentType!==source.assetStorageMimeType)throw new Error('Render poster storage snapshot changed. Reimport its verified image.');
+    }
+
     if (typeof source.shotVersionId === "string") {
       const takeId = ctx.db.normalizeId("shotVersions", source.shotVersionId);
       const take = takeId ? await ctx.db.get(takeId) : null;

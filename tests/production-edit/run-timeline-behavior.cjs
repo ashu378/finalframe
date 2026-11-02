@@ -5,18 +5,19 @@ const path = require('node:path');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-timeline-behavior-'));
-function actualFunctions(file, names) {
+function actualFunctions(file, names, dependencies = '') {
   const source = ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
   const selected = source.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text));
   assert.equal(selected.length, names.length, 'Every tested production helper must exist');
   const printer = ts.createPrinter();
-  const code = selected.map(node => printer.printNode(ts.EmitHint.Unspecified, node, source)).join('\n') + '\nexport { ' + names.join(', ') + ' };';
+  const code = dependencies + '\n' + selected.map(node => printer.printNode(ts.EmitHint.Unspecified, node, source)).join('\n') + '\nexport { ' + names.join(', ') + ' };';
   const output = path.join(temp, path.basename(file) + '.cjs');
   fs.writeFileSync(output, ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText);
   return require(output);
 }
 const editor = actualFunctions('convex/timelineEditor.ts', ['record', 'stringValue', 'optionalString', 'numberValue', 'optionalNumber', 'findClip', 'applyEdit']);
-const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks', 'rendererOutputAudio', 'scopeSourceItems']);
+actualFunctions('renderer/src/poster.ts', ['record','importedOutputAudio']);
+const assembly = actualFunctions('convex/assembly.ts', ['record', 'requireSupportedClipEffects', 'rendererAudioTracks', 'rendererOutputAudio', 'scopeSourceItems'], 'const {importedOutputAudio}=require('+JSON.stringify(path.join(temp,'poster.ts.cjs'))+');');
 const composer = actualFunctions('src/lib/production/workspace-controls.ts', ['validateCompositionAudioTracks']);
 const clip = (id, startSeconds, durationSeconds, extra = {}) => ({ id, trackId: 'track', kind: 'VIDEO', startSeconds, durationSeconds, assetId: 'video', metadata: {}, ...extra });
 const state = clips => ({ metadata: {}, tracks: [{ id: 'track', kind: 'VIDEO', orderIndex: 0, metadata: {}, clips }] });
@@ -50,6 +51,8 @@ try {
     assert.deepEqual(assembly.rendererOutputAudio([{ trackKind: 'AUDIO', volume: .3 }]), { sampleRate: 48000, channels: 2 });
     assert.equal(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: false }]), undefined);
     assert.equal(assembly.rendererOutputAudio([{ trackKind: 'VIDEO', hasAudio: true, volume: 0 }]), undefined);
+    assert.deepEqual(assembly.rendererOutputAudio([{trackKind:'AUDIO',volume:1}],{importedOutput:{audio:{sampleRate:44100,channels:1}}}),{sampleRate:44100,channels:1});
+    assert.throws(()=>assembly.rendererOutputAudio([],{importedOutput:{audio:{sampleRate:22050,channels:2}}}),/Imported audio/);
   });
   check('unwired captions and transitions cannot be saved or silently exported', () => {
     assert.throws(() => editor.applyEdit(state([clip('first', 0, 4)]), 'addTransition', { clipId: 'first', transitionKind: 'DISSOLVE', durationSeconds: .25 }), /Only cut/);

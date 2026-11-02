@@ -309,6 +309,7 @@ function validatePoster(value: unknown): { value?: PosterSpec; issues: Validatio
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) return { issues: [{ path, message: 'must be an object' }] };
   if (!isSafeMediaSource(value.src)) issues.push({ path: `${path}.src`, message: 'must be a safe HTTP(S), file, or local source without control characters' });
+  if(value.assetId!==undefined&&(typeof value.assetId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(value.assetId)))issues.push({path:`${path}.assetId`,message:'must be a bounded canonical asset identifier'});
   if (!isFiniteInteger(value.width) || value.width < 1 || value.width > RENDER_LIMITS.maxWidth) issues.push({ path: `${path}.width`, message: 'must be a positive bounded integer' });
   if (!isFiniteInteger(value.height) || value.height < 1 || value.height > RENDER_LIMITS.maxHeight) issues.push({ path: `${path}.height`, message: 'must be a positive bounded integer' });
   if (value.mimeType !== undefined && !['image/jpeg', 'image/png', 'image/webp'].includes(value.mimeType as string)) issues.push({ path: `${path}.mimeType`, message: 'must be jpeg, png, or webp' });

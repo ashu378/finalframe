@@ -23,7 +23,7 @@ export const record = internalMutation({
   args: { ...args, receiptId: v.string(), model: v.string(), costUsd: v.number() }, returns: v.null(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(music(job)?(input.model===job.model||input.model===job.modelVersion)&&input.costUsd>=.04:(input.model === job.model || input.model.startsWith(job.model + '-')))) throw new Error('Provider receipt does not match the completed speech job.');
+    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(music(job)?(input.model===job.model||input.model===job.modelVersion)&&input.costUsd>0:(input.model === job.model || input.model.startsWith(job.model + '-')))) throw new Error('Provider receipt does not match the completed speech job.');
     if (job.providerCostUsd !== undefined) {
       if (job.providerCostUsd !== input.costUsd) throw new Error('Provider receipt cost conflicts with an already settled job.');
       return null;

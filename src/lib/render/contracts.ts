@@ -66,6 +66,8 @@ export interface VideoClip extends TimelineClipBase {
     media: MediaSourceRef;
     fit?: FitMode;
     playbackRate?: number;
+    volumeDb?: number;
+    muted?: boolean;
 }
 
 export interface ImageClip extends TimelineClipBase {
@@ -84,6 +86,7 @@ export interface AudioClip extends TimelineClipBase {
     kind: 'AUDIO';
     media: MediaSourceRef;
     volumeDb?: number;
+    muted?: boolean;
     pan?: number;
     fadeInSeconds?: number;
     fadeOutSeconds?: number;

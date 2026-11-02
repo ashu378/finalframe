@@ -12,6 +12,7 @@ import {
     type VideoGenerationRequest,
 } from '../ai/types';
 import type { CameraConfig, MotionConfig } from '../types/database';
+import { IMAGE_RESPONSE_LIMITS, readImageResponse, type ImageResponseBody } from '../ai/image-response';
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -38,6 +39,11 @@ export interface OpenRouterTransportOptions {
     /** Durable submit fence, invoked after local/catalog preflight and before
      * the first and only video POST. A rejected fence must not count as a submission. */
     beforeMediaSubmit?: () => Promise<void>;
+    /** Image receipts are correlation IDs only; image results have no video poll API. */
+    onImageReceipt?: (requestId: string, kind: 'GENERATION' | 'CORRELATION') => Promise<void>;
+    onImageCompleted?: (body: ImageResponseBody, requestId?: string, modelUsed?: string) => Promise<void>;
+    /** Image-only action deadline, leaving time to persist inside its current lease. */
+    imageDeadlineAt?: number;
     signal?: AbortSignal;
     idempotencyKey?: string;
     retry?: OpenRouterRetryOptions;
@@ -396,7 +402,7 @@ export function extractUsageAndCost(value: unknown): { usage?: NormalizedUsage; 
     const cachedTokens = finiteNumber(usage.cached_tokens ?? usage.cache_read_input_tokens);
     const reasoningTokens = finiteNumber(usage.reasoning_tokens ?? asRecord(usage.completion_tokens_details).reasoning_tokens);
     const hasUsage = Object.keys(usage).length > 0 || ['prompt_tokens', 'input_tokens', 'completion_tokens', 'output_tokens', 'total_tokens', 'cost', 'cost_usd'].some((key) => key in raw);
-    if (!hasUsage) return {};
+    if (!hasUsage && costUsd===undefined) return {};
     const normalized: NormalizedUsage = {
         promptTokens,
         completionTokens,
@@ -407,7 +413,6 @@ export function extractUsageAndCost(value: unknown): { usage?: NormalizedUsage; 
         ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
         ...(seconds === undefined ? {} : { seconds }),
         ...(costUsd === undefined ? {} : { costUsd, cost: costUsd }),
-        raw: value,
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: totalTokens,
@@ -692,8 +697,21 @@ export async function generateImage(input: ImageGenerationRequest, options: Open
             const model = resolved.id;
             const imageRequestBody = buildImageGenerationRequest({ ...input, model }, { allowDiscoveredModel: resolved.discovered });
             requireKey(options, 'IMAGE_GENERATION', model);
+            if(options.signal?.aborted || options.imageDeadlineAt!==undefined&&(!Number.isFinite(options.imageDeadlineAt)||options.imageDeadlineAt<=Date.now()))throw new AICapabilityError({code:'REQUEST_TIMEOUT',message:'Image worker deadline expired before submission.',provider:'openrouter',capability:'IMAGE_GENERATION',model,retryable:false});
             await options.beforeMediaSubmit?.();
-            const response = await requestJson<{ data?: Array<{ b64_json?: string; media_type?: string; url?: string }>; usage?: unknown; model?: string }>('/images', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(imageRequestBody) }, { ...options, maxRetries: 0, retry: { ...options.retry, maxRetries: 0 } }, 'IMAGE_GENERATION', model);
+            if(options.signal?.aborted || options.imageDeadlineAt!==undefined&&options.imageDeadlineAt<=Date.now())throw new AICapabilityError({code:'REQUEST_TIMEOUT',message:'Image worker deadline expired before POST; outcome requires reconciliation.',provider:'openrouter',capability:'IMAGE_GENERATION',model,retryable:false});
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), Math.max(1,Math.min(options.timeoutMs || IMAGE_RESPONSE_LIMITS.timeoutMs, IMAGE_RESPONSE_LIMITS.timeoutMs, options.imageDeadlineAt===undefined?Infinity:options.imageDeadlineAt-Date.now())));
+            const abort = () => controller.abort();
+            if(options.signal?.aborted)controller.abort();else options.signal?.addEventListener('abort',abort,{once:true});
+            let response: {body:ImageResponseBody;requestId?:string};
+            try {
+                const init={method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...imageRequestBody,stream:true})};
+                const http=await getFetch(options)(`${(options.baseUrl || BASE_URL).replace(/\/+$/, '')}/images`,{...init,headers:requestHeaders(options,init,'POST',stableRequestIdempotencyKey('/images','POST',init,options)),redirect:'error',signal:controller.signal});
+                if(!http.ok){await http.body?.cancel();const classified=classifyOpenRouterError(http.status);throw new AICapabilityError({code:classified.code,message:'Image request was not completed.',provider:'openrouter',capability:'IMAGE_GENERATION',model,status:http.status,retryable:false});}
+                response=await readImageResponse(http,{onImageReceipt:options.onImageReceipt,onImageCompleted:(body,id)=>options.onImageCompleted?.(body,id,body.model||model)??Promise.resolve()},options.maxResponseBytes?Math.ceil(options.maxResponseBytes*4/3)+65536:undefined);
+            } catch(cause) { if(cause instanceof AICapabilityError)throw cause;throw Object.assign(abortError(cause,'IMAGE_GENERATION',model),{retryable:false}); }
+            finally {clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
             const images = (response.body.data || []).map((image) => ({ b64Json: image.b64_json, mediaType: image.media_type, url: image.url }));
             if (!images.some((image) => image.b64Json || image.url)) throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no image output.', provider: 'openrouter', capability: 'IMAGE_GENERATION', model, retryable: false, details: response.body });
             const first = images[0];

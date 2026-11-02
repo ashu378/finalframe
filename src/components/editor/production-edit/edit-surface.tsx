@@ -12,6 +12,7 @@ import type { ProductionEditImpact } from './edit-impact-summary';
 import { TimelineEditor, type TimelineEditEvent } from '@/components/editor/timeline-editor/timeline-editor';
 import {GraphicEditPanel} from './graphic-edit-panel';
 import { MusicBeatEditor } from './music-beat-editor';
+import { MediaReplacementPanel } from './media-replacement-panel';
 
 type ProductionId = Id<'productions'>;
 
@@ -39,6 +40,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
   const [message, setMessage] = useState<string | null>(null);
   const [impactError, setImpactError] = useState<string | null>(null);
+  const [replacement, setReplacement] = useState<{ timelineId: string; clipId: string } | null>(null);
   const impactQuery = useQuery(api.productionOperations.previewImpact, selectedNode ? { productionId: convexProductionId, targetType: targetTypeMap[selectedNode.resourceType] ?? 'production', targetId: selectedNode.resourceId } : 'skip');
   const draft = useQuery(api.timelineEditor.getDraft, { productionId: convexProductionId, timelineId: activeTimelineId });
   const previewOperation = useMutation(api.productionOperations.create);
@@ -47,7 +49,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   const redoTimelineEdit = useMutation(api.timelineEditor.redo);
   const canonicalTimelineState = useQuery(api.approvals.get, draft?.timeline?.projectId ? { projectId: draft.timeline.projectId as Id<'projects'>, productionId: convexProductionId, resourceType: 'timeline', resourceId: String(draft.timeline._id) } : 'skip');
   const timeline = useMemo(() => toTimelineVersion(draft, canonicalTimelineState?.currentState), [draft, canonicalTimelineState?.currentState]);
-  const canEditTimeline = canonicalTimelineState !== undefined && ['DRAFT', 'REVISION_REQUESTED'].includes(canonicalTimelineState.currentState);
+  const canEditTimeline = draft?.canEdit === true && canonicalTimelineState !== undefined && ['DRAFT', 'REVISION_REQUESTED'].includes(canonicalTimelineState.currentState);
   const history = draft?.operations?.filter((operation: any) => operation.outputResourceIds.includes(String(draft.timeline._id))) ?? [];
   const canUndo = canEditTimeline && history.some((operation: any) => operation.kind !== 'CREATE_TIMELINE');
   const canRedo = canEditTimeline && history.some((operation: any) => operation.kind === 'UNDO');
@@ -77,7 +79,8 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   }
 
   async function handleTimelineEdit(event: TimelineEditEvent) {
-    if (event.type === 'select-clip' || !timeline) return;
+    if (event.type === 'select-clip') { setReplacement(null); return; }
+    if (!timeline || !canEditTimeline) return;
     const timelineId = asProductionId(timeline.id) as unknown as Id<'timelines'>;
     const idempotencyKey = `timeline-edit:${crypto.randomUUID()}`;
     try {
@@ -90,7 +93,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
         const result = await redoTimelineEdit({ timelineId, idempotencyKey });
         setActiveTimelineId(result.timelineId as Id<'timelines'>);
       } else if (event.type === 'replace') {
-        setMessage('Choose replacement media from the Media workspace before replacing this take.');
+        setReplacement({ timelineId: timeline.id, clipId: event.clipId });
         setSaveStatus('saved');
         return;
       } else {
@@ -99,10 +102,17 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
         let input: Record<string, unknown> = { clipId: event.clipId };
         if (event.type === 'trim') { kind = 'trim'; input = { clipId: event.clipId, trimStartSeconds: event.startSeconds, trimEndSeconds: event.endSeconds }; }
         if (event.type === 'split') { kind = 'split'; input = { clipId: event.clipId, splitAtSeconds: Math.max(0.1, (selectedClip?.durationSeconds ?? 1) / 2) }; }
-        if (event.type === 'move') { kind = 'reorder'; input = { clipId: event.clipId, toIndex: event.direction === 'earlier' ? 0 : 999 }; }
+        if (event.type === 'move') {
+          const lane = timeline.tracks.find(track => track.id === event.trackId)?.clips.slice().sort((a, b) => a.startSeconds - b.startSeconds) ?? [];
+          const index = lane.findIndex(clip => clip.id === event.clipId);
+          if (index < 0) throw new Error('The selected timeline clip is unavailable.');
+          const toIndex = Math.max(0, Math.min(lane.length - 1, index + (event.direction === 'earlier' ? -1 : 1)));
+          if (toIndex === index) { setSaveStatus('saved'); return; }
+          kind = 'reorder'; input = { clipId: event.clipId, toIndex };
+        }
         if (event.type === 'transition') { kind = 'addTransition'; input = { clipId: event.clipId, position: 'out', transitionKind: event.transition, durationSeconds: event.durationSeconds, audioPolicy: event.audioPolicy, trimSoundtrackToPicture: event.trimSoundtrackToPicture }; }
         if (event.type === 'captions') { kind = 'updateCaptions'; input = { clipId: event.clipId, cues: event.cues, language: event.language, style: event.style }; }
-        if (event.type === 'audio-level') { kind = 'adjustAudio'; input = { clipId: event.clipId, volume: Math.pow(10, event.volumeDb / 20) }; }
+        if (event.type === 'audio-level') { kind = 'adjustAudio'; input = { clipId: event.clipId, volume: Math.pow(10, event.volumeDb / 20), muted: false }; }
         const result = await applyTimelineEdit({ timelineId, kind, input, idempotencyKey });
         setActiveTimelineId(result.timelineId as Id<'timelines'>);
       }
@@ -121,6 +131,13 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
     <section className="ff-card p-5 sm:p-7"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow">Editing workspace</p><h2 className="ff-display mt-2 text-3xl font-semibold">Change one part without losing the rest.</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Use a plain-language request for a creative change, or select a clip below for practical timing and audio edits.</p></div><label className="grid gap-2 text-sm font-semibold sm:min-w-64">Editing <select value={selectedNode.id} onChange={(event) => { const node = nodes.find((candidate) => candidate.id === event.target.value); if (node) selectNode(node); }} className="h-11 rounded-xl border border-input bg-background px-3 font-normal outline-none focus:border-primary focus:ring-2 focus:ring-ring/40">{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label></div></section>
     <PromptEditPanel selectedNode={selectedNode} impact={impact} impactLoading={impactRequested && impactQuery === undefined} impactError={impactError} onPreviewImpact={handlePromptPreview} onSubmitOperation={handlePromptSubmit} />
     <TimelineEditor timeline={timeline} frameRate={timeline?.frameRate} finishingV5Enabled={draft?.finishingV5Enabled === true} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
+    {replacement && timeline && replacement.timelineId === timeline.id && <MediaReplacementPanel key={`${timeline.id}:${replacement.clipId}`} timelineId={timeline.id as Id<'timelines'>} clipId={replacement.clipId} disabled={!canEditTimeline || saveStatus === 'saving'} onCancel={() => setReplacement(null)} onApply={async assetId => {
+      setSaveStatus('saving');
+      try {
+        const result = await applyTimelineEdit({ timelineId: timeline.id as Id<'timelines'>, kind: 'replace', input: { clipId: replacement.clipId, assetId }, idempotencyKey: `timeline-replace:${crypto.randomUUID()}` });
+        setActiveTimelineId(result.timelineId); setReplacement(null); setSaveStatus('saved'); setMessage('Replacement saved in a new draft timeline. The previous version is retained.');
+      } catch (error) { setSaveStatus('error'); throw error; }
+    }} />}
     {draft?.graphicsV2Enabled&&timeline&&draft.timeline.projectId&&<GraphicEditPanel key={'graphic:'+timeline.id} projectId={draft.timeline.projectId as Id<'projects'>} clips={draft.tracks.flatMap((track:any)=>track.clips)} fps={timeline.frameRate} disabled={!canEditTimeline||saveStatus==='saving'} onApply={async input=>{setSaveStatus('saving');try{const result=await applyTimelineEdit({timelineId:timeline.id as Id<'timelines'>,kind:'updateGraphic',input,idempotencyKey:crypto.randomUUID()});setActiveTimelineId(result.timelineId);setSaveStatus('saved');setMessage('Graphic saved in a new draft timeline. The previous version is retained.');}catch(error){setSaveStatus('error');throw error;}}}/>}
     {timeline&&draft?.timeline?.projectId&&<MusicBeatEditor key={timeline.id} timeline={timeline} projectId={draft.timeline.projectId as Id<'projects'>} onCreatedTimeline={id=>{setActiveTimelineId(id);setMessage('A new beat-aligned draft is ready. The source timeline and soundtrack are retained.');}} />}
     {message ? <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/45 p-4 text-sm" role="status"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[hsl(var(--success))]" aria-hidden="true" /><span>{message}</span></div> : null}

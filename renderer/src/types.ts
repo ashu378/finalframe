@@ -106,6 +106,8 @@ export interface VisualTransition {
 }
 
 export interface PosterSpec {
+  /** Optional canonical project image identity; never an arbitrary URL grant. */
+  assetId?: string;
   src: string;
   width: number;
   height: number;

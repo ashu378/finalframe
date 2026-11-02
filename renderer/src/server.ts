@@ -9,6 +9,8 @@ import { InjectableFFmpegAdapter, InjectableFFprobeAdapter } from './media/ffmpe
 import { sendRendererCallback } from './contracts/callback.js';
 import type { RenderManifest, RenderMode } from './types.js';
 import { probeRemoteMedia } from './media/remote-probe.js';
+import { extractCanonicalAudio } from './media/extract-audio.js';
+import { safeExtractionError } from './media/audio-extraction-contracts.js';
 import { assertValidManifest, validateManifest } from './manifest.js';
 import { outputFormatForManifest, outputFormatForMimeType } from './output-format.js';
 import { RenderRequestQueue } from './request-queue.js';
@@ -123,11 +125,23 @@ heartbeatTimer.unref();
 createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
-    if (request.method !== 'POST' || !['/render', '/media/probe', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
+    if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
     if (headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
     const payload = await body(request);
+    if (request.url === '/media/extract-audio') {
+      const release = heavyMedia.tryAcquireMedia();
+      if (!release) return json(response,429,{error:'EXTRACTION_WORKER_UNAVAILABLE'});
+      try {
+        const result = await extractCanonicalAudio(payload,{allowedHosts:mediaHosts});
+        response.writeHead(200,{'content-type':'audio/wav','content-length':result.bytes.length,'cache-control':'no-store','x-finalframe-extraction-profile':result.proof.profile,'x-finalframe-source-duration':String(result.proof.sourceDurationSeconds),'x-finalframe-output-checksum':result.proof.checksum});
+        return response.end(result.bytes);
+      } catch (error) {
+        const code = safeExtractionError((error as {code?:string}).code);
+        return json(response,code==='EXTRACTION_WORKER_UNAVAILABLE'?503:400,{error:code});
+      } finally { release(); }
+    }
     if(request.url==='/movie/merge'){
       if(process.env.FINALFRAME_MOVIE_ENABLED!=='true')return json(response,503,{error:'Movie assembly is not enabled.'});
       const movie=JSON.parse(stableMovieJson(assertMovieMergeRequest(payload,mediaHosts))) as MovieMergeRequest;if(movie.mediaAbi!==rendererVersion)return json(response,409,{error:'Movie renderer compatibility does not match this worker.'});const callback=assertTransferUrl(movie.callbackUrl,callbackOrigins);const heartbeat=assertTransferUrl(movie.heartbeatUrl,callbackOrigins);assertTransferUrl(movie.storageUploadUrl,storageOrigins);

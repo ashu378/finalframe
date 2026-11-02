@@ -12,11 +12,12 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/image-response'))return imageResponse; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
 const checksums = compile('renderer/src/media/sha256.ts');
+const imageResponse = compile('src/lib/ai/image-response.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
 const registry = compile('src/lib/ai/model-registry.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});

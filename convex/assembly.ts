@@ -8,6 +8,9 @@ import { getProduction, now } from "./_shared";
 import { cropCaptionTrack, finishingV5Enabled, normalizeCaptionTrack } from './finishingContracts';
 import { validateManifest } from '../renderer/src/manifest';
 import { serializeCaptionSidecars } from '../renderer/src/captions';
+import {importedOutputAudio,importedPosterBinding} from '../renderer/src/poster';
+import {sha256Equal} from '../renderer/src/media/sha256';
+import {resolveGraphicImage} from './graphicsAssets';
 import {GRAPHICS_V2_TEMPLATE_IDS,parseGraphicsV2Render} from '../renderer/src/templates/graphics-v2-contract';
 import type { CaptionTrack } from '../renderer/src/types';
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
@@ -400,7 +403,9 @@ function rendererTransitions(sources: SourceItem[], fps: number) {
   });
 }
 
-function rendererOutputAudio(sources: SourceItem[]) {
+function rendererOutputAudio(sources: SourceItem[], metadata:Record<string,unknown>={}) {
+  const imported=importedOutputAudio(record(metadata.importedOutput).audio);
+  if(imported)return imported;
   return sources.some(source => source.volume !== 0 && (source.trackKind.toUpperCase() === "AUDIO" || source.trackKind.toUpperCase() === "VIDEO" && source.hasAudio))
     ? { sampleRate: 48000 as const, channels: 2 as const }
     : undefined;
@@ -419,6 +424,19 @@ export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof 
     const timeline = await authorizedTimeline(ctx, production, args.timelineId,actorId);
     const timelineState = await getEffectiveResourceState(ctx, projectId, "timeline", timeline._id.toString(), production._id,actorId);
     const preset = outputPreset(timeline.outputPreset || production.outputPreset, timelineMetadata(timeline));
+    const metadata=timelineMetadata(timeline);const outputAudio=rendererOutputAudio([],metadata);
+    let poster:import('../renderer/src/types').PosterSpec|undefined;
+    let posterSource:{sourceKind:'POSTER';assetId:string;assetChecksum:string;assetStorageId:string;assetStorageChecksum:string;assetStorageByteSize:number;assetStorageMimeType:string;sourceUrl:string}|undefined;
+    if(metadata.importedPoster!==undefined){
+      const binding=importedPosterBinding(metadata.importedPoster);const image=await resolveGraphicImage(ctx,{assetId:binding.assetId,projectId,studioExternalId:production.studioExternalId,actorId});const storage=await ctx.db.system.get('_storage',image.storageId!);
+      if(image.storageId!==binding.storageId||image.checksum!==binding.assetChecksum||!storage||storage.size!==binding.byteSize||storage.contentType!==binding.storageMimeType||!sha256Equal(storage.sha256,binding.storageChecksum))throw new Error('Imported poster canonical storage or bytes changed. Reimport the verified image.');
+      const url=await ctx.storage.getUrl(image.storageId!);if(!url)throw new Error('Imported poster canonical image is unavailable.');
+      poster={assetId:image._id,src:url,width:binding.width,height:binding.height,...(binding.mimeType===undefined?{}:{mimeType:binding.mimeType})};
+      posterSource={sourceKind:'POSTER',assetId:image._id,assetChecksum:image.checksum!,assetStorageId:image.storageId!,assetStorageChecksum:storage.sha256,assetStorageByteSize:storage.size,assetStorageMimeType:storage.contentType!,sourceUrl:url};
+    }else if(metadata.importedManifestVersion!==undefined&&timeline.manifestId){
+      const imported=await ctx.db.get(timeline.manifestId);if(record(imported?.manifest).poster!==undefined)throw new Error('This imported poster predates canonical asset binding. Reimport its verified manifest before export.');
+    }
+
     const selectionScope: SelectionScope = args.selectionScope ?? (args.shotVersionIds?.length ? "SHOTS" : args.selectedSceneIds?.length ? "SCENES" : "FULL_PROJECT");
     const selectedIds = new Set<string>(selectionScope === "SHOTS" ? (args.shotVersionIds ?? []).map(String) : selectionScope === "SCENES" ? (args.selectedSceneIds ?? []).map(String) : []);
     if ((selectionScope === "SHOTS" || selectionScope === "SCENES") && selectedIds.size === 0) throw new Error(`A ${selectionScope.toLowerCase()} assembly requires selected IDs.`);
@@ -433,6 +451,7 @@ export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof 
     }
 
     const built = await buildSourceItems(ctx, production, timeline, preset, selectionScope, selectedIds,actorId);
+    if(posterSource&&built.sources.length>=200)throw new Error('The poster exceeds the configured200-source worker limit. Use a smaller approved component.');
     const olderSources: string[] = [];
     for (const source of built.sources) {
       if (!source.shotId || !source.shotVersionId) continue;
@@ -448,6 +467,7 @@ export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof 
     const version = finishingV5Enabled() ? 5 : 4;
     const items = rendererItems(built.sources, preset.fps, version);
     const audioTracks = rendererAudioTracks(built.sources, preset.fps, version);
+    if(posterSource)built.sourceIds.add(posterSource.assetId);
     const itemById = new Map(items.map(item => [item.id, item]));
     const shots = built.sources.filter((source) => source.shotId && source.shotVersionId && source.assetId && source.sourceUrl).map((source) => ({ shotId: source.shotId as string, shotVersionId: source.shotVersionId as string, assetId: source.assetId as string, orderIndex: source.orderIndex, itemId: source.timelineClipId, startFrame: itemById.get(source.timelineClipId)!.startFrame, durationInFrames: itemById.get(source.timelineClipId)!.durationInFrames, src: source.sourceUrl as string }));
     const manifestPayload = {
@@ -466,21 +486,22 @@ export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof 
       export: { scope: selectionScope, format: "MP4" },
       metadata: timelineState.currentState === "LOCKED" ? { lockState: "LOCKED", lockId: timeline._id.toString(), lockedAt: new Date(timelineState.state?.lockedAt ?? timestamp).toISOString(), lockedBy: timelineState.state?.lockedByUserId?.toString() ?? "FinalFrame" } : { lockState: "APPROVED" },
       preset,
-      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec, audio: rendererOutputAudio(built.sources) },
+      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec, audio: outputAudio??rendererOutputAudio(built.sources) },
+      ...(poster?{poster}:{}),
       totalDurationSeconds: built.durationInFrames / preset.fps,
       items,
       audioTracks,
       ...(version === 5 ? { tracks: built.tracks.map(track => ({ id: track._id.toString(), kind: track.kind === 'TEXT' ? 'GRAPHIC' : track.kind, orderIndex: track.orderIndex, ...(track.name ? { name: track.name } : {}) })), captionTracks: rendererCaptionTracks(built.sources, preset.fps), transitions: rendererTransitions(built.sources, preset.fps) } : {}),
       shots,
       sourceIds: [...built.sourceIds],
-      sourceChecksums: built.sources.flatMap((source) => source.assetChecksum ? [source.assetChecksum] : []),
-      sources: built.sources,
+      sourceChecksums: [...built.sources.flatMap((source) => source.assetChecksum ? [source.assetChecksum] : []),...(posterSource?[posterSource.assetChecksum]:[])],
+      sources: [...built.sources,...(posterSource?[posterSource]:[])],
       createdAt: timestamp,
     };
     const validated = validateManifest(manifestPayload);
     if (!validated.ok) throw new Error(`The approved timeline cannot be exported: ${validated.issues.slice(0, 3).map(issue => issue.message).join('; ')}`);
     if (new TextEncoder().encode(JSON.stringify(manifestPayload)).length > 900 * 1024) throw new Error('This export manifest is too large. Use shorter approved components.');
-    const manifestId = await ctx.db.insert("manifests", { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId, productionId: production._id, timelineId: timeline._id, contractVersion: version, selectionScope, exportScope: selectionScope, selectionIds: [...selectedIds].sort(), versionNumber: previous.length + 1, manifest: manifestPayload, sourceHashes: [stableHash({ timelineId: timeline._id, sources: built.sources, items, selectionScope, selectedIds: [...selectedIds].sort(), preset })], rendererVersion: "finalframe-renderer-v1", createdAt: timestamp });
+    const manifestId = await ctx.db.insert("manifests", { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId, productionId: production._id, timelineId: timeline._id, contractVersion: version, selectionScope, exportScope: selectionScope, selectionIds: [...selectedIds].sort(), versionNumber: previous.length + 1, manifest: manifestPayload, sourceHashes: [stableHash({ timelineId: timeline._id, sources: built.sources, items, selectionScope, selectedIds: [...selectedIds].sort(), preset,...(outputAudio?{outputAudio}:{}),...(posterSource?{posterSource}:{} ) })], rendererVersion: "finalframe-renderer-v1", createdAt: timestamp });
     const persistedPayload = { ...manifestPayload, manifestId: manifestId.toString() };
     await ctx.db.patch(manifestId, { manifest: persistedPayload });
     const jobId = await ctx.db.insert("assemblyJobs", { projectId, productionId: production._id, manifestId, selectionScope, exportScope: selectionScope, idempotencyKey, progress: 100, status: "QUEUED", manifest: persistedPayload, correlationId: args.correlationId, createdAt: timestamp, updatedAt: timestamp });

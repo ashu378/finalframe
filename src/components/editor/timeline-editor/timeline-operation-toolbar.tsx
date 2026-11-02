@@ -33,6 +33,11 @@ export interface TimelineOperationToolbarProps {
   transitionAudioPolicy?: 'PRESERVE' | 'CROSSFADE';
   finishingV5Enabled?: boolean;
   canTransition?: boolean;
+  canReplace?: boolean;
+  canMoveEarlier?: boolean;
+  canMoveLater?: boolean;
+  canAdjustAudio?: boolean;
+  audioMuted?: boolean;
   transitionImpact?: (overlapSeconds: number) => { musicTailSeconds: number; protectedAudioOverrun: boolean };
   audioLevelDb?: number;
   maxAudioLevelDb?: number;
@@ -57,6 +62,11 @@ export function TimelineOperationToolbar({
   transitionAudioPolicy = 'PRESERVE',
   finishingV5Enabled = false,
   canTransition = false,
+  canReplace = false,
+  canMoveEarlier = false,
+  canMoveLater = false,
+  canAdjustAudio = false,
+  audioMuted = false,
   transitionImpact,
   audioLevelDb = 0,
   maxAudioLevelDb = 0,
@@ -102,12 +112,12 @@ export function TimelineOperationToolbar({
           <input aria-label="Trim end in seconds" type="number" min="0" step="0.1" value={trimEndSeconds} disabled={locked || !selectedClipId} onChange={(e) => emit({ type: 'trim', startSeconds: trimStartSeconds, endSeconds: Number(e.target.value) })} className="h-10 w-24 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50" />
         </label>
         <div className="flex gap-1" role="group" aria-label="Reorder take">
-          <button type="button" title="Move earlier" aria-label="Move earlier" disabled={locked || !selectedClipId} onClick={() => emit({ type: 'move', direction: 'earlier' })} className="tool-button"><ArrowUp aria-hidden="true" className="h-4 w-4" /></button>
-          <button type="button" title="Move later" aria-label="Move later" disabled={locked || !selectedClipId} onClick={() => emit({ type: 'move', direction: 'later' })} className="tool-button"><ArrowDown aria-hidden="true" className="h-4 w-4" /></button>
+          <button type="button" title="Move earlier" aria-label="Move earlier" disabled={locked || !selectedClipId || !canMoveEarlier} onClick={() => emit({ type: 'move', direction: 'earlier' })} className="tool-button"><ArrowUp aria-hidden="true" className="h-4 w-4" /></button>
+          <button type="button" title="Move later" aria-label="Move later" disabled={locked || !selectedClipId || !canMoveLater} onClick={() => emit({ type: 'move', direction: 'later' })} className="tool-button"><ArrowDown aria-hidden="true" className="h-4 w-4" /></button>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={locked || !selectedClipId} onClick={() => emit({ type: 'split' })} className="tool-action"><Scissors aria-hidden="true" className="h-4 w-4" />Split</button>
-          <button type="button" disabled={locked || !selectedClipId} onClick={() => emit({ type: 'replace' })} className="tool-action"><Replace aria-hidden="true" className="h-4 w-4" />Replace</button>
+          <button type="button" disabled={locked || !selectedClipId || !canReplace} onClick={() => emit({ type: 'replace' })} className="tool-action"><Replace aria-hidden="true" className="h-4 w-4" />Replace</button>
         </div>
         <label className="grid gap-1 text-xs font-medium text-[#91a0b8]">Transition
           <select aria-label="Transition" value={finishingV5Enabled ? chosenTransition : transition} disabled={locked || !selectedClipId || finishingV5Enabled && !canTransition} onChange={(e) => { const next = e.target.value as TransitionKind; setChosenTransition(next); if (!finishingV5Enabled) emit({ type: 'transition', transition: next, durationSeconds: 0, audioPolicy: 'PRESERVE', trimSoundtrackToPicture: false }); }} className="h-10 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50">{(finishingV5Enabled ? transitions : ['CUT']).map((item) => <option key={item} value={item}>{item[0] + item.slice(1).toLowerCase()}</option>)}</select>
@@ -118,7 +128,8 @@ export function TimelineOperationToolbar({
           <button type="button" className="tool-action" disabled={locked || !canTransition || impact.protectedAudioOverrun || impact.musicTailSeconds > 0 && !trimSoundtrack} onClick={() => emit({ type: 'transition', transition: chosenTransition, durationSeconds: chosenTransition === 'CUT' ? 0 : overlap, audioPolicy, trimSoundtrackToPicture: trimSoundtrack })}>Apply transition</button>
         </>}
         <label className="grid gap-1 text-xs font-medium text-[#91a0b8]">Audio level (dB)
-          <input aria-label="Audio level in decibels" type="number" min="-60" max={maxAudioLevelDb} step="1" value={audioLevelDb} disabled={locked || !selectedClipId} onChange={(e) => emit({ type: 'audio-level', volumeDb: Number(e.target.value) })} className="h-10 w-28 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50" />
+          <input aria-label="Audio level in decibels" type="number" min="-60" max={maxAudioLevelDb} step="any" value={audioMuted ? '' : audioLevelDb} placeholder={audioMuted ? 'Muted' : undefined} disabled={locked || !selectedClipId || !canAdjustAudio} onChange={(e) => { if (e.target.value !== '') emit({ type: 'audio-level', volumeDb: Number(e.target.value) }); }} className="h-10 w-28 rounded-xl border border-[#263143] bg-[#151b25] px-3 text-sm text-[#eaf0fa] outline-none ring-[#86a7ff] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50" />
+          {canAdjustAudio && audioMuted ? <span className="max-w-52 text-xs text-[#91a0b8]">Muted. Enter a level to enable this clip’s audio.</span> : null}
         </label>
         <div className="ml-auto flex gap-1" role="group" aria-label="History">
           <button type="button" title="Undo" aria-label="Undo" disabled={!canUndo} onClick={() => emit({ type: 'undo' })} className="tool-button"><Undo2 aria-hidden="true" className="h-4 w-4" /></button>

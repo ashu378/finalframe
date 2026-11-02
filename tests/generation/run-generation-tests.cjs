@@ -28,6 +28,7 @@ const aliasMap = new Map([
   ['@/lib/ai/model-registry', compile('src/lib/ai/model-registry.ts', 'model-registry.js')],
   ['@/lib/ai/capabilities', compile('src/lib/ai/capabilities.ts', 'capabilities.js')],
   ['@/lib/ai/model-discovery', compile('src/lib/ai/model-discovery.ts', 'model-discovery.js')],
+  ['@/lib/ai/image-response', compile('src/lib/ai/image-response.ts', 'image-response.js')],
   ['@/lib/types/database', path.join(tempRoot, 'database.js')],
 ]);
 fs.writeFileSync(path.join(tempRoot, 'database.js'), 'module.exports = {};\n', 'utf8');
@@ -134,7 +135,7 @@ async function main() {
         // injected fetch below never reaches a network socket.
         { apiKey: 'local-test-only', beforeMediaSubmit: async () => {}, fetch: neverResponds, timeoutMs: 5, retry: { maxRetries: 0 } },
       ),
-      (error) => error?.code === 'REQUEST_TIMEOUT' && error?.retryable === true,
+      (error) => error?.code === 'REQUEST_TIMEOUT' && error?.retryable === false,
     );
   });
 

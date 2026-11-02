@@ -18,7 +18,8 @@ export function toTimelineVersion(draft: any, resourceState?: string): TimelineV
         return { ...base, kind: 'GRAPHIC', templateId, props } as TimelineClip;
       }
       if (clipKind === 'CAPTIONS') return { ...base, kind: 'CAPTIONS', captionTrackId: String(clip.metadata?.captionTrack?.id ?? clip.metadata?.captionTrackId ?? clip.id ?? clip._id) } as TimelineClip;
-      return { ...base, kind: clipKind, media: { assetId: String(clip.assetId ?? 'unresolved') }, ...(clipKind === 'IMAGE' ? { fit: clip.metadata?.renderItem?.fit } : {}), ...(clipKind === 'AUDIO' ? { volumeDb: clip.volume === undefined ? 0 : clip.volume > 0 ? 20 * Math.log10(clip.volume) : -60, fadeInSeconds: clip.metadata?.audio?.fadeInSeconds, fadeOutSeconds: clip.metadata?.audio?.fadeOutSeconds } : {}) } as TimelineClip;
+      const audio = ['VIDEO', 'AUDIO'].includes(clipKind) ? { volumeDb: clip.volume === undefined ? 0 : clip.volume > 0 ? 20 * Math.log10(clip.volume) : undefined, muted: clip.volume === 0 || clip.metadata?.audio?.muted === true } : {};
+      return { ...base, kind: clipKind, media: { assetId: String(clip.assetId ?? 'unresolved') }, ...audio, ...(clipKind === 'IMAGE' ? { fit: clip.metadata?.renderItem?.fit } : {}), ...(clipKind === 'AUDIO' ? { fadeInSeconds: clip.metadata?.audio?.fadeInSeconds, fadeOutSeconds: clip.metadata?.audio?.fadeOutSeconds } : {}) } as TimelineClip;
     });
     return { id: trackId, kind, name: track.name ?? 'Track', orderIndex: track.orderIndex, muted: false, locked: false, clips };
   });

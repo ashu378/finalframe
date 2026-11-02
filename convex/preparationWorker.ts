@@ -2,14 +2,14 @@ import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { FunctionReference } from 'convex/server';
 import { internal } from './_generated/api';
-import { generateImage, synthesizeSpeech, transcribeAudio, generateMusic } from '../src/lib/adapters/openrouter-adapter';
+import { generateImage, synthesizeSpeech, transcribeAudio, generateMusic, extractUsageAndCost } from '../src/lib/adapters/openrouter-adapter';
 import { quotePreparation, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { object } from './generationWorkerContracts';
 import {MUSIC_LIMITS,sameMusicQuote,musicQcError,assertMusicOutputProbe} from '../src/lib/ai/music';
 import { sha256Equal } from '../renderer/src/media/sha256';
+import { decodePreparedImage, IMAGE_RESPONSE_LIMITS } from '../src/lib/ai/image-response';
 const jobs = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 const voices = (internal as unknown as { voices: { resolveForSynthesis: FunctionReference<'query', 'internal', any, any> } }).voices;
-function decode(value: string) { const binary = atob(value); return Uint8Array.from(binary, c => c.charCodeAt(0)); }
 async function boundedAudio(url: string, expected: Record<string, unknown>) {
   const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
   if (!response.ok || !response.headers.get('content-type')?.startsWith('audio/')) throw new Error('Recording is unavailable.');
@@ -31,19 +31,17 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
   const kind = request.preparationKind as PreparationKind;
   if(kind==='SFX')throw new Error('SFX_UNSUPPORTED');
   if(kind==='MUSIC'){await runMusicPreparation(ctx,input,lease,beforeSubmit);return;}
+  if(kind==='CHARACTER_REFERENCE'&&input.imageOutput){await finishImage(ctx,input,lease);return;}
   const quote = await quotePreparation({ kind, text: String(request.text || ''), clone: request.clone === true, durationSeconds: Number(request.durationSeconds),durationMeasurement:object(request.transcriptSource).durationMeasurement as 'DECODED_PCM_SAMPLES_V1'|undefined });
   if (quote.model !== job.model || quote.estimatedProviderCostUsd > Number(job.estimatedProviderCostUsd)) throw new Error('Preparation price or route changed. Create a new estimate.');
   if (request.clone === true && JSON.stringify(assertReferenceVoiceQuote(quote.referenceVoiceQuote)) !== JSON.stringify(assertReferenceVoiceQuote(object(request.quote).referenceVoiceQuote))) throw new Error('Reference voice endpoint certificate changed.');
   const options = { maxRetries: 0, fallbackModels: [], allowDiscoveredModel: true, idempotencyKey: job.idempotencyKey, maxResponseBytes: 15 * 1024 * 1024, beforeMediaSubmit: () => beforeSubmit(quote) };
   if (kind === 'CHARACTER_REFERENCE') {
-    const output = await generateImage({ model: job.model, prompt: String(request.text), resolution: '1K', n: 1, outputFormat: 'png' }, options);
-    if (!output.b64_json || output.b64_json.length > 21 * 1024 * 1024) throw new Error('Bounded image data was not returned.');
-    const contentType = output.images[0]?.mediaType || 'image/png';
-    if (!contentType.startsWith('image/')) throw new Error('Image output is invalid.');
-    const bytes = decode(output.b64_json);
-    if (!bytes.byteLength || bytes.byteLength > 15 * 1024 * 1024) throw new Error('Image output exceeds the preparation limit.');
-    const storageId = await ctx.storage.store(new Blob([bytes], { type: contentType }));
-    await ctx.runMutation(jobs.completePreparation, { ...lease, storageId, contentType, actualModel: output.modelUsed, providerRequestId: output.requestId, providerCostUsd: output.costUsd, usage: output.usage });
+    await generateImage({ model: job.model, prompt: String(request.text), resolution: '1K', n: 1, outputFormat: 'png' }, {...options,timeoutMs:IMAGE_RESPONSE_LIMITS.timeoutMs,imageDeadlineAt:Number(job.leaseExpiresAt)-15_000,
+      onImageReceipt:(providerRequestId,kind)=>ctx.runMutation(jobs.recordImageReceipt,{...lease,providerRequestId,kind}),
+      onImageCompleted:async(body,providerRequestId,actualModel)=>{const {bytes,contentType}=decodePreparedImage(body);const storageId=await ctx.storage.store(new Blob([Uint8Array.from(bytes).buffer],{type:contentType}));const normalized=extractUsageAndCost(body);await ctx.runMutation(jobs.recordImageOutput,{...lease,storageId,contentType,actualModel:actualModel!,...(providerRequestId?{providerRequestId}:{}),...(normalized.costUsd!==undefined&&normalized.costUsd>=0?{providerCostUsd:normalized.costUsd}:{}),...(normalized.usage?{usage:normalized.usage}:{})});}
+    });
+    await finishImage(ctx,await ctx.runQuery(jobs.getWorkerInput,lease),lease);
   } else if (kind === 'TRANSCRIPT') {
     const source = input.references.find((entry: any) => entry.assetId === request.sourceAssetId && entry.kind === 'audio');
     if (!source) throw new Error('Project recording is unavailable.');
@@ -62,6 +60,10 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
     const storageId = await ctx.storage.store(new Blob([result.audio], { type: result.contentType }));
     await ctx.runMutation(jobs.completePreparation, { ...lease, storageId, contentType: result.contentType, actualModel: result.modelUsed, providerRequestId: result.generationId || result.requestId, providerCostUsd: result.costUsd, usage: result.usage });
   }
+}
+async function finishImage(ctx:ActionCtx,input:any,lease:{jobId:Id<'generationJobs'>;leaseId:string}) {
+  const saved=input.imageOutput;if(!saved)throw new Error('IMAGE_OUTPUT_UNAVAILABLE');
+  await ctx.runMutation(jobs.completePreparation,{...lease,storageId:saved.storageId,contentType:saved.contentType,actualModel:saved.model,...(saved.providerRequestId?{providerRequestId:saved.providerRequestId}:{}),...(input.job.providerCostUsd!==undefined?{providerCostUsd:input.job.providerCostUsd}:{}),...(object(input.job.response).usage?{usage:object(input.job.response).usage}:{})});
 }
 
 async function boundedProbe(response: Response) { const reader = response.body?.getReader(); if (!reader)

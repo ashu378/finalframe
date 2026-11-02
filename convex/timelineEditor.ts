@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from 'convex/server';
+import {sha256Equal} from '../renderer/src/media/sha256';
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
@@ -233,6 +235,20 @@ function findClip(state: TimelineState, clipId: string): { track: TrackState; cl
     if (clip) return { track, clip };
   }
   throw new Error("The selected timeline clip was not found in the current version.");
+}
+
+async function replacementAsset(ctx: ReadCtx, projectId: Id<'projects'>, studioExternalId: string, clip: ClipState, assetId: string) {
+  const prefix = ({ VIDEO: 'video/', IMAGE: 'image/', AUDIO: 'audio/' } as Record<string, string>)[clip.kind];
+  if (!prefix) throw new Error('Use the graphic or caption editor for this clip.');
+  const id = ctx.db.normalizeId('assets', assetId);
+  const asset = id ? await ctx.db.get(id) : null;
+  const denied = (value: unknown) => { const row = record(value); return row.approved === false || row.consent === false || ['DENIED','REJECTED','REVOKED','EXPIRED','BLOCKED','RESTRICTED','QUARANTINED'].includes(String(typeof value === 'string' ? value : row.status ?? row.state ?? '').toUpperCase()); };
+  if (!asset || asset.projectId !== projectId || asset.studioExternalId !== studioExternalId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith(prefix) || [asset.rights,asset.provenance,asset.moderation].some(denied)) throw new Error('Choose an active approved replacement from this project with current media rights.');
+  const storage = await ctx.db.system.get('_storage', asset.storageId);
+  if (!storage || storage.size < 1 || storage.contentType !== asset.mimeType || !sha256Equal(asset.checksum, storage.sha256)) throw new Error('The replacement media bytes or type changed.');
+  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + clip.durationSeconds > asset.durationSeconds! + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
+  await requireApprovedResource(ctx, projectId, 'asset', asset._id);
+  return asset;
 }
 
 function ensureChanged(before: string, after: TimelineState) {
@@ -633,12 +649,12 @@ async function insertOperation(
 
 export const getDraft = query({
   args: { productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")) },
-  returns: v.union(v.null(), v.object({ timeline: v.any(), tracks: v.array(v.any()), metadata: v.any(), finishingV5Enabled: v.boolean(), graphicsV2Enabled:v.boolean(), operations: v.array(v.any()) })),
+  returns: v.union(v.null(), v.object({ timeline: v.any(), tracks: v.array(v.any()), metadata: v.any(), canEdit: v.boolean(), finishingV5Enabled: v.boolean(), graphicsV2Enabled:v.boolean(), operations: v.array(v.any()) })),
   handler: async (ctx, args) => {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
     if (!production.projectId) throw new Error("Production is not attached to a project.");
-    await requireProjectAccess(ctx, production.projectId);
+    const access = await requireProjectAccess(ctx, production.projectId);
     const timeline = args.timelineId
       ? await ctx.db.get(args.timelineId)
       : (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200)).find((candidate) => candidate.status === "DRAFT");
@@ -646,7 +662,27 @@ export const getDraft = query({
     if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId) throw new Error("Timeline does not belong to this production.");
     const state = await getTimelineState(ctx, timeline);
     const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
-    return { timeline, ...state, finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
+    return { timeline, ...state, canEdit: ['OWNER','EDITOR'].includes(access.projectRole), finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
+  },
+});
+
+export const replacementAssets = query({
+  args: { timelineId: v.id('timelines'), clipId: v.string(), paginationOpts: paginationOptsValidator },
+  returns: v.object({ page: v.array(v.object({ id: v.id('assets'), name: v.string(), mimeType: v.string() })), continueCursor: v.string(), isDone: v.boolean() }),
+  handler: async (ctx, args) => {
+    const { timeline, production, member } = await getTimelineForMember(ctx, args.timelineId);
+    const { clip } = findClip(await getTimelineState(ctx, timeline), args.clipId);
+    if (!['VIDEO','IMAGE','AUDIO'].includes(clip.kind)) throw new Error('Use the graphic or caption editor for this clip.');
+    const result = await ctx.db.query('assets').withIndex('by_project', q => q.eq('projectId', production.projectId!)).order('desc').paginate({ ...args.paginationOpts, numItems: Math.min(25, Math.max(1, args.paginationOpts.numItems)) });
+    const page = [];
+    for (const candidate of result.page) {
+      if (String(candidate._id) === clip.assetId) continue;
+      try {
+        const asset = await replacementAsset(ctx, production.projectId!, member.studio.externalId, clip, candidate._id);
+        page.push({ id: asset._id, name: String(asset.name ?? 'Project media').slice(0, 200), mimeType: asset.mimeType! });
+      } catch { /* Pagination advances even when a page has no eligible media. */ }
+    }
+    return { page, continueCursor: result.continueCursor, isDone: result.isDone };
   },
 });
 
@@ -659,9 +695,9 @@ export const apply = mutation({
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
-      if(args.kind==='updateGraphic'){
+      if(args.kind==='updateGraphic'||args.kind==='replace'){
         const oldInput=operationInput(existing);const stable=(value:unknown):string=>JSON.stringify(value,(_key,row)=>row&&typeof row==='object'&&!Array.isArray(row)?Object.fromEntries(Object.entries(row).sort(([a],[b])=>a.localeCompare(b))):row);
-        if(oldInput.sourceTimelineId!==String(timeline._id)||oldInput.editKind!==args.kind||stable(oldInput.editInput)!==stable(args.input))throw new Error('This graphic request key belongs to another edit.');
+        if(oldInput.sourceTimelineId!==String(timeline._id)||oldInput.editKind!==args.kind||stable(oldInput.editInput)!==stable(args.input))throw new Error('This edit request key belongs to another edit.');
       }
       return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
@@ -673,6 +709,10 @@ export const apply = mutation({
     const before = JSON.stringify(state);
     const next = structuredClone(state);
     applyEdit(next, args.kind, args.input);
+    if (args.kind === 'replace') {
+      const edited = findClip(next, String(record(args.input).clipId)).clip;
+      await replacementAsset(ctx, production.projectId!, member.studio.externalId, edited, edited.assetId!);
+    }
     if(args.kind==='updateGraphic'){
       const edited=findClip(next,String(record(args.input).clipId)).clip;
       if(edited.assetId)await resolveGraphicImage(ctx,{assetId:edited.assetId,projectId:production.projectId!,studioExternalId:member.studio.externalId});

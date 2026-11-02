@@ -446,7 +446,7 @@ export default defineSchema({
     createdAt: timestamp, updatedAt: v.optional(timestamp), deletedAt: v.optional(timestamp),
   }).index("by_external_id", ["externalId"]).index("by_studio", ["studioExternalId"])
     .index("by_studio_id", ["studioId"]).index("by_project", ["projectId"]).index("by_production", ["productionId"])
-    .index("by_checksum", ["studioExternalId", "checksum"]),
+    .index("by_checksum", ["studioExternalId", "checksum"]).index("by_storage", ["storageId"]),
 
   derivatives: defineTable({
     ...studioOwned, sourceAssetId: v.id("assets"), derivedAssetId: v.id("assets"), kind: v.string(), transform: json,
@@ -637,6 +637,18 @@ export default defineSchema({
   movieReviewLinks: defineTable({
     projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), movieExportId: v.id('movieExports'), reviewId: v.id('movieReviews'), planHash: v.string(), tokenHash: v.string(), label: v.string(), createdByUserId: v.id('users'), expiresAt: timestamp, createdAt: timestamp, revokedAt: v.optional(timestamp),
   }).index('by_token_hash', ['tokenHash']).index('by_review', ['reviewId']).index('by_project', ['projectId', 'createdAt']),
+
+  mediaDerivationJobs: defineTable({
+    projectId: v.id('projects'), studioId: v.optional(v.id('studios')), studioExternalId: v.string(), createdByUserId: v.id('users'),
+    sourceAssetId: v.id('assets'), sourceStorageId: v.id('_storage'), sourceChecksum: v.string(), sourceAssetChecksum: v.string(), sourceStorageChecksum: v.string(), sourceByteSize: v.number(),
+    profile: v.literal('VIDEO_AUDIO_WAV_48K_STEREO_V1'), startSample: v.number(), sampleCount: v.number(), requestHash: v.string(), idempotencyKey: v.string(),
+    status: v.union(v.literal('QUEUED'), v.literal('PROCESSING'), v.literal('RETRYING'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('CANCELED')),
+    attemptCount: v.number(), nextAttemptAt: v.optional(v.number()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(v.number()), cancelRequestedAt: v.optional(v.number()),
+    leaseHistory: v.optional(v.array(v.object({leaseId:v.string(), attemptNumber:v.number(), startedAt:v.number(), expiresAt:v.number()}))),
+    privateOutputs: v.optional(v.array(v.object({storageId:v.id('_storage'), checksum:v.string(), byteSize:v.number(), sampleCount:v.number(), sourceDurationSeconds:v.number(), leaseId:v.string(), attemptNumber:v.number(), createdAt:v.number(), expiresAt:v.number()}))),
+    resultAssetId: v.optional(v.id('assets')), resultStorageId: v.optional(v.id('_storage')), resultChecksum: v.optional(v.string()), resultByteSize: v.optional(v.number()), actualSampleCount: v.optional(v.number()), sourceDurationSeconds: v.optional(v.number()),
+    errorCode: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(), completedAt: v.optional(v.number()),
+  }).index('by_project', ['projectId', 'createdAt']).index('by_status', ['status']).index('by_key', ['idempotencyKey']),
 
   beatAnalysisJobs: defineTable({
     projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), sourceChecksum: v.string(), assetChecksum: v.string(), algorithmVersion: v.string(),
