@@ -12,12 +12,17 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
+const checksums = compile('renderer/src/media/sha256.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
-const routing = compile('src/lib/ai/video-routing.ts');
+const registry = compile('src/lib/ai/model-registry.ts');
+const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry });
+const studioMemberships = compile('convex/studioMemberships.ts');
+const pricing = compile('src/lib/credits/pricing.ts');
+const routing = compile('src/lib/ai/video-routing.ts', { './model-registry': registry });
 const contracts = compile('convex/generationWorkerContracts.ts');
 const api = new Proxy({}, { get: (_, module) => new Proxy({}, { get: (_, fn) => String(module) + '.' + String(fn) }) });
 const providerJobId = 'gen-vid-123-abcdefghijklmnopqrst';
@@ -41,7 +46,7 @@ function publicActionFixture(metadata, references = []) {
   const fixture = { mutations: [], estimates: [], routingEnabled: true, model: { ...model }, source: { ...upscaleSource }, rawCatalog: { upscale_factor: { min: 1.5, max: 3 }, creativity: [0, 1] } };
   if (metadata.operation === 'UPSCALE') fixture.model = { ...fixture.model, modelId: upscaleModelId, pricingSkus: { ...upscalePrices }, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1] };
   const client = {
-    action: async () => ({ ...fixture.source }),
+    action: async ref => ({ ...(fixture.actionSources?.[ref] ?? fixture.source) }),
     query: async ref => {
       if (ref === 'account.current') return { user: { id: 'user' } };
       if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: 'LANDSCAPE' }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
@@ -55,7 +60,7 @@ function publicActionFixture(metadata, references = []) {
     '@/lib/ai/capabilities': { assertCapability: () => ({ provider: 'openrouter', model: 'test/reviewed' }) },
     '@/lib/credits/service': { estimateProductionCost: async input => { fixture.estimates.push(input); return { totalCredits: 1 }; } },
     '@/lib/ai/video-routing': routing, '@/lib/config/feature-flags': { isFeatureEnabled: () => fixture.routingEnabled },
-    '@/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async () => [{ id: fixture.model.modelId, upscaleFactor: fixture.rawCatalog.upscale_factor, creativityLevels: fixture.rawCatalog.creativity, supportedDurations: fixture.model.supportedDurations, supportedResolutions: fixture.model.supportedResolutions, supportedAspectRatios: fixture.model.supportedAspectRatios, supportedSizes: ['1280x720'], pricingSkus: fixture.model.pricingSkus, allowedPassthroughParameters: [], raw: fixture.rawCatalog }] },
+    '@/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async () => [{ id: fixture.model.modelId, canonicalSlug: fixture.model.canonicalSlug, upscaleFactor: fixture.rawCatalog.upscale_factor, creativityLevels: fixture.rawCatalog.creativity, supportedDurations: fixture.model.supportedDurations, supportedResolutions: fixture.model.supportedResolutions, supportedAspectRatios: fixture.model.supportedAspectRatios, supportedSizes: ['1280x720'], pricingSkus: fixture.model.pricingSkus, allowedPassthroughParameters: fixture.model.supportedParameters, raw: fixture.rawCatalog }] },
     '@/lib/production/workspace-controls': controls,
   });
   fixture.run = () => fixture.actions.createShotGenerationJob({ productionId: 'production', shotId: 'shot', requestId: 'operation-contract-00001' });
@@ -78,11 +83,13 @@ function workspaceActionFixture() {
   fixture.save = selected => actions.saveShotOperationControls({ projectExternalId: 'project-external', productionId: 'production', shotId: 'shot', controls: selected });
   return fixture;
 }
-function backendFixture(metadata, referenceAssetIds = [], routingFactory) {
-  const state = { approval: 'APPROVED', routeChecks: [], writes: [], schedules: [], rows: new Map(), counter: 0 };
+function backendFixture(metadata, referenceAssetIds = [], routingFactory, dependencies = {}) {
+  const state = { approval: 'APPROVED', routeChecks: [], writes: [], schedules: [], rows: new Map(), counter: 0, creditEstimates: [], creditReservations: [] };
   const row = (table, value) => state.rows.set(value._id, { ...value, table });
   row('projects', { _id: 'project', studioExternalId: 'studio', ownerUserId: 'user' });
   row('users', { _id: 'user', status: 'active' });
+  row('studios', { _id: 'studio-id', externalId: 'studio', ownerUserId: 'user', status: 'active' });
+  row('members', { _id: 'studio-member', studioId: 'studio-id', userId: 'user', role: 'owner', status: 'active' });
   row('productions', { _id: 'production', projectId: 'project', studioExternalId: 'studio', currentVersionId: 'version' });
   row('productionVersions', { _id: 'version', productionId: 'production', status: 'APPROVED' });
   row('shots', { _id: 'shot', projectId: 'project', productionId: 'production', productionVersionId: 'version', sceneId: 'scene', prompt: 'Continue', durationSeconds: 4, requiredAssetIds: referenceAssetIds, metadata });
@@ -111,11 +118,11 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory) {
     './_generated/server': { query: value => value, mutation: value => value, internalQuery: value => value, internalMutation: value => value },
     'convex/values': { v }, './authorization': { requireProjectAccess: auth, requireProjectRole: auth },
     './resourceStates': { ensureResourceState: async () => {}, getEffectiveResourceState: async (_, projectId, type, id) => ({ currentState: id === 'source-take' ? state.approval : 'DRAFT' }) },
-    './financial': { estimateGenerationCredits: () => 1, reserveGenerationCreditsInTransaction: async () => ({ reservationId: 'credit-hold' }) },
-    './providerBudget': { reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
+    './financial': { estimateGenerationCredits: args => { state.creditEstimates.push(args); return pricing.estimateGenerationCredits(args); }, reserveGenerationCreditsInTransaction: async (_, args) => { state.creditReservations.push(args); return { reservationId: 'credit-hold' }; }, settleGenerationCreditsInTransaction: async () => {} },
+    './providerBudget': { settleProviderBudget: async () => {}, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
     './videoRouting': routingFactory ? (state.routing = routingFactory(state, ctx, auth)) : { resolveUpscaleSourceCertificate: async () => ({ ...upscaleSource }), validateReviewedVideoJob: async (_, args) => { state.routeChecks.push(args.request); return { estimatedCostUsd: .04, selection: { provider: 'openrouter', modelId: args.modelId, path: 'AI_VIDEO', resolution: args.request.operation === 'UPSCALE' ? undefined : '720p', routeReason: 'Test-reviewed', policyVersion: 1, ...(args.request.operation === 'EXTEND' ? { continuationQuote: routing.quoteVideoContinuation(model, args.request) } : {}), ...(args.request.operation === 'UPSCALE' ? { upscaleQuote: routing.quoteVideoUpscale({ ...model, modelId: upscaleModelId, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: upscalePrices }, { ...args.request, upscaleSource }) } : {}) } }; } },
     './generationContinuity': { resolveGenerationContinuity: async (_, args) => ({ referenceAssetIds: args.referenceAssetIds, selectedResourceVersionIds: [], voiceIds: [], planningContextSnapshot: null }) },
-    './voices': {}, '../src/lib/ai/preparation': {}, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,
+    './studioMemberships': studioMemberships, './voices': dependencies.voices || {}, './audioCertificates': dependencies.audio || {}, './imageCertificates': dependencies.image || {}, '../src/lib/ai/preparation': dependencies.preparation || preparation, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,
     './generationWorkerContracts': { ...contracts, workerEnabled: () => true },
   });
   state.create = async (overrides = {}) => jobs.create.handler(ctx, { productionId: 'production', shotId: 'shot', provider: 'openrouter', model: metadata.operation === 'UPSCALE' ? upscaleModelId : 'test/reviewed', request: { ratio: '16:9', previousModelId: 'invented/model', upscaleFactor: 99, creativity: 99 }, estimatedCost: 1, idempotencyKey: 'operation-contract-00001', ...overrides });
@@ -211,5 +218,5 @@ async function main() {
   });
   console.log('Operation control contracts: PASS (' + checks + '); actual application actions and Convex handlers with isolated in-memory seams. No database or provider calls.');
 }
-module.exports = { compile, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
+module.exports = { compile, checksums, registry, preparation, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; }).finally(module.exports.cleanup);

@@ -1,4 +1,6 @@
 import type { QualityTier } from '../types/database';
+import { REVIEWED_OPERATION_CONTRACTS } from './model-registry';
+import { normalizeSha256 } from '../../../renderer/src/media/sha256';
 
 export const VIDEO_TYPES = [
     'ANIMATED_COMEDY_2D',
@@ -32,6 +34,7 @@ export const VIDEO_TYPE_LABELS: Record<VideoType, string> = {
 export interface VideoModelCapabilities {
     provider: string;
     modelId: string;
+    canonicalSlug?: string;
     available: boolean;
     supportsTextToVideo: boolean;
     supportsImageReferences: boolean;
@@ -73,6 +76,8 @@ export interface VideoRoutingRequest {
     creativity?: number;
     upscaleSource?: UpscaleSourceCertificate;
     editSource?: VideoEditSourceCertificate;
+    lipSyncSource?: LipSyncAudioCertificate;
+    lipSyncPortrait?: LipSyncPortraitCertificate;
     qualityTier: QualityTier;
     durationSeconds: number;
     aspectRatio: string;
@@ -108,6 +113,7 @@ export interface VideoRouteSelection {
     upscaleQuote?: UpscaleQuoteCertificate;
     editQuote?: VideoEditQuoteCertificate;
     continuationQuote?: ContinuationQuoteCertificate;
+    lipSyncQuote?: LipSyncQuoteCertificate;
 }
 
 export function buildVideoRouteMetadata(
@@ -128,6 +134,7 @@ export function buildVideoRouteMetadata(
         ...(selection.upscaleQuote ? { upscaleQuote: selection.upscaleQuote } : {}),
         ...(selection.editQuote ? { editQuote: selection.editQuote } : {}),
         ...(selection.continuationQuote ? { continuationQuote: selection.continuationQuote } : {}),
+        ...(selection.lipSyncQuote ? { lipSyncQuote: selection.lipSyncQuote } : {}),
         maximumCostUsd: options.costCeilingUsd,
         referenceAssetIds: options.referenceAssetIds || [],
         audioAssetIds: options.audioAssetIds || [],
@@ -183,6 +190,34 @@ export interface UpscaleQuoteCertificate {
 }
 
 export const VIDEO_EDIT_BILLING_VERSION = 'FLUX_SOURCE_VIDEO_EDIT_V1' as const;
+export interface LipSyncAudioCertificate { assetId: string; storageId: string; checksum: string; byteSize: number; durationSeconds: number; audioCodec: string; audioFormat?: string; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1'; sampleRate: number; channels: number; hasVideo: boolean }
+export interface LipSyncPortraitCertificate { assetId: string; storageId: string; checksum: string; byteSize: number; width: number; height: number; imageCodec: string; mimeType: string }
+export interface LipSyncQuoteCertificate { version: string; canonicalSlug: string; catalogFingerprint: string; endpointFingerprint: string; source: LipSyncAudioCertificate; portrait: LipSyncPortraitCertificate; billableDurationSeconds: number; sku: string; rateUsdPerSecond: number; costUsd: number }
+export function certifyAvatarEndpointCatalog(value: unknown): string {
+    const root = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const catalog = root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : root;
+    const contract = REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar;
+    const endpoints = Array.isArray(catalog.endpoints) ? catalog.endpoints : [];
+    const endpoint = endpoints[0] as Record<string, unknown> | undefined; const prices = endpoint?.pricing as Record<string, unknown> | undefined;
+    const architecture = catalog.architecture && typeof catalog.architecture === 'object' ? catalog.architecture as Record<string, unknown> : {};
+    if (JSON.stringify(Array.isArray(architecture.input_modalities) ? [...architecture.input_modalities].sort() : []) !== JSON.stringify(['audio','image','text']) || JSON.stringify(architecture.output_modalities) !== JSON.stringify(['video'])) throw new Error('Avatar source modalities changed.');
+    if (catalog.id !== contract.modelId || endpoints.length !== 1 || endpoint?.name !== contract.endpointName || endpoint.tag !== contract.providerTag || endpoint.model_id !== contract.modelId || endpoint.status !== 0 || !prices || Object.keys(prices).length !== 3 || Object.keys(prices).some(key => !['prompt','completion','discount'].includes(key) || prices[key] !== 0 && prices[key] !== '0') || ['supports_voice_cloning','supports_multiple_audio_references','supports_image_reference','supports_diarization'].some(key=>endpoint[key] !== false)) throw new Error('Avatar endpoint version, provider or controls changed.');
+    return avatarEndpointFingerprint();
+}
+function avatarEndpointFingerprint() { const c = REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar; return JSON.stringify([c.version,c.canonicalSlug,c.endpointName,c.providerTag,c.modelId,0,[['completion',0],['discount',0],['prompt',0]],[false,false,false,false],['audio','image','text'],['video']]); }
+export function quoteSuppliedAudioAvatar(model: VideoModelCapabilities, request: VideoRoutingRequest): LipSyncQuoteCertificate | undefined {
+    const contract = REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar; const source = request.lipSyncSource; const portrait = request.lipSyncPortrait;
+    if ((request.operation || request.task) !== 'LIP_SYNC' || model.provider !== 'openrouter' || model.modelId !== contract.modelId || model.canonicalSlug !== contract.canonicalSlug || request.audioPolicy !== 'USE_RECORDING' || !request.hasImageReferences || request.imageReferenceCount !== 1 || !request.hasAudioReference || request.hasVideoReference || request.requiresFirstFrame || request.requiresLastFrame || request.requiresAudio || request.requiresMask || request.previousJobId || request.upscaleFactor !== undefined || request.creativity !== undefined) return undefined;
+    if (!source || !source.assetId || !source.storageId || !normalizeSha256(source.checksum) || !Number.isSafeInteger(source.byteSize) || source.byteSize <= 0 || source.byteSize > contract.maxSourceBytes || !Number.isFinite(source.durationSeconds) || source.durationSeconds <= 0 || source.durationSeconds > contract.maxSourceSeconds || source.hasVideo !== false || !Number.isInteger(source.sampleRate) || source.sampleRate <= 0 || !Number.isInteger(source.channels) || source.channels <= 0 || !(contract.audioCodecs as readonly string[]).includes(source.audioCodec)) return undefined;
+    if (source.durationMeasurement !== 'DECODED_PCM_SAMPLES_V1' || !(source.audioFormat === 'wav' && source.audioCodec.startsWith('pcm_') || source.audioFormat === 'mp3' && source.audioCodec === 'mp3')) return undefined;
+    if (source.durationSeconds > contract.applicationMaxSourceSeconds) return undefined;
+    if (!portrait || !portrait.assetId || !portrait.storageId || !normalizeSha256(portrait.checksum) || !Number.isSafeInteger(portrait.byteSize) || portrait.byteSize <= 0 || portrait.byteSize > contract.maxPortraitBytes || !Number.isInteger(portrait.width) || portrait.width <= 0 || portrait.width >= contract.maxPortraitDimension || !Number.isInteger(portrait.height) || portrait.height <= 0 || portrait.height >= contract.maxPortraitDimension || !(portrait.mimeType === 'image/png' && portrait.imageCodec === 'png' || portrait.mimeType === 'image/jpeg' && portrait.imageCodec === 'mjpeg')) return undefined;
+    if (Object.keys(model.pricingSkus || {}).length !== 1 || model.pricingSkus?.[contract.sku] !== contract.rateUsdPerSecond || model.supportedDurations.length || JSON.stringify([...model.supportedResolutions].sort()) !== JSON.stringify(['1080p','720p']) || JSON.stringify([...model.supportedAspectRatios].sort()) !== JSON.stringify(['16:9','1:1','9:16'].sort()) || JSON.stringify([...model.supportedParameters].sort()) !== JSON.stringify([...contract.passthrough].sort())) return undefined;
+    // Playback keeps the exact decoded duration. A separate one-sample upper
+    // bound accounts for16kHz resampling quantization before whole-second ceil.
+    const billableDurationSeconds = Math.ceil(source.durationSeconds + 1 / 16000);
+    return { version: contract.version, canonicalSlug: contract.canonicalSlug, catalogFingerprint: videoCatalogFingerprint(model), endpointFingerprint: avatarEndpointFingerprint(), source, portrait, billableDurationSeconds, sku: contract.sku, rateUsdPerSecond: contract.rateUsdPerSecond, costUsd: Math.ceil(billableDurationSeconds * contract.rateUsdPerSecond * 1e6) / 1e6 };
+}
 export const CONTINUATION_BILLING_VERSION = 'OPENROUTER_CONTINUATION_OUTPUT_SECOND_V1' as const;
 export interface ContinuationQuoteCertificate {
     version: typeof CONTINUATION_BILLING_VERSION; sourceProviderJobId: string; sourceModelId: string;
@@ -228,10 +263,11 @@ export function validUpscaleSource(source: UpscaleSourceCertificate | undefined)
     return Boolean(source && typeof source.assetId === 'string' && source.assetId && typeof source.storageId === 'string' && source.storageId && typeof source.checksum === 'string' && source.checksum && Number.isSafeInteger(source.byteSize) && source.byteSize > 0 && source.byteSize <= 50_000_000 && Number.isInteger(source.width) && Number.isInteger(source.height) && source.width > 0 && source.height > 0 && Math.max(source.width, source.height) <= 2560 && Math.min(source.width, source.height) <= 1440 && source.width * source.height <= 2560 * 1440 && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 20);
 }
 
-export function videoCatalogFingerprint(model: { provider: string; modelId: string; supportedDurations: number[]; supportedResolutions: string[]; supportedAspectRatios: string[]; supportedSizes?: string[]; supportedParameters: string[]; upscaleFactor?: { min: number; max: number }; creativityLevels?: number[]; pricingSkus?: Record<string, number> }) {
+export function videoCatalogFingerprint(model: { provider: string; modelId: string; canonicalSlug?: string; supportedDurations: number[]; supportedResolutions: string[]; supportedAspectRatios: string[]; supportedSizes?: string[]; supportedParameters: string[]; upscaleFactor?: { min: number; max: number }; creativityLevels?: number[]; pricingSkus?: Record<string, number> }) {
     const controls = [model.provider, model.modelId, [...model.supportedDurations].sort((a, b) => a - b), [...model.supportedResolutions].sort(), [...model.supportedAspectRatios].sort(), [...(model.supportedSizes || [])].sort(), [...model.supportedParameters].sort()];
     // Preserve historical non-upscale review fingerprints. Upscale certification
     // includes exact controls and prices, so changes withdraw that review.
+    if (model.modelId === REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar.modelId) return JSON.stringify([...controls, model.canonicalSlug ?? null, Object.entries(model.pricingSkus || {}).sort(([a],[b])=>a.localeCompare(b)), REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar.version]);
     if (model.modelId === 'black-forest-labs/flux-video-edit') return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), VIDEO_EDIT_BILLING_VERSION]);
     if (model.modelId === 'black-forest-labs/flux-3-video' || Object.keys(model.pricingSkus || {}).some(sku => sku.includes('video_continuation'))) return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), CONTINUATION_BILLING_VERSION]);
     return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...controls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : controls);
@@ -263,8 +299,8 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     const sourceEdit = isSourceVideoEdit(operation) && model.modelId === 'black-forest-labs/flux-video-edit';
     // Manual capability flags cannot certify an undocumented motion-transfer
     // contract or a supplied-audio output-duration billing bound.
-    if (operation === 'PERFORMANCE_TRANSFER' || operation === 'LIP_SYNC' || isSourceVideoEdit(operation) && !sourceEdit) return false;
-    if (!Number.isFinite(request.durationSeconds) || (operation === 'UPSCALE' || sourceEdit ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
+    if (operation === 'PERFORMANCE_TRANSFER' || operation === 'LIP_SYNC' && (!model.supportsLipSync || !quoteSuppliedAudioAvatar(model, request)) || isSourceVideoEdit(operation) && !sourceEdit) return false;
+    if (!Number.isFinite(request.durationSeconds) || (operation === 'LIP_SYNC' || operation === 'UPSCALE' || sourceEdit ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
     if (request.maximumCostUsd !== undefined && (!Number.isFinite(request.maximumCostUsd) || request.maximumCostUsd < 0)) return false;
     if (!(VIDEO_OPERATIONS as readonly string[]).includes(operation)) return false;
     // The portable API has no mask contract. Never silently drop a requested mask.
@@ -288,6 +324,8 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
         // This operation inherits duration/framing from its single certified
         // source. Null generation catalog lists are not unsupported controls.
         if (request.resolution || request.requiresFirstFrame || request.requiresLastFrame || request.hasImageReferences || request.hasAudioReference || request.requiresAudio) return false;
+    } else if (operation === 'LIP_SYNC') {
+        if (request.resolution && !model.supportedResolutions.includes(request.resolution) || !model.supportedAspectRatios.includes(request.aspectRatio)) return false;
     } else if (sourceEdit) {
         if (!quoteVideoEdit(model, request)) return false;
     } else {
@@ -302,6 +340,7 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
 }
 
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
+    if ((request.operation || request.task) === 'LIP_SYNC') return quoteSuppliedAudioAvatar(model, request)?.costUsd;
     if ((request.operation || request.task) === 'UPSCALE') return quoteVideoUpscale(model, request)?.costUsd;
     if (model.modelId === 'black-forest-labs/flux-video-edit') return quoteVideoEdit(model, request)?.costUsd;
     if ((request.operation || request.task) === 'EXTEND') {
@@ -451,5 +490,6 @@ export function selectVideoRoute(
         ...(selectedRequest.operation === 'UPSCALE' ? { upscaleQuote: quoteVideoUpscale(selected, selectedRequest) } : {}),
         ...(selected.modelId === 'black-forest-labs/flux-video-edit' ? { editQuote: quoteVideoEdit(selected, selectedRequest) } : {}),
         ...((selectedRequest.operation || selectedRequest.task) === 'EXTEND' ? { continuationQuote: quoteVideoContinuation(selected, selectedRequest) } : {}),
+        ...((selectedRequest.operation || selectedRequest.task) === 'LIP_SYNC' ? { lipSyncQuote: quoteSuppliedAudioAvatar(selected, selectedRequest) } : {}),
     };
 }

@@ -131,47 +131,22 @@ export const updateAsset = mutation({
 
 export const team = query({
   args: {},
-  handler: async (ctx) => {
-    const { studio } = await accessibleStudio(ctx);
-    await requireMember(ctx, studio.externalId);
-    return await ctx.db.query("studioMembers").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).collect();
-  },
+  handler: async () => { throw new Error("The legacy team directory is retired. Use the authorized paginated team roster."); },
 });
 
 export const inviteTeamMember = mutation({
   args: { email: v.string(), role: v.union(v.literal("admin"), v.literal("member")) },
-  handler: async (ctx, args) => {
-    const { identity, studio } = await accessibleStudio(ctx);
-    await requireAdmin(ctx, studio.externalId);
-    const existing = await ctx.db.query("studioMembers").withIndex("by_studio_user", q => q.eq("studioExternalId", studio.externalId).eq("userExternalId", args.email)).unique();
-    if (existing) return { ok: true, id: existing._id };
-    const id = await ctx.db.insert("studioMembers", { studioExternalId: studio.externalId, userExternalId: args.email, role: args.role, status: "invited", invitedByExternalId: identity.externalId, invitedAt: now(), createdAt: now(), updatedAt: now() });
-    return { ok: true, id };
-  },
+  handler: async () => { throw new Error("Legacy team mutations are retired. Use canonical recipient-ID invitations and audited workspace controls."); },
 });
 
 export const updateTeamMember = mutation({
   args: { memberId: v.id("studioMembers"), role: v.union(v.literal("admin"), v.literal("member"), v.literal("owner")) },
-  handler: async (ctx, args) => {
-    const { studio } = await accessibleStudio(ctx);
-    await requireAdmin(ctx, studio.externalId);
-    const member = await ctx.db.get(args.memberId);
-    if (!member || member.studioExternalId !== studio.externalId) throw new Error("Team member not found.");
-    await ctx.db.patch(member._id, { role: args.role, updatedAt: now() });
-    return { ok: true };
-  },
+  handler: async () => { throw new Error("Legacy team mutations are retired. Use canonical recipient-ID invitations and audited workspace controls."); },
 });
 
 export const removeTeamMember = mutation({
   args: { memberId: v.id("studioMembers") },
-  handler: async (ctx, args) => {
-    const { studio } = await accessibleStudio(ctx);
-    await requireAdmin(ctx, studio.externalId);
-    const member = await ctx.db.get(args.memberId);
-    if (!member || member.studioExternalId !== studio.externalId) throw new Error("Team member not found.");
-    await ctx.db.patch(member._id, { status: "suspended", updatedAt: now() });
-    return { ok: true };
-  },
+  handler: async () => { throw new Error("Legacy team mutations are retired. Use canonical recipient-ID invitations and audited workspace controls."); },
 });
 
 export const adminOverview = query({
@@ -190,13 +165,15 @@ export const adminOverview = query({
 
 export const adminUsers = query({
   args: {},
+  returns: v.array(v.object({ _id: v.string(), name: v.string(), role: v.union(v.literal('owner'), v.literal('admin'), v.literal('member')), membershipStatus: v.string() })),
   handler: async (ctx) => {
     const { studio } = await accessibleStudio(ctx);
     await requireAdmin(ctx, studio.externalId);
     const members = await ctx.db.query("studioMembers").withIndex("by_studio", q => q.eq("studioExternalId", studio.externalId)).order("desc").take(100);
     const profiles = await Promise.all(members.map(async (member) => {
       const user = member.userId ? await ctx.db.get(member.userId) : null;
-      return user ? { ...user, role: member.role, membershipStatus: member.status } : { _id: member._id, name: undefined, email: member.userExternalId, role: member.role, membershipStatus: member.status };
+      const canonical = user ? await ctx.db.query('members').withIndex('by_studio_user', q => q.eq('studioId', studio._id).eq('userId', user._id)).unique() : null;
+      return { _id: user?._id ?? member._id, name: user?.displayName || user?.name || 'Legacy membership without an available canonical account', role: canonical?.role ?? member.role, membershipStatus: canonical?.status ?? member.status };
     }));
     return profiles;
   },

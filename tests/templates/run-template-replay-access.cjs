@@ -14,7 +14,7 @@ function load(file, stubs = {}) {
 class AccessError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const identity = { externalId: 'subject', subject: 'subject' };
 const auth = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
-const authorization = load('convex/authorization.ts', { './auth': auth, './identity': { getIdentity: async () => identity, requireIdentity: async () => identity } });
+const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './auth': auth, './identity': { getIdentity: async () => identity, requireIdentity: async () => identity } });
 const server = { query: value => value, mutation: value => value };
 const args = { studioExternalId: 'studio-external', templateId: 'product-launch', projectName: 'My launch', requestId: 'original-request' };
 const project = { _id: 'project', externalId: 'template_studio_user_original-request', studioId: 'studio', studioExternalId: args.studioExternalId, createdByUserId: 'user', ownerUserId: 'user', createdByExternalId: 'subject', name: args.projectName, status: 'DRAFT', metadata: { templateId: args.templateId, templateCreationInput: { templateId: args.templateId, templateVersion: 1, projectName: args.projectName, requestId: args.requestId, createdByUserId: 'user' } } };

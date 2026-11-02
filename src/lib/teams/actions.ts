@@ -1,29 +1,30 @@
 'use server';
-
+import { makeFunctionReference } from 'convex/server';
 import { revalidatePath } from 'next/cache';
-import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
-import type { StudioMember, StudioRole } from '@/lib/types/database';
-
-export async function getTeamMembers(_studioId: string): Promise<{ success: boolean; data?: StudioMember[]; error?: string }> {
-  try {
-    const rows = await (await getAuthenticatedConvexClient()).query(api.app.team, {});
-    const data = rows.map((row: any) => ({ id: row._id, studio_id: row.studioExternalId, user_id: row.userExternalId, role: row.role, created_at: new Date(row.createdAt).toISOString(), status: row.status === 'invited' ? 'pending' : row.status, email: row.userExternalId, full_name: row.userExternalId, avatar_url: undefined })) as StudioMember[];
-    return { success: true, data };
-  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to load team' }; }
-}
-
-export async function inviteMember(_studioId: string, email: string, role: StudioRole): Promise<{ success: boolean; error?: string }> {
-  try { await (await getAuthenticatedConvexClient()).mutation(api.app.inviteTeamMember, { email, role: role === 'owner' || role === 'editor' ? 'admin' : 'member' }); revalidatePath('/dashboard/settings/team'); return { success: true }; }
-  catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to invite team member' }; }
-}
-
-export async function updateMemberRole(memberId: string, newRole: StudioRole, _isInvitation = false): Promise<{ success: boolean; error?: string }> {
-  try { await (await getAuthenticatedConvexClient()).mutation(api.app.updateTeamMember, { memberId: memberId as never, role: newRole === 'owner' ? 'owner' : newRole === 'editor' ? 'admin' : 'member' }); revalidatePath('/dashboard/settings/team'); return { success: true }; }
-  catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to update team member' }; }
-}
-
-export async function removeMember(memberId: string, _isInvitation = false): Promise<{ success: boolean; error?: string }> {
-  try { await (await getAuthenticatedConvexClient()).mutation(api.app.removeTeamMember, { memberId: memberId as never }); revalidatePath('/dashboard/settings/team'); return { success: true }; }
-  catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to remove team member' }; }
-}
+import type { Id } from '../../../convex/_generated/dataModel';
+import type { InvitationPreview, TeamContext, TeamInvitationRow, TeamMemberRow, TeamPage, WorkspaceRow } from './contracts';
+const contextQuery = makeFunctionReference<'query', { studioId?: Id<'studios'> }, TeamContext>('teamLifecycle:context');
+const rosterQuery = makeFunctionReference<'query', { studioId: Id<'studios'>; cursor?: string }, TeamPage<TeamMemberRow>>('teamLifecycle:roster');
+const invitationsQuery = makeFunctionReference<'query', { studioId: Id<'studios'>; status: 'PENDING' | 'ACCEPTED' | 'REVOKED'; now: number; cursor?: string }, TeamPage<TeamInvitationRow>>('teamLifecycle:invitations');
+const workspacesQuery = makeFunctionReference<'query', { cursor?: string }, TeamPage<WorkspaceRow>>('teamLifecycle:workspaces');
+const selectMutation = makeFunctionReference<'mutation', { studioId: Id<'studios'> }, null>('teamLifecycle:selectWorkspace');
+const createMutation = makeFunctionReference<'mutation', { studioId: Id<'studios'>; recipientUserId: Id<'users'>; role: 'admin' | 'member'; tokenHash: string; expiresAt: number; requestId: string }, { invitationId: string; replayed: boolean }>('teamLifecycle:createInvitation');
+const revokeMutation = makeFunctionReference<'mutation', { invitationId: Id<'studioInvitations'>; reason: string; requestId: string }, { replayed: boolean }>('teamLifecycle:revokeInvitation');
+const memberMutation = makeFunctionReference<'mutation', { studioId: Id<'studios'>; userId: Id<'users'>; role: 'admin' | 'member'; status: 'active' | 'suspended' | 'removed'; reason: string; requestId: string }, { replayed: boolean }>('teamLifecycle:changeMember');
+const transferMutation = makeFunctionReference<'mutation', { studioId: Id<'studios'>; successorUserId: Id<'users'>; reason: string; confirmation: string; requestId: string }, { studioId: string; replayed: boolean }>('teamLifecycle:transferOwnership');
+const previewMutation = makeFunctionReference<'mutation', { token: string }, InvitationPreview | null>('teamLifecycle:previewInvitation');
+const acceptMutation = makeFunctionReference<'mutation', { token: string; requestId: string; selectWorkspace: boolean }, { studioId: string; replayed: boolean }>('teamLifecycle:acceptInvitation');
+type Result<T> = { success: true; data: T } | { success: false; error: string };
+async function change<T>(operation: () => Promise<T>, error: string): Promise<Result<T>> { try { const data = await operation(); revalidatePath('/dashboard', 'layout'); return { success: true, data }; } catch (caught) { const message = caught instanceof Error ? caught.message : ''; return { success: false, error: /Shared project ownership|bounded project ownership/.test(message) ? 'Project ownership handoff or a complete staff-assisted ownership review is required before removing this member. No access was changed.' : error }; } }
+export async function getTeamContext(studioId?: string) { return (await getAuthenticatedConvexClient()).query(contextQuery, { ...(studioId ? { studioId: studioId as Id<'studios'> } : {}) }); }
+export async function getTeamRoster(studioId: string, cursor?: string) { return (await getAuthenticatedConvexClient()).query(rosterQuery, { studioId: studioId as Id<'studios'>, cursor }); }
+export async function getTeamInvitations(studioId: string, status: 'PENDING' | 'ACCEPTED' | 'REVOKED', cursor?: string) { return (await getAuthenticatedConvexClient()).query(invitationsQuery, { studioId: studioId as Id<'studios'>, status, cursor, now: Date.now() }); }
+export async function getTeamWorkspaces(cursor?: string) { return (await getAuthenticatedConvexClient()).query(workspacesQuery, { cursor }); }
+export async function selectTeamWorkspace(studioId: string) { return change(async () => (await getAuthenticatedConvexClient()).mutation(selectMutation, { studioId: studioId as Id<'studios'> }), 'That workspace could not be selected. Check your current membership.'); }
+export async function createTeamInvitation(input: { studioId: string; recipientUserId: string; role: 'admin' | 'member'; tokenHash: string; expiresAt: number; requestId: string }) { return change(async () => (await getAuthenticatedConvexClient()).mutation(createMutation, { ...input, studioId: input.studioId as Id<'studios'>, recipientUserId: input.recipientUserId as Id<'users'> }), 'The invitation was not confirmed. Check the exact account ID, existing membership, pending invitations and your authority before retrying.'); }
+export async function revokeTeamInvitation(input: { invitationId: string; reason: string; requestId: string }) { return change(async () => (await getAuthenticatedConvexClient()).mutation(revokeMutation, { ...input, invitationId: input.invitationId as Id<'studioInvitations'> }), 'Revocation was not confirmed. Check the current invitation and your authority.'); }
+export async function changeTeamMember(input: { studioId: string; userId: string; role: 'admin' | 'member'; status: 'active' | 'suspended' | 'removed'; reason: string; requestId: string }) { return change(async () => (await getAuthenticatedConvexClient()).mutation(memberMutation, { ...input, studioId: input.studioId as Id<'studios'>, userId: input.userId as Id<'users'> }), 'Member access was not changed. Check ownership handoff, role authority, account state and the required review reason.'); }
+export async function transferTeamOwnership(input: { studioId: string; successorUserId: string; reason: string; confirmation: string; requestId: string }) { return change(async () => (await getAuthenticatedConvexClient()).mutation(transferMutation, { ...input, studioId: input.studioId as Id<'studios'>, successorUserId: input.successorUserId as Id<'users'> }), 'Ownership transfer was not confirmed. Only the current recorded owner can transfer to an enabled ACTIVE canonical member with the exact typed confirmation.'); }
+export async function previewTeamInvitation(token: string): Promise<Result<InvitationPreview | null>> { try { return { success: true, data: await (await getAuthenticatedConvexClient()).mutation(previewMutation, { token }) }; } catch { return { success: false, error: 'Sign in to the intended recipient account, then reopen the private invitation link. The link may also have expired or been revoked.' }; } }
+export async function acceptTeamInvitation(input: { token: string; requestId: string; selectWorkspace: boolean }) { return change(async () => (await getAuthenticatedConvexClient()).mutation(acceptMutation, input), 'Acceptance was not confirmed. Check this invitation again before retrying; changed or inactive memberships require explicit owner review.'); }

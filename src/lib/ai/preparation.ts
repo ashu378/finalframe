@@ -1,4 +1,4 @@
-import { PREPARATION_MODELS } from './model-registry';
+import { PREPARATION_MODELS, REVIEWED_OPERATION_CONTRACTS } from './model-registry';
 
 export type PreparationKind = 'CHARACTER_REFERENCE' | 'NARRATION' | 'VOICE_PREVIEW' | 'TRANSCRIPT';
 export function preparationModel(kind: PreparationKind, clone = false) {
@@ -6,9 +6,34 @@ export function preparationModel(kind: PreparationKind, clone = false) {
 }
 function row(value: unknown): Record<string, any> { return value && typeof value === 'object' ? value as Record<string, any> : {}; }
 function positive(value: unknown) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) throw new Error('Verified preparation pricing is unavailable.'); return n; }
+export interface ReferenceVoiceQuoteCertificate {
+  version: string; model: string; canonicalSlug: string; endpointFingerprint: string;
+  maxOriginalOutputSeconds: number; sku: 'original_duration_seconds'; rateUsdPerSecond: number; costUsd: number;
+}
+export function certifyReferenceVoiceEndpoints(catalog: Record<string, any>): ReferenceVoiceQuoteCertificate {
+  const contract = REVIEWED_OPERATION_CONTRACTS.referenceVoice;
+  const endpoints = Array.isArray(catalog.endpoints) ? catalog.endpoints.map(row) : [];
+  if (catalog.id !== contract.modelId || endpoints.length !== 1) throw new Error('Reference synthesis needs the reviewed model version and endpoint.');
+  const endpoint = endpoints[0]; const pricing = row(endpoint.pricing);
+  if (endpoint.supports_voice_cloning !== true) throw new Error('Reference synthesis is not supported by every eligible endpoint.');
+  if (endpoint.name !== contract.endpointName || endpoint.tag !== contract.providerTag || endpoint.model_id !== contract.modelId || endpoint.status !== 0 || endpoint.supports_multiple_audio_references !== true || endpoint.supports_image_reference !== true || Object.keys(pricing).length !== 3 || Object.keys(pricing).some(key => !['prompt','completion','discount'].includes(key)) || ![0,'0'].includes(pricing.prompt) || ![0,'0'].includes(pricing.discount) || Number(pricing.completion) !== contract.rateUsdPerSecond) throw new Error('Reference synthesis endpoint version, controls or billing changed.');
+  const endpointFingerprint = JSON.stringify([contract.version, contract.canonicalSlug, endpoint.name, endpoint.tag, endpoint.model_id, endpoint.status, endpoint.supports_voice_cloning, endpoint.supports_multiple_audio_references, endpoint.supports_image_reference, Object.entries(pricing).sort(([a],[b]) => a.localeCompare(b))]);
+  return { version: contract.version, model: contract.modelId, canonicalSlug: contract.canonicalSlug, endpointFingerprint, maxOriginalOutputSeconds: contract.maxOriginalOutputSeconds, sku: 'original_duration_seconds', rateUsdPerSecond: contract.rateUsdPerSecond, costUsd: contract.maxOriginalOutputSeconds * contract.rateUsdPerSecond };
+}
+export function assertReferenceVoiceQuote(value: unknown): ReferenceVoiceQuoteCertificate {
+  const quote = row(value); const contract = REVIEWED_OPERATION_CONTRACTS.referenceVoice;
+  if (quote.version !== contract.version || quote.model !== contract.modelId || quote.canonicalSlug !== contract.canonicalSlug || quote.maxOriginalOutputSeconds !== contract.maxOriginalOutputSeconds || quote.sku !== 'original_duration_seconds' || quote.rateUsdPerSecond !== contract.rateUsdPerSecond || quote.costUsd !== contract.maxOriginalOutputSeconds * contract.rateUsdPerSecond || typeof quote.endpointFingerprint !== 'string' || quote.endpointFingerprint.length > 8000) throw new Error('Reference synthesis needs the reviewed original-duration certificate.');
+  // Recreate authority from the frozen endpoint facts instead of accepting an
+  // arbitrary matching version string supplied by a caller.
+  let facts; try { facts = JSON.parse(quote.endpointFingerprint); } catch { throw new Error('Invalid reference endpoint certificate.'); }
+  if (!Array.isArray(facts) || facts.length !== 10) throw new Error('Invalid reference endpoint certificate.');
+  const expected = certifyReferenceVoiceEndpoints({ id: contract.modelId, endpoints: [{ name: facts[2], tag: facts[3], model_id: facts[4], status: facts[5], supports_voice_cloning: facts[6], supports_multiple_audio_references: facts[7], supports_image_reference: facts[8], pricing: Object.fromEntries(Array.isArray(facts[9]) ? facts[9] : []) }] });
+  if (quote.endpointFingerprint !== expected.endpointFingerprint || JSON.stringify(Object.keys(expected).sort()) !== JSON.stringify(Object.keys(quote).sort())) throw new Error('Reference endpoint certificate changed.');
+  return expected;
+}
 /** Only server actions call this public, no-cost catalog endpoint. Every
  * endpoint is priced conservatively; unknown billing units fail closed. */
-export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number }, fetcher: typeof fetch = fetch) {
+export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1' }, fetcher: typeof fetch = fetch) {
   const config = preparationModel(input.kind, input.clone);
   if ('certifiedModel' in config && config.id !== config.certifiedModel) throw new Error('This preparation model needs a billing-unit review.');
   const image = input.kind === 'CHARACTER_REFERENCE';
@@ -20,7 +45,7 @@ export async function quotePreparation(input: { kind: PreparationKind; text?: st
   if (catalog.id !== config.id || !Array.isArray(catalog.endpoints) || !catalog.endpoints.length) throw new Error('Preparation model is unavailable.');
   const endpoints = catalog.endpoints.map(row);
   if (!image && !input.clone && endpoints.some((endpoint: Record<string, any>) => Number(row(endpoint.pricing).completion || 0) !== 0)) throw new Error('Preparation output billing needs a new review.');
-  let usd: number;
+  let usd: number; let referenceVoiceQuote: ReferenceVoiceQuoteCertificate | undefined; let billableInputSeconds: number | undefined;
   if (image) {
     const costs = endpoints.map((endpoint: Record<string, any>) => {
       const skus = Array.isArray(endpoint.pricing) ? endpoint.pricing.filter((item: Record<string, unknown>) => item.billable === 'output_image' && item.unit === 'image') : [];
@@ -34,17 +59,16 @@ export async function quotePreparation(input: { kind: PreparationKind; text?: st
     usd = Math.max(...costs) * 1.05 + .01;
   } else if (input.kind === 'TRANSCRIPT') {
     if (!Number.isFinite(input.durationSeconds) || input.durationSeconds! <= 0 || input.durationSeconds! > 60) throw new Error('Use a recording of at most 60 seconds.');
-    usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).prompt))) * Math.ceil(input.durationSeconds!);
+    if (input.durationMeasurement !== 'DECODED_PCM_SAMPLES_V1') throw new Error('Transcription requires a decoded source-duration certificate.');
+    billableInputSeconds = Math.ceil(input.durationSeconds! + 1/16000);
+    usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).prompt))) * billableInputSeconds;
   } else if (input.clone) {
-    // OpenRouter's current model contract is an endpoint-wide maximum, not a
-    // requested duration: https://openrouter.ai/provider/seed . The live model
-    // description must still certify that bound; changed contracts fail closed.
-    if (typeof catalog.description !== 'string' || !/output is limited to 120 seconds per request/i.test(catalog.description)) throw new Error('Reference synthesis needs a verified hard output-duration bound.');
-    if (endpoints.some((endpoint: Record<string, any>) => endpoint.supports_voice_cloning !== true)) throw new Error('Reference synthesis is not supported by every eligible endpoint.');
-    usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).completion))) * PREPARATION_MODELS.referenceVoice.maxOutputSeconds;
+    if (!input.text?.trim() || input.text.length > REVIEWED_OPERATION_CONTRACTS.referenceVoice.maxInputCharacters) throw new Error('Reference speech accepts at most 3000 characters.');
+    referenceVoiceQuote = certifyReferenceVoiceEndpoints(catalog);
+    usd = referenceVoiceQuote.costUsd;
   } else {
     usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).prompt))) * (input.text || '').length;
   }
   if (!Number.isFinite(usd) || usd <= 0 || usd > 2) throw new Error('Preparation estimate is outside the controlled test limit.');
-  return { model: config.id, capability: config.capability, estimatedProviderCostUsd: Math.ceil(usd * 1_000_000) / 1_000_000, checkedAt: Date.now(), billing: config.billing };
+  return { model: config.id, capability: config.capability, estimatedProviderCostUsd: Math.ceil(usd * 1_000_000) / 1_000_000, checkedAt: Date.now(), billing: config.billing, ...(referenceVoiceQuote ? { referenceVoiceQuote } : {}), ...(billableInputSeconds ? {billableInputSeconds, durationMeasurement:input.durationMeasurement,inputDurationSeconds:input.durationSeconds} : {}) };
 }

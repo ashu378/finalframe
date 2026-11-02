@@ -333,13 +333,14 @@ export async function validateVoiceForApproval(ctx: QueryCtx | MutationCtx, proj
 }
 
 export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, args: {
-  projectId: Id<"projects">; voiceId: Id<"voices">; use: "SYNTHESIZE" | "AVATAR_LIPSYNC";
+  projectId: Id<"projects">; voiceId: Id<"voices">; use: "SYNTHESIZE" | "AVATAR_LIPSYNC"; primaryVoiceSampleAssetId?: Id<'assets'>;
 }) {
   const [project, voice] = await Promise.all([ctx.db.get(args.projectId), ctx.db.get(args.voiceId)]);
   if (!project || project.deletedAt || !voice || voice.projectId !== project._id || voice.deletedAt || voice.revokedAt || voice.status !== "READY") throw new Error("VOICE_NOT_READY");
   const state = await ctx.db.query("resourceStates").withIndex("by_project_resource", (q) => q.eq("projectId", project._id).eq("resourceType", "voice").eq("resourceId", voice._id.toString())).unique();
   if (!state || (state.state !== "APPROVED" && state.state !== "LOCKED")) throw new Error("VOICE_APPROVAL_REQUIRED");
   if (voice.kind === "STOCK") {
+    if (args.primaryVoiceSampleAssetId) throw new Error('Stock voices do not use a reference recording.');
     if (voice.provider !== "openrouter" || !voice.providerVoiceId || (voice.settingsSnapshot as { modelId?: string } | undefined)?.modelId !== PREPARATION_MODELS.narration.id) throw new Error("VOICE_PROVIDER_REQUIRED");
     return { projectId: project._id, voiceId: voice._id, mode: "STOCK" as const, provider: voice.provider, providerVoiceId: voice.providerVoiceId, references: [], consentId: undefined };
   }
@@ -350,10 +351,15 @@ export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, ar
     consentId = consent._id;
   }
   if (voice.sampleAssetIds.length < 1 || voice.sampleAssetIds.length > 3) throw new Error("VOICE_SAMPLE_REQUIRED");
+  if (args.primaryVoiceSampleAssetId && (voice.kind !== 'CLONED' || !voice.sampleAssetIds.includes(args.primaryVoiceSampleAssetId))) throw new Error('Choose a primary recording belonging to this approved cloned voice.');
   const references = [];
-  for (const assetId of voice.sampleAssetIds) {
+  for (const assetId of args.primaryVoiceSampleAssetId ? [args.primaryVoiceSampleAssetId] : voice.sampleAssetIds) {
     const asset = await ctx.db.get(assetId);
     if (!asset || asset.projectId !== project._id || asset.scope !== "PROJECT" || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith("audio/")) throw new Error("VOICE_SAMPLE_UNAVAILABLE");
+    if (args.primaryVoiceSampleAssetId) {
+      const approved = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', project._id).eq('resourceType', 'asset').eq('resourceId', asset._id)).unique();
+      if (!approved || !['APPROVED','LOCKED'].includes(approved.state) || [asset.rights, asset.provenance, asset.moderation].some(value => { const r = value && typeof value === 'object' ? value as Record<string, unknown> : {}; return r.approved === false || r.consent === false || ['DENIED','REJECTED','REVOKED','EXPIRED'].includes(String(r.status ?? r.state ?? '').toUpperCase()); })) throw new Error('Approve the selected recording and confirm its current rights.');
+    }
     const metadata = await ctx.db.system.get("_storage", asset.storageId);
     if (!metadata || metadata.size < 1 || metadata.size > 15 * 1024 * 1024 || !metadata.contentType?.startsWith("audio/")) throw new Error("VOICE_SAMPLE_UNAVAILABLE");
     const url = await ctx.storage.getUrl(asset.storageId);
@@ -364,7 +370,7 @@ export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, ar
 }
 
 export const resolveForSynthesis = internalQuery({
-  args: { projectId: v.id("projects"), voiceId: v.id("voices"), use: v.union(v.literal("SYNTHESIZE"), v.literal("AVATAR_LIPSYNC")) },
+  args: { projectId: v.id("projects"), voiceId: v.id("voices"), use: v.union(v.literal("SYNTHESIZE"), v.literal("AVATAR_LIPSYNC")), primaryVoiceSampleAssetId: v.optional(v.id('assets')) },
   returns: v.any(),
   handler: resolveVoiceSynthesisInput,
 });
@@ -381,6 +387,25 @@ export const readiness = query({
     } catch {
       return { ready: false, reason: "Approve the voice, add project-owned recordings, and confirm current consent before use." };
     }
+  },
+});
+
+/** Bounded selected-voice projection. A sample can predate the library's
+ * current page, so its picker must resolve the voice's exact sample IDs. */
+export const primarySamples = query({
+  args: { projectId: v.id('projects'), voiceId: v.id('voices') },
+  returns: v.array(v.object({ assetId: v.id('assets'), name: v.string(), state: v.string() })),
+  handler: async (ctx,args) => {
+    await requireProjectAccess(ctx,args.projectId);
+    const voice=await ctx.db.get(args.voiceId);
+    if(!voice||voice.projectId!==args.projectId||voice.kind!=='CLONED'||voice.deletedAt||voice.revokedAt||voice.status!=='READY'||voice.sampleAssetIds.length>3)return [];
+    const result=[];
+    for(const id of voice.sampleAssetIds){
+      const asset=await ctx.db.get(id);if(!asset||asset.projectId!==args.projectId||asset.scope!=='PROJECT'||asset.deletedAt||!asset.storageId||!asset.mimeType?.startsWith('audio/'))continue;
+      const state=await ctx.db.query('resourceStates').withIndex('by_project_resource',q=>q.eq('projectId',args.projectId).eq('resourceType','asset').eq('resourceId',id)).unique();
+      if(state&&['APPROVED','LOCKED'].includes(state.state))result.push({assetId:id,name:asset.name||`Voice recording ${id.slice(-6)}`,state:state.state});
+    }
+    return result;
   },
 });
 

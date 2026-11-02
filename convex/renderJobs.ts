@@ -7,6 +7,8 @@ import { requireMember, requireProjectRole } from "./authorization";
 import { now } from "./_shared";
 import { canReconcileAcceptedCompletion, RENDER_ATTEMPT_MAX_MS, validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
 import { validateLockedManifest } from "../renderer/src/manifest";
+import { assertStoredRenderMediaType } from '../renderer/src/output-format';
+import { authorizeMovieRenderContext, movieActor, movieEnabled, movieWorkerEnabled, requiredMovieMediaAbi } from './movieAuthority';
 import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
 
 type RenderStatus = "QUEUED" | "PROCESSING" | "SUBMITTED" | "COMPLETED" | "RETRYING" | "FAILED" | "CANCELED";
@@ -115,6 +117,14 @@ async function authorizedManifest(ctx: MutationCtx, job: RenderJob) {
   if (!stored || stored.productionId !== job.productionId || stored.projectId !== project._id || (stored.contractVersion !== 4 && stored.contractVersion !== 5)) throw new Error("Canonical render manifest is unavailable.");
   const raw = object(stored.manifest);
   if ((raw.version !== 4 && raw.version !== 5) || raw.version !== stored.contractVersion || raw.projectId !== project._id || raw.productionId !== job.productionId || raw.manifestId !== stored._id) throw new Error("Render manifest ownership is invalid.");
+  if (job.movieComponentId) {
+    if (!job.createdByUserId) throw new Error('Movie render actor is unavailable.');
+    if(job.movieMediaAbi!==requiredMovieMediaAbi())throw new Error('MOVIE_MEDIA_ABI_OBSOLETE');
+    await authorizeMovieRenderContext(ctx,{componentId:job.movieComponentId,projectId:project._id,productionId:job.productionId,manifestId:stored._id,actorId:job.createdByUserId});
+  } else {
+    const production = await ctx.db.get(job.productionId);
+    if (!production?.currentVersionId || raw.productionVersionId !== production.currentVersionId) throw new Error('Standalone rendering requires the current approved production version.');
+  }
   const timelineId = typeof raw.timelineId === "string" ? ctx.db.normalizeId("timelines", raw.timelineId) : null;
   const timeline = timelineId ? await ctx.db.get(timelineId) : null;
   if (!timeline || timeline.productionId !== job.productionId || (timeline.projectId && timeline.projectId !== project._id)) throw new Error("Render timeline ownership is invalid.");
@@ -202,6 +212,11 @@ export async function prepareRenderDispatch(ctx: MutationCtx, args: { jobId: Id<
   }
   if (!dispatchCanRun(job, timestamp)) return null;
   if (!job.dispatchPayload) {
+    if (movieEnabled() && movieWorkerEnabled()) {
+      const movies = await ctx.db.query('movieMergeJobs').withIndex('by_status',q=>q.eq('status','PROCESSING')).take(101);
+      if (movies.length > 100) throw new Error('Movie worker recovery requires an administrator check.');
+      if (movies.some(candidate=>(candidate.leaseExpiresAt??0)>timestamp)) { if (fixtureKey===undefined) await schedule(ctx,'dispatch',RENDER_RETRY_MS,{jobId:job._id});return null; }
+    }
     // A single active render protects the shared host. Expired owners are
     // scheduled for recovery and release the slot before another job starts.
     for (const status of ["PROCESSING", "SUBMITTED"] as const) {
@@ -263,19 +278,27 @@ export const recordDispatchFailure = internalMutation({
   },
 });
 
+type RenderCreateArgs = {productionId:Id<'productions'>;manifestId:Id<'manifests'>;timelineId?:Id<'timelines'>;operation?:string;preset:string;idempotencyKey:string;estimatedCost?:number;movieComponentId?:Id<'movieComponents'>};
 export const create = mutation({
-  args: { productionId: v.id("productions"), manifestId: v.id("manifests"), timelineId: v.optional(v.id("timelines")), operation: v.optional(v.string()), preset: v.string(), idempotencyKey: v.string(), estimatedCost: v.optional(v.number()) },
+  args: { productionId: v.id("productions"), manifestId: v.id("manifests"), timelineId: v.optional(v.id("timelines")), operation: v.optional(v.string()), preset: v.string(), idempotencyKey: v.string(), estimatedCost: v.optional(v.number()), movieComponentId:v.optional(v.id('movieComponents')) },
   returns: v.any(),
-  handler: async (ctx, args) => {
+  handler: async (ctx, args) => createCanonicalRenderJob(ctx,args),
+});
+
+/** Shared record factory for browser and movie orchestration. Movie authority
+ * is exact and additional; it never widens standalone current-version access. */
+export async function createCanonicalRenderJob(ctx:MutationCtx,args:RenderCreateArgs,actorId?:Id<'users'>) {
     const production = await ctx.db.get(args.productionId);
     if (!production) throw new Error("Production not found.");
     const manifest = await ctx.db.get(args.manifestId);
     if (!manifest || manifest.productionId !== args.productionId) throw new Error("Manifest not found.");
-    const member = await requireMember(ctx, manifest.studioExternalId);
-    if (production.projectId) await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
+    const member = actorId && production.projectId ? await movieActor(ctx,production.projectId,actorId) : await requireMember(ctx, manifest.studioExternalId);
+    if (!actorId && production.projectId) await requireProjectRole(ctx, production.projectId, ["OWNER", "EDITOR"]);
     const manifestData = object(manifest.manifest);
     if ((manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion) throw new Error("Only canonical manifest v4/v5 can create new render jobs.");
     if (!production.projectId || !manifest.projectId || manifest.projectId !== production.projectId || manifestData.projectId !== production.projectId.toString()) throw new Error("Manifest and production belong to different projects.");
+    if (args.movieComponentId) await authorizeMovieRenderContext(ctx,{componentId:args.movieComponentId,projectId:production.projectId,productionId:production._id,manifestId:manifest._id,actorId:member.user._id});
+    else if (!production.currentVersionId || manifestData.productionVersionId !== production.currentVersionId) throw new Error('Standalone rendering requires the current approved production version.');
     if (args.timelineId) {
       const timeline = await ctx.db.get(args.timelineId);
       if (!timeline || timeline.productionId !== args.productionId || timeline.studioExternalId !== member.studio.externalId) throw new Error("Timeline not found.");
@@ -284,18 +307,18 @@ export const create = mutation({
     if (idempotencyKey.length < 8 || idempotencyKey.length > 200) throw new Error("Idempotency key must be between 8 and 200 characters.");
     const selection = object(manifestData.selection);
     const selectionScope = typeof selection.scope === "string" ? selection.scope : manifest.selectionScope;
-    const requestHash = hash({ productionId: args.productionId, manifestId: args.manifestId, timelineId: args.timelineId, operation: args.operation ?? "RENDER", preset: args.preset, selectionScope, selectionIds: selection.ids });
+    const movieMediaAbi=args.movieComponentId?requiredMovieMediaAbi():undefined;
+    const requestHash = hash({ productionId: args.productionId, manifestId: args.manifestId, timelineId: args.timelineId, operation: args.operation ?? "RENDER", preset: args.preset, selectionScope, selectionIds: selection.ids, ...(args.movieComponentId?{movieComponentId:args.movieComponentId,movieMediaAbi}:{}) });
     const existing = await ctx.db.query("renderJobs").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.requestHash !== requestHash) throw new Error("Idempotency key is already used for a different render request.");
       return publicRenderJob(existing);
     }
     const timestamp = now();
-    const jobId = await ctx.db.insert("renderJobs", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId: production.projectId, productionId: args.productionId, timelineId: args.timelineId ?? (typeof manifestData.timelineId === "string" ? manifestData.timelineId as Id<"timelines"> : undefined), manifestId: args.manifestId, selectionScope, exportScope: typeof manifestData.export === "object" && manifestData.export !== null ? String(object(manifestData.export).scope ?? selectionScope ?? "FULL_PROJECT") : selectionScope, operation: args.operation ?? "RENDER", preset: args.preset, createdByUserId: member.user._id, executionStage: "QUEUED", status: "QUEUED", idempotencyKey, requestHash, progress: 0, estimatedCost: args.estimatedCost, createdAt: timestamp, updatedAt: timestamp });
+    const jobId = await ctx.db.insert("renderJobs", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId: production.projectId, productionId: args.productionId, timelineId: args.timelineId ?? (typeof manifestData.timelineId === "string" ? manifestData.timelineId as Id<"timelines"> : undefined), manifestId: args.manifestId, ...(args.movieComponentId?{movieComponentId:args.movieComponentId,movieMediaAbi}:{}), selectionScope, exportScope: typeof manifestData.export === "object" && manifestData.export !== null ? String(object(manifestData.export).scope ?? selectionScope ?? "FULL_PROJECT") : selectionScope, operation: args.operation ?? "RENDER", preset: args.preset, createdByUserId: member.user._id, executionStage: "QUEUED", status: "QUEUED", idempotencyKey, requestHash, progress: 0, estimatedCost: args.estimatedCost, createdAt: timestamp, updatedAt: timestamp });
     await schedule(ctx, "dispatch", 0, { jobId });
     return publicRenderJob((await ctx.db.get(jobId))!);
-  },
-});
+}
 
 export const get = query({
   args: { jobId: v.id("renderJobs") },
@@ -500,6 +523,7 @@ export const applyRendererCallback = internalMutation({
     if (args.checksum !== undefined && args.checksum !== storage.sha256) throw new Error('Renderer completion checksum does not match stored media.');
     const storedManifest = job.manifestId ? await ctx.db.get(job.manifestId) : null;
     if (!storedManifest || storedManifest.projectId !== job.projectId || storedManifest.productionId !== job.productionId) throw new Error('Renderer completion manifest ownership is invalid.');
+    assertStoredRenderMediaType(storedManifest.manifest, storedManifest.contractVersion, storage.contentType, args.mimeType);
     const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100);
     if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
     else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });

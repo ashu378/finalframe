@@ -101,6 +101,10 @@ export function validateOutputProbe(
     if (expected.audio && value.audioSampleRate !== undefined && value.audioSampleRate !== expected.audio.sampleRate) issues.push({ path: 'audio.sample_rate', message: `expected ${expected.audio.sampleRate}, received ${value.audioSampleRate}` });
     if (expected.audio && value.audioChannels !== undefined && value.audioChannels !== expected.audio.channels) issues.push({ path: 'audio.channels', message: `expected ${expected.audio.channels}, received ${value.audioChannels}` });
   }
+  if (value.hasAudio) {
+    const expectedAudioCodec = expected.codec === 'vp9' ? 'opus' : expected.codec === 'prores' ? 'pcm_s16le' : 'aac';
+    if (value.audioCodec !== expectedAudioCodec) issues.push({ path: 'audio.codec', message: `expected ${expectedAudioCodec} for ${expected.codec} output` });
+  }
   const expectedCaptions = options.expectedCaptionTrackCount ?? 0;
   if (options.captionMode === 'subtitle' && value.subtitleStreamCount < expectedCaptions) {
     issues.push({ path: 'streams.subtitle', message: `expected at least ${expectedCaptions} subtitle stream(s), received ${value.subtitleStreamCount}` });

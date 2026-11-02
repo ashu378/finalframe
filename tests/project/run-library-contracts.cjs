@@ -17,7 +17,7 @@ class AccessError extends Error { constructor(code, message) { super(message); t
 const auth = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
 let authenticated = true;
 const identity = { externalId: 'subject-one', subject: 'subject-one' };
-const authorization = load('convex/authorization.ts', { './auth': auth, './identity': { getIdentity: async () => authenticated ? identity : null, requireIdentity: async () => { if (!authenticated) throw new AccessError('UNAUTHENTICATED', 'Sign in'); return identity; } } });
+const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './auth': auth, './identity': { getIdentity: async () => authenticated ? identity : null, requireIdentity: async () => { if (!authenticated) throw new AccessError('UNAUTHENTICATED', 'Sign in'); return identity; } } });
 const library = load('src/lib/project/library.ts');
 const server = { query: (value) => value, mutation: (value) => value };
 const projects = load('convex/projects.ts', { './_generated/server': server, './authorization': authorization, './auth': auth, '../src/lib/project/library': library });

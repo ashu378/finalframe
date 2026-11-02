@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');const h=require('./run-operation-controls.cjs');const v=new Proxy({},{get:()=>()=>({})});
+async function main(){
+ const state=h.backendFixture({operation:'GENERATE'},['image']);const created=await state.create();const job=state.rows.get(created._id);const acceptedId='gen-vid-123-abcdefghijklmnopqrst';
+ Object.assign(job,{providerJobId:acceptedId,leaseId:'lease',leaseExpiresAt:Date.now()+60000,status:'PENDING'});state.rows.get('image').deletedAt=Date.now();
+ const input=await state.jobs.getWorkerInput.handler(state.ctx,{jobId:job._id,leaseId:'lease'});assert.deepEqual(input.references,[]);assert.deepEqual(input.request.referenceAssetIds,['image']);assert.equal(input.job.model,h.model.modelId);assert.equal(input.job.providerJobId,acceptedId);
+ let polls=0;const mutations=[];const noPurchase=()=>{throw new Error('Accepted recovery must not purchase or re-plan.');};
+ const worker=h.compile('convex/generationWorker.ts',{'./_generated/server':{internalAction:value=>value},'./_generated/api':{internal:h.api},'convex/values':{v},'../src/lib/ai/video-routing':h.routing,'./preparationWorker':{},'./generationWorkerContracts':{...h.contracts,workerEnabled:()=>true},'../src/lib/ai/model-discovery':{discoverOpenRouterVideoModels:noPurchase},'../src/lib/adapters/openrouter-adapter':{buildVideoGenerationRequest:noPurchase,generateVideo:noPurchase,pollVideo:async id=>{assert.equal(id,acceptedId);polls++;return{status:'pending'};}}});
+ await worker.run.handler({runQuery:async(_,args)=>state.jobs.getWorkerInput.handler(state.ctx,args),runMutation:async(ref,args)=>{mutations.push(ref);if(ref==='generationJobs.claim')return{claimed:true,leaseId:'lease'};assert.equal(ref,'generationJobs.poll');assert.equal(args.done,false);return{};}},{jobId:job._id});assert.equal(polls,1);assert.deepEqual(mutations,['generationJobs.claim','generationJobs.poll']);
+ state.rows.get('production').projectId='foreign';await assert.rejects(state.jobs.getWorkerInput.handler(state.ctx,{jobId:job._id,leaseId:'lease'}),/ownership/);
+ const prep=h.backendFixture({operation:'GENERATE'},['audio']);const made=await prep.create();Object.assign(prep.rows.get(made._id),{operation:'PREPARATION',modality:'TEXT',submissionStartedAt:Date.now(),status:'PROCESSING',executionStage:'SUBMITTING'});prep.rows.get('audio').deletedAt=Date.now();
+ assert.deepEqual(await prep.jobs.claim.handler(prep.ctx,{jobId:made._id}),{claimed:false});assert.equal(prep.rows.get(made._id).executionStage,'RECONCILIATION_REQUIRED');assert.ok(prep.rows.get(made._id).submissionStartedAt);
+ console.log('Accepted source recovery: PASS (video actual query→worker + ownership denial + synchronous preparation reconciliation); no DB/provider calls.');
+}
+main().catch(error=>{console.error(error);process.exitCode=1;}).finally(h.cleanup);

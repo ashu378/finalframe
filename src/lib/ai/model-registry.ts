@@ -287,3 +287,28 @@ export const PREPARATION_MODELS = {
     referenceVoice: { id: configuredModel('OPENROUTER_REFERENCE_VOICE_MODEL', 'bytedance-seed/seed-audio-1-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'OUTPUT_SECONDS' as const, certifiedModel: 'bytedance-seed/seed-audio-1-0', maxOutputSeconds: 120 },
     transcription: { id: configuredModel('OPENROUTER_PREPARATION_STT_MODEL', 'mistralai/voxtral-mini-transcribe-3-0'), capability: 'TRANSCRIPTION' as const, billing: 'INPUT_SECONDS' as const, certifiedModel: 'mistralai/voxtral-mini-transcribe-3-0' },
 };
+
+/** Reviewed operation contracts, separate from routing preferences. Re-review
+ * a changed permanent model version, provider, price unit or control surface.
+ * Evidence/conflicts: docs/creator-workflows/AVATAR-SEED-MOTION-MASK-RESEARCH-2026-11-02.md */
+export const REVIEWED_OPERATION_CONTRACTS = {
+    referenceVoice: {
+        version: 'SEED_AUDIO_ORIGINAL_SECONDS_120_V1',
+        modelId: 'bytedance-seed/seed-audio-1-0',
+        canonicalSlug: 'bytedance-seed/seed-audio-1-0-20260630', providerTag: 'seed',
+        endpointName: 'Seed | bytedance-seed/seed-audio-1-0-20260630',
+        maxOriginalOutputSeconds: 120, rateUsdPerSecond: .0025,
+        maxInputCharacters: 3000, maxReferenceSeconds: 30, maxReferenceBytes: 10_000_000,
+        referenceCodecs: ['pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le', 'mp3', 'opus'],
+        evidence: ['https://docs.byteplus.com/en/docs/byteplusvoice/seedaudio-01', 'https://openrouter.ai/provider/seed'], reviewedAt: '2026-11-02',
+    },
+    suppliedAudioAvatar: {
+        version: 'AVATAR_SUPPLIED_AUDIO_SOURCE_SECONDS_V1',
+        modelId: 'heygen/avatar-iv', canonicalSlug: 'heygen/avatar-iv-20260625', providerTag: 'heygen',
+        endpointName: 'HeyGen | heygen/avatar-iv-20260625', sku: 'duration_seconds', rateUsdPerSecond: .05,
+        maxSourceSeconds: 600, applicationMaxSourceSeconds: 60, maxSourceBytes: 32_000_000, maxPortraitBytes: 16_000_000, maxPortraitDimension: 2000,
+        audioCodecs: ['pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le', 'mp3'],
+        passthrough: ['voice_id', 'voice_settings', 'motion_prompt', 'expressiveness', 'fit', 'remove_background', 'background', 'caption', 'title'],
+        evidence: ['https://developers.heygen.com/audio-to-video', 'https://developers.heygen.com/docs/usage-limits', 'https://developers.heygen.com/assets'], reviewedAt: '2026-11-02',
+    },
+} as const;

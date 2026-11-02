@@ -4,6 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { getUser, requireUser, requireProjectAccess } from './authorization';
 import { ConvexAuthError, ConvexAuthorizationError } from './auth';
 import { requirePlatformRole } from './platformAdministration';
+import { studioRoleForUser, userExternalKey } from './studioMemberships';
 import { ACCOUNT_INDEX_SCOPE, ACCOUNT_INDEX_VERSION, type DeactivationPreflight } from '../src/lib/account-lifecycle/contracts';
 import { exportPayload, sha256, type ExportRecord, type FragmentProgress } from '../src/lib/account-lifecycle/export-format';
 
@@ -194,8 +195,7 @@ async function preflight(ctx: ReadCtx, actor: Actor): Promise<DeactivationPrefli
       const peer = await ctx.db.get(member.userId); if (!peer || peer.status === 'disabled') continue;
       shared = true;
       if (member.role === 'OWNER') {
-        const canonical = await ctx.db.query('members').withIndex('by_studio_user', (q) => q.eq('studioId', access.studio._id).eq('userId', peer._id)).unique();
-        if (canonical?.status === 'active' || (access.studio.ownerUserId ?? access.studio.ownerId) === peer._id) enabledOwner = true;
+        if (await studioRoleForUser(ctx, access.studio, peer, userExternalKey(peer))) enabledOwner = true;
       }
     }
     if (shared && !enabledOwner) return deny('SHARED_PROJECT_OWNER', `Shared project “${access.project.name}” needs another enabled OWNER with active studio access before this account can deactivate.`);

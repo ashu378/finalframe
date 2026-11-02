@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { assertCapabilityRequest } from '../ai/capabilities';
-import { getFallbackModelsForCapability, getModelForCapability, isCatalogSelectionModel, type AICapability } from '../ai/model-registry';
+import { getFallbackModelsForCapability, getModelForCapability, isCatalogSelectionModel, REVIEWED_OPERATION_CONTRACTS, type AICapability } from '../ai/model-registry';
 import { discoverOpenRouterVideoModels, selectOpenRouterModel } from '../ai/model-discovery';
 import {
     AICapabilityError,
@@ -714,6 +714,8 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
     if (input.upscaleFactor !== undefined) assertFiniteRange(input.upscaleFactor, 'upscaleFactor', Number.EPSILON);
     if (input.creativity !== undefined && (!Number.isInteger(input.creativity) || input.creativity < 0)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Upscale creativity must be a non-negative integer.', provider: 'openrouter', retryable: false });
     const sourceDerived = ['black-forest-labs/flux-video-edit', 'black-forest-labs/flux-video-upscale'].includes(input.model);
+    const suppliedAudioAvatar = input.model === REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar.modelId;
+    if (suppliedAudioAvatar && (input.duration !== undefined || input.generateAudio !== undefined || input.frameImages?.length || input.previousJobId || input.upscaleFactor !== undefined || input.creativity !== undefined || input.inputReferences?.length !== 2 || input.inputReferences.filter(reference=>reference.kind === 'audio').length !== 1 || input.inputReferences.filter(reference=>!reference.kind || reference.kind === 'image').length !== 1)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Supplied-audio Avatar requires exactly one portrait and recording with source-derived duration.', provider: 'openrouter', retryable: false });
     if (sourceDerived && (input.duration !== undefined || input.aspectRatio !== undefined || input.resolution !== undefined || input.frameImages?.length || input.generateAudio === true || input.previousJobId)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Source-derived video operations do not accept generation duration, framing or generated-audio controls.', provider: 'openrouter', retryable: false });
     if (sourceDerived && (input.inputReferences?.length !== 1 || input.inputReferences[0].kind !== 'video')) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Source-derived video operations require exactly one video reference.', provider: 'openrouter', retryable: false });
     if (input.model === 'black-forest-labs/flux-video-edit' && (input.upscaleFactor !== undefined || input.creativity !== undefined)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Video editing does not accept upscale controls.', provider: 'openrouter', retryable: false });
@@ -753,7 +755,7 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
         ...(input.creativity === undefined ? {} : { creativity: input.creativity }),
         // OpenRouter enables audio by default for models that support it.
         // Keep video jobs silent unless the caller explicitly opts in.
-        ...(sourceDerived ? {} : { generate_audio: input.generateAudio === true }),
+        ...(sourceDerived || suppliedAudioAvatar ? {} : { generate_audio: input.generateAudio === true }),
         ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}),
     };
 }

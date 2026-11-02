@@ -9,7 +9,7 @@ export interface FFmpegAdapter {
 
 export interface FFprobeAdapter {
   readonly command: string;
-  probe(input: string, options?: { cwd?: string; timeoutMs?: number }): Promise<FFprobeResult>;
+  probe(input: string, options?: { cwd?: string; timeoutMs?: number; countFrames?: boolean }): Promise<FFprobeResult>;
 }
 
 export interface FFprobeResult {
@@ -51,6 +51,12 @@ function codecArgs(codec: RenderOutputSpec['codec']): string[] {
   return ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18'];
 }
 
+function audioCodecArgs(codec: RenderOutputSpec['codec']): string[] {
+  if (codec === 'vp9') return ['-c:a', 'libopus', '-b:a', '192k'];
+  if (codec === 'prores') return ['-c:a', 'pcm_s16le'];
+  return ['-c:a', 'aac', '-b:a', '192k'];
+}
+
 function assertLocalMediaPath(value: string, label: string): void {
   if (!value || value.includes('\u0000') || /^(https?|data|javascript):/i.test(value)) throw new Error(`${label} must be a local worker path`);
 }
@@ -76,7 +82,7 @@ export function buildNormalizeArgs(inputPath: string, outputPath: string, option
     // Remotion/AAC packet padding can outlive the final picture. Normalize the
     // decoded audio to the canonical sample count and bound the mux duration,
     // so independent chunks do not accumulate encoder padding when joined.
-    '-c:a', 'aac', '-ar', String(sampleRate), '-ac', String(options.output.audio?.channels ?? 2), '-b:a', '192k',
+    ...audioCodecArgs(options.output.codec), '-ar', String(sampleRate), '-ac', String(options.output.audio?.channels ?? 2),
     '-af', `aresample=${sampleRate},apad,atrim=end_sample=${audioSamples},asetpts=PTS-STARTPTS`,
     '-t', String(durationSeconds),
     ...(options.output.codec === 'h264' ? ['-movflags', '+faststart'] : []), outputPath,
@@ -106,8 +112,8 @@ export class InjectableFFprobeAdapter implements FFprobeAdapter {
     this.runner = options.runner ?? new ChildProcessCommandRunner();
   }
 
-  async probe(input: string, options: { cwd?: string; timeoutMs?: number } = {}): Promise<FFprobeResult> {
-    const result = await this.runner.run(this.command, ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_format', '-show_streams', input], options);
+  async probe(input: string, options: { cwd?: string; timeoutMs?: number; countFrames?: boolean } = {}): Promise<FFprobeResult> {
+    const result = await this.runner.run(this.command, ['-v', 'error', '-protocol_whitelist', 'file,pipe', ...(options.countFrames ? ['-count_frames'] : []), '-print_format', 'json', '-show_format', '-show_streams', input], options);
     try {
       const parsed = JSON.parse(result.stdout) as Partial<FFprobeResult>;
       return { streams: Array.isArray(parsed.streams) ? parsed.streams : [], format: parsed.format };

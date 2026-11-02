@@ -1,66 +1,11 @@
-import { requireAuth } from '@/lib/guards';
-import { getTeamMembers } from '@/lib/teams/actions';
-import { MemberList } from '@/components/team/member-list';
-// Breakdown component to avoid client/server boundary issues
-import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { ArrowLeft, Users } from 'lucide-react';
-
-export const metadata = {
-    title: 'Team_Registry',
-    description: 'Manage studio personnel and authorization matrix',
-};
-
-// We need a client component wrapper for the header button to open the dialog
-import { TeamHeader } from './team-header';
-
-export default async function TeamSettingsPage() {
-    const { user } = await requireAuth();
-
-    // In MVP, User ID = Studio ID for the "Personal Studio"
-    const studioId = user.id;
-
-    // Fetch members
-    let result = await getTeamMembers(studioId);
-
-    const members = result.success && result.data ? result.data : [];
-
-    return (
-        <div className="team-theme mx-auto max-w-6xl space-y-10 py-5 sm:py-8 animate-in fade-in duration-500">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-10 pb-10 border-b border-zinc-800">
-                <div className="space-y-4">
-                    <div className="flex items-center gap-4">
-                        <Link href="/dashboard/settings" className="text-zinc-600 hover:text-zinc-50 transition-all p-2 -ml-2 rounded-sm hover:bg-zinc-900 border border-transparent hover:border-zinc-800">
-                            <ArrowLeft className="w-6 h-6" />
-                        </Link>
-                        <h2 className="text-sm font-black uppercase tracking-[0.4em] text-zinc-50 underline underline-offset-[14px] decoration-primary/50 italic flex items-center gap-5">
-                            <div className="p-3 rounded-sm bg-primary/10 text-primary border border-primary/20 shadow-2xl shadow-primary/5">
-                                <Users className="w-6 h-6" />
-                            </div>
-                            People who can help make videos
-                        </h2>
-                    </div>
-                    <p className="text-metadata font-bold text-zinc-500 max-w-xl uppercase tracking-[0.2em] leading-relaxed pl-20 italic">
-                        Invite teammates, reviewers, or clients and choose what they can access.
-                    </p>
-                </div>
-
-                <div className="shrink-0 pt-2 lg:pt-4">
-                    <TeamHeader studioId={studioId} />
-                </div>
-            </div>
-
-            {/* Members List */}
-            <div className="relative z-0">
-                <MemberList members={members} currentUserId={user.id} />
-            </div>
-
-            {!members.length && (
-                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-200 text-sm text-center">
-                    Error loading team members. Please try refreshing or contact support.
-                </div>
-            )}
-        </div>
-    );
+import { requireAuth } from '@/lib/guards';
+import { getTeamContext, getTeamInvitations, getTeamRoster, getTeamWorkspaces } from '@/lib/teams/actions';
+import { WorkspacePicker, TeamInviteForm, TeamMemberControls, RevokeInvitationForm, WorkspaceTransferForm } from '@/components/team/team-controls';
+export const metadata = { title: 'People and workspaces | FinalFrame' };
+export default async function TeamSettingsPage({ searchParams }: { searchParams: Promise<{ studioId?: string; membersCursor?: string; invitationsCursor?: string; workspacesCursor?: string; status?: string }> }) {
+  await requireAuth(); const params = await searchParams; const context = await getTeamContext(params.studioId); const canManage = context.role === 'owner' || context.role === 'admin'; const status = params.status === 'ACCEPTED' || params.status === 'REVOKED' ? params.status : 'PENDING';
+  const [workspaces, members, invitations] = await Promise.all([getTeamWorkspaces(params.workspacesCursor), canManage ? getTeamRoster(context.studioId, params.membersCursor) : null, canManage ? getTeamInvitations(context.studioId, status, params.invitationsCursor) : null]);
+  const pageUrl = (extra: Record<string, string>) => `/dashboard/settings/team?${new URLSearchParams({ studioId: context.studioId, status, ...extra })}`;
+  return <div className="mx-auto max-w-5xl space-y-8 py-5 sm:py-8"><header><Link href="/dashboard/settings" className="ff-link inline-flex min-h-11 items-center text-sm">Back to settings</Link><h1 className="mt-3 text-3xl font-semibold">People and workspaces</h1><p className="mt-4 text-sm leading-7 text-muted-foreground">{context.name} · Your workspace role is {context.role}. Project membership and platform administration are separate.</p><Link href="/dashboard/settings/account" className="ff-link inline-flex min-h-11 items-center text-sm">Find and copy your own account ID</Link></header><WorkspacePicker key={context.studioId} workspaces={workspaces.rows} context={context} />{workspaces.continueCursor ? <Link href={pageUrl({ workspacesCursor: workspaces.continueCursor })} className="ff-button-quiet inline-flex min-h-11 items-center">More of your workspaces</Link> : null}{canManage ? <><TeamInviteForm key={context.studioId} context={context} /><section className="space-y-5"><h2 className="text-xl font-semibold">Workspace members</h2>{members?.rows.length ? members.rows.map((member) => <article key={member.key} className="ff-card p-6"><h3 className="font-semibold">{member.displayName}{member.recordedOwner ? ' · Primary owner' : ''}</h3><p className="mt-2 text-sm text-muted-foreground">{member.role} · {member.status} · {member.source}</p>{member.userId ? <p className="mt-3 break-all text-xs text-muted-foreground">Account ID: {member.userId}</p> : <p className="mt-3 text-sm text-muted-foreground">This legacy row has no canonical recipient. It cannot grant access through an email address.</p>}<TeamMemberControls context={context} member={member} /></article>) : <p className="ff-card p-6 text-sm text-muted-foreground">No member rows on this page.</p>}{members?.continueCursor ? <Link href={pageUrl({ membersCursor: members.continueCursor })} className="ff-button-quiet inline-flex min-h-11 items-center">Next member page</Link> : null}</section><section className="space-y-5"><h2 className="text-xl font-semibold">Invitation records</h2><div className="flex flex-wrap gap-3">{(['PENDING', 'ACCEPTED', 'REVOKED'] as const).map((value) => <Link key={value} href={pageUrl({ status: value })} aria-current={value === status ? 'page' : undefined} className="ff-button-quiet inline-flex min-h-11 items-center">{value.toLowerCase()}</Link>)}</div>{invitations?.rows.length ? invitations.rows.map((invitation) => <article key={invitation.invitationId} className="ff-card p-6"><p className="break-all text-sm font-semibold">Recipient account: {invitation.recipientUserId}</p><p className="mt-3 text-sm text-muted-foreground">{invitation.role} · {invitation.status.toLowerCase()}{invitation.expired ? ' · expired' : ''} · {new Date(invitation.expiresAt).toISOString()}</p><RevokeInvitationForm context={context} invitation={invitation} /></article>) : <p className="ff-card p-6 text-sm text-muted-foreground">No {status.toLowerCase()} invitation records on this page.</p>}{invitations?.continueCursor ? <Link href={pageUrl({ invitationsCursor: invitations.continueCursor })} className="ff-button-quiet inline-flex min-h-11 items-center">Next invitation page</Link> : null}</section><WorkspaceTransferForm key={context.studioId} context={context} /></> : <p className="ff-card p-6 text-sm leading-7 text-muted-foreground">Your membership is active. Ask the workspace owner or administrator for project invitations; joining this workspace alone does not open its existing projects.</p>}</div>;
 }

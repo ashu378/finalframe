@@ -5,6 +5,7 @@ import {
   ConvexAuthorizationError,
 } from "./auth";
 import { getIdentity, requireIdentity, type FinalFrameIdentity } from "./identity";
+import { currentStudioForUser, studioRoleForUser } from "./studioMemberships";
 
 export type AuthorizationCtx = QueryCtx | MutationCtx;
 export type User = Doc<"users">;
@@ -41,36 +42,9 @@ async function getStudioById(ctx: AuthorizationCtx, studioId: Doc<"studios">["_i
   return await ctx.db.get(studioId);
 }
 
-/** Resolve a canonical membership, then the temporary legacy membership. */
-async function resolveMembership(
-  ctx: AuthorizationCtx,
-  studio: Studio,
-  authorizedUser: AuthorizedUser,
-): Promise<StudioRole | null> {
-  const canonicalMembership = await ctx.db
-    .query("members")
-    .withIndex("by_studio_user", (q) =>
-      q.eq("studioId", studio._id).eq("userId", authorizedUser.user._id),
-    )
-    .unique();
-  if (canonicalMembership?.status === "active") return canonicalMembership.role;
-
-  const legacyMembership = await ctx.db
-    .query("studioMembers")
-    .withIndex("by_studio_user", (q) =>
-      q.eq("studioExternalId", studio.externalId).eq("userExternalId", authorizedUser.identity.externalId),
-    )
-    .unique();
-  if (legacyMembership?.status === "active") return legacyMembership.role;
-
-  // Existing owner records predate canonical membership backfill. Owner
-  // access is still safe because both values are compared with the verified
-  // Convex user, never with a caller-supplied identity string.
-  const ownerId = studio.ownerUserId ?? studio.ownerId;
-  if (ownerId === authorizedUser.user._id) return "owner";
-  if (!ownerId && studio.ownerExternalId === authorizedUser.identity.externalId) return "owner";
-
-  return null;
+/** A canonical inactive membership is a durable denial before any fallback. */
+async function resolveMembership(ctx: AuthorizationCtx, studio: Studio, authorizedUser: AuthorizedUser): Promise<StudioRole | null> {
+  return studioRoleForUser(ctx, studio, authorizedUser.user, authorizedUser.identity.externalId);
 }
 
 /** Return the current application's user, if the verified identity is known. */
@@ -227,42 +201,9 @@ export async function requireMemberById(
  */
 export async function requireCurrentMember(ctx: AuthorizationCtx): Promise<AuthorizedMember> {
   const authorizedUser = await requireUser(ctx);
-  const canonicalMembership = await ctx.db
-    .query("members")
-    .withIndex("by_user", (q) => q.eq("userId", authorizedUser.user._id))
-    .filter((q) => q.eq(q.field("status"), "active"))
-    .first();
-
-  const legacyMembership = !canonicalMembership
-    ? await ctx.db
-      .query("studioMembers")
-      .withIndex("by_user", (q) => q.eq("userExternalId", authorizedUser.identity.externalId))
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .first()
-    : null;
-
-  const studio = canonicalMembership
-    ? await getStudioById(ctx, canonicalMembership.studioId)
-    : legacyMembership?.studioExternalId
-      ? await getStudioByExternalId(ctx, legacyMembership.studioExternalId)
-      : await ctx.db
-        .query("studios")
-        .withIndex("by_owner_user", (q) => q.eq("ownerUserId", authorizedUser.user._id))
-        .first()
-        ?? await ctx.db
-          .query("studios")
-          .withIndex("by_owner", (q) => q.eq("ownerExternalId", authorizedUser.identity.externalId))
-          .first();
-
-  if (!studio) {
-    throw new ConvexAuthorizationError("STUDIO_NOT_FOUND", "Create a studio before creating a project.");
-  }
-
-  const role = await resolveMembership(ctx, studio, authorizedUser);
-  if (!role) {
-    throw new ConvexAuthorizationError("NOT_A_MEMBER", "You are not a member of this studio.");
-  }
-  return { ...authorizedUser, studio, role };
+  const selected = await currentStudioForUser(ctx, authorizedUser.user, authorizedUser.identity.externalId);
+  if (!selected) throw new ConvexAuthorizationError("NOT_A_MEMBER", "No authorized workspace is available. Ask its owner to restore access or create a personal workspace.");
+  return { ...authorizedUser, ...selected };
 }
 
 function hasProjectRole(role: ProjectRole, allowedRoles?: readonly ProjectRole[]) {

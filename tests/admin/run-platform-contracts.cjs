@@ -18,7 +18,7 @@ class AccessError extends Error { constructor(code, message) { super(message); t
 const auth = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
 let actorId = 'owner'; let signedIn = true; let sequence = 0; let writes = 0; let forbiddenRead;
 const identity = () => ({ externalId: actorId, subject: actorId });
-const authorization = load('convex/authorization.ts', { './auth': auth, './identity': { getIdentity: async () => signedIn ? identity() : null, requireIdentity: async () => { if (!signedIn) throw new AccessError('UNAUTHENTICATED', 'Sign in'); return identity(); } } });
+const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './auth': auth, './identity': { getIdentity: async () => signedIn ? identity() : null, requireIdentity: async () => { if (!signedIn) throw new AccessError('UNAUTHENTICATED', 'Sign in'); return identity(); } } });
 const contracts = load('src/lib/platform-admin/contracts.ts');
 const registered = { query: (value) => value, mutation: (value) => value, internalMutation: (value) => value };
 const platform = load('convex/platformAdministration.ts', { './_generated/server': registered, './authorization': authorization, './auth': auth, '../src/lib/platform-admin/contracts': contracts });

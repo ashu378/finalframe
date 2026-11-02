@@ -1,0 +1,18 @@
+{
+  "kind": "finalframe.render-manifest",
+  "version": 3,
+  "manifestId": "manifest",
+  "projectId": "legacy-external-project",
+  "productionId": "production",
+  "productionVersionId": "legacy-production-version",
+  "timelineId": "legacy-timeline",
+  "timelineVersionNumber": 1,
+  "rendererVersion": "finalframe-renderer-v1",
+  "idempotencyKey": "legacy-assembly-request",
+  "preset": { "name": "HD", "width": 1920, "height": 1080, "fps": 30, "codec": "h264" },
+  "output": { "width": 1920, "height": 1080, "fps": 30, "durationInFrames": 30, "codec": "h264" },
+  "sourceIds": [],
+  "sourceChecksums": [],
+  "sources": [],
+  "createdAt": 1700000000000
+}

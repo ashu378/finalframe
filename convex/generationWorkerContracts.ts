@@ -58,6 +58,10 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   const [x, y] = String(request.ratio || '16:9').split(':').map(Number);
   if (!x || !y || Math.abs(width / height - x / y) > 0.08) throw new Error('MEDIA_VALIDATION_FAILED');
   const constraints = { ...request, ...object(request.constraints) };
+  if (request.operation === 'LIP_SYNC') {
+    const source = object(request.lipSyncSource); const quote = object(request.lipSyncQuote);
+    if (quote.version !== 'AVATAR_SUPPLIED_AUDIO_SOURCE_SECONDS_V1' || !Number.isFinite(Number(source.durationSeconds)) || Math.abs(duration - Number(source.durationSeconds)) > .1 || probe.hasAudio !== true) throw new Error('MEDIA_VALIDATION_FAILED');
+  }
   const resolution = typeof constraints.resolution === 'string' ? constraints.resolution.toLowerCase() : '';
   const dimensions = /^(\d+)x(\d+)$/.exec(resolution);
   const expectedShortEdge = dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : ({ '4k': 2160, '2k': 1440 } as Record<string, number>)[resolution] || (/^\d+p$/.test(resolution) ? Number.parseInt(resolution, 10) : 0);
@@ -92,6 +96,8 @@ export function publicJob(job: Record<string, unknown>) {
     _id: job._id,
     shotId: job.shotId,
     ...Object.fromEntries(keys.filter((key) => job[key] !== undefined).map((key) => [key, job[key]])),
+    ...(typeof job.estimatedProviderCostUsd === 'number' ? { estimatedProviderCostUsd: job.estimatedProviderCostUsd } : {}),
+    ...(typeof job.providerCostUsd === 'number' ? { providerCostUsd: job.providerCostUsd } : {}),
     status: String(job.status || 'QUEUED'),
     progress: typeof job.progress === 'number' ? job.progress : 0,
     model: typeof job.model === 'string' ? job.model : '',

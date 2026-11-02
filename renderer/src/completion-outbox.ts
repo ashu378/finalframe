@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import type { RenderReceiptStore, RenderResult } from './renderer.js';
 import { createCallbackBody } from './contracts/callback.js';
+import { outputFormatForMimeType, type RenderOutputMimeType } from './output-format.js';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -62,6 +63,8 @@ export interface CompletionRequest {
   rendererVersion: string;
   heartbeatUrl?: string;
   durationInFrames?: number;
+  mimeType?: RenderOutputMimeType;
+  movieContext?: {movieVersionId:string;movieExportId:string;planHash:string};
 }
 
 export interface CompletionRecord {
@@ -104,6 +107,8 @@ export class CompletionOutbox {
   private async save(record: CompletionRecord) { await writePrivateJson(this.path(record.key), record); }
 
   async begin(request: CompletionRequest, payload: unknown): Promise<CompletionRecord> {
+    const format = outputFormatForMimeType(request.mimeType);
+    if (request.movieContext && format.mimeType !== 'video/mp4') throw new Error('Movie completion requires MP4.');
     const key = digest(`${request.jobId}:${request.leaseId}`);
     const fingerprint = digest(JSON.stringify(payload));
     const previous = await readPrivateJson<CompletionRecord>(this.path(key)) ?? await readPrivateJson<CompletionRecord>(this.path(key).replace(/\.json$/, '.done.json'));
@@ -112,7 +117,7 @@ export class CompletionOutbox {
       return previous;
     }
     const timestamp = this.now();
-    const record: CompletionRecord = { version: 1, key, fingerprint, request, stage: 'RENDERING', createdAt: timestamp, updatedAt: timestamp, nextAttemptAt: timestamp, transferAttempts: 0 };
+    const record: CompletionRecord = { version: 1, key, fingerprint, request: { ...request }, stage: 'RENDERING', createdAt: timestamp, updatedAt: timestamp, nextAttemptAt: timestamp, transferAttempts: 0 };
     await this.save(record);
     this.options.onPending?.(record);
     return record;
@@ -125,18 +130,21 @@ export class CompletionOutbox {
     return updated;
   }
 
-  async failed(record: CompletionRecord) {
-    const updated: CompletionRecord = { ...record, stage: 'CALLBACK_PENDING', callbackBody: this.callbackBody(record, 'render.failed'), updatedAt: this.now() };
+  async failed(record: CompletionRecord, failure?:{code:string;message:string;retryable:boolean}) {
+    const updated: CompletionRecord = { ...record, stage: 'CALLBACK_PENDING', callbackBody: this.callbackBody(record, 'render.failed',failure), updatedAt: this.now() };
     await this.save(updated);
     this.options.onPending?.(updated);
     return updated;
   }
 
-  private callbackBody(record: CompletionRecord, eventType: 'render.completed' | 'render.failed') {
+  private callbackBody(record: CompletionRecord, eventType: 'render.completed' | 'render.failed', failure?:{code:string;message:string;retryable:boolean}) {
+    const movie = record.request.movieContext;
+    const proof = record.result?.verification;
+    const movieProof = proof ? {checkedBy:proof.checkedBy,checkedAt:proof.checkedAt,fileSizeBytes:proof.fileSizeBytes,width:proof.width,height:proof.height,fps:proof.fps,durationSeconds:proof.durationSeconds,videoCodec:proof.videoCodec,...(proof.audioCodec?{audioCodec:proof.audioCodec}:{}),hasAudio:proof.hasAudio,orderedPartIds:proof.orderedItemIds,durationInFrames:record.result!.durationInFrames} : undefined;
     return createCallbackBody({ eventId: randomUUID(), idempotencyKey: record.request.idempotencyKey, jobId: record.request.jobId, projectId: record.request.projectId, rendererVersion: record.request.rendererVersion, attempt: record.request.attempt, eventType,
       payload: eventType === 'render.completed'
-        ? { storageId: record.storageId, leaseId: record.request.leaseId, mimeType: 'video/mp4', durationInFrames: record.result!.durationInFrames }
-        : { leaseId: record.request.leaseId, errorCode: 'RENDER_FAILED', errorMessage: 'The renderer could not complete this export.', retryable: true },
+        ? { storageId: record.storageId, leaseId: record.request.leaseId, mimeType: outputFormatForMimeType(record.request.mimeType).mimeType, durationInFrames: record.result!.durationInFrames, ...(movie?{...movie,checksum:record.result!.checksum,verification:movieProof}:{}) }
+        : { leaseId: record.request.leaseId, errorCode: failure?.code??'RENDER_FAILED', errorMessage: failure?.message??'The renderer could not complete this export.', retryable: failure?.retryable??true, ...(movie??{}) },
     });
   }
 
@@ -199,11 +207,11 @@ export class CompletionOutbox {
     const root = resolve(this.options.outputRoot);
     const output = resolve(record.result.outputPath);
     // Delete only an acknowledged artifact directly within our output root.
-    if (dirname(output) === root && output === join(root, `${record.key}.mp4`)) await rm(output, { force: true });
+    if (dirname(output) === root && output === join(root, `${record.key}.${outputFormatForMimeType(record.request.mimeType).extension}`)) await rm(output, { force: true });
   }
 
   private async recoverableReceipt(record: CompletionRecord, result: RenderResult | null): Promise<boolean> {
-    if (!result || result.jobId !== record.request.jobId || result.manifestId !== record.request.manifestId || result.outputPath !== join(this.options.outputRoot, `${record.key}.mp4`) || (record.request.durationInFrames !== undefined && record.request.durationInFrames !== result.durationInFrames)) return false;
+    if (!result || result.jobId !== record.request.jobId || result.manifestId !== record.request.manifestId || result.outputPath !== join(this.options.outputRoot, `${record.key}.${outputFormatForMimeType(record.request.mimeType).extension}`) || (record.request.durationInFrames !== undefined && record.request.durationInFrames !== result.durationInFrames)) return false;
     try {
       const file = await lstat(result.outputPath);
       return file.isFile() && !file.isSymbolicLink() && file.size > 0 && (!result.verification || result.verification.fileSizeBytes === file.size);

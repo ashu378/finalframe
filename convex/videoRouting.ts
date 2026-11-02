@@ -23,7 +23,7 @@ const qualityTier = v.union(v.literal("ECONOMY"), v.literal("STANDARD"), v.liter
 const path = v.union(v.literal("AI_VIDEO"), v.literal("MOTION_GRAPHICS"), v.literal("COMPOSITED"));
 
 const catalogInput = v.object({
-  provider: v.string(), modelId: v.string(), name: v.optional(v.string()),
+  provider: v.string(), modelId: v.string(), canonicalSlug: v.optional(v.string()), name: v.optional(v.string()),
   supportedDurations: v.array(v.number()), supportedResolutions: v.array(v.string()),
   supportedAspectRatios: v.array(v.string()), supportedSizes: v.optional(v.array(v.string())), supportedParameters: v.array(v.string()),
   upscaleFactor: v.optional(v.object({ min: v.number(), max: v.number() })), creativityLevels: v.optional(v.array(v.number())),
@@ -65,7 +65,7 @@ export const refreshCatalog = mutation({
       const existing = await ctx.db.query("videoModelCatalog")
         .withIndex("by_studio_model", (q) => q.eq("studioExternalId", args.studioExternalId).eq("modelId", model.modelId)).unique();
       const discovered = {
-        provider: model.provider, modelId: model.modelId, name: model.name,
+        provider: model.provider, modelId: model.modelId, canonicalSlug: model.canonicalSlug, name: model.name,
         supportedDurations: model.supportedDurations, supportedResolutions: model.supportedResolutions,
         supportedAspectRatios: model.supportedAspectRatios, supportedSizes: model.supportedSizes, supportedParameters: model.supportedParameters,
         upscaleFactor: model.upscaleFactor, creativityLevels: model.creativityLevels,
@@ -213,6 +213,8 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
     upscaleFactor: typeof raw.upscaleFactor === 'number' ? raw.upscaleFactor : undefined, creativity: typeof raw.creativity === 'number' ? raw.creativity : undefined,
     upscaleSource: raw.upscaleSource as UpscaleSourceCertificate | undefined,
     editSource: raw.editSource as VideoEditSourceCertificate | undefined,
+    lipSyncSource: raw.lipSyncSource as VideoRoutingRequest['lipSyncSource'],
+    lipSyncPortrait: raw.lipSyncPortrait as VideoRoutingRequest['lipSyncPortrait'],
     audioPolicy: raw.audioPolicy as VideoRoutingRequest['audioPolicy'],
     maximumCostUsd: typeof raw.maximumCostUsd === "number" ? raw.maximumCostUsd : undefined,
   };

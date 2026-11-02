@@ -60,6 +60,9 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = captionTrackDownloadName(language, trackId, format);
     document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
+  if (state === undefined || jobs === undefined || latestExport && exportDetails === undefined) {
+    return <section role="status" aria-busy="true" className="rounded-2xl border border-border bg-card p-5 text-sm text-muted-foreground">Loading this production’s saved reviews and exports…</section>;
+  }
   return <div className="space-y-6">
     <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
       <h2 className="text-lg font-semibold">Review and export an approved timeline</h2>

@@ -9,6 +9,7 @@ import { applyClientReviewDecision, transitionResourceState } from "./approvals"
 import { assertReviewToken, isReviewLinkActive, REVIEW_COMMENT_LIMIT, REVIEW_LINK_DEFAULT_AGE_MS, REVIEW_LINK_MAX_AGE_MS, validateReviewComment } from "./reviewLinkContracts";
 import { publicRenderJob } from "./renderWorkerContracts";
 import { now } from "./_shared";
+import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 
 type ReadCtx = QueryCtx | MutationCtx;
 
@@ -215,8 +216,16 @@ export const getExport = query({
     if (!exportRecord) throw new Error("Export not found.");
     const { production } = await authorizedProduction(ctx, exportRecord.productionId);
     if (exportRecord.projectId && exportRecord.projectId !== production.projectId) throw new Error("Export not found.");
-    const url = exportRecord.storageId && exportRecord.status === "COMPLETED" ? await ctx.storage.getUrl(exportRecord.storageId) : undefined;
     const job = exportRecord.renderJobId ? await ctx.db.get(exportRecord.renderJobId) : null;
+    let url: string | null | undefined;
+    if (exportRecord.storageId && exportRecord.status === 'COMPLETED') {
+      const manifestId = exportRecord.manifestId ?? job?.manifestId;
+      const [manifest, storage] = await Promise.all([manifestId ? ctx.db.get(manifestId) : null, ctx.db.system.get('_storage', exportRecord.storageId)]);
+      if (manifestId && (!manifest || manifest.productionId !== production._id || manifest.projectId && manifest.projectId !== production.projectId)) throw new Error('Export manifest ownership is unavailable.');
+      if (!storage || storage.size < 1) throw new Error('Export media is unavailable.');
+      assertStoredRenderMediaType(manifest?.manifest, manifest?.contractVersion, storage.contentType, exportRecord.mimeType);
+      url = await ctx.storage.getUrl(exportRecord.storageId);
+    }
     return { ...exportRecord, progress: exportRecord.progress ?? job?.progress ?? 0, jobStatus: job?.status, downloadUrl: url };
   },
 });
@@ -235,6 +244,9 @@ async function exactReviewScope(ctx: ReadCtx, link: Doc<'reviewLinks'>) {
   if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !review || review.projectId !== project._id || review.productionId !== production._id || review.timelineId !== link.timelineId || review.manifestId !== link.manifestId || review.exportId !== link.exportId || review.timelineVersionNumber !== link.timelineVersionNumber || !timeline || timeline.projectId !== project._id || timeline.productionId !== production._id || timeline.versionNumber !== link.timelineVersionNumber || !manifest || manifest.projectId !== project._id || manifest.productionId !== production._id || !exportRecord || exportRecord.projectId !== project._id || exportRecord.productionId !== production._id || exportRecord.manifestId !== manifest._id || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId) throw new Error('This review version is unavailable.');
   const manifestData = record(manifest.manifest);
   if (manifestData.timelineId !== timeline._id || (manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion) throw new Error('This review version is unavailable.');
+  const storage = await ctx.db.system.get('_storage', exportRecord.storageId);
+  if (!storage || storage.size < 1) throw new Error('This review video is unavailable.');
+  assertStoredRenderMediaType(manifest.manifest, manifest.contractVersion, storage.contentType, exportRecord.mimeType);
   return { project, production, review, timeline, manifest, exportRecord };
 }
 async function sharedReview(ctx: ReadCtx, token: string) {
@@ -262,6 +274,7 @@ export const createShareLink = mutation({
     if (!production || production.projectId !== args.projectId) throw new Error('This production is outside this project.');
     const storage = await ctx.db.system.get('_storage', exportRecord.storageId);
     if (!storage || !storage.contentType?.startsWith('video/') || storage.size <= 0) throw new Error('This export has no stored video.');
+    assertStoredRenderMediaType(manifest.manifest, manifest.contractVersion, storage.contentType, exportRecord.mimeType);
     const previous = await ctx.db.query('reviewLinks').withIndex('by_token_hash', q => q.eq('tokenHash', args.tokenHash)).unique();
     if (previous) throw new Error('Create a new review token.');
     const timestamp = now();

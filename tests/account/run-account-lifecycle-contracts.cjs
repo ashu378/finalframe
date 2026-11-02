@@ -15,13 +15,13 @@ class AccessError extends Error { constructor(code, message) { super(message); t
 const errors = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
 let actor = 'exporter'; let signedIn = true; let sequence = 0; let writes = 0; let paginationCalls = 0; let failRead;
 const identity = { getIdentity: async () => signedIn ? { externalId: actor, subject: actor } : null, requireIdentity: async () => { if (!signedIn) throw new AccessError('UNAUTHENTICATED', 'Verified identity required'); return { externalId: actor, subject: actor }; } };
-const authorization = load('convex/authorization.ts', { './identity': identity, './auth': errors });
+const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './identity': identity, './auth': errors });
 const registered = { query: (value) => value, mutation: (value) => value, internalMutation: (value) => value };
 const contracts = load('src/lib/account-lifecycle/contracts.ts');
 const format = load('src/lib/account-lifecycle/export-format.ts');
 const platform = load('convex/platformAdministration.ts', { './_generated/server': registered, './authorization': authorization, './auth': errors, '../src/lib/platform-admin/contracts': load('src/lib/platform-admin/contracts.ts') });
-const lifecycle = load('convex/accountLifecycle.ts', { './_generated/server': registered, './authorization': authorization, './auth': errors, './platformAdministration': platform, '../src/lib/account-lifecycle/contracts': contracts, '../src/lib/account-lifecycle/export-format': format });
-const account = load('convex/account.ts', { './_generated/server': registered, './identity': identity });
+const lifecycle = load('convex/accountLifecycle.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './_generated/server': registered, './authorization': authorization, './auth': errors, './platformAdministration': platform, '../src/lib/account-lifecycle/contracts': contracts, '../src/lib/account-lifecycle/export-format': format });
+const account = load('convex/account.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './_generated/server': registered, './identity': identity });
 const tables = Object.fromEntries(['users', 'studios', 'members', 'studioMembers', 'projects', 'projectMembers', 'platformRoles', 'audit', 'accountExportRequests', 'accountExportPages', 'accountDeactivationRequests'].map((name) => [name, []]));
 function add(table, fields) { const row = { _creationTime: ++sequence, createdAt: sequence, updatedAt: sequence, ...fields }; tables[table].push(row); return row; }
 const ctx = { db: {

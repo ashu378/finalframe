@@ -17,6 +17,7 @@ export function WorkspaceNav() {
       {WORKSPACE_SECTIONS.map((section) => { const active = pathname?.endsWith(`/workspace/${section.slug}`) || (section.slug === 'overview' && pathname?.endsWith('/workspace')); return <Link key={section.slug} href={`/dashboard/projects/${projectId}/workspace/${section.slug}${suffix}`} aria-current={active ? 'page' : undefined} className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold transition ${active ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
         {section.slug === 'canvas' ? <GitBranch className="mr-2 inline size-4" aria-hidden="true" /> : section.slug === 'overview' ? <LayoutDashboard className="mr-2 inline size-4" aria-hidden="true" /> : null}{section.label}
       </Link>; })}
+      <Link href={`/dashboard/projects/${projectId}/movies`} className="min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground">Movie assembly</Link>
     </nav>
   </div>;
 }

@@ -11,7 +11,7 @@ export class RenderRequestQueue {
 
   get busy() { return this.pending > 0; }
 
-  accept(jobId: string, payload: unknown, work: () => Promise<unknown>) {
+  accept(jobId: string, payload: unknown, work: () => Promise<unknown>, options: {onlyIfIdle?:boolean} = {}) {
     const timestamp = Date.now();
     for (const [id, entry] of this.entries) if (entry.completedAt && (timestamp - entry.completedAt > 600_000 || this.entries.size > 100)) this.entries.delete(id);
     const fingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -22,7 +22,7 @@ export class RenderRequestQueue {
       if (!existing.completedAt || !leaseId || leaseId === existing.leaseId) throw new Error('RENDER_REQUEST_CONFLICT');
       this.entries.delete(jobId);
     }
-    if (this.pending >= this.limit) throw new Error('RENDER_QUEUE_FULL');
+    if (this.pending >= this.limit || options.onlyIfIdle && this.pending > 0) throw new Error('RENDER_QUEUE_FULL');
     const entry: { fingerprint: string; leaseId?: string; completedAt?: number } = { fingerprint, leaseId };
     this.entries.set(jobId, entry);
     this.pending += 1;

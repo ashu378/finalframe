@@ -2,7 +2,8 @@ import { Password } from "@convex-dev/auth/providers/Password";
 import { Email } from "@convex-dev/auth/providers/Email";
 import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { currentStudioForUser } from "./studioMemberships";
 
 const emailDeliveryEnabled = process.env.CONVEX_AUTH_EMAIL_ENABLED === "true";
 
@@ -152,6 +153,7 @@ export class ConvexAuthorizationError extends ConvexError<AuthorizationErrorData
  */
 export const currentUser = query({
   args: {},
+  returns: v.union(v.null(), v.object({ id: v.string(), email: v.string(), name: v.union(v.string(), v.null()), onboardingCompleted: v.boolean(), isAdmin: v.boolean(), role: v.union(v.null(), v.literal('owner'), v.literal('admin'), v.literal('member')), studioExternalId: v.union(v.string(), v.null()), createdAt: v.number() })),
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
@@ -159,26 +161,9 @@ export const currentUser = query({
     const user = await ctx.db.get(userId);
     if (!user || user.status === 'disabled') return null;
 
-    const canonicalMembership = await ctx.db
-      .query("members")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .first();
-    const legacyMembership = !canonicalMembership
-      ? await ctx.db.query("studioMembers")
-        .withIndex("by_user", (q) => q.eq("userExternalId", userId.toString()))
-        .filter((q) => q.eq(q.field("status"), "active"))
-        .first()
-      : null;
-    const studio = canonicalMembership
-      ? await ctx.db.get(canonicalMembership.studioId)
-      : legacyMembership?.studioExternalId
-        ? await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", legacyMembership.studioExternalId)).first()
-      : await ctx.db
-        .query("studios")
-        .withIndex("by_owner", (q) => q.eq("ownerExternalId", userId.toString()))
-        .first();
-    const role = canonicalMembership?.role ?? legacyMembership?.role ?? (studio ? "owner" : null);
+    const selected = await currentStudioForUser(ctx, user, userId.toString());
+    const studio = selected?.studio ?? null;
+    const role = selected?.role ?? null;
     const metadata = studio?.metadata && typeof studio.metadata === "object"
       ? studio.metadata as Record<string, unknown>
       : {};

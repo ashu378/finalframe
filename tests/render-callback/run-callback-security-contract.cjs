@@ -64,6 +64,7 @@ const store = {
   compile('convex/renderHeartbeatPolicy.ts', 'renderHeartbeatPolicy.js');
   const renderJobsPath = compile('convex/renderJobs.ts', 'renderJobs.js');
   const manifestPath = compile('renderer/src/manifest.ts', 'renderer-manifest.js');
+  const outputFormatPath = compile('renderer/src/output-format.ts', 'output-format.js');
   compile('renderer/src/types.ts', 'types.js');
   compile('renderer/src/templates/contract.ts', 'templates/contract.js');
   const workerPolicyPath = compile('convex/renderWorkerContracts.ts', 'renderWorkerContracts.js');
@@ -75,7 +76,7 @@ const store = {
   const fakeExports = new Map();
   const context = {
     db: {
-      get: async (id) => id === job._id ? job : id === 'manifest-1' ? { _id: id, projectId: job.projectId, productionId: job.productionId, contractVersion: 5 } : id === 'storage-1' ? { _id: id, sha256: 'sha256:fixture', contentType: 'video/mp4', size: 10 } : receipts.get(id) ?? fakeExports.get(id) ?? null,
+      get: async (id) => id === job._id ? job : id === 'manifest-1' ? { _id: id, projectId: job.projectId, productionId: job.productionId, contractVersion: 5, manifest: { version: 5, output: { codec: 'h264' }, export: { format: 'MP4' } } } : id === 'storage-1' ? { _id: id, sha256: 'sha256:fixture', contentType: 'video/mp4', size: 10 } : receipts.get(id) ?? fakeExports.get(id) ?? null,
       query: (table) => ({ withIndex: (_index, builderCallback) => {
         const constraints = {};
         const builder = { eq: (field, value) => { constraints[field] = value; return builder; } };
@@ -93,6 +94,8 @@ const store = {
     if (request === 'convex/values') return { v: { union: (...values) => values, literal: (value) => value, id: (value) => value, optional: (value) => value, string: () => 'string', number: () => 'number', boolean: () => 'boolean', any: () => 'any', null: () => 'null' } };
     if (request === './_generated/server') return { internalAction: (definition) => definition, internalMutation: (definition) => definition, mutation: (definition) => definition, query: (definition) => definition };
     if (request === '../renderer/src/manifest') return originalLoad.call(this, manifestPath, parent, isMain);
+    if (request === '../renderer/src/output-format') return originalLoad.call(this, outputFormatPath, parent, isMain);
+    if (request === './movieAuthority') return { authorizeMovieRenderContext: async () => { throw new Error('Ordinary callback fixture cannot authorize movie rendering.'); } };
     if (request === './renderWorkerContracts') return originalLoad.call(this, workerPolicyPath, parent, isMain);
     if (request === './_generated/api') return { internal: { renderJobs: {} } };
     if (request === './authorization') return { requireMember: async () => ({ studio: { externalId: 'studio-1', _id: 'studio-1' } }), requireProjectRole: async () => ({}) };

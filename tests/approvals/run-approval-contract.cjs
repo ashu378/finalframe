@@ -27,6 +27,10 @@ assert.match(assemblySource, /requireApprovedResource/);
 assert.match(assemblySource, /asset\.projectId !== production\.projectId/);
 
 const outputPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'finalframe-approval-')), 'approvals.cjs');
+const checksumPath = path.join(path.dirname(outputPath), 'sha256.cjs');
+fs.writeFileSync(checksumPath, ts.transpileModule(fs.readFileSync(path.join(root, 'renderer/src/media/sha256.ts'), 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText, 'utf8');
 fs.writeFileSync(outputPath, ts.transpileModule(approvalsSource, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
   fileName: path.join(root, 'convex/approvals.ts'),
@@ -37,6 +41,7 @@ const events = [];
 let actingRole = 'OWNER';
 const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
+  if (request === '../renderer/src/media/sha256') return originalLoad.call(this, checksumPath, parent, isMain);
   if (request === 'convex/values') {
     return { v: { union: (...values) => values, literal: (value) => value, id: (value) => value, optional: (value) => value, string: () => 'string' } };
   }

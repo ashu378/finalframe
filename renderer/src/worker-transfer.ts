@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { outputFormatForMimeType, type RenderOutputMimeType } from './output-format.js';
 
 /** Transfer capabilities are accepted only on explicitly configured origins.
  * Do not derive an origin allowlist from an incoming render request. */
@@ -50,9 +51,10 @@ export async function readBoundedJsonReceipt(response: Response, maxBytes: numbe
 export async function uploadRenderFile(
   url: string,
   outputPath: string,
-  options: { allowedOrigins: readonly string[]; maxBytes: number; timeoutMs?: number; fetch?: typeof globalThis.fetch },
+  options: { allowedOrigins: readonly string[]; maxBytes: number; timeoutMs?: number; fetch?: typeof globalThis.fetch; mimeType?: RenderOutputMimeType },
 ): Promise<string> {
   assertTransferUrl(url, options.allowedOrigins);
+  const { mimeType } = outputFormatForMimeType(options.mimeType);
   const file = await stat(outputPath);
   if (!file.isFile() || file.size < 1 || file.size > options.maxBytes) throw new Error('Render upload exceeds the configured file limits.');
   const controller = new AbortController();
@@ -62,7 +64,7 @@ export async function uploadRenderFile(
   controller.signal.addEventListener('abort', abortStream, { once: true });
   try {
     const init: RequestInit & { duplex: 'half' } = {
-      method: 'POST', headers: { 'content-type': 'video/mp4', 'content-length': String(file.size) },
+      method: 'POST', headers: { 'content-type': mimeType, 'content-length': String(file.size) },
       body: stream as unknown as BodyInit, duplex: 'half', redirect: 'error', signal: controller.signal,
     };
     const response = await (options.fetch ?? globalThis.fetch)(url, init);

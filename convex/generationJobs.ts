@@ -12,7 +12,10 @@ import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, val
 import { isSourceVideoEdit } from '../src/lib/ai/video-routing';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
-import { preparationModel, type PreparationKind } from '../src/lib/ai/preparation';
+import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
+import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
+import { resolvePortraitSourceCertificate } from './imageCertificates';
+import { studioRoleForUser, userExternalKey } from './studioMemberships';
 import { validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '../src/lib/production/workspace-controls';
 import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
 
@@ -155,8 +158,19 @@ export const create = mutation({
       hasAudioReference: sourceAssets.some((asset) => asset.mimeType?.startsWith('audio/')),
       requiresFirstFrame: Boolean(firstFrame) || metadata.requiresFirstFrame === true,
       requiresLastFrame: Boolean(lastFrame) || metadata.requiresLastFrame === true,
-      upscaleSource: undefined, upscaleQuote: undefined, editSource: undefined, editQuote: undefined, continuationQuote: undefined, constraints: undefined,
+      upscaleSource: undefined, upscaleQuote: undefined, editSource: undefined, editQuote: undefined, continuationQuote: undefined, lipSyncSource: undefined, lipSyncPortrait: undefined, lipSyncQuote: undefined, constraints: undefined,
     };
+    if (operation === 'LIP_SYNC') {
+      const recordings = sourceAssets.filter(asset => asset.mimeType?.startsWith('audio/'));
+      const portraits = sourceAssets.filter(asset => asset.mimeType?.startsWith('image/'));
+      if (sourceAssets.length !== 2 || recordings.length !== 1 || portraits.length !== 1) throw new Error('Choose exactly one approved portrait and one supplied recording.');
+      const source = await resolveAudioSourceCertificate(ctx, { projectId: access.project._id, assetId: recordings[0]._id });
+      const stored = await ctx.db.system.get('_storage', recordings[0].storageId!);
+      if (!stored || !['audio/wav','audio/x-wav','audio/mpeg','audio/mp3'].includes(stored.contentType ?? '') || recordings[0].mimeType !== stored.contentType) throw new Error('Avatar lip sync requires canonical WAV or MP3 audio.');
+      normalizedRequest.lipSyncSource = source;
+      normalizedRequest.lipSyncPortrait = await resolvePortraitSourceCertificate(ctx, { projectId: access.project._id, assetId: portraits[0]._id });
+      normalizedRequest.duration = source.durationSeconds; normalizedRequest.durationSeconds = source.durationSeconds;
+    }
     if (operation === 'EXTEND') {
       const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') });
       normalizedRequest.previousModelId = previous.model;
@@ -190,6 +204,10 @@ export const create = mutation({
       if (!validated.selection.editQuote) throw new Error('Source video edit certification is unavailable.');
       normalizedRequest.editQuote = validated.selection.editQuote;
     }
+    if (operation === 'LIP_SYNC') {
+      if (!validated.selection.lipSyncQuote) throw new Error('Supplied recording duration certification is unavailable.');
+      normalizedRequest.lipSyncQuote = validated.selection.lipSyncQuote;
+    }
     if (operation === 'EXTEND') {
       if (!validated.selection.continuationQuote) throw new Error('Continuation pricing certification is unavailable.');
       normalizedRequest.continuationQuote = validated.selection.continuationQuote;
@@ -200,7 +218,7 @@ export const create = mutation({
     normalizedRequest.resolution = validated.selection.resolution ?? normalizedRequest.resolution;
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
-    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
+    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'LIP_SYNC' || operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
@@ -281,7 +299,7 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   if (!job.providerJobId && (project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || (job.operation !== 'PREPARATION' && production.currentVersionId !== job.productionVersionId))) throw new Error('This project or production version is no longer available for generation.');
   const request = object(job.request);
   const references: Array<{ assetId: string; url: string; kind: 'image' | 'video' | 'audio'; mimeType?: string }> = [];
-  for (const rawId of Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds : []) {
+  for (const rawId of job.providerJobId ? [] : Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds : []) {
     const id = ctx.db.normalizeId('assets', String(rawId));
     const asset = id ? await ctx.db.get(id) : null;
     if (!asset || asset.projectId !== project._id || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId) throw new Error('Generation reference is not owned by this project.');
@@ -295,7 +313,7 @@ export const getWorkerInput = internalQuery({ args: leaseArgs, returns: v.any(),
   const outputUrl = output?.projectId === project._id && output.storageId ? await ctx.storage.getUrl(output.storageId) : null;
   return { job, request, references, outputAssetId: output?._id, outputUrl };
 } });
-export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCatalogFingerprint: v.optional(v.string()), liveCatalogCheckedAt: v.optional(v.number()) }, returns: v.any(), handler: async (ctx, args) => {
+export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCatalogFingerprint: v.optional(v.string()), liveCatalogCheckedAt: v.optional(v.number()), livePreparationQuote: v.optional(v.any()), liveEndpointFingerprint: v.optional(v.string()) }, returns: v.any(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId); assertLease(job, args.leaseId);
   if (job.providerJobId || job.submissionStartedAt) return { allowed: false };
   const project = job.projectId ? await ctx.db.get(job.projectId) : null;
@@ -306,6 +324,8 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
   const membership = actor ? await ctx.db.query('projectMembers').withIndex('by_project_user', (q) => q.eq('projectId', project._id).eq('userId', actor._id)).unique() : null;
   const actorOwnsProject = actor && (project.ownerUserId === actor._id || project.createdByUserId === actor._id);
   if (!actor || actor.status === 'disabled' || (membership ? membership.status !== 'ACTIVE' || !['OWNER', 'EDITOR'].includes(membership.role) : !actorOwnsProject)) throw new Error('Generation permission has changed.');
+  const studio = project.studioId ? await ctx.db.get(project.studioId) : await ctx.db.query('studios').withIndex('by_external_id', q => q.eq('externalId', project.studioExternalId)).unique();
+  if (!studio || studio.externalId !== job.studioExternalId || studio.externalId !== project.studioExternalId || ['DISABLED','SUSPENDED','REMOVED','ARCHIVED','DELETED'].includes(String(studio.status ?? '').toUpperCase()) || !await studioRoleForUser(ctx, studio, actor, userExternalKey(actor))) throw new Error('Generation workspace membership has changed.');
   const shot = job.shotId ? await ctx.db.get(job.shotId) : null;
   const scene = shot ? await ctx.db.get(shot.sceneId) : null;
   if (job.operation !== 'PREPARATION') {
@@ -314,7 +334,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
   }
   const request = object(job.request);
   if (job.operation !== 'PREPARATION') await resolveGenerationContinuity(ctx, { projectId: project._id, productionId: job.productionId, snapshot: request.planningContextSnapshot, explicitResourceVersionIds: request.selectedResourceVersionIds, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
-  if (request.targetVoiceId) await resolveVoiceSynthesisInput(ctx, { projectId: project._id, voiceId: request.targetVoiceId as Id<'voices'>, use: 'SYNTHESIZE' });
+  if (request.targetVoiceId) await resolveVoiceSynthesisInput(ctx, { projectId: project._id, voiceId: request.targetVoiceId as Id<'voices'>, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: request.primaryVoiceSampleAssetId as Id<'assets'> | undefined });
   const reserved = job.providerBudgetReservationId ? await ctx.db.get(job.providerBudgetReservationId) : null;
   const budget = reserved ? await ctx.db.get(reserved.budgetId) : null;
   if (!reserved || reserved.jobId !== job._id || reserved.status !== 'RESERVED' || !budget || budget.status !== 'ACTIVE') throw new Error('Paid testing is paused.');
@@ -325,11 +345,32 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     dispatchValidation = { fixtureOnly: true };
   } else if (job.operation === 'PREPARATION') {
     if (process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not enabled.');
+    const bookedMicros=Math.ceil(Number(job.estimatedProviderCostUsd)*1_000_000);
+    if(!Number.isFinite(bookedMicros)||bookedMicros<=0||bookedMicros>reserved.estimatedMicros)throw new Error('The preparation reservation no longer covers its provider quote.');
     const selected = preparationModel(request.preparationKind as PreparationKind, request.clone === true);
     if (selected.id !== job.model) throw new Error('Preparation model configuration changed.');
+    if (request.preparationKind === 'TRANSCRIPT') {
+      const source=await resolveTranscriptSourceCertificate(ctx,{projectId:project._id,assetId:request.sourceAssetId as Id<'assets'>});
+      const live=object(args.livePreparationQuote);const frozen=object(request.quote);
+      if(stable(source)!==stable(request.transcriptSource)||request.transcriptFormat!==transcriptFormat(source)||typeof live.checkedAt!=='number'||Date.now()-live.checkedAt>30000||live.checkedAt>Date.now()+1000||live.model!==job.model||live.inputDurationSeconds!==source.durationSeconds||live.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||live.billableInputSeconds!==Math.ceil(source.durationSeconds+1/16000)||live.estimatedProviderCostUsd!==job.estimatedProviderCostUsd||frozen.billableInputSeconds!==live.billableInputSeconds)throw new Error('Transcript source or billing certificate changed.');
+    }
+    if (request.clone === true) {
+      if (!request.primaryVoiceSampleAssetId) throw new Error('Choose an explicit primary voice recording.');
+      const source = await resolveAudioSourceCertificate(ctx, { projectId: project._id, assetId: request.primaryVoiceSampleAssetId as Id<'assets'> });
+      if (!validReferenceVoiceSource(source) || stable(source) !== stable(request.cloneSource)) throw new Error('The measured primary recording changed.');
+      const frozen = assertReferenceVoiceQuote(object(request.quote).referenceVoiceQuote);
+      const live = object(args.livePreparationQuote); const current = assertReferenceVoiceQuote(live.referenceVoiceQuote);
+      if (stable(frozen) !== stable(current) || typeof live.checkedAt !== 'number' || Date.now() - live.checkedAt > 30_000 || live.checkedAt > Date.now() + 1000 || live.model !== job.model || live.estimatedProviderCostUsd !== job.estimatedProviderCostUsd) throw new Error('Reference voice billing certificate changed.');
+    }
     dispatchValidation = { model: job.model, estimatedCostUsd: job.estimatedProviderCostUsd };
   } else {
     try {
+      if (request.operation === 'LIP_SYNC') {
+        const source = object(request.lipSyncSource); const portrait = object(request.lipSyncPortrait); const frozen = object(request.lipSyncQuote);
+        const audio = await resolveAudioSourceCertificate(ctx, { projectId: project._id, assetId: source.assetId as Id<'assets'> });
+        const image = await resolvePortraitSourceCertificate(ctx, { projectId: project._id, assetId: portrait.assetId as Id<'assets'> });
+        if (stable(audio) !== stable(source) || stable(image) !== stable(portrait) || args.liveEndpointFingerprint !== frozen.endpointFingerprint || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Supplied audio or portrait certificate changed.');
+      }
       if (request.operation === 'EXTEND') {
         await requireContinuationSource(ctx, { projectId: project._id, productionId: job.productionId, model: job.model, previousJobId: String(request.previousJobId || '') });
         const frozen = object(request.continuationQuote);
@@ -348,6 +389,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
       const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
       if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
       if (isSourceVideoEdit(request.operation) && stable(current.selection.editQuote) !== stable(request.editQuote)) throw new Error('The frozen video edit pricing certificate changed.');
+      if (request.operation === 'LIP_SYNC' && stable(current.selection.lipSyncQuote) !== stable(request.lipSyncQuote)) throw new Error('The frozen lip-sync pricing certificate changed.');
       if (request.operation === 'EXTEND' && stable(current.selection.continuationQuote) !== stable(request.continuationQuote)) throw new Error('The frozen continuation pricing certificate changed.');
       const estimatedMicros = Math.ceil(current.estimatedCostUsd * 1_000_000);
       if (!Number.isFinite(estimatedMicros) || estimatedMicros <= 0 || estimatedMicros > reserved.estimatedMicros || (typeof request.path === 'string' && current.selection.path !== request.path) || (typeof request.resolution === 'string' && current.selection.resolution !== request.resolution)) throw new Error('The frozen route or provider quote has changed.');
@@ -474,34 +516,47 @@ export const reconcileAcceptedSubmission = internalMutation({
 
 const preparationKindValidator = v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'));
 export const preparationContext = internalQuery({
-  args: { productionId: v.id('productions'), voiceId: v.optional(v.id('voices')), sourceAssetId: v.optional(v.id('assets')) }, returns: v.any(),
+  args: { productionId: v.id('productions'), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')) }, returns: v.any(),
   handler: async (ctx, args) => {
     const { production, access } = await productionAccess(ctx, args.productionId, true);
-    const voice = args.voiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.voiceId, use: 'SYNTHESIZE' }) : null;
+    const voice = args.voiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.voiceId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
     const asset = args.sourceAssetId ? await ctx.db.get(args.sourceAssetId) : null;
     if (args.sourceAssetId && (!asset || asset.projectId !== access.project._id || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('audio/'))) throw new Error('Select a project-owned recording.');
     const stored = asset?.storageId ? await ctx.db.system.get('_storage', asset.storageId) : null;
     if (stored && (stored.size < 1 || stored.size > 15 * 1024 * 1024)) throw new Error('Recording must not exceed 15 MiB.');
-    return { productionId: production._id, projectId: access.project._id, voice, source: asset?.storageId ? { assetId: asset._id, mimeType: asset.mimeType, url: await ctx.storage.getUrl(asset.storageId) } : null };
+    return { productionId: production._id, projectId: access.project._id, voice, source: asset?.storageId && stored ? { assetId: asset._id,storageId:asset.storageId,checksum:stored.sha256,byteSize:stored.size,mimeType:asset.mimeType,url:await ctx.storage.getUrl(asset.storageId) } : null };
   },
 });
 export const createPreparation = internalMutation({
-  args: { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() }, returns: v.any(),
+  args: { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() }, returns: v.any(),
   handler: async (ctx, args) => {
     const { production, access } = await productionAccess(ctx, args.productionId, true);
     if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new preparation.');
     if (!workerEnabled() || process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not enabled.');
+    if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) && (args.targetVoiceId || args.primaryVoiceSampleAssetId) || args.kind !== 'TRANSCRIPT' && args.sourceAssetId) throw new Error('Choose only the sources used by this preparation type.');
     if (args.text.length > 4000 || (args.kind !== 'TRANSCRIPT' && !args.text.trim())) throw new Error('Use between one and 4000 characters.');
     if ((args.kind === 'NARRATION' || args.kind === 'VOICE_PREVIEW') && !args.targetVoiceId) throw new Error('Select an approved project voice.');
-    if (args.targetVoiceId) await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.targetVoiceId, use: 'SYNTHESIZE' });
+    const voice = args.targetVoiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.targetVoiceId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
+    let cloneSource;
+    if (args.clone) {
+      if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) || voice?.mode !== 'REFERENCE_CLONE' || !args.primaryVoiceSampleAssetId || voice.references.length !== 1 || voice.references[0].assetId !== args.primaryVoiceSampleAssetId || args.text.length > 3000) throw new Error('Select an approved primary recording for this cloned narration.');
+      cloneSource = await resolveAudioSourceCertificate(ctx, { projectId: access.project._id, assetId: args.primaryVoiceSampleAssetId });
+      if (!validReferenceVoiceSource(cloneSource)) throw new Error('The primary recording exceeds its reviewed format, 30-second or10MB limit.');
+      const frozen = assertReferenceVoiceQuote(object(args.quote).referenceVoiceQuote);
+      if (args.estimatedProviderCostUsd !== frozen.costUsd || object(args.quote).model !== args.model || typeof object(args.quote).checkedAt !== 'number' || Date.now() - Number(object(args.quote).checkedAt) > 30_000 || Number(object(args.quote).checkedAt) > Date.now() + 1000) throw new Error('Obtain a fresh reviewed reference voice quote.');
+    } else if (args.primaryVoiceSampleAssetId || voice?.mode === 'REFERENCE_CLONE' || voice?.mode === 'RECORDED') throw new Error('Voice mode changed.');
     const config = preparationModel(args.kind, args.clone);
     if (args.model !== config.id || args.capability !== config.capability || !Number.isFinite(args.estimatedProviderCostUsd) || args.estimatedProviderCostUsd <= 0 || args.estimatedProviderCostUsd > 2) throw new Error('A verified preparation quote is required.');
+    let transcriptSource;
     if (args.kind === 'TRANSCRIPT') {
       const source = args.sourceAssetId ? await ctx.db.get(args.sourceAssetId) : null;
       if (!source || source.projectId !== access.project._id || source.scope !== 'PROJECT' || source.deletedAt || !source.storageId || !source.mimeType?.startsWith('audio/')) throw new Error('Recording is unavailable.');
+      transcriptSource=await resolveTranscriptSourceCertificate(ctx,{projectId:access.project._id,assetId:source._id});
+      const quoted=object(args.quote);
+      if(args.durationSeconds!==transcriptSource.durationSeconds||quoted.inputDurationSeconds!==transcriptSource.durationSeconds||quoted.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||quoted.billableInputSeconds!==Math.ceil(transcriptSource.durationSeconds+1/16000)||quoted.estimatedProviderCostUsd!==args.estimatedProviderCostUsd||quoted.model!==args.model||typeof quoted.checkedAt!=='number'||Date.now()-quoted.checkedAt>30000||quoted.checkedAt>Date.now()+1000)throw new Error('Obtain a fresh decoded transcription quote.');
     }
-    const request = { preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, sourceAssetId: args.sourceAssetId, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
-    const requestHash = stable({ productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, sourceAssetId: args.sourceAssetId });
+    const request = { preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
+    const requestHash = stable({ productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource });
     const idempotencyKey = key(args.idempotencyKey);
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
     if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }

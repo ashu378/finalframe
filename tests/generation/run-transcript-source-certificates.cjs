@@ -1,0 +1,40 @@
+const assert=require('node:assert/strict');const {createHash}=require('node:crypto');const h=require('./run-operation-controls.cjs');
+const v=new Proxy({},{get:()=>()=>({})});const definitions=Object.fromEntries(['query','mutation','action','internalAction','internalQuery','internalMutation'].map(name=>[name,value=>value]));
+const bytes=Buffer.from('original synthetic recording bytes');const checksum=createHash('sha256').update(bytes).digest('base64');
+const source={assetId:'audio',storageId:'storage',checksum,byteSize:bytes.length,durationSeconds:4.25,audioCodec:'pcm_s16le',audioFormat:'wav',durationMeasurement:'DECODED_PCM_SAMPLES_V1',sampleRate:16000,channels:1,hasVideo:false};
+const config=h.preparation.preparationModel('TRANSCRIPT');const catalog={data:{id:config.id,endpoints:[{pricing:{prompt:.001,completion:0}}]}};
+const quote=()=>h.preparation.quotePreparation({kind:'TRANSCRIPT',durationSeconds:source.durationSeconds,durationMeasurement:'DECODED_PCM_SAMPLES_V1'},async()=>Response.json(catalog));
+function fixture(){const deps={};const state=h.backendFixture({operation:'GENERATE'},['audio'],(state,ctx,auth)=>{
+ deps.audio=h.compile('convex/audioCertificates.ts',{'./_generated/server':definitions,'./_generated/api':{internal:h.api},'convex/values':{v},'./authorization':{requireProjectRole:auth},'./generationWorkerContracts':h.contracts,'./generationContinuity':{},'./voices':{},'../src/lib/ai/model-registry':h.registry});return{};
+},deps);state.storage.sha256=checksum;state.storage.size=bytes.length;state.storage.contentType='audio/wav';state.ctx.storage.getUrl=async()=> 'https://fixture.convex.cloud/api/storage/audio';
+state.probe={...source,decodedSampleCount:68000,decodedSampleRate:16000,hasAudio:true};
+state.measure=patch=>deps.audio.recordTranscriptProbe.handler(state.ctx,{productionId:'production',sourceAssetId:'audio',storageId:'storage',checksum,byteSize:bytes.length,probe:{...state.probe,...patch}});
+state.prepare=async patch=>state.jobs.createPreparation.handler(state.ctx,{productionId:'production',kind:'TRANSCRIPT',text:'',sourceAssetId:'audio',clone:false,durationSeconds:source.durationSeconds,model:config.id,capability:config.capability,estimatedProviderCostUsd:.005,quote:await quote(),idempotencyKey:'transcript-source-contract',...patch});state.audio=deps.audio;return state;}
+let checks=0;async function check(name,run){await run();checks++;console.log('PASS '+name);}
+const old={enabled:process.env.FINALFRAME_PREPARATION_ENABLED,url:process.env.RENDER_WORKER_URL,secret:process.env.RENDER_WORKER_SHARED_SECRET,fetch:global.fetch};
+async function main(){process.env.FINALFRAME_PREPARATION_ENABLED='true';process.env.RENDER_WORKER_URL='https://renderer.fixture';process.env.RENDER_WORKER_SHARED_SECRET='fixture-only';
+await check('actual request probes canonical bytes in verified mode before quoting/reserving source input seconds',async()=>{
+ const state=fixture();const action=h.compile('convex/preparation.ts',{'./_generated/server':definitions,'./_generated/api':{internal:h.api},'convex/values':{v},'../src/lib/ai/preparation':h.preparation});let probes=0;
+ global.fetch=async(url,init)=>{if(String(url).startsWith('https://openrouter.ai/api/v1/models/')){assert.equal(init.method,undefined);return Response.json(catalog);}assert.equal(url,'https://renderer.fixture/media/probe');assert.equal(init.redirect,'error');assert.equal(init.headers['x-finalframe-worker-secret'],'fixture-only');assert.deepEqual(JSON.parse(init.body),{url:'https://fixture.convex.cloud/api/storage/audio',kind:'audio',verifyAudioDuration:true,checksum,byteSize:bytes.length});probes++;return Response.json(state.probe);};
+ state.ctx.runQuery=(_,args)=>state.jobs.preparationContext.handler(state.ctx,args);state.ctx.runMutation=(ref,args)=>ref==='audioCertificates.recordTranscriptProbe'?state.audio.recordTranscriptProbe.handler(state.ctx,args):state.jobs.createPreparation.handler(state.ctx,args);
+ const made=await action.create.handler(state.ctx,{productionId:'production',kind:'TRANSCRIPT',sourceAssetId:'audio',idempotencyKey:'transcript-public-contract'});const job=state.rows.get(made._id);assert.equal(probes,1);assert.deepEqual(job.request.transcriptSource,source);assert.equal(job.request.durationSeconds,4.25);assert.equal(job.request.quote.billableInputSeconds,5);assert.equal(job.estimatedProviderCostUsd,.005);
+});
+await check('metadata-only/forged duration, unmeasured source, >60 seconds and stale quotes cannot reserve',async()=>{
+ for(const patch of [{durationMeasurement:undefined},{durationSeconds:.25},{durationSeconds:60.01,decodedSampleCount:960160},{checksum:'wrong'}]){const state=fixture();await assert.rejects(state.measure(patch));assert.equal(state.writes.length,0);}
+ const missing=fixture();await assert.rejects(missing.prepare(),/Measure/);assert.equal(missing.writes.length,0);
+ for(const patch of [{durationSeconds:.25},{quote:{...await quote(),checkedAt:Date.now()-31000}},{estimatedProviderCostUsd:.001}]){const state=fixture();await state.measure();const before=state.writes.length;await assert.rejects(state.prepare(patch));assert.equal(state.writes.length,before);}
+});
+await check('current SHA/size/ownership/rights/decoded authority and fresh pricing are fenced independently',async()=>{
+ for(const change of [s=>s.storage.sha256='b'.repeat(64),s=>s.storage.size++,s=>s.rows.get('audio').projectId='foreign',s=>s.rows.get('audio').rights={consent:false},s=>[...s.rows.values()].find(row=>row.table==='verifiedAudioProbes').durationMeasurement=undefined,s=>s.rows.get('hold').estimatedMicros=1]){const state=fixture();await state.measure();const made=await state.prepare();change(state);await assert.rejects(state.fence(made._id,{livePreparationQuote:await quote()}));assert.equal(state.rows.get(made._id).submissionStartedAt,undefined);}
+ const state=fixture();await state.measure();const made=await state.prepare();await assert.rejects(state.fence(made._id,{livePreparationQuote:{...await quote(),checkedAt:Date.now()-31000}}));assert.deepEqual(await state.fence(made._id,{livePreparationQuote:await quote()}),{allowed:true});
+});
+await check('actual worker sends certified bytes/container once and refuses a mismatching download before POST',async()=>{
+ for(const changed of [false,true]){const state=fixture();await state.measure();const made=await state.prepare();const job=state.rows.get(made._id);Object.assign(job,{leaseId:'lease',leaseExpiresAt:Date.now()+60000});let posts=0;
+  global.fetch=async()=>new Response(changed?Buffer.from('changed'):bytes,{headers:{'content-type':'audio/wav'}});
+  const worker=h.compile('convex/preparationWorker.ts',{'./_generated/api':{internal:h.api},'../src/lib/ai/preparation':{...h.preparation,quotePreparation:async input=>{assert.equal(input.durationMeasurement,'DECODED_PCM_SAMPLES_V1');return quote();}},'./generationWorkerContracts':h.contracts,'../src/lib/adapters/openrouter-adapter':{transcribeAudio:async(input,options)=>{assert.equal(input.audio.format,'wav');assert.equal(input.audio.data,bytes.toString('base64'));await options.beforeMediaSubmit();posts++;return{modelUsed:config.id,text:'Original synthetic words.',costUsd:.005};}}});
+  const input=await state.jobs.getWorkerInput.handler(state.ctx,{jobId:made._id,leaseId:'lease'});const run=worker.runPreparation({runMutation:async()=>null},input,{jobId:made._id,leaseId:'lease'},live=>state.fence(made._id,{livePreparationQuote:live}));if(changed)await assert.rejects(run,/certified source/);else await run;assert.equal(posts,changed?0:1);
+ }
+});
+console.log(`Transcript source certificates: PASS (${checks}); actual request/create/fence/query/worker with isolated storage/HTTP. Forged-Xing actual decode is covered by renderer certified-audio suite. No DB/provider calls.`);
+}
+main().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>{global.fetch=old.fetch;for(const[name,value]of [['FINALFRAME_PREPARATION_ENABLED',old.enabled],['RENDER_WORKER_URL',old.url],['RENDER_WORKER_SHARED_SECRET',old.secret]]){if(value===undefined)delete process.env[name];else process.env[name]=value;}h.cleanup();});

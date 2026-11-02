@@ -25,13 +25,13 @@ const ctx = { db: {
     reads.push(['query', table]); let values = rows[table]; assert(values, table);
     const q = { withIndex: (_, callback) => { const constraints = []; const builder = { eq: (key, value) => { constraints.push([key, value]); return builder; } }; callback(builder); values = values.filter(row => constraints.every(([key, value]) => row[key] === value)); return q; },
       filter: callback => { const condition = callback({ field: key => key, eq: (key, value) => row => row[key] === value }); values = values.filter(condition); return q; },
-      unique: async () => { assert(values.length <= 1); return values[0] ?? null; }, first: async () => values[0] ?? null };
+      unique: async () => { assert(values.length <= 1); return values[0] ?? null; }, first: async () => values[0] ?? null, take: async limit => { assert(limit <= 101); return values.slice(0, limit); } };
     return q;
   },
 } };
 const identity = { requireIdentity: async () => { if (!signedIn) throw new Error('UNAUTHENTICATED'); return { externalId: actor, subject: actor }; } };
 const bootstrap = load('convex/bootstrap.ts', { './_generated/server': definitions, 'convex/values': { v } });
-const account = load('convex/account.ts', { './_generated/server': definitions, 'convex/values': { v }, './identity': identity });
+const account = load('convex/account.ts', { './studioMemberships': load('convex/studioMemberships.ts', {}), './_generated/server': definitions, 'convex/values': { v }, './identity': identity });
 (async () => {
   const legacyArgs = {
     ensureStudio: { studioExternalId: 'new-studio', name: 'Attempted grant', initialCredits: 1000000 },

@@ -115,6 +115,23 @@ const studioOwned = {
   studioId: v.optional(v.id("studios")),
 };
 
+const movieOutput = v.object({ width: v.number(), height: v.number(), fps: v.number(), codec: v.literal('h264'), audioSampleRate: v.literal(48000), audioChannels: v.literal(2) });
+const movieSource = v.object({
+  itemId: v.string(), kind: v.union(v.literal('VIDEO'), v.literal('IMAGE'), v.literal('GRAPHIC'), v.literal('AUDIO'), v.literal('CAPTIONS')),
+  trackId: v.optional(v.string()), timelineClipId: v.optional(v.string()), sceneId: v.optional(v.id('scenes')), shotId: v.optional(v.id('shots')), shotVersionId: v.optional(v.id('shotVersions')), assetId: v.optional(v.id('assets')),
+  startFrame: v.number(), durationInFrames: v.number(), sourceTimelineStartFrame: v.optional(v.number()), sourceMediaTrimStartFrame: v.optional(v.number()),
+  fadeInFrames: v.optional(v.number()), fadeOutFrames: v.optional(v.number()),
+  assetStorageId: v.optional(v.id('_storage')), assetChecksum: v.optional(v.string()), assetStorageChecksum: v.optional(v.string()),
+});
+const movieArtifactVerification = v.object({
+  checkedBy: v.literal('ffprobe'), checkedAt: v.string(), fileSizeBytes: v.number(), width: v.number(), height: v.number(), fps: v.number(), durationSeconds: v.number(), videoCodec: v.string(),
+  audioCodec: v.optional(v.string()), hasAudio: v.boolean(), orderedPartIds: v.array(v.string()), durationInFrames: v.number(),
+});
+const moviePartVerification = v.object({
+  checkedBy: v.literal('ffprobe'), checkedAt: v.string(), fileSizeBytes: v.number(), width: v.number(), height: v.number(), fps: v.number(), durationSeconds: v.number(), videoCodec: v.string(),
+  audioCodec: v.optional(v.string()), hasAudio: v.boolean(), orderedItemIds: v.array(v.string()), captionTrackCount: v.number(), captionMode: v.union(v.literal('none'), v.literal('burned-in'), v.literal('subtitle')),
+});
+
 export default defineSchema({
   ...authTables,
 
@@ -125,7 +142,7 @@ export default defineSchema({
     externalId: v.optional(v.string()), authSubject: v.optional(v.string()),
     status: v.optional(status), metadata: v.optional(json), createdAt: v.optional(timestamp),
     updatedAt: v.optional(timestamp), displayName: v.optional(v.string()),
-    deactivationRequestId: v.optional(v.id('accountDeactivationRequests')),
+    deactivationRequestId: v.optional(v.id('accountDeactivationRequests')), currentStudioId: v.optional(v.id('studios')),
   }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]),
 
   accountDeactivationRequests: defineTable({
@@ -170,7 +187,7 @@ export default defineSchema({
     invitedByExternalId: v.optional(v.string()), invitedAt: v.optional(timestamp), joinedAt: v.optional(timestamp),
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_studio", ["studioExternalId"]).index("by_studio_id", ["studioId"])
-    .index("by_user", ["userExternalId"]).index("by_user_id", ["userId"])
+    .index("by_user", ["userExternalId"]).index("by_user_id", ["userId"]).index('by_user_status', ['userExternalId', 'status'])
     .index("by_studio_user", ["studioExternalId", "userExternalId"])
     .index("by_studio_user_id", ["studioId", "userId"]),
 
@@ -179,7 +196,14 @@ export default defineSchema({
     studioId: v.id("studios"), userId: v.id("users"),
     role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member")), status: v.union(v.literal("active"), v.literal("invited"), v.literal("suspended"), v.literal("removed")),
     createdAt: v.optional(timestamp), updatedAt: v.optional(timestamp),
-  }).index("by_studio_user", ["studioId", "userId"]).index("by_studio", ["studioId"]).index("by_user", ["userId"]),
+  }).index("by_studio_user", ["studioId", "userId"]).index("by_studio", ["studioId"]).index("by_user", ["userId"]).index('by_user_status', ['userId', 'status']),
+
+  studioInvitations: defineTable({
+    studioId: v.id('studios'), studioExternalId: v.string(), recipientUserId: v.id('users'), role: v.union(v.literal('admin'), v.literal('member')), tokenHash: v.string(),
+    status: v.union(v.literal('PENDING'), v.literal('ACCEPTED'), v.literal('REVOKED')), idempotencyKey: v.string(), createdByUserId: v.id('users'), createdAt: timestamp, updatedAt: timestamp, expiresAt: timestamp,
+    acceptedByUserId: v.optional(v.id('users')), acceptedAt: v.optional(timestamp), acceptedRequestId: v.optional(v.string()), membershipId: v.optional(v.id('members')),
+    revokedByUserId: v.optional(v.id('users')), revokedAt: v.optional(timestamp), revocationReason: v.optional(v.string()),
+  }).index('by_token_hash', ['tokenHash']).index('by_idempotency', ['idempotencyKey']).index('by_studio_status', ['studioId', 'status']).index('by_recipient_status', ['recipientUserId', 'status']).index('by_studio_recipient_status', ['studioId', 'recipientUserId', 'status']),
 
   projects: defineTable({
     externalId: v.string(), studioExternalId: v.string(), studioId: v.optional(v.id("studios")), name: v.string(),
@@ -452,7 +476,7 @@ export default defineSchema({
     .index("by_status", ["status"]).index("by_studio", ["studioExternalId"]).index("by_provider_job", ["provider", "providerJobId"]),
 
   videoModelCatalog: defineTable({
-    studioExternalId: v.string(), provider: v.string(), modelId: v.string(), name: v.optional(v.string()),
+    studioExternalId: v.string(), provider: v.string(), modelId: v.string(), canonicalSlug: v.optional(v.string()), name: v.optional(v.string()),
     supportsTextToVideo: v.boolean(), supportsImageReferences: v.boolean(), supportsVideoReferences: v.boolean(),
     supportsFirstFrame: v.boolean(), supportsLastFrame: v.boolean(), supportsVideoEdit: v.boolean(),
     supportsVideoExtension: v.boolean(), supportsAudio: v.boolean(), supportedDurations: v.array(v.number()),
@@ -517,8 +541,72 @@ export default defineSchema({
 
   verifiedAudioProbes: defineTable({
     projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
-    durationSeconds: v.number(), audioCodec: v.string(), sampleRate: v.number(), channels: v.number(), hasVideo: v.boolean(), probedAt: timestamp,
+    durationSeconds: v.number(), audioCodec: v.string(), audioFormat: v.optional(v.string()), durationMeasurement: v.optional(v.literal('DECODED_PCM_SAMPLES_V1')), sampleRate: v.number(), channels: v.number(), hasVideo: v.boolean(), probedAt: timestamp,
   }).index('by_asset', ['assetId']),
+
+  verifiedImageProbes: defineTable({
+    projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
+    width: v.number(), height: v.number(), imageCodec: v.string(), probedAt: timestamp,
+  }).index('by_asset', ['assetId']),
+
+  movies: defineTable({
+    projectId: v.id('projects'), title: v.string(), creationKey: v.string(), requestHash: v.string(), createdByUserId: v.id('users'), createdAt: timestamp, updatedAt: timestamp, archivedAt: v.optional(timestamp),
+  }).index('by_project', ['projectId', 'createdAt']).index('by_creation_key', ['creationKey']),
+
+  movieVersions: defineTable({
+    projectId: v.id('projects'), movieId: v.id('movies'), versionNumber: v.number(), parentVersionId: v.optional(v.id('movieVersions')), creationKey: v.string(), requestHash: v.string(),
+    state: v.union(v.literal('VALIDATING'), v.literal('READY'), v.literal('INVALID')), output: movieOutput, componentCount: v.number(), validatedComponentCount: v.number(),
+    durationInFrames: v.optional(v.number()), contentHash: v.optional(v.string()), confirmedRetainedVersions: v.boolean(), createdByUserId: v.id('users'), createdAt: timestamp, validatedAt: v.optional(timestamp), errorCode: v.optional(v.string()),
+  }).index('by_movie_version', ['movieId', 'versionNumber']).index('by_creation_key', ['creationKey']).index('by_project', ['projectId', 'createdAt']).index('by_state', ['state', 'createdAt']),
+
+  movieComponents: defineTable({
+    projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), orderIndex: v.number(), chapterId: v.string(), chapterTitle: v.string(), productionId: v.id('productions'), productionVersionId: v.id('productionVersions'),
+    timelineId: v.id('timelines'), timelineVersionNumber: v.number(), manifestId: v.id('manifests'), episodeId: v.optional(v.id('episodes')), episodeStoryStateId: v.optional(v.id('episodeStoryStates')), continuityBibleId: v.optional(v.id('continuityBibles')),
+    validationState: v.union(v.literal('PENDING'), v.literal('VALIDATED'), v.literal('INVALID')), sourceManifestSha256: v.optional(v.string()), rendererVersion: v.optional(v.string()), startFrame: v.optional(v.number()), durationInFrames: v.optional(v.number()),
+    sourceMap: v.optional(v.array(movieSource)), errorCode: v.optional(v.string()), createdAt: timestamp,
+  }).index('by_version_order', ['movieVersionId', 'orderIndex']).index('by_version_start', ['movieVersionId', 'startFrame']).index('by_version_chapter', ['movieVersionId', 'chapterId', 'orderIndex']).index('by_manifest', ['manifestId']),
+
+  movieExports: defineTable({
+    mediaAbi: v.optional(v.string()),
+    projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), requestedByUserId: v.id('users'), idempotencyKey: v.string(), requestHash: v.string(), purpose: v.union(v.literal('REVIEW'), v.literal('DELIVERY')), approvedReviewId: v.optional(v.id('movieReviews')),
+    selection: v.object({ scope: v.union(v.literal('MOVIE'), v.literal('CHAPTERS'), v.literal('SCENES'), v.literal('SHOTS')), chapterIds: v.optional(v.array(v.string())), occurrences: v.optional(v.array(v.object({ componentId: v.id('movieComponents'), sceneId: v.optional(v.id('scenes')), shotVersionId: v.optional(v.id('shotVersions')) }))) }),
+    outputHash: v.string(), planHash: v.string(), partCount: v.number(), readyPartCount: v.number(), durationInFrames: v.number(),
+    status: v.union(v.literal('QUEUED'), v.literal('RENDERING_COMPONENTS'), v.literal('MERGING'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('CANCELED'), v.literal('NEEDS_ATTENTION')),
+    mergeJobId: v.optional(v.id('movieMergeJobs')), storageId: v.optional(v.id('_storage')), checksum: v.optional(v.string()), byteSize: v.optional(v.number()), verification: v.optional(movieArtifactVerification), errorCode: v.optional(v.string()),
+    createdAt: timestamp, updatedAt: timestamp, completedAt: v.optional(timestamp), canceledAt: v.optional(timestamp),
+  }).index('by_version', ['movieVersionId', 'createdAt']).index('by_project', ['projectId', 'createdAt']).index('by_idempotency', ['idempotencyKey']).index('by_status', ['status', 'updatedAt']),
+
+  movieExportParts: defineTable({
+    projectId: v.id('projects'), movieExportId: v.id('movieExports'), componentId: v.id('movieComponents'), orderIndex: v.number(), sourceStartFrame: v.number(), durationInFrames: v.number(), outputStartFrame: v.number(), sourceManifestSha256: v.string(),
+    status: v.union(v.literal('WAITING_RENDER'), v.literal('READY'), v.literal('FAILED'), v.literal('CANCELED')), renderJobId: v.optional(v.id('renderJobs')), exportId: v.optional(v.id('exports')), storageId: v.optional(v.id('_storage')),
+    checksum: v.optional(v.string()), byteSize: v.optional(v.number()), verification: v.optional(moviePartVerification), reused: v.boolean(), errorCode: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp,
+  }).index('by_export_order', ['movieExportId', 'orderIndex']).index('by_render_job', ['renderJobId']).index('by_component', ['componentId']),
+
+  movieMergeJobs: defineTable({
+    mediaAbi: v.optional(v.string()),
+    projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), movieExportId: v.id('movieExports'), planHash: v.string(), idempotencyKey: v.string(), requestHash: v.string(), createdByUserId: v.id('users'),
+    status: v.union(v.literal('QUEUED'), v.literal('PROCESSING'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('CANCELED'), v.literal('NEEDS_ATTENTION')), executionStage: v.string(), progress: v.number(), attempt: v.number(),
+    leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), dispatchLeaseId: v.optional(v.string()), dispatchLeaseExpiresAt: v.optional(timestamp), dispatchPayload: v.optional(json), callbackIdempotencyKey: v.optional(v.string()),
+    dispatchRetryCount: v.number(), nextDispatchAt: v.optional(timestamp), acceptedAt: v.optional(timestamp), startedAt: v.optional(timestamp), lastHeartbeatAt: v.optional(timestamp), lastHeartbeatOccurredAt: v.optional(timestamp), errorCode: v.optional(v.string()),
+    createdAt: timestamp, updatedAt: timestamp, completedAt: v.optional(timestamp),
+  }).index('by_export', ['movieExportId']).index('by_idempotency', ['idempotencyKey']).index('by_status', ['status', 'nextDispatchAt']).index('by_project', ['projectId', 'createdAt']),
+
+  movieMergeCallbackReceipts: defineTable({
+    jobId: v.id('movieMergeJobs'), projectId: v.id('projects'), eventId: v.string(), idempotencyKey: v.string(), eventType: v.string(), attempt: v.number(), occurredAt: timestamp, receivedAt: timestamp, payloadHash: v.string(), signature: v.optional(v.string()), status: v.string(),
+  }).index('by_event_id', ['eventId']).index('by_idempotency', ['idempotencyKey']).index('by_job', ['jobId']),
+
+  movieReviews: defineTable({
+    projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), movieExportId: v.id('movieExports'), planHash: v.string(), creationKey: v.string(), requestHash: v.string(), requestedByUserId: v.id('users'), createdAt: timestamp, updatedAt: timestamp,
+  }).index('by_export', ['movieExportId']).index('by_version', ['movieVersionId', 'createdAt']).index('by_project', ['projectId', 'createdAt']).index('by_creation_key', ['creationKey']),
+
+  movieReviewComments: defineTable({
+    projectId: v.id('projects'), reviewId: v.id('movieReviews'), authorUserId: v.optional(v.id('users')), authorName: v.optional(v.string()), reviewLinkId: v.optional(v.id('movieReviewLinks')), clientRequestId: v.optional(v.string()), body: v.string(),
+    movieFrame: v.number(), componentId: v.id('movieComponents'), componentFrame: v.number(), contributors: v.array(movieSource), resolvedAt: v.optional(timestamp), createdAt: timestamp,
+  }).index('by_review', ['reviewId', 'createdAt']).index('by_link_request', ['reviewLinkId', 'clientRequestId']),
+
+  movieReviewLinks: defineTable({
+    projectId: v.id('projects'), movieVersionId: v.id('movieVersions'), movieExportId: v.id('movieExports'), reviewId: v.id('movieReviews'), planHash: v.string(), tokenHash: v.string(), label: v.string(), createdByUserId: v.id('users'), expiresAt: timestamp, createdAt: timestamp, revokedAt: v.optional(timestamp),
+  }).index('by_token_hash', ['tokenHash']).index('by_review', ['reviewId']).index('by_project', ['projectId', 'createdAt']),
 
   beatAnalysisJobs: defineTable({
     projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), sourceChecksum: v.string(), assetChecksum: v.string(), algorithmVersion: v.string(),
@@ -538,6 +626,8 @@ export default defineSchema({
   }).index('by_project', ['projectId', 'createdAt']).index('by_asset', ['assetId', 'createdAt']).index('by_source', ['projectId', 'assetId', 'sourceChecksum', 'algorithmVersion']).index('by_parent', ['parentVersionId']).index('by_creation_key', ['creationKey']),
 
   renderJobs: defineTable({
+    movieComponentId: v.optional(v.id('movieComponents')),
+    movieMediaAbi: v.optional(v.string()),
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), manifestId: v.optional(v.id("manifests")), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), operation: v.string(), preset: v.string(),
     status, idempotencyKey: v.string(), requestHash: v.optional(v.string()), progress: v.number(), estimatedCost: v.optional(v.number()), actualCost: v.optional(v.number()),
     createdByUserId: v.optional(v.id("users")), executionStage: v.optional(v.string()), dispatchAttempt: v.optional(v.number()),

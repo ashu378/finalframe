@@ -17,7 +17,7 @@ export async function sendLeaseHeartbeat(record: CompletionRecord, options: Hear
   if (!record.request.heartbeatUrl) return 'denied';
   if (!options.secret) throw new Error('Worker heartbeat authentication is not configured.');
   const url = assertTransferUrl(record.request.heartbeatUrl, options.allowedOrigins);
-  if (url.pathname !== '/renderer/heartbeat' || url.search) throw new Error('Invalid worker heartbeat endpoint.');
+  if (url.pathname !== (record.request.movieContext ? '/renderer/movie-heartbeat' : '/renderer/heartbeat') || url.search) throw new Error('Invalid worker heartbeat endpoint.');
   const stage = record.stage === 'RENDERING' ? 'RENDERING' : record.stage === 'UPLOAD_PENDING' ? 'UPLOADING' : 'CALLBACK_PENDING';
   const body = JSON.stringify({ version: 1, eventId: randomUUID(), jobId: record.request.jobId, projectId: record.request.projectId, attempt: record.request.attempt, leaseId: record.request.leaseId, occurredAt: new Date(options.now?.() ?? Date.now()).toISOString(), stage });
   const controller = new AbortController();
@@ -44,6 +44,7 @@ export class LeaseHeartbeatMonitor {
     if (record.request.heartbeatUrl && !this.denied.has(record.key) && !['DELIVERED', 'NEEDS_ATTENTION'].includes(record.stage)) this.pending.set(record.key, record);
   }
   stop(key: string) { this.pending.delete(key); }
+  isDenied(key:string) { return this.denied.has(key); }
   tick(): Promise<void> {
     if (this.ticking) return this.ticking;
     this.ticking = this.tickOnce().finally(() => { this.ticking = undefined; });

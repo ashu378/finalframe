@@ -212,6 +212,14 @@
       "acceptance": "PENDING"
     },
     {
+      "route": "/dashboard/projects/[id]/movies",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/movies/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/movies",
+      "acceptance": "PENDING"
+    },
+    {
       "route": "/dashboard/projects/[id]/production",
       "kind": "page",
       "area": "creator",
@@ -308,6 +316,14 @@
       "acceptance": "PENDING"
     },
     {
+      "route": "/invite",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/invite/page.tsx",
+      "testId": "route:page:/invite",
+      "acceptance": "PENDING"
+    },
+    {
       "route": "/legal/cookies",
       "kind": "page",
       "area": "policy",
@@ -361,6 +377,14 @@
       "area": "public",
       "source": "src/app/(public)/methodology/page.tsx",
       "testId": "route:page:/methodology",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/movie-review/[token]",
+      "kind": "page",
+      "area": "public",
+      "source": "src/app/(public)/movie-review/[token]/page.tsx",
+      "testId": "route:page:/movie-review/[token]",
       "acceptance": "PENDING"
     },
     {

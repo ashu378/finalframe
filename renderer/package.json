@@ -16,9 +16,13 @@
     "build": "tsc --project tsconfig.json",
     "check": "npm run typecheck",
     "test": "npm run build && node tests/run-renderer-tests.cjs && node tests/run-transfer-outbox-tests.cjs && node tests/run-v5-contract-tests.mjs && node tests/run-beat-detector-tests.cjs && node tests/run-probe-timing-tests.mjs",
+    "test:images:media": "npm run build && node tests/run-image-probe-tests.mjs",
     "test:audio": "npm run build && node tests/run-audio-normalization-tests.mjs",
     "test:beats:media": "npm run build && node tests/run-beat-media-tests.mjs",
-    "test:visual": "npm run build && node tests/run-v5-visual-tests.mjs"
+    "test:visual": "npm run build && node tests/run-v5-visual-tests.mjs",
+    "test:movie": "npm run build && node tests/run-movie-contract-tests.mjs && node tests/run-movie-outbox-tests.mjs",
+    "test:movie:media": "npm run build && node tests/run-movie-media-tests.mjs && node tests/run-movie-v5-media-tests.mjs",
+    "test:movie:long": "npm run build && node tests/run-movie-thirty-minute-tests.mjs"
   },
   "engines": {
     "node": ">=20"

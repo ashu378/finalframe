@@ -10,6 +10,7 @@ import type { WorkerMediaPolicy } from '../media/source-policy.js';
 import type { AssemblyPlan } from '../assembly/plan.js';
 import type { RenderRequest, RenderRuntime } from '../renderer.js';
 import type { RenderArtifactVerification } from '../types.js';
+import { outputFormatForManifest } from '../output-format.js';
 
 export interface RemotionRuntimeOptions {
   entryPoint: string;
@@ -48,6 +49,7 @@ export class RemotionRenderRuntime implements RenderRuntime {
   async render(plan: AssemblyPlan, request: RenderRequest): Promise<{ outputPath: string; durationInFrames: number; verification?: RenderArtifactVerification }> {
     const production = (request.mode ?? 'production') === 'production';
     const manifest = production ? assertLockedManifest(request.manifest) : assertValidManifest(request.manifest);
+    const outputFormat = outputFormatForManifest(manifest);
     assertManifestMediaSources(manifest, { mode: production ? 'production' : 'fixture', ...this.options.mediaPolicy });
     if (production && (this.options.requireMediaTools ?? true) && (!this.options.ffmpeg || !this.options.ffprobe)) {
       throw new Error('Renderer unavailable: production rendering requires both FFmpeg normalization and ffprobe verification. Configure the worker binaries before accepting a render.');
@@ -60,8 +62,16 @@ export class RemotionRenderRuntime implements RenderRuntime {
       id: plan.compositionId,
       inputProps: { manifest },
     });
-    const remotionPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.remotion.mp4`);
-    const normalizedPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.normalized.mp4`);
+    // Remotion's compressed AAC intermediate is ADTS, which cannot preserve
+    // encoder skip-sample metadata. Copying it into MP4 shifts content before
+    // normalization. Keep the mix as PCM in a supported container until the
+    // final encoder; this also preserves optional/native audio without adding
+    // a synthetic audio track to silent compositions.
+    const losslessIntermediate = Boolean(this.options.ffmpeg);
+    const intermediateExtension = losslessIntermediate ? (plan.outputCodec === 'prores' ? 'mov' : 'mkv') : outputFormat.extension;
+    const normalizedExtension = outputFormat.extension;
+    const remotionPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.remotion.${intermediateExtension}`);
+    const normalizedPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.normalized.${normalizedExtension}`);
     try {
       await renderMedia({
         composition: { ...composition, durationInFrames: plan.durationInFrames, fps: plan.fps, width: plan.width, height: plan.height },
@@ -70,6 +80,11 @@ export class RemotionRenderRuntime implements RenderRuntime {
         outputLocation: remotionPath,
         inputProps: { manifest },
         concurrency: Math.max(1, Math.min(this.options.maxConcurrency ?? Math.max(1, Math.floor(os.cpus().length / 2)), 8)),
+        ...(losslessIntermediate ? { preferLossless: true } : {}),
+        // Remotion may collect still-image assets while deciding whether an
+        // audio mix exists. Known-silent visual plans need no synthetic mix;
+        // video plans must keep their potentially undeclared native audio.
+        ...(plan.audioTracks.length === 0 && !plan.items.some(item => item.kind === 'video') ? { muted: true } : {}),
       });
       if (this.options.ffmpeg) {
         await normalizeWithFFmpeg(this.options.ffmpeg, remotionPath, normalizedPath, { output: manifest.output, requireAudio: Boolean(manifest.output.audio) || plan.audioTracks.length > 0, timeoutMs: this.options.commandTimeoutMs, maxOutputBytes: this.options.maxOutputBytes });

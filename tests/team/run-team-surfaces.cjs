@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const ts = require('typescript');
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const { getFunctionName } = require('convex/server');
+global.crypto ||= require('node:crypto').webcrypto;
+const root = path.resolve(__dirname, '../..');
+function load(file, stubs = {}) { const filename = path.join(root, file); const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename)); const normal = mod.require.bind(mod); mod.require = name => Object.hasOwn(stubs, name) ? stubs[name] : normal(name); mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename); return mod.exports; }
+const Link = ({ children, ...props }) => React.createElement('a', props, children);
+const mutations = []; const refreshed = []; let fail = false;
+const actions = load('src/lib/teams/actions.ts', { 'next/cache': { revalidatePath: (...value) => refreshed.push(value) }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => ({ mutation: async (ref, args) => { mutations.push({ name: getFunctionName(ref), args }); if (fail) throw new Error('private-token-or-provider-authority'); return { studioId: 'studio', invitationId: 'invitation' }; }, query: async () => ({}) }) } });
+const secret = load('src/lib/teams/invitation-token.ts');
+const controls = load('src/components/team/team-controls.tsx', { 'next/navigation': { useRouter: () => ({ refresh() {}, push() {} }) }, '@/lib/teams/actions': actions, '@/lib/teams/invitation-token': secret });
+const owner = { studioId: 'studio', studioExternalId: 'studio', name: 'Own workspace', role: 'owner', recordedOwner: true, userId: 'owner' };
+const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
+(async () => {
+  const token = await secret.invitationSecret(); assert.match(token.token, /^[A-Za-z0-9_-]{43}$/); assert.equal(token.tokenHash, require('node:crypto').createHash('sha256').update(token.token).digest('hex')); assert.notEqual((await secret.invitationSecret()).token, token.token);
+  const ownerInvite = render(controls.TeamInviteForm, { context: owner }); assert(ownerInvite.includes('Recipient account ID')); assert(ownerInvite.includes('No email is sent')); assert(ownerInvite.includes('Create copyable invitation')); assert(!ownerInvite.includes('type="email"')); assert(!ownerInvite.includes('value="owner"')); assert(ownerInvite.includes('value="admin"'));
+  const admin = { ...owner, role: 'admin', recordedOwner: false, userId: 'admin' }; assert(!render(controls.TeamInviteForm, { context: admin }).includes('value="admin"'));
+  assert.equal(render(controls.WorkspaceTransferForm, { context: admin }), ''); const transfer = render(controls.WorkspaceTransferForm, { context: owner }); assert(transfer.includes('exact successor account ID')); assert(transfer.includes('Project membership and project ownership stay separate'));
+  const primary = { key: 'member', userId: 'owner', displayName: 'Owner', role: 'owner', status: 'active', source: 'canonical', recordedOwner: true }; assert.equal(render(controls.TeamMemberControls, { context: owner, member: primary }), '');
+  const removed = { ...primary, userId: 'removed', role: 'member', recordedOwner: false, status: 'removed' }; assert.equal(render(controls.TeamMemberControls, { context: admin, member: removed }), ''); assert(render(controls.TeamMemberControls, { context: owner, member: removed }).includes('Apply member change'));
+  const invitation = { invitationId: 'invite', recipientUserId: 'recipient', role: 'admin', status: 'PENDING', expiresAt: 1, expired: false, createdAt: 1 }; assert.equal(render(controls.RevokeInvitationForm, { context: admin, invitation }), ''); assert(render(controls.RevokeInvitationForm, { context: owner, invitation }).includes('Revocation reason'));
+  await actions.createTeamInvitation({ studioId: 'studio', recipientUserId: 'exact-recipient', role: 'member', tokenHash: token.tokenHash, expiresAt: 1000, requestId: 'stable-invite' }); assert.equal(mutations.at(-1).name, 'teamLifecycle:createInvitation'); assert(!JSON.stringify(mutations.at(-1).args).includes(token.token)); assert(!('email' in mutations.at(-1).args));
+  await actions.acceptTeamInvitation({ token: token.token, requestId: 'stable-accept', selectWorkspace: true }); assert.equal(mutations.at(-1).args.token, token.token); assert(refreshed.some(([route, kind]) => route === '/dashboard' && kind === 'layout'));
+  fail = true; const failure = await actions.previewTeamInvitation(token.token); assert.equal(failure.success, false); assert(!failure.error.includes('authority')); fail = false;
+  let context = owner; let allow = true; let rosterReads = 0;
+  const page = load('src/app/(dashboard)/dashboard/settings/team/page.tsx', { 'next/link': Link, '@/lib/guards': { requireAuth: async () => { if (!allow) throw new Error('login redirect'); } }, '@/lib/teams/actions': { getTeamContext: async () => context, getTeamWorkspaces: async () => ({ rows: [{ studioId: 'studio', name: 'Own workspace', role: context.role, selected: true }], continueCursor: 'more-workspaces', isDone: false }), getTeamRoster: async () => { rosterReads++; return { rows: [{ ...primary, displayName: 'Primary owner' }], continueCursor: 'next-members', isDone: false }; }, getTeamInvitations: async () => ({ rows: [invitation], continueCursor: 'next-invitations', isDone: false }) }, '@/components/team/team-controls': controls });
+  const ownerPage = renderToStaticMarkup(await page.default({ searchParams: Promise.resolve({}) })); assert(ownerPage.includes('More of your workspaces')); assert(ownerPage.includes('Next member page')); assert(ownerPage.includes('Next invitation page')); assert(ownerPage.includes('Transfer workspace ownership'));
+  context = { ...owner, role: 'member', recordedOwner: false }; const readsBefore = rosterReads; const memberPage = renderToStaticMarkup(await page.default({ searchParams: Promise.resolve({}) })); assert.equal(rosterReads, readsBefore); assert(!memberPage.includes('Invite an existing account')); assert(!memberPage.includes('Transfer workspace ownership')); assert(memberPage.includes('joining this workspace alone does not open its existing projects'));
+  allow = false; await assert.rejects(page.default({ searchParams: Promise.resolve({}) }), /login redirect/);
+  const acceptance = load('src/components/team/invitation-acceptance.tsx', { 'next/link': Link, 'next/navigation': { useRouter: () => ({ push() {}, refresh() {} }) }, '@/lib/teams/actions': actions }); const landing = render(acceptance.InvitationAcceptance, {}); assert(landing.includes('reopen the private link afterward')); assert(!landing.includes(token.token));
+  console.log('PASS team SSR role/owner gates, exact-ID copy-link controls, cryptographic token/hash format, no email or raw-token creation payload, scoped action targets, workspace pagination and private invitation landing (no network/DB calls)');
+})().catch(error => { console.error(error); process.exitCode = 1; });

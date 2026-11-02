@@ -9,6 +9,7 @@ import { cropCaptionTrack, finishingV5Enabled, normalizeCaptionTrack } from './f
 import { validateManifest } from '../renderer/src/manifest';
 import { serializeCaptionSidecars } from '../renderer/src/captions';
 import type { CaptionTrack } from '../renderer/src/types';
+import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Production = Doc<"productions">;
@@ -511,6 +512,7 @@ export const captionSidecars = query({
     if (!job || job.status !== 'COMPLETED' || job.projectId !== manifest.projectId || job.manifestId !== manifest._id || !storage || storage.size < 1 || !storage.contentType?.startsWith('video/')) throw new Error('The verified video for these captions is unavailable.');
     const payload = manifest.manifest as import('../renderer/src/types').RenderManifest;
     if (!validateManifest(payload).ok || ![4, 5].includes(payload.version) || payload.version !== manifest.contractVersion || payload.projectId !== manifest.projectId || payload.productionId !== manifest.productionId || payload.manifestId !== manifest._id) throw new Error('This caption manifest is unavailable.');
+    assertStoredRenderMediaType(payload, manifest.contractVersion, storage.contentType, record.mimeType);
     return (payload.captionTracks ?? []).map(track => ({ trackId: track.id, language: track.language, ...serializeCaptionSidecars(track, payload.output.fps) }));
   },
 });

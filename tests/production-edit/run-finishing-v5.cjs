@@ -141,6 +141,10 @@ async function runFinishingTests() {
       ctx.storageObjects.set('storage_export',{size:1234,contentType:'video/mp4'});
       ctx.put('exports',{_id:'export_done',projectId:'project_1',productionId:'production_1',manifestId:manifestRecord._id,renderJobId:'render_done',status:'COMPLETED',storageId:'storage_export'});
       const sidecars = await assembly.captionSidecars.handler(ctx,{manifestId:manifestRecord._id,exportId:'export_done'}); assert.match(sidecars[0].srt,/00:00:00,200 --> 00:00:01,200\nExact words\./);
+      ctx.storageObjects.set('storage_export',{size:1234,contentType:'video/webm'});
+      await assert.rejects(assembly.captionSidecars.handler(ctx,{manifestId:manifestRecord._id,exportId:'export_done'}), /media type/);
+      ctx.storageObjects.set('storage_export',{size:1234,contentType:'video/mp4'}); ctx.rows.get('export_done').mimeType='video/webm';
+      await assert.rejects(assembly.captionSidecars.handler(ctx,{manifestId:manifestRecord._id,exportId:'export_done'}), /media type/); delete ctx.rows.get('export_done').mimeType;
       const savedPayload = structuredClone(ctx.rows.get(manifestRecord._id).manifest);
       for (const [field, foreignValue] of [['projectId','project_other'],['productionId','production_other'],['manifestId','manifest_other'],['version',4]]) {
         ctx.rows.get(manifestRecord._id).manifest = { ...structuredClone(savedPayload), [field]: foreignValue };

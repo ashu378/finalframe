@@ -25,6 +25,7 @@ export interface RenderResult {
   durationInFrames: number;
   manifestId: string;
   verification?: RenderArtifactVerification;
+  checksum?: string;
 }
 
 export interface RenderReceiptStore {

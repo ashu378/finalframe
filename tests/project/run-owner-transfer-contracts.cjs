@@ -14,7 +14,7 @@ function load(file, stubs = {}) {
 class AccessError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const identity = { externalId: 'subject-one', subject: 'subject-one' };
 const auth = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
-const authorization = load('convex/authorization.ts', { './auth': auth, './identity': { getIdentity: async () => identity, requireIdentity: async () => identity } });
+const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './auth': auth, './identity': { getIdentity: async () => identity, requireIdentity: async () => identity } });
 const rows = {
   users: [{ _id: 'one', externalId: 'subject-one', authSubject: 'subject-one', status: 'active' }, { _id: 'two', externalId: 'subject-two', authSubject: 'subject-two', status: 'active' }],
   studios: [{ _id: 'studio', externalId: 'workspace', ownerUserId: 'one', ownerExternalId: 'subject-one' }],

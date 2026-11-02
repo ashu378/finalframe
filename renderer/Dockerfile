@@ -31,8 +31,8 @@ COPY fixtures ./fixtures
 RUN pnpm build
 
 RUN useradd --create-home --uid 10001 appuser \
-  && mkdir -p /var/lib/finalframe/output /var/lib/finalframe/state \
-  && chown -R appuser:appuser /app/dist /app/fixtures /var/lib/finalframe \
+  && mkdir -p /var/lib/finalframe/output /var/lib/finalframe/state /app/node_modules/.cache \
+  && chown -R appuser:appuser /app/dist /app/fixtures /var/lib/finalframe /app/node_modules/.cache \
   && chmod 0700 /var/lib/finalframe /var/lib/finalframe/output /var/lib/finalframe/state
 USER appuser
 

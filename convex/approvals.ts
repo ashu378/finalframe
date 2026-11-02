@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import {sha256Equal} from '../renderer/src/media/sha256';
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireProjectAccess, requireProjectRole, type ProjectRole } from "./authorization";
@@ -87,11 +88,23 @@ export async function transitionResourceState(
   if (args.resourceType === "production" || args.resourceType === "productionVersion") {
     throw new Error("Production planning and approval must use the canonical productions.ts path.");
   }
+  if (['movieVersion','movieReview','movieExport'].includes(args.resourceType) && process.env.FINALFRAME_MOVIE_ENABLED !== 'true') throw new Error('Movie approvals are not enabled yet.');
   const access = await requireProjectRole(ctx, args.projectId, args.roles);
   const effective = await getEffectiveResourceState(ctx, args.projectId, args.resourceType, args.resourceId, args.productionId);
   if (args.resourceType === "voice" && ["APPROVED", "LOCKED"].includes(args.targetState)) await validateVoiceForApproval(ctx, args.projectId, (effective.resource as Doc<"voices">)._id);
   const productionId = args.productionId ?? effective.productionId;
-  if (!productionId && !["asset", "voice", "projectResourceVersion", "continuityBible"].includes(args.resourceType)) throw new Error("Approval requires a production-owned or supported project-owned resource.");
+  if (!productionId && !["asset", "voice", "projectResourceVersion", "continuityBible", "movieVersion", "movieReview", "movieExport"].includes(args.resourceType)) throw new Error("Approval requires a production-owned or supported project-owned resource.");
+  if (['APPROVED','LOCKED'].includes(args.targetState) && args.resourceType === 'movieVersion') {
+    const version = effective.resource as Doc<'movieVersions'>;
+    if (version.state !== 'READY' || !version.contentHash || !version.durationInFrames || version.validatedComponentCount !== version.componentCount) throw new Error('Validate the exact movie composition before approval or locking.');
+  }
+  if (['APPROVED','LOCKED'].includes(args.targetState) && ['movieReview','movieExport'].includes(args.resourceType)) {
+    const resource = effective.resource as Doc<'movieReviews'> | Doc<'movieExports'>;
+    const output = args.resourceType === 'movieReview' ? await ctx.db.get((resource as Doc<'movieReviews'>).movieExportId) : resource as Doc<'movieExports'>;
+    if (!output || output.projectId !== args.projectId || output.movieVersionId !== resource.movieVersionId || output.status !== 'COMPLETED' || !output.storageId || !output.checksum || !await ctx.db.system.get('_storage',output.storageId)) throw new Error('Movie approval requires the exact completed stored export.');
+    const versionState = await getEffectiveResourceState(ctx,args.projectId,'movieVersion',resource.movieVersionId);
+    if (versionState.currentState !== 'LOCKED') throw new Error('Lock the validated movie version first.');
+  }
   if (args.targetState === "APPROVED" && args.resourceType === "continuityBible") {
     await validateBibleBindings(ctx, args.projectId, (effective.resource as Doc<"continuityBibles">).snapshot, true);
   }
@@ -238,4 +251,14 @@ export async function applyClientReviewDecision(ctx: MutationCtx, args: {
   await ctx.db.patch(review._id, { status: args.decision, updatedAt: timestamp });
   await ctx.db.insert('approvals', { projectId: link.projectId, productionId: link.productionId, studioExternalId: review.studioExternalId, studioId: review.studioId, reviewId: review._id, resourceType: 'review', resourceId: review._id, decision: args.decision === 'APPROVED' ? 'CLIENT_APPROVED' : 'CLIENT_REVISION_REQUESTED', note: `Client ${args.authorName}; review link ${link._id}; timeline version ${link.timelineVersionNumber}${args.note ? `; ${args.note}` : ''}`, createdAt: timestamp });
   return { replayed: false };
+}
+
+/** A movie capability can decide only its exact movie review resource. It
+ * cannot approve the movie assembly, source production or any source asset. */
+export async function applyMovieClientReviewDecision(ctx:MutationCtx,args:{linkId:Id<'movieReviewLinks'>;tokenHash:string;decision:'APPROVED'|'CHANGES_REQUESTED';authorName:string;note?:string}){
+  const link=await ctx.db.get(args.linkId);if(!link||link.tokenHash!==args.tokenHash||link.revokedAt!==undefined||link.expiresAt<=Date.now())throw new Error('Movie review link unavailable.');
+  const [project,review,output,version]=await Promise.all([ctx.db.get(link.projectId),ctx.db.get(link.reviewId),ctx.db.get(link.movieExportId),ctx.db.get(link.movieVersionId)]);
+  if(!project||project.deletedAt||project.archivedAt||project.moderationStatus==='RESTRICTED'||!review||review.projectId!==project._id||review.movieVersionId!==link.movieVersionId||review.movieExportId!==link.movieExportId||review.planHash!==link.planHash||!version||version.projectId!==project._id||version.state!=='READY'||!output||output.projectId!==project._id||output.movieVersionId!==version._id||output.planHash!==link.planHash||output.status!=='COMPLETED'||!output.storageId||!output.checksum)throw new Error('Exact movie review version unavailable.');
+  const storage=await ctx.db.system.get('_storage',output.storageId);if(!storage||!sha256Equal(storage.sha256,output.checksum)||storage.size!==output.byteSize)throw new Error('Movie review storage changed.');
+  const state=await ctx.db.query('resourceStates').withIndex('by_project_resource',q=>q.eq('projectId',project._id).eq('resourceType','movieReview').eq('resourceId',review._id)).unique();const versionState=await ctx.db.query('resourceStates').withIndex('by_project_resource',q=>q.eq('projectId',project._id).eq('resourceType','movieVersion').eq('resourceId',version._id)).unique();if(!state||versionState?.state!=='LOCKED')throw new Error('Canonical movie review authority is unavailable.');const target=args.decision==='APPROVED'?'APPROVED':'REVISION_REQUESTED';if(state.state===target)return {replayed:true};if(state.state!=='IN_REVIEW')throw new Error('Request a new movie review before another decision.');assertResourceStateTransition(state.state,target);const timestamp=Date.now();await ctx.db.patch(state._id,{state:target,updatedAt:timestamp,...(target==='APPROVED'?{approvedAt:timestamp}:{unlockReason:args.note})});await ctx.db.patch(review._id,{updatedAt:timestamp});await ctx.db.insert('approvals',{projectId:project._id,studioExternalId:project.studioExternalId,studioId:project.studioId,resourceType:'movieReview',resourceId:review._id,decision:args.decision==='APPROVED'?'CLIENT_APPROVED':'CLIENT_REVISION_REQUESTED',note:`Client ${args.authorName}; movie review link ${link._id}${args.note?'; '+args.note:''}`,createdAt:timestamp});return {replayed:false};
 }

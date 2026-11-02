@@ -46,7 +46,7 @@ export async function refreshVideoModelCatalog() {
   const models = discovered.map((model) => {
     const perSecondPrices = Object.entries(model.pricingSkus).filter(([sku]) => sku.startsWith('per-video-second')).map(([, price]) => price);
     return {
-      provider: 'openrouter', modelId: model.id, name: model.name,
+      provider: 'openrouter', modelId: model.id, canonicalSlug: model.canonicalSlug, name: model.name,
       supportedDurations: model.supportedDurations,
       supportedResolutions: model.supportedResolutions,
       supportedAspectRatios: model.supportedAspectRatios,

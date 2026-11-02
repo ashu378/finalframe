@@ -70,7 +70,7 @@ export interface WorkspaceControlData {
     resources: ResourceVersionView[];
     resourceCursor: string | null;
     assets: WorkspaceAssetView[];
-    voices: Array<{ id: string; name: string; kind: string; status: string; state: WorkspaceResourceState; hasConsent: boolean; sampleCount: number }>;
+    voices: Array<{ id: string; name: string; kind: string; status: string; state: WorkspaceResourceState; hasConsent: boolean; sampleCount: number; sampleAssetIds: string[] }>;
     bibles: BibleView[];
     boundResources: Array<{ id: string; resourceId: string; name: string; kind: ProjectResourceKind; versionNumber: number; state: WorkspaceResourceState }>;
     plannedBibleId: string | null;

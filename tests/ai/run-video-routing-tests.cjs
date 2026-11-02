@@ -14,11 +14,15 @@ function compileSource(relative, filename) {
   fs.writeFileSync(outputPath, outputText);
   return outputPath;
 }
+compileSource('src/lib/ai/model-registry.ts', 'model-registry.js');
 const source = fs.readFileSync(path.join(root, 'src/lib/ai/video-routing.ts'), 'utf8');
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: 'video-routing.ts' }).outputText;
 const compiled = new Module(path.join(tempRoot, 'video-routing.js'), module);
 compiled.filename = path.join(tempRoot, 'video-routing.js');
 compiled.paths = Module._nodeModulePaths(tempRoot);
+const digestPath = compileSource('renderer/src/media/sha256.ts', 'sha256.js');
+const nativeRoutingRequire = compiled.require.bind(compiled);
+compiled.require = name => name === '../../../renderer/src/media/sha256' ? require(digestPath) : nativeRoutingRequire(name);
 compiled._compile(output, compiled.filename);
 const routing = compiled.exports;
 
@@ -261,6 +265,11 @@ async function testMockedProviderContract() {
   assert.equal(upscalePayload.input_references[0].type, 'video_url');
   const sourceVideo = [{ kind: 'video', url: 'https://fixture.test/source.mp4' }];
   const editPayload = adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-edit', prompt: 'Change the toy car paint.', inputReferences: sourceVideo }, { allowDiscoveredModel: true });
+  const avatarInput = { model: 'heygen/avatar-iv', prompt: 'Animate this original synthetic presenter.', inputReferences: [{ kind: 'image', url: 'https://fixture.test/portrait.png' }, { kind: 'audio', url: 'https://fixture.test/speech.wav' }], aspectRatio: '16:9', resolution: '720p' };
+  const avatarPayload = adapter.buildVideoGenerationRequest(avatarInput, { allowDiscoveredModel: true });
+  assert.equal(avatarPayload.duration, undefined); assert.equal(avatarPayload.generate_audio, undefined); assert.equal(avatarPayload.frame_images, undefined);
+  assert.deepEqual(avatarPayload.input_references.map(reference => reference.type), ['image_url', 'audio_url']);
+  for (const patch of [{ duration: 4 }, { generateAudio: false }, { generateAudio: true }, { frameImages: [{ url: 'https://fixture.test/frame.png', frameType: 'first_frame' }] }, { inputReferences: [] }, { inputReferences: [avatarInput.inputReferences[0]] }, { inputReferences: [...avatarInput.inputReferences, avatarInput.inputReferences[1]] }]) assert.throws(() => adapter.buildVideoGenerationRequest({ ...avatarInput, ...patch }, { allowDiscoveredModel: true }), /Supplied-audio/);
   assert.deepEqual(editPayload, { model: 'black-forest-labs/flux-video-edit', prompt: 'Change the toy car paint.', input_references: [{ type: 'video_url', video_url: { url: 'https://fixture.test/source.mp4' } }] });
   for (const patch of [{ duration: 4 }, { aspectRatio: '16:9' }, { resolution: '720p' }, { generateAudio: true }, { upscaleFactor: 2 }, { creativity: 1 }, { inputReferences: [] }, { inputReferences: [{ kind: 'image', url: 'https://fixture.test/portrait.png' }] }]) assert.throws(() => adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-edit', prompt: 'Edit source.', inputReferences: sourceVideo, ...patch }, { allowDiscoveredModel: true }), /Source-derived|editing/);
   const certifiedUpscalePayload = adapter.buildVideoGenerationRequest({ model: 'black-forest-labs/flux-video-upscale', prompt: 'Enlarge source.', inputReferences: sourceVideo, upscaleFactor: 2, creativity: 0 }, { allowDiscoveredModel: true });

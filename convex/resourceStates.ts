@@ -18,7 +18,7 @@ export type ResourceStateDoc = Doc<"resourceStates">;
 export const RESOURCE_TYPES = [
   "production", "productionVersion", "productionBible", "character", "location", "product", "referencePack",
   "asset", "sequence", "scene", "shot", "shotVersion", "audio", "transcript", "caption", "timeline", "review", "export", "voice",
-  "projectResourceVersion", "continuityBible", "episodeStoryState",
+  "projectResourceVersion", "continuityBible", "episodeStoryState", "movieVersion", "movieReview", "movieExport",
 ] as const;
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 
@@ -104,7 +104,7 @@ function record(value: unknown): Record<string, unknown> {
 type ResolvedResource = {
   projectId: Id<"projects">;
   productionId?: Id<"productions">;
-  resource: Doc<"projects"> | Doc<"productions"> | Doc<"productionVersions"> | Doc<"productionBibles"> | Doc<"characters"> | Doc<"locations"> | Doc<"products"> | Doc<"referencePacks"> | Doc<"assets"> | Doc<"sequences"> | Doc<"scenes"> | Doc<"shots"> | Doc<"shotVersions"> | Doc<"audio"> | Doc<"transcripts"> | Doc<"captions"> | Doc<"timelines"> | Doc<"reviews"> | Doc<"exports"> | Doc<"voices"> | Doc<"projectResourceVersions"> | Doc<"continuityBibles"> | Doc<"episodeStoryStates">;
+  resource: Doc<"projects"> | Doc<"productions"> | Doc<"productionVersions"> | Doc<"productionBibles"> | Doc<"characters"> | Doc<"locations"> | Doc<"products"> | Doc<"referencePacks"> | Doc<"assets"> | Doc<"sequences"> | Doc<"scenes"> | Doc<"shots"> | Doc<"shotVersions"> | Doc<"audio"> | Doc<"transcripts"> | Doc<"captions"> | Doc<"timelines"> | Doc<"reviews"> | Doc<"exports"> | Doc<"voices"> | Doc<"projectResourceVersions"> | Doc<"continuityBibles"> | Doc<"episodeStoryStates"> | Doc<"movieVersions"> | Doc<"movieReviews"> | Doc<"movieExports">;
 };
 
 /** Resolve a resource through its canonical project/production ownership. */
@@ -144,6 +144,20 @@ export async function resolveProjectResource(
       case "voice": resource = await ctx.db.get(identity.resourceId as Id<"voices">); productionId = resource?.productionId; break;
       case "projectResourceVersion": resource = await ctx.db.get(identity.resourceId as Id<"projectResourceVersions">); break;
       case "continuityBible": resource = await ctx.db.get(identity.resourceId as Id<"continuityBibles">); break;
+      case "movieVersion": {
+        resource = await ctx.db.get(identity.resourceId as Id<'movieVersions'>);
+        const movie = resource ? await ctx.db.get(resource.movieId) : null;
+        if (!movie || movie.projectId !== projectId || movie.archivedAt || resource?.projectId !== movie.projectId) resource = null;
+        break;
+      }
+      case "movieReview":
+      case "movieExport": {
+        resource = type === 'movieReview' ? await ctx.db.get(identity.resourceId as Id<'movieReviews'>) : await ctx.db.get(identity.resourceId as Id<'movieExports'>);
+        const version = resource ? await ctx.db.get(resource.movieVersionId) : null;
+        const movie = version ? await ctx.db.get(version.movieId) : null;
+        if (!version || !movie || movie.archivedAt || version.projectId !== projectId || movie.projectId !== projectId || resource?.projectId !== projectId) resource = null;
+        break;
+      }
       case "episodeStoryState": {
         resource = await ctx.db.get(identity.resourceId as Id<"episodeStoryStates">);
         const episode = resource ? await ctx.db.get(resource.episodeId) : null;
