@@ -26,6 +26,15 @@ let checks=0;async function check(name,run){await run();checks++;console.log('PA
  delete process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED;delete process.env.FINALFRAME_BEAT_WORKER_ENABLED;
  await check('public analysis is disabled by default and never schedules paid/model work',async()=>{const ctx=context();await assert.rejects(beat.request.handler(ctx,args()),/not enabled/);assert.equal(ctx.count('beatAnalysisJobs'),0);assert.equal(ctx.scheduled.length,0);});
  process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED='true';process.env.FINALFRAME_BEAT_WORKER_ENABLED='true';
+ await check('canonical online Storage base64 SHA binds the exact same worker digest without rewriting asset lineage',async()=>{
+  const ctx=context();ctx.storageObjects.get('storage_music').sha256=Buffer.from(sourceSha,'hex').toString('base64');
+  const originalAssetChecksum=ctx.rows.get('asset_music').checksum;
+  const made=await beat.request.handler(ctx,args());const claimed=await beat.claim.handler(ctx,{jobId:made.jobId});
+  assert.equal(claimed.sourceChecksum,sourceSha);assert.equal(claimed.assetChecksum,originalAssetChecksum);
+  await beat.complete.handler(ctx,{jobId:made.jobId,leaseId:claimed.leaseId,result:goodResult()});
+  assert.equal(ctx.rows.get(made.jobId).status,'COMPLETED');assert.equal(ctx.rows.get('asset_music').checksum,originalAssetChecksum);
+  ctx.storageObjects.get('storage_music').sha256='not-a-digest';await assert.rejects(beat.request.handler(ctx,args()),/canonical audio/);
+ });
  await check('request replay fences current source/user and cache reuse does not recompute',async()=>{
   const ctx=context();const input=args();const first=await beat.request.handler(ctx,input);const repeat=await beat.request.handler(ctx,input);assert.equal(first.jobId,repeat.jobId);assert.equal(repeat.replayed,true);assert.equal(ctx.count('beatAnalysisJobs'),1);
   const leased=await beat.claim.handler(ctx,{jobId:first.jobId});await beat.complete.handler(ctx,{jobId:first.jobId,leaseId:leased.leaseId,result:goodResult()});const cached=await beat.request.handler(ctx,args());assert.equal(ctx.rows.get(cached.jobId).status,'COMPLETED');assert.equal(ctx.count('beatAnalysisVersions'),1);

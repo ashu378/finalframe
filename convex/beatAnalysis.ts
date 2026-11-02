@@ -6,6 +6,7 @@ import type { FunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { requireProjectAccess, requireProjectRole } from './authorization';
 import { assertBeatAnalysisResult, BEAT_ANALYSIS_LIMITS, BEAT_ANALYSIS_VERSION } from '../renderer/src/media/beat-detector';
+import { normalizeSha256 } from '../renderer/src/media/sha256';
 
 type ReadCtx = MutationCtx | QueryCtx;
 type Job = Doc<'beatAnalysisJobs'>;
@@ -48,8 +49,9 @@ export async function approvedBeatSource(ctx: ReadCtx, projectId: Id<'projects'>
   const approval = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', projectId).eq('resourceType', 'asset').eq('resourceId', assetId)).unique();
   if (!approval || !['APPROVED', 'LOCKED'].includes(approval.state)) throw new Error('Approve this project audio before beat analysis.');
   const storage = await ctx.db.system.get('_storage', asset.storageId);
-  if (!storage || !storage.contentType?.startsWith('audio/') || storage.size <= 0 || storage.size > BEAT_ANALYSIS_LIMITS.maxSourceBytes || !/^[a-f0-9]{64}$/i.test(storage.sha256)) throw new Error('Choose canonical audio of at most 64 MiB.');
-  return { project, asset, storage, projectId, assetId, storageId: asset.storageId, sourceChecksum: storage.sha256, assetChecksum: asset.checksum, byteSize: storage.size };
+  const sourceChecksum = normalizeSha256(storage?.sha256);
+  if (!storage || !storage.contentType?.startsWith('audio/') || storage.size <= 0 || storage.size > BEAT_ANALYSIS_LIMITS.maxSourceBytes || !sourceChecksum) throw new Error('Choose canonical audio of at most 64 MiB.');
+  return { project, asset, storage, projectId, assetId, storageId: asset.storageId, sourceChecksum, assetChecksum: asset.checksum, byteSize: storage.size };
 }
 
 function sameSource(source: Awaited<ReturnType<typeof approvedBeatSource>>, row: Pick<Job, 'projectId' | 'assetId' | 'storageId' | 'sourceChecksum' | 'assetChecksum'>) { return source.projectId === row.projectId && source.assetId === row.assetId && source.storageId === row.storageId && source.sourceChecksum === row.sourceChecksum && source.assetChecksum === row.assetChecksum; }
