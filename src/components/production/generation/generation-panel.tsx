@@ -1,9 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Clock3, Film, Info, Loader2, Play, RefreshCcw, Sparkles, WandSparkles } from 'lucide-react';
-import { toast } from 'sonner';
-import { createShotGenerationJob } from '@/lib/generation/actions';
+import { useMemo } from 'react';
+import { AlertTriangle, Check, ChevronDown, Clock3, Film, Info, Loader2, Sparkles, WandSparkles } from 'lucide-react';
+import { GenerateShotButton } from '@/components/production/generate-shot-button';
 import { useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -16,7 +15,6 @@ interface GenerationPanelProps {
     enabled: boolean;
 }
 
-type LocalJob = GenerationJobView & { jobId: string; progress: number };
 
 function normalizedStatus(status?: string): string {
     return status?.toUpperCase() || 'PLANNING';
@@ -66,37 +64,14 @@ function initialJobForShot(jobs: GenerationJobView[], shot: GenerationShotView):
 }
 
 export function GenerationPanel({ productionId, sequences, jobs, enabled }: GenerationPanelProps) {
-    const [localJobs, setLocalJobs] = useState<Record<string, LocalJob>>({});
-    const [pendingShotId, setPendingShotId] = useState<string | null>(null);
     const liveJobs = useQuery(api.generationJobs.list, { productionId: productionId as Id<'productions'> }) as GenerationJobView[] | undefined;
     const visibleJobs = liveJobs ?? jobs;
 
     const takeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.length, 0), 0), [sequences]);
-    const madeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.filter((shot) => normalizedStatus((visibleJobs.find((job) => (job._id || job.jobId) === localJobs[shot._id]?.jobId) || localJobs[shot._id] || initialJobForShot(visibleJobs, shot))?.status || shot.status) === 'COMPLETED').length, 0), 0), [visibleJobs, localJobs, sequences]);
+    const madeCount = useMemo(() => sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sceneTotal, scene) => sceneTotal + scene.shots.filter((shot) => normalizedStatus((initialJobForShot(visibleJobs, shot))?.status || shot.status) === 'COMPLETED').length, 0), 0), [visibleJobs, sequences]);
 
     function jobFor(shot: GenerationShotView): GenerationJobView | undefined {
-        const local = localJobs[shot._id];
-        if (local) return visibleJobs.find((job) => (job._id || job.jobId) === local.jobId) || local;
         return initialJobForShot(visibleJobs, shot);
-    }
-
-    async function makeTake(shot: GenerationShotView) {
-        if (!enabled || pendingShotId || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(jobFor(shot)?.status))) return;
-        setPendingShotId(shot._id);
-        setLocalJobs((current) => ({ ...current, [shot._id]: { shotId: shot._id, jobId: `pending-${shot._id}`, status: 'QUEUED', progress: 0 } }));
-        try {
-            const result = await createShotGenerationJob({ productionId, shotId: shot._id, requestId: crypto.randomUUID() });
-            if (!result.success || !result.jobId) throw new Error(result.error || 'FinalFrame could not queue this take.');
-            const jobId = result.jobId;
-            setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId, status: 'QUEUED', progress: 0 } }));
-            toast.success(`${shot.title} is queued. You can leave this page while FinalFrame works.`);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'The making step could not finish this take.';
-            setLocalJobs((current) => ({ ...current, [shot._id]: { ...current[shot._id], shotId: shot._id, jobId: current[shot._id]?.jobId || `failed-${shot._id}`, status: 'FAILED', progress: 0, errorMessage: message } }));
-            toast.error(message);
-        } finally {
-            setPendingShotId(null);
-        }
     }
 
     if (!enabled) {
@@ -107,10 +82,10 @@ export function GenerationPanel({ productionId, sequences, jobs, enabled }: Gene
         return <section className="ff-card flex flex-col items-center p-10 text-center" aria-live="polite"><span className="grid size-12 place-items-center rounded-2xl bg-[#86a7ff]"><Film className="size-5" aria-hidden="true" /></span><h2 className="ff-display mt-6 text-2xl font-semibold">Preparing your parts</h2><p className="mt-3 max-w-md leading-7 text-muted-foreground">Your approved plan is being prepared. The take controls will appear here when it is ready.</p><div className="mt-6 h-2 w-44 overflow-hidden rounded-full bg-secondary"><span className="block h-full w-1/2 animate-pulse rounded-full bg-primary" /></div></section>;
     }
 
-    return <div className="space-y-6" aria-label="Video making workspace"><section className="rounded-[1.4rem] bg-[#0b0d12] p-6 text-[#eaf0fa] sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow text-[#86a7ff]">Make your video</p><h2 className="ff-display mt-3 text-3xl font-semibold">Make one take at a time.</h2><p className="mt-3 max-w-2xl leading-7 text-[#91a0b8]">Each take can be made, checked, and tried again without losing the rest of your plan.</p></div><div className="rounded-2xl bg-white/10 px-4 py-3 text-sm"><span className="font-semibold text-[#86a7ff]">{madeCount}/{takeCount}</span><span className="ml-2 text-[#91a0b8]">takes ready</span></div></div><div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#86a7ff] transition-all duration-500" style={{ width: `${takeCount ? (madeCount / takeCount) * 100 : 0}%` }} /></div></section>{sequences.map((sequence) => <section key={sequence._id} className="ff-card overflow-hidden"><div className="flex flex-col justify-between gap-4 border-b border-border/70 bg-[#0f141c] p-6 sm:flex-row sm:items-center sm:p-8"><div><p className="ff-eyebrow">Part group {sequence.orderIndex + 1}</p><h3 className="ff-display mt-3 text-2xl font-semibold">{sequence.title}</h3><p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{sequence.description}</p></div><span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><Film className="size-4" aria-hidden="true" /> {sequence.scenes.reduce((count, scene) => count + scene.shots.length, 0)} takes</span></div><div className="divide-y divide-border/70">{sequence.scenes.map((scene) => <div key={scene._id} className="p-6 sm:p-8"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="ff-eyebrow">Part {scene.orderIndex + 1}</p><h4 className="mt-2 text-lg font-semibold">{scene.title}</h4><p className="mt-2 text-sm leading-6 text-muted-foreground">{scene.purpose}</p></div><span className="text-sm text-muted-foreground">{scene.shots.length} {scene.shots.length === 1 ? 'take' : 'takes'}</span></div><div className="mt-6 grid gap-3 lg:grid-cols-2">{scene.shots.map((shot) => <TakeCard key={shot._id} shot={shot} job={jobFor(shot)} pending={pendingShotId === shot._id} enabled={enabled} onMake={() => makeTake(shot)} />)}</div></div>)}</div></section>)}</div>;
+    return <div className="space-y-6" aria-label="Video making workspace"><section className="rounded-[1.4rem] bg-[#0b0d12] p-6 text-[#eaf0fa] sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow text-[#86a7ff]">Make your video</p><h2 className="ff-display mt-3 text-3xl font-semibold">Make one take at a time.</h2><p className="mt-3 max-w-2xl leading-7 text-[#91a0b8]">Each take can be made, checked, and tried again without losing the rest of your plan.</p></div><div className="rounded-2xl bg-white/10 px-4 py-3 text-sm"><span className="font-semibold text-[#86a7ff]">{madeCount}/{takeCount}</span><span className="ml-2 text-[#91a0b8]">takes ready</span></div></div><div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#86a7ff] transition-all duration-500" style={{ width: `${takeCount ? (madeCount / takeCount) * 100 : 0}%` }} /></div></section>{sequences.map((sequence) => <section key={sequence._id} className="ff-card overflow-hidden"><div className="flex flex-col justify-between gap-4 border-b border-border/70 bg-[#0f141c] p-6 sm:flex-row sm:items-center sm:p-8"><div><p className="ff-eyebrow">Part group {sequence.orderIndex + 1}</p><h3 className="ff-display mt-3 text-2xl font-semibold">{sequence.title}</h3><p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{sequence.description}</p></div><span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><Film className="size-4" aria-hidden="true" /> {sequence.scenes.reduce((count, scene) => count + scene.shots.length, 0)} takes</span></div><div className="divide-y divide-border/70">{sequence.scenes.map((scene) => <div key={scene._id} className="p-6 sm:p-8"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="ff-eyebrow">Part {scene.orderIndex + 1}</p><h4 className="mt-2 text-lg font-semibold">{scene.title}</h4><p className="mt-2 text-sm leading-6 text-muted-foreground">{scene.purpose}</p></div><span className="text-sm text-muted-foreground">{scene.shots.length} {scene.shots.length === 1 ? 'take' : 'takes'}</span></div><div className="mt-6 grid gap-3 lg:grid-cols-2">{scene.shots.map((shot) => <TakeCard key={shot._id} shot={shot} job={jobFor(shot)} productionId={productionId} enabled={enabled} />)}</div></div>)}</div></section>)}</div>;
 }
 
-function TakeCard({ shot, job, pending, enabled, onMake }: { shot: GenerationShotView; job?: GenerationJobView; pending: boolean; enabled: boolean; onMake: () => void }) {
+function TakeCard({ shot, job, productionId, enabled }: { shot: GenerationShotView; job?: GenerationJobView; productionId: string; enabled: boolean }) {
     const status = statusCopy(job?.executionStage === 'RECONCILIATION_REQUIRED' ? job.executionStage : job?.status || shot.status);
     const progress = progressFor(job);
     const completed = normalizedStatus(job?.status || shot.status) === 'COMPLETED';
@@ -120,11 +95,11 @@ function TakeCard({ shot, job, pending, enabled, onMake }: { shot: GenerationSho
     const qualityTier = typeof route?.qualityTier === 'string' ? route.qualityTier : undefined;
     return <article className="rounded-[1rem] border border-border/70 bg-secondary/25 p-4 sm:p-5">
         <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-sm font-semibold">{shot.title}</p><p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{shot.prompt}</p></div><span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ${statusClasses(status.tone)}`}><ToneIcon tone={status.tone} />{status.label}</span></div>
-        {(pending || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING', 'POLLING', 'DOWNLOADING'].includes(normalizedStatus(job?.status))) && <div className="mt-5 rounded-xl bg-card p-3" aria-live="polite"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>{status.description}</span><span>{progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} /></div></div>}
+        {(['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING', 'POLLING', 'DOWNLOADING'].includes(normalizedStatus(job?.status))) && <div className="mt-5 rounded-xl bg-card p-3" aria-live="polite"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>{status.description}</span><span>{progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} /></div></div>}
         {route && <div className="mt-4 rounded-xl border border-border/70 bg-card/70 p-3 text-xs leading-5"><p className="font-semibold">{qualityTier ? `${qualityTier} finish` : 'Video route'}{job?.provider && job.model ? ` · ${job.provider} / ${job.model}` : ''}</p>{routeReason && <p className="mt-1 text-muted-foreground">{routeReason}</p>}<p className="mt-1 text-muted-foreground">{job?.estimatedProviderCostUsd === undefined ? '' : `Estimated provider cost: $${job.estimatedProviderCostUsd.toFixed(4)}`}{job?.providerCostUsd === undefined ? '' : ` · Actual: $${job.providerCostUsd.toFixed(4)}`}</p></div>}
         {failed && <div className="mt-5 rounded-xl border border-[#ff9e9e]/45 bg-[#26171a] p-3 text-sm leading-6 text-[#ffd0d0]"><div className="flex gap-2"><AlertTriangle className="mt-1 size-4 shrink-0" aria-hidden="true" /><div><p className="font-semibold">We could not finish this take.</p><p className="mt-1">{job?.errorMessage || 'The making service stopped before a video was ready.'}</p><p className="mt-2 text-xs">Your other parts are unchanged. You can try this take again when the making service is available.</p></div></div></div>}
         {completed && <div className="mt-5 flex items-center gap-2 rounded-xl bg-[#9be3c3]/55 px-3 py-3 text-sm font-semibold text-[hsl(var(--success))]"><Check className="size-4" aria-hidden="true" /> Take ready for review</div>}
-        <div className="mt-5 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted-foreground">{shot.durationSeconds}s · cost shown before making</span>{completed ? <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-quiet min-h-11 border border-border"><RefreshCcw className="size-4" aria-hidden="true" /> Regenerate take</button> : failed ? <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-primary min-h-11"><RefreshCcw className="size-4" aria-hidden="true" /> Try this take again</button> : <button type="button" onClick={onMake} disabled={pending || !enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING'].includes(normalizedStatus(job?.status))} className="ff-button-primary min-h-11"><Play className="size-4" aria-hidden="true" /> {pending ? 'Starting…' : 'Make this take'}</button>}</div>
+        <div className="mt-5 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted-foreground">{shot.durationSeconds}s · cost shown before making</span><GenerateShotButton productionId={productionId} shotId={shot._id} disabled={!enabled || ['QUEUED', 'PROCESSING', 'SUBMITTED', 'PENDING', 'RETRYING', 'POLLING', 'DOWNLOADING'].includes(normalizedStatus(job?.status))} label={completed ? 'Regenerate take' : 'Make this take'} /></div>
         {job?.errorMessage && !failed && <details className="group mt-3 text-xs text-muted-foreground"><summary className="flex cursor-pointer list-none items-center gap-2"><ChevronDown className="size-3 transition group-open:rotate-180" aria-hidden="true" /> See technical details</summary><p className="mt-2 rounded-lg bg-background p-3 leading-5">{job.errorMessage}</p></details>}
     </article>;
 }

@@ -30,6 +30,7 @@ function routingFailure(error: unknown): string {
 }
 
 function userSafeGenerationError(error: unknown): string {
+    if (error instanceof Error && /SHOT_ESTIMATE_(EXPIRED|CHANGED|REVIEW_REQUIRED)/.test(error.message)) return 'This estimate is no longer valid. Review a fresh estimate before making the take.';
     if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';
     const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
     if (code === 'MISSING_API_KEY') return 'Video generation is not configured yet.';
@@ -40,7 +41,7 @@ function userSafeGenerationError(error: unknown): string {
     return 'We could not complete this video generation. Please try again.';
 }
 
-export async function createShotGenerationJob(input: { productionId: string; shotId: string; qualityTier?: QualityTier; requestId: string }) {
+export async function previewShotGeneration(input: { productionId: string; shotId: string; qualityTier?: QualityTier; requestId: string }) {
     try {
         const convex = await getAuthenticatedConvexClient();
         const account = await convex.query(api.account.current, {});
@@ -203,7 +204,7 @@ export async function createShotGenerationJob(input: { productionId: string; sho
         });
         if (!/^[a-zA-Z0-9-]{16,100}$/.test(input.requestId)) return { success: false, error: 'Start a new generation request.' };
         const idempotencyKey = `shot_${input.shotId}_${input.requestId}`;
-        const job = await convex.mutation(api.generationJobs.create, {
+        const quote = await convex.mutation(api.generationJobs.previewShotEstimate, {
             productionId: input.productionId as any,
             shotId: input.shotId as any,
             provider,
@@ -217,9 +218,22 @@ export async function createShotGenerationJob(input: { productionId: string; sho
             modality: 'VIDEO',
             correlationId: `generation-${input.productionId}-${input.shotId}`,
         });
-        return { success: true, jobId: typeof job?._id === 'string' ? job._id : undefined, estimate };
+        return { success: true as const, quote };
     } catch (error) {
         return { success: false, error: userSafeGenerationError(error) };
+    }
+}
+
+export async function confirmShotGeneration(input: { estimateId: string; quoteHash: string }) {
+    try {
+        const convex = await getAuthenticatedConvexClient();
+        const job = await convex.mutation(api.generationJobs.createReviewedTake, {
+            estimateId: input.estimateId as import('../../../convex/_generated/dataModel').Id<'estimates'>,
+            quoteHash: input.quoteHash,
+        });
+        return { success: true as const, jobId: typeof job?._id === 'string' ? job._id : undefined };
+    } catch (error) {
+        return { success: false as const, error: userSafeGenerationError(error) };
     }
 }
 

@@ -1,5 +1,5 @@
 import { internal } from './_generated/api';
-import { internalMutation, internalQuery, mutation, query } from './_generated/server';
+import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { SchedulableFunctionReference, FunctionReference } from 'convex/server';
@@ -10,7 +10,9 @@ import { ensureResourceState, getEffectiveResourceState } from './resourceStates
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
 import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, validateReviewedVideoJob } from './videoRouting';
-import { isSourceVideoEdit } from '../src/lib/ai/video-routing';
+import { isSourceVideoEdit, videoCatalogFingerprint } from '../src/lib/ai/video-routing';
+import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
+import { SHOT_ESTIMATE_VERSION, SHOT_ESTIMATE_TTL_MS, shotEstimateHash, stableShotEstimate, assertShotEstimateTime } from '../src/lib/generation/shot-estimate';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput } from './voices';
 import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
@@ -106,11 +108,68 @@ function stable(value: unknown): string {
 }
 
 /** Creation, both reservations and the scheduled handoff share one transaction. */
-const generationCreateArgs = { productionId: v.id('productions'), shotId: v.id('shots'), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), estimatedProviderCostUsd: v.optional(v.number()), idempotencyKey: v.string(), modality: v.optional(v.string()), capability: v.optional(v.string()), modelVersion: v.optional(v.string()), correlationId: v.optional(v.string()), reservationId: v.optional(v.id('creditReservations')), canonicalReservationId: v.optional(v.id('reservations')) };
+const generationCreateArgs = { productionId: v.id('productions'), shotId: v.id('shots'), provider: v.string(), model: v.string(), request: v.any(), estimatedCost: v.number(), estimatedProviderCostUsd: v.optional(v.number()), idempotencyKey: v.string(), modality: v.optional(v.string()), capability: v.optional(v.string()), modelVersion: v.optional(v.string()), correlationId: v.optional(v.string()), reservationId: v.optional(v.id('creditReservations')), canonicalReservationId: v.optional(v.id('reservations')), estimateConsent: v.optional(v.object({estimateId:v.id('estimates'),quoteHash:v.string()})) };
 const generationCreateValidator = v.object(generationCreateArgs);
 type GenerationCreateArgs = Infer<typeof generationCreateValidator>;
+export const previewShotEstimate = mutation({
+    args: generationCreateArgs,
+    returns: v.object({
+        estimateId: v.id('estimates'), quoteHash: v.string(), model: v.string(), operation: v.string(),
+        baseProviderUsd: v.number(), providerHoldMicros: v.number(), totalCredits: v.number(), expiresAt: v.number(),
+    }),
+    handler: async (ctx, args) => {
+        const intent = await resolveGenerationIntent(ctx, args);
+        const quote = await resolveCanonicalShotQuote(ctx, args, intent);
+        const createdAt = Date.now();
+        const expiresAt = createdAt + SHOT_ESTIMATE_TTL_MS;
+        const { estimateConsent: _consent, ...createArgs } = args;
+        const quoteHash = await shotEstimateHash({ canonicalHash: quote.canonicalHash, createdAt, expiresAt });
+        const estimateId = await ctx.db.insert('estimates', {
+            studioExternalId: intent.production.studioExternalId,
+            studioId: intent.production.studioId,
+            projectId: intent.access.project._id,
+            productionId: intent.production._id,
+            version: SHOT_ESTIMATE_VERSION,
+            totalCredits: quote.estimatedCost,
+            lineItems: [{ operation: quote.operation, credits: quote.estimatedCost }],
+            policySnapshot: {
+                createArgs: JSON.parse(stableShotEstimate(createArgs)),
+                actorUserId: intent.access.user._id,
+                idempotencyKey: intent.idempotencyKey,
+                canonicalHash: quote.canonicalHash,
+                providerHoldMicros: quote.providerHoldMicros,
+                quoteHash,
+            },
+            createdAt,
+            expiresAt,
+        });
+        return {
+            estimateId, quoteHash, model: args.model, operation: quote.operation,
+            baseProviderUsd: quote.estimatedProviderCostUsd, providerHoldMicros: quote.providerHoldMicros,
+            totalCredits: quote.estimatedCost, expiresAt,
+        };
+    },
+});
+
+export const createReviewedTake = mutation({
+    args: { estimateId: v.id('estimates'), quoteHash: v.string() },
+    returns: v.any(),
+    handler: async (ctx, consent) => {
+        const estimate = await ctx.db.get(consent.estimateId);
+        const saved = object(estimate?.policySnapshot);
+        if (!estimate?.productionId || estimate.version !== SHOT_ESTIMATE_VERSION || saved.quoteHash !== consent.quoteHash) {
+            throw new Error('SHOT_ESTIMATE_CHANGED');
+        }
+        const { access } = await productionAccess(ctx, estimate.productionId, true);
+        if (saved.actorUserId !== access.user._id || estimate.projectId !== access.project._id) {
+            throw new Error('SHOT_ESTIMATE_CHANGED');
+        }
+        return createCanonicalGenerationJob(ctx, { ...saved.createArgs as GenerationCreateArgs, estimateConsent: consent });
+    },
+});
+
 export const create = mutation({ args: generationCreateArgs, returns: v.any(), handler: (ctx,args) => createCanonicalGenerationJob(ctx,args) });
-export async function createCanonicalGenerationJob(ctx: MutationCtx, args: GenerationCreateArgs, execution?: RecipeExecution) {
+async function resolveGenerationIntent(ctx: ReadCtx, args: GenerationCreateArgs, execution?: RecipeExecution) {
     const { production, access } = await productionAccess(ctx, args.productionId, true, execution);
     if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new generation.');
     const shot = await ctx.db.get(args.shotId);
@@ -130,22 +189,26 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
     const recipeMarkers = recipeNode ? {recipeRunNodeId:recipeNode._id,recipeResolvedRequestHash:recipeNode.resolvedRequestHash} : {};
     const metadata = object(shot.metadata);
     const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)] });
-    const qualityTier = requested.qualityTier === 'ECONOMY' || requested.qualityTier === 'PREMIUM' ? requested.qualityTier : 'STANDARD';
+    const qualityTier: 'ECONOMY' | 'STANDARD' | 'PREMIUM' = requested.qualityTier === 'ECONOMY' || requested.qualityTier === 'PREMIUM' ? requested.qualityTier : 'STANDARD';
     const request = { ...requested, ...recipeMarkers, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
     const requestHash = stable({ productionId: production._id, versionId: version._id, shotId: shot._id, model: args.model, provider: args.provider, request, shotMetadata: metadata });
-    const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', (q) => q.eq('idempotencyKey', idempotencyKey)).unique();
-    if (existing) {
-      if (existing.productionId !== production._id || existing.requestHash !== requestHash) throw new Error('Idempotency key is already used for another request.');
-      return publicJob(existing as unknown as Record<string, unknown>);
-    }
+    return {production,access,shot,scene,version,requested,metadata,continuity,qualityTier,recipeMarkers,idempotencyKey,requestHash};
+}
+type GenerationIntent = Awaited<ReturnType<typeof resolveGenerationIntent>>;
+async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArgs, intent: GenerationIntent, execution?: RecipeExecution) {
+    const {production,access,shot,version,requested,metadata,continuity,qualityTier,recipeMarkers}=intent;
     if (!workerEnabled()) throw new Error('Video generation is not configured yet.');
     if (args.provider !== 'openrouter') throw new Error('This provider is not enabled.');
     // Derive reference requirements from canonical project assets, not browser flags.
     const sourceAssets = [];
+    const mediaProofs = [];
     for (const rawId of continuity.referenceAssetIds) {
       const assetId = ctx.db.normalizeId('assets', rawId);
       const asset = assetId ? await ctx.db.get(assetId) : null;
       if (!asset || asset.projectId !== access.project._id || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId) throw new Error('Import every reference into this project before generating.');
+      const storage = await ctx.db.system.get('_storage', asset.storageId);
+      if (!storage) throw new Error('SHOT_ESTIMATE_SOURCE_UNAVAILABLE');
+      mediaProofs.push({assetId:asset._id,storageId:asset.storageId,checksum:storage.sha256,byteSize:storage.size,mimeType:asset.mimeType});
       sourceAssets.push(asset);
     }
     const firstFrame = typeof metadata.firstFrameAssetId === 'string' ? metadata.firstFrameAssetId : undefined;
@@ -191,6 +254,11 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
     if (operation === 'EXTEND') {
       const previous = await requireContinuationSource(ctx, { projectId: access.project._id, productionId: production._id, model: args.model, previousJobId: String(normalizedRequest.previousJobId || '') },execution?access.user._id:undefined);
       normalizedRequest.previousModelId = previous.model;
+      const take = await ctx.db.get(previous.shotVersionId!);
+      const asset = take?.assetId ? await ctx.db.get(take.assetId) : null;
+      const storage = asset?.storageId ? await ctx.db.system.get('_storage',asset.storageId) : null;
+      if (!asset || !storage) throw new Error('SHOT_ESTIMATE_SOURCE_UNAVAILABLE');
+      mediaProofs.push({assetId:asset._id,storageId:asset.storageId,checksum:storage.sha256,byteSize:storage.size,mimeType:asset.mimeType});
     }
     if (operation === 'UPSCALE') {
       if (typeof metadata.resolution === 'string' && metadata.resolution || typeof normalizedRequest.resolution === 'string' && normalizedRequest.resolution) throw new Error('Upscale output dimensions come from the source and factor; remove the resolution constraint.');
@@ -236,12 +304,39 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
     const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'LIP_SYNC' || operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
+    const catalog = await ctx.db.query('videoModelCatalog').withIndex('by_studio_model', q=>q.eq('studioExternalId',production.studioExternalId).eq('modelId',args.model)).unique();
+    if (!catalog || catalog.provider !== args.provider) throw new Error('SHOT_ESTIMATE_MODEL_UNAVAILABLE');
+    const catalogFingerprint=videoCatalogFingerprint(catalog);
+    const policy=await ctx.db.query('videoRoutePolicies').withIndex('by_studio_type_quality',q=>q.eq('studioExternalId',production.studioExternalId).eq('videoType',validated.request.videoType).eq('qualityTier',qualityTier)).unique();
+    const providerHoldMicros=Math.ceil(videoBudgetReservationUsd(estimatedProviderCostUsd)*1e6);
+    const canonicalHash=await shotEstimateHash({version:SHOT_ESTIMATE_VERSION,actorUserId:access.user._id,projectId:access.project._id,productionId:production._id,productionVersionId:version._id,shotId:shot._id,idempotencyKey:intent.idempotencyKey,requestHash:intent.requestHash,normalizedRequest,mediaProofs,model:args.model,modelVersion:args.modelVersion,catalogFingerprint,pricingSkus:catalog.pricingSkus,estimatedCostPerSecond:catalog.estimatedCostPerSecond,policy,estimatedProviderCostUsd,providerHoldMicros,totalCredits:estimatedCost});
+    return {normalizedRequest,estimatedProviderCostUsd,estimatedCost,providerHoldMicros,catalogFingerprint,canonicalHash,operation};
+}
+async function requireStoredShotEstimate(ctx: ReadCtx,args:GenerationCreateArgs,intent:GenerationIntent,quote:Awaited<ReturnType<typeof resolveCanonicalShotQuote>>) {
+    const consent=args.estimateConsent;
+    if (!consent) throw new Error('SHOT_ESTIMATE_REVIEW_REQUIRED');
+    const estimate=await ctx.db.get(consent.estimateId),saved=object(estimate?.policySnapshot);
+    if (!estimate || estimate.version!==SHOT_ESTIMATE_VERSION || estimate.projectId!==intent.access.project._id || estimate.productionId!==intent.production._id || estimate.studioExternalId!==intent.production.studioExternalId || saved.actorUserId!==intent.access.user._id || saved.idempotencyKey!==intent.idempotencyKey || saved.canonicalHash!==quote.canonicalHash || saved.quoteHash!==consent.quoteHash || estimate.totalCredits!==quote.estimatedCost || saved.providerHoldMicros!==quote.providerHoldMicros) throw new Error('SHOT_ESTIMATE_CHANGED');
+    assertShotEstimateTime(estimate.createdAt,estimate.expiresAt);
+    return estimate._id;
+}
+export async function createCanonicalGenerationJob(ctx: MutationCtx, args: GenerationCreateArgs, execution?: RecipeExecution) {
+    const intent=await resolveGenerationIntent(ctx,args,execution);
+    const {production,access,shot,version,idempotencyKey,requestHash}=intent;
+    const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', (q) => q.eq('idempotencyKey', idempotencyKey)).unique();
+    if (existing) {
+      if (existing.productionId !== production._id || existing.createdByUserId !== access.user._id || existing.requestHash !== requestHash) throw new Error('Idempotency key is already used for another request.');
+      return publicJob(existing as unknown as Record<string, unknown>);
+    }
+    const quote=await resolveCanonicalShotQuote(ctx,args,intent,execution);
+    const {normalizedRequest,estimatedProviderCostUsd,estimatedCost}=quote;
+    const estimateId=execution?undefined:await requireStoredShotEstimate(ctx,args,intent,quote);
     const recipeAdmission = execution ? await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:videoBudgetReservationUsd(estimatedProviderCostUsd),credits:estimatedCost}) : null;
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
     await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId },execution?access.user._id:undefined);
-    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
+    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, ...(estimateId?{estimateId}:{}), request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
     const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
     const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: videoBudgetReservationUsd(estimatedProviderCostUsd), idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });
