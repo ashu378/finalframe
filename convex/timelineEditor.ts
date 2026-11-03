@@ -529,7 +529,7 @@ async function persistDraft(
   member: Awaited<ReturnType<typeof requireMember>>,
   sourceTimelineId: Id<"timelines">,
   projectId: Id<"projects">,
-  options: { preserveAudioTiming?: boolean } = {},
+  options: { preserveAudioTiming?: boolean; preserveTiming?: boolean } = {},
 ) {
   const production = await ctx.db.get(source.productionId);
   if (!production || production.projectId !== projectId) throw new Error('Timeline project ownership is invalid.');
@@ -578,7 +578,7 @@ async function persistDraft(
     const nextClips: ClipState[] = [];
 
     for (const [clipIndex, clip] of track.clips.entries()) {
-      if (finishingV5Enabled() && !(options.preserveAudioTiming && clip.kind === 'AUDIO')) {
+      if (finishingV5Enabled() && !options.preserveTiming && !(options.preserveAudioTiming && clip.kind === 'AUDIO')) {
         const fps = finishingFps(state.metadata);
         clip.startSeconds = Math.round(clip.startSeconds * fps) / fps;
         clip.durationSeconds = Math.round(clip.durationSeconds * fps) / fps;
@@ -674,7 +674,7 @@ export const getDraft = query({
     if (!args.timelineId) {
       const candidates = await ctx.db.query("timelines").withIndex("by_production", q => q.eq("productionId", args.productionId)).order("desc").take(200);
       for (const candidate of candidates) {
-        if (candidate.status !== 'DRAFT') continue;
+        if (!['DRAFT', 'APPROVED'].includes(candidate.status)) continue;
         const manifest = candidate.manifestId ? await ctx.db.get(candidate.manifestId) : null;
         if (timelineMatchesCurrentVersion(candidate, production, version, manifest)) { timeline = candidate; break; }
       }
@@ -685,6 +685,31 @@ export const getDraft = query({
     const state = await getTimelineState(ctx, timeline);
     const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
     return { timeline, ...state, canEdit: ['OWNER','EDITOR'].includes(access.projectRole) && timelineMatchesCurrentVersion(timeline, production, version, manifest), finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
+  },
+});
+
+/** A reviewed source stays immutable. Duplication only creates a separate draft
+ * with the same timing and content, and never submits paid or render work. */
+export const duplicate = mutation({
+  args: { timelineId: v.id('timelines'), expectedVersionNumber: v.number(), expectedUpdatedAt: v.union(v.number(), v.null()), idempotencyKey: v.string() },
+  returns: v.object({ timelineId: v.id('timelines'), operationId: v.id('productionOperations'), replayed: v.boolean() }),
+  handler: async (ctx, args) => {
+    const key = idempotencyKey(args.idempotencyKey);
+    const { timeline, member, production, resourceState } = await getTimelineForMember(ctx, args.timelineId);
+    const previous = await findOperationByKey(ctx, key);
+    if (previous) {
+      const input = operationInput(previous);
+      if (previous.kind !== 'DUPLICATE_TIMELINE' || previous.studioExternalId !== member.studio.externalId || previous.productionId !== production._id || previous.actorUserId !== member.user._id || input.sourceTimelineId !== timeline._id || input.sourceVersionNumber !== args.expectedVersionNumber || input.sourceUpdatedAt !== args.expectedUpdatedAt) throw new Error('This duplicate request key belongs to another source, revision or user.');
+      return { timelineId: previous.outputResourceIds[0] as Id<'timelines'>, operationId: previous._id, replayed: true };
+    }
+    await requireCurrentTimeline(ctx, timeline, production);
+    if (!['DRAFT', 'APPROVED'].includes(timeline.status) || !['APPROVED', 'LOCKED'].includes(resourceState.currentState)) throw new Error('Choose a current approved or locked timeline to duplicate.');
+    if (timeline.versionNumber !== args.expectedVersionNumber || (timeline.updatedAt ?? null) !== args.expectedUpdatedAt) throw new Error('The source timeline changed. Refresh it before creating a draft.');
+    const state = await getTimelineState(ctx, timeline);
+    delete state.metadata.lockState;
+    const draft = await persistDraft(ctx, timeline, state, member, timeline._id, production.projectId!, { preserveTiming: true });
+    const operationId = await insertOperation(ctx, member, timeline, 'DUPLICATE_TIMELINE', key, { sourceTimelineId: timeline._id, sourceVersionNumber: args.expectedVersionNumber, sourceUpdatedAt: args.expectedUpdatedAt, createdTimelineId: draft.timelineId }, [draft.timelineId, ...draft.createdTrackIds, ...draft.createdClipIds]);
+    return { timelineId: draft.timelineId, operationId, replayed: false };
   },
 });
 

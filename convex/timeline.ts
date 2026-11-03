@@ -139,7 +139,7 @@ export const list = query({
 
 const draftClip = v.union(
   v.object({ kind: v.literal('TAKE'), shotVersionId: v.id('shotVersions') }),
-  v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number(), trimStartSeconds:v.optional(v.number()), volume:v.optional(v.number()) }),
+  v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number(), trimStartSeconds:v.optional(v.number()), volume:v.optional(v.number()), fit:v.optional(v.union(v.literal('contain'),v.literal('cover'))) }),
   v.object({ kind: v.literal('GRAPHIC'), templateId: v.union(v.literal('kinetic-title'), v.literal('brand-card'), v.literal('feature-callout'), v.literal('end-card'),v.literal('product-ui'),v.literal('bar-chart'),v.literal('explainer-steps')), durationSeconds: v.number(), props: v.any(), logoAssetId: v.optional(v.id('assets')),screenAssetId:v.optional(v.id('assets')) }),
 );
 
@@ -200,6 +200,10 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
         if (!asset.mimeType?.startsWith('image/') && !asset.mimeType?.startsWith('video/')) throw new Error('Visual clips require project images or videos.');
         duration = input.durationSeconds;
         kind = asset.mimeType.startsWith('image/') ? 'IMAGE' : 'VIDEO';
+        if (input.fit !== undefined) {
+          if (kind !== 'IMAGE' || !['contain', 'cover'].includes(input.fit)) throw new Error('Fit applies only to still images.');
+          metadata = { renderItem: { fit: input.fit } };
+        }
       } else {
         kind = 'GRAPHIC'; duration = input.durationSeconds;
         if(object(input.props).layoutVersion===2){

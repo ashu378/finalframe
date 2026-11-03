@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { api } from '../../../../convex/_generated/api';
+import { Button } from '@/components/ui/button';
 import { CheckCircle2, CircleAlert, Film } from 'lucide-react';
 import type { ProductionGraphNode } from '@/lib/production-graph/contracts';
 import { toTimelineVersion } from '@/lib/production/timeline-view';
@@ -49,11 +50,15 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   const applyTimelineEdit = useMutation(api.timelineEditor.apply);
   const undoTimelineEdit = useMutation(api.timelineEditor.undo);
   const redoTimelineEdit = useMutation(api.timelineEditor.redo);
+  const duplicateTimeline = useMutation(api.timelineEditor.duplicate);
+  const duplicateRequest = useRef<{ timelineId: string; revision: string; key: string } | null>(null);
+  const duplicatePending = useRef(false);
   const canonicalTimelineState = useQuery(api.approvals.get, draft?.timeline?.projectId ? { projectId: draft.timeline.projectId as Id<'projects'>, productionId: convexProductionId, resourceType: 'timeline', resourceId: String(draft.timeline._id) } : 'skip');
   const timeline = useMemo(() => toTimelineVersion(draft, canonicalTimelineState?.currentState), [draft, canonicalTimelineState?.currentState]);
   const canEditTimeline = draft?.canEdit === true && canonicalTimelineState !== undefined && ['DRAFT', 'REVISION_REQUESTED'].includes(canonicalTimelineState.currentState);
+  const canDuplicateTimeline = draft?.canEdit === true && canonicalTimelineState !== undefined && ['APPROVED', 'LOCKED'].includes(canonicalTimelineState.currentState) && ['DRAFT', 'APPROVED'].includes(draft.timeline.status);
   const history = draft?.operations?.filter((operation: any) => operation.outputResourceIds.includes(String(draft.timeline._id))) ?? [];
-  const canUndo = canEditTimeline && history.some((operation: any) => operation.kind !== 'CREATE_TIMELINE');
+  const canUndo = canEditTimeline && history.some((operation: any) => !['CREATE_TIMELINE', 'DUPLICATE_TIMELINE'].includes(operation.kind));
   const canRedo = canEditTimeline && history.some((operation: any) => operation.kind === 'UNDO');
 
   const impact = impactRequested && impactQuery ? makeImpact(impactQuery) : null;
@@ -83,6 +88,25 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   function showCreatedTimeline(id: Id<'timelines'>) {
     setActiveTimelineId(id);
     router.refresh();
+  }
+
+  async function handleDuplicateTimeline() {
+    if (!draft || !canDuplicateTimeline || duplicatePending.current) return;
+    const timelineId = draft.timeline._id as Id<'timelines'>;
+    const revision = `${draft.timeline.versionNumber}:${draft.timeline.updatedAt ?? 'none'}`;
+    if (duplicateRequest.current?.timelineId !== timelineId || duplicateRequest.current.revision !== revision) duplicateRequest.current = { timelineId, revision, key: `timeline-duplicate:${crypto.randomUUID()}` };
+    duplicatePending.current = true;
+    setSaveStatus('saving'); setMessage(null);
+    try {
+      const result = await duplicateTimeline({ timelineId, expectedVersionNumber: draft.timeline.versionNumber, expectedUpdatedAt: draft.timeline.updatedAt ?? null, idempotencyKey: duplicateRequest.current.key });
+      showCreatedTimeline(result.timelineId);
+      duplicateRequest.current = null;
+      setReplacement(null); setSaveStatus('saved');
+      setMessage('An editable copy is ready with the same captions, transitions, graphics and sound. The approved version is preserved.');
+    } catch {
+      setSaveStatus('error');
+      setMessage('The copy could not be created. Refresh the timeline and check its current version and project permissions.');
+    } finally { duplicatePending.current = false; }
   }
 
   async function handleTimelineEdit(event: TimelineEditEvent) {
@@ -137,6 +161,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   return <div className="space-y-8">
     <section className="ff-card p-5 sm:p-7"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="ff-eyebrow">Editing workspace</p><h2 className="ff-display mt-2 text-3xl font-semibold">Change one part without losing the rest.</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Use a plain-language request for a creative change, or select a clip below for practical timing and audio edits.</p></div><label className="grid gap-2 text-sm font-semibold sm:min-w-64">Editing <select value={selectedNode.id} onChange={(event) => { const node = nodes.find((candidate) => candidate.id === event.target.value); if (node) selectNode(node); }} className="h-11 rounded-xl border border-input bg-background px-3 font-normal outline-none focus:border-primary focus:ring-2 focus:ring-ring/40">{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label></div></section>
     <PromptEditPanel selectedNode={selectedNode} impact={impact} impactLoading={impactRequested && impactQuery === undefined} impactError={impactError} onPreviewImpact={handlePromptPreview} onSubmitOperation={handlePromptSubmit} />
+    {canDuplicateTimeline ? <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" disabled={saveStatus === 'saving'} onClick={() => void handleDuplicateTimeline()}>Create editable copy</Button><p className="text-sm text-muted-foreground">Continue editing in a new draft while keeping this approved version.</p></div> : null}
     <TimelineEditor timeline={timeline} frameRate={timeline?.frameRate} finishingV5Enabled={draft?.finishingV5Enabled === true} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
     {replacement && timeline && replacement.timelineId === timeline.id && <MediaReplacementPanel key={`${timeline.id}:${replacement.clipId}`} timelineId={timeline.id as Id<'timelines'>} clipId={replacement.clipId} disabled={!canEditTimeline || saveStatus === 'saving'} onCancel={() => setReplacement(null)} onApply={async assetId => {
       setSaveStatus('saving');

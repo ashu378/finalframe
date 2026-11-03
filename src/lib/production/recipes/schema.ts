@@ -16,7 +16,7 @@ export const RECIPE_DOCUMENT_SCHEMA = {
       step('NARRATION', { mode: { const: 'RECORDING' }, sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1) }),
       step('GENERATION', { shotId: id, references: { type: 'array', maxItems: 20, items: { oneOf: [object({ assetId: id }), object({ stepKey: key })] } } }),
       step('GRAPHIC', { templateId: { enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] }, durationFrames: integer(1), title: text(200), subtitle: { type: 'string', maxLength: 500 }, brandName: { type: 'string', maxLength: 160 }, eyebrow:text(500),feature:text(2000),detail:text(2000),index:text(100),callToAction:text(500),url:text(500),accentColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},backgroundColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},textColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'}, logoAssetId: id }, ['logoAssetId','eyebrow','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor']),
-      step('SOURCE_RANGE', { sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1), audioPolicy: { enum: ['KEEP_SOURCE', 'MUTE'] } }),
+      step('SOURCE_RANGE', { sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1), audioPolicy: { enum: ['KEEP_SOURCE', 'MUTE'] }, fit: { enum: ['contain', 'cover'] } }, ['fit']),
       step('MUSIC_ANALYSIS', { sourceAssetId: id, trimStartFrame: frameOffset, durationFrames: integer(1) }),
       step('CAPTIONS', { transcriptStepKey: key, language: text(35) }),
     ] } }, visualOrder: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: key }, narrationStepKey: key, musicStepKey: key, captionStepKey: key }, ['narrationStepKey', 'musicStepKey', 'captionStepKey']),

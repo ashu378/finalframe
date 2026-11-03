@@ -21,12 +21,12 @@ async function copy(ctx, id, proof = 'old_version', extra = {}) {
 }
 const edit = (ctx, id, key, input = { clipId: 'clip_red', volume: 0 }) => editor.apply.handler(ctx, { timelineId: id, kind: 'adjustAudio', input, idempotencyKey: key });
 (async () => {
-  await check('default draft ignores newer historical/unbound display numbers; explicit reads remain read-only', async () => {
+  await check('default editor ignores newer historical/unbound display numbers and retains the current approved source', async () => {
     const ctx = fixture(); await copy(ctx, 'old'); const unbound = await copy(ctx, 'unbound'); delete unbound.tracks.productionVersionId; delete unbound.tracks.metadata.productionVersionId;
     assert.equal((await editor.getDraft.handler(ctx, { productionId: 'production_1' })).timeline._id, 'timeline_1');
     for (const id of ['old', 'unbound']) assert.equal((await ctx.draft(id)).canEdit, false);
-    ctx.rows.get('timeline_1').status = 'APPROVED';
-    assert.equal(await editor.getDraft.handler(ctx, { productionId: 'production_1' }), null);
+    ctx.lock('timeline_1');
+    assert.equal((await editor.getDraft.handler(ctx, { productionId: 'production_1' })).timeline._id, 'timeline_1');
     assert.equal(ctx.count('timelines'), 3);
   });
   await check('exact current immutable version, project/studio ownership and agreeing proofs are required', async () => {
