@@ -59,6 +59,8 @@ export const createVersion = mutation({
       if (prior.productionId !== production._id || prior.projectId !== projectId || prior.manifestId !== manifest._id) throw new Error("This import key belongs to another manifest.");
       return prior;
     }
+    const targetVersion = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
+    if (!targetVersion || targetVersion.productionId !== production._id || targetVersion.status !== 'APPROVED' || payload.productionVersionId !== targetVersion._id) throw new Error('Historical or unbound manifests are read-only. Import the exact current approved production manifest.');
     const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq("productionId", args.productionId)).order("desc").first();
     const timestamp = now();
     const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output,...(importedPoster?{importedPoster}:{}) };
@@ -89,7 +91,7 @@ export const createVersion = mutation({
       const trackId = await trackFor(laneKey, "VIDEO", index, "Imported pictures");
       const assetId = await assetFor(item, item.kind !== "motion-graphics");
       const shotVersionId = typeof item.shotVersionId === "string" ? ctx.db.normalizeId("shotVersions", item.shotVersionId) : null;
-      if (shotVersionId) { const take = await ctx.db.get(shotVersionId); if (!take || take.projectId !== projectId || take.productionId !== production._id || take.assetId !== assetId) throw new Error("Imported take is outside this production."); await requireApprovedResource(ctx, projectId, "shotVersion", shotVersionId, production._id); }
+      if (shotVersionId) { const take = await ctx.db.get(shotVersionId); if (!take || take.projectId !== projectId || take.productionId !== production._id || take.productionVersionId !== targetVersion._id || take.assetId !== assetId) throw new Error("Imported take is outside this production."); await requireApprovedResource(ctx, projectId, "shotVersion", shotVersionId, production._id); }
       const transition = (Array.isArray(payload.transitions) ? payload.transitions.map(object) : []).find(row => row.fromItemId === item.id);
       const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props,...(object(item.props).layoutVersion===2?{graphicAssetRole:item.templateId==='product-ui'?'screen':'logo'}:{}) } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
       await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, shotVersionId: shotVersionId ?? undefined, startSeconds: Number(item.startFrame) / fps, durationSeconds: Number(item.durationInFrames) / fps, trimStartSeconds: typeof item.trimStartInFrames === "number" ? item.trimStartInFrames / fps : undefined, volume: typeof item.volume === "number" ? item.volume : undefined, ...(transition && payload.version === 5 ? { transition: { out: { kind: transition.kind, durationSeconds: Number(transition.durationInFrames) / fps, audioPolicy: transition.audioPolicy } } } : {}), metadata: JSON.parse(JSON.stringify(clipMetadata)) });

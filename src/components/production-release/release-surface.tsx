@@ -47,7 +47,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   const rendererState = latestJob ? rendererStateFor(latestJob.status) : 'NOT_STARTED';
   const completedManifests = state?.manifests?.filter((item: any) => state.exports?.some((output: any) => output.manifestId === item._id && output.status === 'COMPLETED' && output.storageId)) ?? [];
   const decision = review?.status === 'APPROVED' ? 'APPROVED' : review?.status === 'CHANGES_REQUESTED' ? 'CHANGES_REQUESTED' : 'PENDING';
-  const availability = latestExport?.status === 'COMPLETED' && exportDetails?.downloadUrl ? 'READY' : 'WAITING';
+  const availability = latestExport?.status === 'COMPLETED' && exportDetails?.downloadUrl ? 'READY' : !latestJob ? 'NOT_STARTED' : 'WAITING';
   const downloadStatus = latestExport?.status === 'COMPLETED' && exportDetails?.downloadUrl ? 'READY' : latestExport && !['FAILED', 'CANCELED'].includes(latestExport.status) ? 'VERIFYING' : 'NOT_READY';
   async function save(action: () => Promise<unknown>) {
     setSaving(true); setError(undefined);

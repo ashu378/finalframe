@@ -7,6 +7,7 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { validateShotOperationControls, videoTaskForOperation, type ContinuationSourceView, type ShotOperationControls } from './workspace-controls';
 import type { ProjectResourceKind, ResourceVersionView, StorySnapshotView, WorkspaceControlData, WorkspaceResourceState } from './workspace-controls';
 import { validateAuthoringOutputSettings } from '../../../renderer/src/output-settings';
+import { timelineMatchesCurrentVersion } from './timeline-lineage';
 
 function object(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -91,15 +92,12 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
             const resource = current.resource as Doc<'projectResourceVersions'>;
             return { id: versionId, resourceId: String(binding.resourceId), name: String(binding.name || ''), kind: binding.kind as ProjectResourceKind, versionNumber: resource.versionNumber, state: current.currentState };
         })),
-        Promise.all(timelines.slice(0, 50).map(async (timeline) => {
+        Promise.all(timelines.filter(timeline => timeline.productionId === workspace.production!._id && timeline.studioExternalId === project.studioExternalId && (!timeline.projectId || timeline.projectId === project._id)).slice(0, 50).map(async (timeline) => {
             const [state, manifest] = await Promise.all([
                 client.query(api.approvals.get, { projectId: project._id, productionId: workspace.production!._id, resourceType: 'timeline', resourceId: timeline._id }),
                 timeline.manifestId ? client.query(api.assembly.getManifest, { manifestId: timeline.manifestId }) : Promise.resolve(null),
             ]);
-            const versionId = object(manifest?.manifest).productionVersionId || object(timeline.tracks).productionVersionId;
-            // Original assembly timelines may not store manifestId. The backend
-            // validates their indexed manifest again on explicit acceptance.
-            return { id: timeline._id.toString(), versionNumber: timeline.versionNumber, state: state.currentState, matchesProductionVersion: !versionId || versionId === workspace.version?._id };
+            return { id: timeline._id.toString(), versionNumber: timeline.versionNumber, state: state.currentState, matchesProductionVersion: timelineMatchesCurrentVersion(timeline, workspace.production, workspace.version, manifest) };
         })),
         episode?.acceptedStoryStateId ? client.query(api.approvals.get, { projectId: project._id, resourceType: 'episodeStoryState', resourceId: episode.acceptedStoryStateId }) : Promise.resolve(null),
     ]);

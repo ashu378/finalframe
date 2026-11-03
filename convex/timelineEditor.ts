@@ -13,6 +13,7 @@ import { approvedBeatSource } from './beatAnalysis';
 import {resolveGraphicImage} from './graphicsAssets';
 import {graphicsV2Enabled,parseGraphicsV2Authoring} from './graphicsContracts';
 import { planBeatCuts } from './beatCutContracts';
+import { timelineMatchesCurrentVersion } from '../src/lib/production/timeline-lineage';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -503,6 +504,15 @@ async function getTimelineState(ctx: ReadCtx, timeline: Timeline): Promise<Timel
   return await loadState(ctx, timeline, tracks, clips);
 }
 
+async function requireCurrentTimeline(ctx: ReadCtx, timeline: Timeline, production: Doc<'productions'>) {
+  const [version, manifest] = await Promise.all([
+    production.currentVersionId ? ctx.db.get(production.currentVersionId) : null,
+    timeline.manifestId ? ctx.db.get(timeline.manifestId) : null,
+  ]);
+  if (!timelineMatchesCurrentVersion(timeline, production, version, manifest)) throw new Error('This historical or unbound timeline is read-only. Choose an exact timeline for the current approved production version.');
+  return production.currentVersionId!;
+}
+
 async function findOperationByKey(ctx: ReadCtx, key: string): Promise<Operation | null> {
   const operations = await ctx.db.query("productionOperations").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", key)).take(2);
   return operations[0] ?? null;
@@ -521,6 +531,10 @@ async function persistDraft(
   projectId: Id<"projects">,
   options: { preserveAudioTiming?: boolean } = {},
 ) {
+  const production = await ctx.db.get(source.productionId);
+  if (!production || production.projectId !== projectId) throw new Error('Timeline project ownership is invalid.');
+  const productionVersionId = await requireCurrentTimeline(ctx, source, production);
+  state.metadata = { ...state.metadata, productionVersionId };
   const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq('productionId', source.productionId)).order('desc').first();
   const timestamp = now();
   const versionNumber = (latest?.versionNumber ?? 0) + 1;
@@ -584,7 +598,7 @@ async function persistDraft(
       const shotVersionId = clip.shotVersionId ? clip.shotVersionId as Id<"shotVersions"> : undefined;
       if (shotVersionId) {
         const shotVersion = await ctx.db.get(shotVersionId);
-        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId || shotVersion.projectId !== projectId || shotVersion.productionId !== source.productionId || shotVersion.assetId !== assetId) throw new Error("An edited clip references a take outside this production or its media.");
+        if (!shotVersion || shotVersion.studioExternalId !== member.studio.externalId || shotVersion.projectId !== projectId || shotVersion.productionId !== source.productionId || shotVersion.productionVersionId !== productionVersionId || shotVersion.assetId !== assetId) throw new Error("An edited clip references a take outside this production or its media.");
       }
       const clipId = await ctx.db.insert("timelineClips", {
         studioExternalId: member.studio.externalId,
@@ -655,14 +669,22 @@ export const getDraft = query({
     if (!production) throw new Error("Production not found.");
     if (!production.projectId) throw new Error("Production is not attached to a project.");
     const access = await requireProjectAccess(ctx, production.projectId);
-    const timeline = args.timelineId
-      ? await ctx.db.get(args.timelineId)
-      : (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200)).find((candidate) => candidate.status === "DRAFT");
+    const version = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
+    let timeline = args.timelineId ? await ctx.db.get(args.timelineId) : null;
+    if (!args.timelineId) {
+      const candidates = await ctx.db.query("timelines").withIndex("by_production", q => q.eq("productionId", args.productionId)).order("desc").take(200);
+      for (const candidate of candidates) {
+        if (candidate.status !== 'DRAFT') continue;
+        const manifest = candidate.manifestId ? await ctx.db.get(candidate.manifestId) : null;
+        if (timelineMatchesCurrentVersion(candidate, production, version, manifest)) { timeline = candidate; break; }
+      }
+    }
     if (!timeline) return null;
-    if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId) throw new Error("Timeline does not belong to this production.");
+    if (timeline.productionId !== args.productionId || timeline.studioExternalId !== production.studioExternalId || timeline.projectId && timeline.projectId !== production.projectId) throw new Error("Timeline does not belong to this production.");
+    const manifest = timeline.manifestId ? await ctx.db.get(timeline.manifestId) : null;
     const state = await getTimelineState(ctx, timeline);
     const operations = await ctx.db.query("productionOperations").withIndex("by_production", (q) => q.eq("productionId", args.productionId)).order("desc").take(200);
-    return { timeline, ...state, canEdit: ['OWNER','EDITOR'].includes(access.projectRole), finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
+    return { timeline, ...state, canEdit: ['OWNER','EDITOR'].includes(access.projectRole) && timelineMatchesCurrentVersion(timeline, production, version, manifest), finishingV5Enabled: finishingV5Enabled(), graphicsV2Enabled:graphicsV2Enabled(), operations: operations.slice(0, 50) };
   },
 });
 
@@ -695,7 +717,7 @@ export const apply = mutation({
     const { timeline, member, production } = await getTimelineForMember(ctx, args.timelineId);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
-      if(args.kind==='updateGraphic'||args.kind==='replace'){
+      {
         const oldInput=operationInput(existing);const stable=(value:unknown):string=>JSON.stringify(value,(_key,row)=>row&&typeof row==='object'&&!Array.isArray(row)?Object.fromEntries(Object.entries(row).sort(([a],[b])=>a.localeCompare(b))):row);
         if(oldInput.sourceTimelineId!==String(timeline._id)||oldInput.editKind!==args.kind||stable(oldInput.editInput)!==stable(args.input))throw new Error('This edit request key belongs to another edit.');
       }
@@ -703,6 +725,7 @@ export const apply = mutation({
     }
     if (args.input === undefined || args.input === null) throw new Error("Edit input is required.");
     if (new TextEncoder().encode(JSON.stringify(args.input)).length > 128 * 1024) throw new Error('This edit input is too large. Use shorter caption or timing edits.');
+    await requireCurrentTimeline(ctx, timeline, production);
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const state = await getTimelineState(ctx, timeline);
@@ -738,8 +761,10 @@ export const undo = mutation({
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
+      if(existing.kind!=='UNDO'||operationInput(existing).sourceTimelineId!==timeline._id)throw new Error('This edit request key belongs to another edit.');
       return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
+    await requireCurrentTimeline(ctx, timeline, production);
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
@@ -764,8 +789,10 @@ export const redo = mutation({
     const existing = await findOperationByKey(ctx, key);
     if (existing) {
       if (existing.studioExternalId !== member.studio.externalId || existing.productionId !== timeline.productionId) throw new Error("This idempotency key belongs to another operation.");
+      if(existing.kind!=='REDO'||operationInput(existing).sourceTimelineId!==timeline._id)throw new Error('This edit request key belongs to another edit.');
       return { timelineId: existing.outputResourceIds[0] as Id<"timelines">, operationId: existing._id, replayed: true };
     }
+    await requireCurrentTimeline(ctx, timeline, production);
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
     const undoOperation = await lastOperationForTimeline(ctx, timeline, ["UNDO"]);
@@ -823,15 +850,12 @@ const beatCutArgs = { timelineId: v.id('timelines'), analysisVersionId: v.id('be
 async function beatCutContext(ctx: ReadCtx, args: { timelineId: Id<'timelines'>; analysisVersionId: Id<'beatAnalysisVersions'>; audioClipId: string; pictureTrackId: string; beatIndices?: number[] }) {
   if (process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED !== 'true') throw new Error('Beat-aligned editing is not enabled yet.');
   const access = await getTimelineForMember(ctx, args.timelineId);
+  await requireCurrentTimeline(ctx, access.timeline, access.production);
   if (access.timeline.status === 'SUPERSEDED' || !['DRAFT','REVISION_REQUESTED','APPROVED','LOCKED'].includes(access.resourceState.currentState)) throw new Error('Choose an editable or retained approved timeline for a new beat edit.');
   const state = await getTimelineState(ctx, access.timeline); const analysis = await ctx.db.get(args.analysisVersionId);
   if (!analysis || analysis.projectId !== access.production.projectId || !(analysis.origin === 'AUTO' && analysis.outcome === 'RELIABLE' && analysis.confidence >= 0.7 || analysis.origin === 'MANUAL' && analysis.outcome === 'MANUAL')) throw new Error('Choose a reliable automatic beat map or an explicitly reviewed manual version from this project.');
   const source = await approvedBeatSource(ctx, analysis.projectId, analysis.assetId);
   if (analysis.storageId !== source.storageId || analysis.sourceChecksum !== source.sourceChecksum || analysis.assetChecksum !== source.assetChecksum) throw new Error('The audio bytes changed after this analysis. Analyze the current source first.');
-  const sourceManifest = !state.metadata.productionVersionId && access.timeline.manifestId ? await ctx.db.get(access.timeline.manifestId) : null;
-  const boundVersion = state.metadata.productionVersionId ?? record(sourceManifest?.manifest).productionVersionId;
-  if (!access.production.currentVersionId || boundVersion !== access.production.currentVersionId) throw new Error('Use a timeline from the current approved production version.');
-  const version = await ctx.db.get(access.production.currentVersionId); if (!version || version.status !== 'APPROVED') throw new Error('Approve the current production before applying a beat edit.');
   const { clip: audio } = findClip(state, args.audioClipId);
   if (audio.kind !== 'AUDIO' || audio.assetId !== analysis.assetId) throw new Error('The selected soundtrack clip must use the exact analyzed project audio.');
   const fps = finishingFps(state.metadata);
@@ -867,9 +891,14 @@ export const previewBeatCuts = query({ args: beatCutArgs, returns: v.any(), hand
 export const applyBeatCuts = mutation({
   args: {...beatCutArgs,expectedPlanHash:v.string(),idempotencyKey:v.string()},returns:v.object({timelineId:v.id('timelines'),operationId:v.id('productionOperations'),replayed:v.boolean()}),
   handler:async(ctx,args)=>{
-    const context=await beatCutContext(ctx,args);const key=idempotencyKey(args.idempotencyKey);const previous=await findOperationByKey(ctx,key);
+    const key=idempotencyKey(args.idempotencyKey);const previous=await findOperationByKey(ctx,key);
+    if(previous){
+      const access=await getTimelineForMember(ctx,args.timelineId),input=operationInput(previous);
+      if(previous.kind!=='APPLY_BEAT_CUTS'||previous.productionId!==access.production._id||previous.targetId!==access.timeline._id||previous.actorUserId!==access.member.user._id||input.planHash!==args.expectedPlanHash||input.analysisVersionId!==args.analysisVersionId||input.audioClipId!==args.audioClipId||input.pictureTrackId!==args.pictureTrackId||args.beatIndices!==undefined&&JSON.stringify(input.beatIndices)!==JSON.stringify(args.beatIndices))throw new Error('This beat-edit key belongs to another source, plan or user.');
+      return {timelineId:previous.outputResourceIds[0] as Id<'timelines'>,operationId:previous._id,replayed:true};
+    }
+    const context=await beatCutContext(ctx,args);
     if(args.expectedPlanHash!==context.planHash)throw new Error('The beat plan changed. Preview the current source and map again.');
-    if(previous){if(previous.kind!=='APPLY_BEAT_CUTS'||previous.productionId!==context.production._id||previous.targetId!==context.timeline._id||previous.actorUserId!==context.member.user._id||operationInput(previous).planHash!==args.expectedPlanHash)throw new Error('This beat-edit key belongs to another source, plan or user.');return {timelineId:previous.outputResourceIds[0] as Id<'timelines'>,operationId:previous._id,replayed:true};}
     const state=structuredClone(context.state);const track=state.tracks.find(candidate=>candidate.id===args.pictureTrackId)!;const byId=new Map(context.plan.clips.map(clip=>[clip.clipId,clip]));
     for(const clip of track.clips){const planned=byId.get(clip.id)!;clip.startSeconds=planned.startFrame/context.fps;clip.durationSeconds=planned.durationInFrames/context.fps;clip.trimEndSeconds=(clip.trimStartSeconds??0)+clip.durationSeconds;clip.transition=undefined;clip.metadata={...clip.metadata,rendererTiming:{fps:context.fps,startFrame:planned.startFrame,durationInFrames:planned.durationInFrames,trimStartInFrames:Math.round((clip.trimStartSeconds??0)*context.fps)}};delete clip.metadata.rendererOrderIndex;}
     state.metadata={...state.metadata,beatEdit:{analysisVersionId:context.analysis._id,sourceChecksum:context.source.sourceChecksum,sourceAudioClipId:args.audioClipId,sourcePictureTrackId:args.pictureTrackId,boundaryFrames:context.plan.boundaryFrames,beatIndices:context.plan.beatIndices,planHash:context.planHash}};

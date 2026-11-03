@@ -1,6 +1,6 @@
 export type ReviewDecision = 'PENDING' | 'CHANGES_REQUESTED' | 'APPROVED';
 
-export type ReviewAvailability = 'READY' | 'WAITING' | 'UNAVAILABLE' | 'ERROR';
+export type ReviewAvailability = 'READY' | 'NOT_STARTED' | 'WAITING' | 'UNAVAILABLE' | 'ERROR';
 
 export interface ReviewVersion {
   id: string;

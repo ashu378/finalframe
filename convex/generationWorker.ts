@@ -7,6 +7,7 @@ import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
 import { videoCatalogFingerprint, isSourceVideoEdit, certifyAvatarEndpointCatalog } from '../src/lib/ai/video-routing';
 import { runPreparation } from './preparationWorker';
 import { GENERATION_MAX_MEDIA_BYTES, object, validateMediaProbe, workerEnabled } from './generationWorkerContracts';
+import { sanitizeSubmissionDiagnostic } from '../src/lib/ai/submission-diagnostic';
 
 type InternalMutation = FunctionReference<'mutation', 'internal', any, any>;
 type InternalQuery = FunctionReference<'query', 'internal', any, any>;
@@ -117,10 +118,11 @@ export const run = internalAction({
       catch { throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' }); }
       await ctx.runMutation(jobs.succeed, { ...lease, assetId, technicalProbe });
     } catch (error) {
-      const details = error as { code?: string; status?: number; retryable?: boolean };
+      const details = error as { code?: string; status?: number; retryable?: boolean; details?: unknown };
       const code = details.code || 'GENERATION_WORKER_ERROR';
       const rejected = !submissionAttempted || (typeof details.status === 'number' && details.status >= 400 && details.status < 500 && details.status !== 408);
-      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: code !== 'MEDIA_VALIDATION_FAILED', ambiguous: submissionAttempted && !rejected, rejected }).catch(() => {
+      const submissionDiagnostic = sanitizeSubmissionDiagnostic(object(details.details).submissionDiagnostic);
+      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: code !== 'MEDIA_VALIDATION_FAILED', ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {
         // A stale action cannot mutate a newer lease. The scheduled expiry
         // recovers accepted jobs or holds an ambiguous submission for review.
       });

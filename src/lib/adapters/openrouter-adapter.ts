@@ -13,6 +13,7 @@ import {
 } from '../ai/types';
 import type { CameraConfig, MotionConfig } from '../types/database';
 import { IMAGE_RESPONSE_LIMITS, readImageResponse, type ImageResponseBody } from '../ai/image-response';
+import { buildSubmissionDiagnostic, sanitizeSubmissionDiagnostic, SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES } from '../ai/submission-diagnostic';
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -331,7 +332,35 @@ interface JsonResponse<T> {
     requestId?: string;
 }
 
-async function requestJson<T>(path: string, init: RequestInit, options: OpenRouterTransportOptions, capability: string, model?: string): Promise<JsonResponse<T>> {
+/** Diagnostic failure never replaces the authoritative HTTP rejection status. */
+async function rejectedVideoBody(response: Response, signal: AbortSignal): Promise<{ body?: unknown; bytes?: Uint8Array }> {
+    let reader: ReadableStreamDefaultReader<Uint8Array>;
+    try { if (!response.body) return {}; reader = response.body.getReader(); }
+    catch { return {}; }
+    const cancel = () => { void reader.cancel().catch(() => undefined); };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+        if (signal.aborted || Number(response.headers.get('content-length')) > SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES) return {};
+        const chunks: Uint8Array[] = []; let size = 0;
+        for (let reads = 0; ; reads++) {
+            if (signal.aborted || reads >= 2048) return {};
+            const part = await reader.read();
+            if (part.done) break;
+            size += part.value.byteLength;
+            if (size > SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES) return {};
+            chunks.push(part.value);
+        }
+        if (signal.aborted) return {};
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        let body: unknown;
+        try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { /* Digest still identifies exact bounded malformed bytes. */ }
+        return { body, bytes };
+    } catch { return {}; }
+    finally { signal.removeEventListener('abort', cancel); void reader.cancel().catch(() => undefined); }
+}
+
+async function requestJson<T>(path: string, init: RequestInit, options: OpenRouterTransportOptions, capability: string, model?: string, diagnosticControls?: unknown): Promise<JsonResponse<T>> {
     requireKey(options, capability, model);
     const fetcher = getFetch(options);
     const retry = retryOptions(options);
@@ -354,21 +383,34 @@ async function requestJson<T>(path: string, init: RequestInit, options: OpenRout
                 signal: controller.signal,
                 headers: requestHeaders(options, init, method, idempotencyKey),
             });
-            const body = await response.json().catch(() => null) as unknown;
+            const videoRejection = !response.ok && path === '/videos' && method === 'POST' && capability === 'VIDEO_GENERATION';
+            const rejectedBody = videoRejection ? await rejectedVideoBody(response, controller.signal) : undefined;
+            const body = videoRejection ? rejectedBody?.body : await response.json().catch(() => null) as unknown;
             if (response.ok) {
                 return { body: body as T, requestId: response.headers.get('x-request-id') || undefined };
             }
             const classification = classifyOpenRouterError(response.status);
+            let submissionDiagnostic;
+            if (videoRejection) {
+                const record = asRecord(body), nested = asRecord(record.error);
+                const providerCode = record.code ?? nested.code ?? record.type ?? nested.type;
+                try { submissionDiagnostic = await buildSubmissionDiagnostic({
+                    error: { status: response.status, requestId: response.headers.get('x-request-id'), details: {
+                        providerCode: typeof providerCode === 'number' && Number.isInteger(providerCode) ? String(providerCode) : providerCode,
+                        providerParam: record.param ?? nested.param ?? record.parameter ?? nested.parameter,
+                    } }, controls: diagnosticControls, responseBodyBytes: rejectedBody?.bytes,
+                }); } catch { /* Preserve the original HTTP outcome even if hashing is unavailable. */ }
+            }
             const error = new AICapabilityError({
                 code: classification.code,
-                message: responseMessage(body, `OpenRouter request failed (${response.status}).`),
+                message: videoRejection ? `OpenRouter video request failed (${response.status}).` : responseMessage(body, `OpenRouter request failed (${response.status}).`),
                 provider: 'openrouter',
                 capability,
                 model,
                 status: response.status,
                 requestId: response.headers.get('x-request-id') || undefined,
                 retryable: classification.retryable,
-                details: normalizedProviderDetails(body),
+                details: videoRejection ? (submissionDiagnostic ? { submissionDiagnostic } : undefined) : normalizedProviderDetails(body),
             });
             if (!error.retryable || attempt >= retry.maxRetries) throw error;
             if (retry.sleep) await retry.sleep(delayForAttempt(response, attempt, options));
@@ -789,16 +831,24 @@ export async function generateVideo(input: VideoGenerationRequest, options: Open
     const resolved = await resolveCatalogModel('VIDEO_GENERATION', input.model, 'video', options);
     const model = resolved.id;
     const body = buildVideoGenerationRequest({ ...input, model }, { allowDiscoveredModel: resolved.discovered });
+    const diagnosticControls = { duration: body.duration, aspectRatio: body.aspect_ratio, resolution: body.resolution,
+        generateAudio: body.generate_audio, continuation: Boolean(body.previous_job_id),
+        frameImageCount: Array.isArray(body.frame_images) ? body.frame_images.length : 0,
+        inputReferenceCount: Array.isArray(body.input_references) ? body.input_references.length : 0 };
     requireKey(options, 'VIDEO_GENERATION', model);
     await options.beforeMediaSubmit?.();
     try {
-        const response = await requestJson<{ id: string; polling_url?: string; status: string; generation_id?: string; usage?: unknown; model?: string }>('/videos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, { ...options, maxRetries: 0, retry: { ...options.retry, maxRetries: 0 } }, 'VIDEO_GENERATION', model);
+        const response = await requestJson<{ id: string; polling_url?: string; status: string; generation_id?: string; usage?: unknown; model?: string }>('/videos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, { ...options, maxRetries: 0, retry: { ...options.retry, maxRetries: 0 } }, 'VIDEO_GENERATION', model, diagnosticControls);
         if (!response.body?.id) throw new AICapabilityError({ code: 'INVALID_PROVIDER_RESPONSE', message: 'OpenRouter returned no video task ID.', provider: 'openrouter', capability: 'VIDEO_GENERATION', model, retryable: false, details: { submissionUnknown: true } });
         return { id: response.body.id, pollingUrl: response.body.polling_url, polling_url: response.body.polling_url, status: response.body.status, generationId: response.body.generation_id, generation_id: response.body.generation_id, modelUsed: response.body.model || model, ...extractUsageAndCost(response.body), requestId: response.requestId, raw: response.body };
     } catch (cause) {
         const error = cause instanceof AICapabilityError ? cause : abortError(cause, 'VIDEO_GENERATION', model);
         const submissionUnknown = ['NETWORK_ERROR', 'REQUEST_TIMEOUT', 'INVALID_PROVIDER_RESPONSE'].includes(error.code) || (error.status !== undefined && (error.status >= 500 || error.status === 408));
-        throw new AICapabilityError({ ...error.toJSON(), retryable: false, details: { ...asRecord(error.details), submissionUnknown }, cause });
+        let submissionDiagnostic = sanitizeSubmissionDiagnostic(asRecord(error.details).submissionDiagnostic);
+        if (!submissionDiagnostic) {
+            try { submissionDiagnostic = await buildSubmissionDiagnostic({ error, controls: diagnosticControls }); } catch { /* Diagnostics never mask submission uncertainty. */ }
+        }
+        throw new AICapabilityError({ ...error.toJSON(), retryable: false, details: { submissionUnknown, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }, cause });
     }
 }
 

@@ -14,9 +14,9 @@ provider login, or retry of that job was performed.
 - [BFL's continuation documentation](https://docs.bfl.ai/flux_3/flux3_video)
   supports a 5-second continuation, 16:9, and disabled generated audio. Direct
   BFL input names are not the normalized OpenRouter transport contract.
-- The worker currently keeps the error code and rejection/uncertainty decision,
-  discarding the adapter's HTTP status, request ID, and rejection details. The
-  retained live job therefore cannot prove the rejected parameter. A completed
+- Before this packet the worker kept only the error code and
+  rejection/uncertainty decision, discarding rejection details. The historical
+  live job therefore cannot prove the rejected parameter. A completed
   source GET does not prove upstream availability, and source age alone does not
   prove expiry.
 
@@ -31,12 +31,15 @@ adapter/builder, canonical job creation/fence/claim/submit/poll/fail handlers an
 reviewed routing. Catalog discovery, HTTP, database, and accounting functions
 use isolated fixtures. It verifies the exact silent 5-second continuation
 payload, one fenced POST, accepted polling, definitive 400 release, and uncertain
-408/500/network/abort reconciliation without another POST. Accounting assertions
+408/500/network/abort reconciliation without another POST, private persistence
+and public query redaction, malformed/oversized/interrupted bodies, stale lease
+and terminal replay, and hashing failure without changed accounting. Assertions
 check the actual fail handler's settlement calls; this is not an online ledger
 or billing test.
 
-`src/lib/ai/submission-diagnostic.ts` is a new pure helper with **no active
-imports**. Its output contains only version 1, a SHA-256 of fixed-order permitted
+`src/lib/ai/submission-diagnostic.ts` is a pure helper used by the adapter,
+worker and internal failure persistence boundary. Its output contains only
+version 1, a SHA-256 of fixed-order permitted
 controls, and optional HTTP status, recognized request ID, exact allowlisted
 provider code/parameter, and bounded response-byte SHA-256. It never serializes
 arbitrary error/request/response objects, messages, prompts, model/source IDs,
@@ -45,34 +48,35 @@ there is no misleading partial digest. Input snapshots are taken before async
 hashing yields. The output boundary sanitizer drops unknown fields and rejects
 invalid versions/fingerprints. Unknown correlation-ID formats are omitted.
 
-## Proposed integration for the coordinator (not implemented here)
+## Integrated private boundaries
 
-1. In the VIDEO_GENERATION error transport only, capture at most 64 KiB of the
-   rejected response bytes using a bounded single body read. Cancel overflow;
-   do not collect an unlimited body for diagnosis. Keep bytes ephemeral. Feed
+1. In the VIDEO_GENERATION error transport only, the adapter captures at most 64 KiB of the
+   rejected response bytes using one bounded body read (also capped at 2048
+   reads). It cancels overflow and retains no partial digest. Bytes remain
+   ephemeral. It feeds
    only status, the actual `x-request-id` header, allowlisted provider error code
    and parameter, and those bytes into `buildSubmissionDiagnostic`, along with
    controls derived from the already-built canonical request: duration,
    aspectRatio, resolution, generateAudio, continuation boolean, and reference
-   counts. Never parse arbitrary provider messages to invent a parameter or
-   receipt. Unknown ID/code/param values remain absent. If exact bounded bytes
-   are unavailable, omit `responseDigest` rather than hash a reconstruction.
-2. Forward only the returned diagnostic on a private typed error slot through
-   the generation worker's catch. Do not forward raw adapter details: existing
-   `providerMessage` can echo sensitive request content. Diagnostic creation
-   failure must never replace the original submission outcome or alter whether
-   its reservation is released or retained.
-3. Add an optional diagnostic argument to internal `generationJobs.fail` and
-   call `sanitizeSubmissionDiagnostic` at that persistence boundary. After the
-   existing terminal/lease checks, persist only sanitized output inside existing
-   `job.response.submissionDiagnostic`. Preserve all stored-output recovery,
-   accepted/uncertain barriers, retry, settlement, and stale-lease behavior.
-   No schema field is needed. Do not expose this field through public job/error
-   projections, and do not turn its existence into retry permission.
-4. Add actual-handler integration assertions for diagnostic preservation,
-   malicious optional fields, stale lease/no writes, public projection redaction,
-   and unchanged rejected-versus-uncertain settlement. Keep controlled future
-   attempts explicit; this packet does not schedule one.
+   counts. It reads explicit provider code/parameter fields, never infers them
+   from messages. Unknown ID/code/param values remain absent. If exact bounded
+   bytes are unavailable, `responseDigest` is absent. Rejected video errors use
+   a static message, and raw provider details are not forwarded. Success-body
+   handling and non-video/SFX/MUSIC transports keep their existing behavior.
+2. The generation worker forwards only the re-sanitized private diagnostic.
+   Network/timeout errors can retain a control fingerprint without inventing
+   a status, request ID or response digest. Read/hash failure does not replace
+   the original HTTP or uncertainty classification or change settlement.
+3. Internal `generationJobs.fail` accepts an optional diagnostic and revalidates
+   it after existing terminal/lease checks. Only fenced, unaccepted
+   SHOT_GENERATION jobs persist it in `job.response.submissionDiagnostic`.
+   Invalid versions/fields are dropped. Existing response fields, stored-output
+   recovery, accepted/uncertain barriers and accounting are preserved. No schema
+   field or public projection is changed. A diagnostic grants no retry authority.
+4. Actual-handler tests verify private preservation, malicious optional-field
+   stripping, stale lease/no writes, terminal no-op replay, public get/list
+   redaction, and unchanged rejected-versus-uncertain settlement even if hashing
+   fails. Future controlled attempts remain explicit; this packet schedules none.
 
 ## No-cost checks
 

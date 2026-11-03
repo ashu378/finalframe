@@ -17,6 +17,7 @@ import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } fro
 import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
 import {freshSfxQuote,assertSfxQuote,sameSfxQuote,assertSfxConsent,validateSfxPrompt,SFX_LIMITS,assertSfxOutputProbe,retryableSfxQc,safeSfxQcCode,sfxError} from '../src/lib/ai/sfx';
 import {REVIEWED_OPERATION_CONTRACTS} from '../src/lib/ai/model-registry';
+import { sanitizeSubmissionDiagnostic } from '../src/lib/ai/submission-diagnostic';
 import {freshMusicQuote,sameMusicQuote,MUSIC_LIMITS,assertMusicOutputProbe,MUSIC_OUTPUT_POLICY,retryableMusicQc,safeMusicQcCode} from '../src/lib/ai/music';
 import {normalizeSha256,sha256Equal} from '../renderer/src/media/sha256';
 import { resolvePortraitSourceCertificate } from './imageCertificates';
@@ -511,10 +512,14 @@ export const succeed = internalMutation({ args: { ...leaseArgs, assetId: v.id('a
   await settle(ctx, job, true, job.providerCostUsd);
   return { jobId: job._id, assetId: args.assetId };
 } });
-export const fail = internalMutation({ args: { ...leaseArgs, errorCode: v.string(), retryable: v.optional(v.boolean()), ambiguous: v.optional(v.boolean()), rejected: v.optional(v.boolean()) }, returns: v.null(), handler: async (ctx, args) => {
+export const fail = internalMutation({ args: { ...leaseArgs, errorCode: v.string(), retryable: v.optional(v.boolean()), ambiguous: v.optional(v.boolean()), rejected: v.optional(v.boolean()), submissionDiagnostic: v.optional(v.any()) }, returns: v.null(), handler: async (ctx, args) => {
   const job = await load(ctx, args.jobId);
   if (GENERATION_TERMINAL.has(job.status)) return null;
   assertLease(job, args.leaseId);
+  const diagnostic = sanitizeSubmissionDiagnostic(args.submissionDiagnostic);
+  if (diagnostic && job.operation === 'SHOT_GENERATION' && job.submissionStartedAt && !job.providerJobId) {
+    await ctx.db.patch(job._id, { response: { ...object(job.response), submissionDiagnostic: diagnostic } });
+  }
   const timestamp = Date.now();
   if(hasStoredSfxOutput(job)){await resumeSfxQc(ctx,job,args.retryable===true,args.errorCode);return null;}
   if(hasStoredMusicOutput(job)){await resumeMusicQc(ctx,job,args.retryable===true,args.errorCode);return null;}
