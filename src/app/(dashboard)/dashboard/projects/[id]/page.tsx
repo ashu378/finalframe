@@ -10,6 +10,7 @@ import { notFound, redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/guards';
 import { getProjectById } from '@/lib/project/actions';
 import { getProductionWorkspace } from '@/lib/production/actions';
+import { getEpisodeNavigation } from '@/lib/production/episode-actions';
 import { getScenesForProject } from '@/lib/scene/actions';
 import { getRenderJobs } from '@/lib/render/actions';
 import { ReviewPlayer } from '@/components/review/review-player';
@@ -30,12 +31,23 @@ export const metadata = {
 
 interface ProjectPageProps {
     params: Promise<{ id: string }>;
+    searchParams: Promise<{ production?: string }>;
 }
 
-export default async function ProjectPage({ params }: ProjectPageProps) {
+export default async function ProjectPage({ params, searchParams }: ProjectPageProps) {
     await requireAuth();
     const { id: routeId } = await params;
     const id = decodeProjectRouteId(routeId);
+    const selection = await searchParams;
+    const navigation = await getEpisodeNavigation(id);
+    if (!navigation) notFound();
+    if (selection.production && !navigation.options.some(option => option.productionId === selection.production)) notFound();
+    // Canonical productions own their episode selection and finishing history.
+    // Choose that route before any legacy loader asks for an ambiguous project.
+    if (navigation.options.length) {
+        const query = selection.production ? `?${new URLSearchParams({ production: selection.production })}` : '';
+        redirect(`/dashboard/projects/${encodeURIComponent(id)}/workspace/overview${query}`);
+    }
 
     const [result, scenesResult, jobsResult, workspace] = await Promise.all([
         getProjectById(id),

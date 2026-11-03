@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { api } from '../../../convex/_generated/api';
+import type { Id } from '../../../convex/_generated/dataModel';
 import type { Scene, CameraConfig, MotionConfig, SceneAsset } from '@/lib/types/database';
 
 type WorkspaceScene = { _id: string; title: string; purpose: string; visualDirection: string; orderIndex: number; metadata?: Record<string, any> };
@@ -29,21 +30,21 @@ function mapScene(scene: WorkspaceScene, projectId: string): Scene {
         updated_at: new Date(metadata.updatedAt || Date.now()).toISOString(),
     };
 }
-async function workspace(projectId: string) {
+async function workspace(projectId: string, productionId?: string) {
     const convex = await getAuthenticatedConvexClient();
     const projects = await convex.query(api.projects.list, { studioExternalId: (await convex.query(api.account.current, {})).studio?.externalId || '' });
     if (!projects.some((project) => project.externalId === projectId || project._id === projectId)) return { convex, data: null };
-    return { convex, data: await convex.query(api.productions.getWorkspaceByProject, { projectExternalId: projectId }) };
+    return { convex, data: await convex.query(api.productions.getWorkspaceByProject, { projectExternalId: projectId, ...(productionId ? { productionId: productionId as Id<'productions'> } : {}) }) };
 }
 
-export async function getScenesForProject(projectId: string): Promise<{ success: boolean; scenes?: Scene[]; error?: string }> {
+export async function getScenesForProject(projectId: string, productionId?: string): Promise<{ success: boolean; scenes?: Scene[]; error?: string }> {
     try {
-        const result = await workspace(projectId);
+        const result = await workspace(projectId, productionId);
         if (!result.data) return { success: false, error: 'Project not found' };
         const scenes = result.data.sequences.flatMap((sequence) => sequence.scenes.map((scene) => mapScene(scene, projectId)));
         return { success: true, scenes };
-    } catch (error) {
-        console.error('Convex getScenesForProject failed:', error);
+    } catch {
+        console.error('Convex getScenesForProject failed:', { code: 'SCENES_UNAVAILABLE' });
         return { success: false, error: 'Failed to fetch scenes' };
     }
 }

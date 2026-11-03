@@ -40,6 +40,7 @@ function node(id: string, kind: string, label: string, state: ReturnType<typeof 
 function edge(id: string, source: string, target: string, kind: string) {
   return { id, source, target, kind };
 }
+function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
 async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
   const nodes: ReturnType<typeof node>[] = [];
@@ -106,24 +107,60 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
     }
   }
 
-  const timelines = (await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect()).sort((a, b) => b.versionNumber - a.versionNumber);
-  const latestTimeline = timelines[0];
+  const timelinePage = await ctx.db.query("timelines").withIndex("by_production", (q) => q.eq("productionId", production._id)).order('desc').take(201);
+  const timelines = timelinePage.slice(0,200).sort((a, b) => b.versionNumber - a.versionNumber);
+  const manifests = new Map<string, Doc<'manifests'> | null>();
+  async function ownedManifest(id: string | undefined) {
+    if(!id)return null;
+    if(manifests.has(id))return manifests.get(id)??null;
+    const manifest=await ctx.db.get(id as Doc<'manifests'>['_id']);
+    const payload=record(manifest?.manifest);
+    const valid=manifest&&manifest.productionId===production._id&&manifest.projectId===production.projectId&&manifest.studioExternalId===production.studioExternalId&&payload.productionId===production._id&&payload.projectId===production.projectId;
+    manifests.set(id,valid?manifest:null);return valid?manifest:null;
+  }
+  async function timelineVersion(timeline: Doc<'timelines'>) {
+    if(timeline.productionId!==production._id||timeline.studioExternalId!==production.studioExternalId||timeline.projectId&&timeline.projectId!==production.projectId)return null;
+    const tracks=record(timeline.tracks),metadata=record(tracks.metadata);
+    const ids=[tracks.productionVersionId,metadata.productionVersionId].filter((id):id is string=>typeof id==='string'&&id.length>0);
+    if(timeline.manifestId){const manifest=await ownedManifest(timeline.manifestId);const id=record(manifest?.manifest).productionVersionId;if(!manifest||typeof id!=='string')return null;ids.push(id);}
+    if(!ids.length){
+      const indexed=await ctx.db.query('manifests').withIndex('by_timeline',q=>q.eq('timelineId',timeline._id)).order('desc').take(2);
+      for(const candidate of indexed){const manifest=await ownedManifest(candidate._id);const payload=record(manifest?.manifest);if(!manifest||payload.timelineId!==timeline._id||typeof payload.productionVersionId!=='string')return null;ids.push(payload.productionVersionId);}
+    }
+    return ids.length&&new Set(ids).size===1?ids[0]:null;
+  }
+  const currentTimelineIds=new Set<string>();
+  for(const timeline of timelines)if(production.currentVersionId&&await timelineVersion(timeline)===production.currentVersionId)currentTimelineIds.add(timeline._id);
+  const latestTimeline = timelines.find(timeline=>currentTimelineIds.has(timeline._id));
   if (latestTimeline) {
     const timelineNodeId = `timeline:${latestTimeline._id}`;
     addNode(timelineNodeId, "timeline", `Edit version ${latestTimeline.versionNumber}`, friendlyState(latestTimeline.status), "timelines", latestTimeline._id, `${latestTimeline.durationSeconds}s timeline`);
     addEdge(`placed:${productionNodeId}:${timelineNodeId}`, productionNodeId, timelineNodeId, "placedOn");
   }
 
-  const reviews = (await ctx.db.query("reviews").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect()).sort((a, b) => b.createdAt - a.createdAt);
-  const review = reviews[0];
+  const reviewPage = await ctx.db.query("reviews").withIndex("by_production", (q) => q.eq("productionId", production._id)).order('desc').take(201);
+  const reviews = reviewPage.slice(0,200).sort((a, b) => b.createdAt - a.createdAt);
+  async function currentManifest(id: string | undefined) {
+    const manifest=await ownedManifest(id),payload=record(manifest?.manifest);
+    return manifest&&production.currentVersionId&&payload.productionVersionId===production.currentVersionId&&typeof payload.timelineId==='string'&&currentTimelineIds.has(payload.timelineId)?manifest:null;
+  }
+  let review: Doc<'reviews'> | undefined;
+  for(const candidate of reviews){const manifest=await currentManifest(candidate.manifestId);if(manifest&&candidate.timelineId===record(manifest.manifest).timelineId&&(!candidate.projectId||candidate.projectId===production.projectId)&&candidate.studioExternalId===production.studioExternalId){review=candidate;break;}}
   if (review) {
     const reviewNodeId = `review:${review._id}`;
     addNode(reviewNodeId, "review", "Review", friendlyState(review.status), "reviews", review._id, "Comments, approval, and requested changes");
     addEdge(`reviewed:${productionNodeId}:${reviewNodeId}`, productionNodeId, reviewNodeId, "reviewedBy");
   }
 
-  const exports = (await ctx.db.query("exports").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect()).sort((a, b) => b.createdAt - a.createdAt);
-  const exportRecord = exports[0];
+  const exportPage = await ctx.db.query("exports").withIndex("by_production", (q) => q.eq("productionId", production._id)).order('desc').take(201);
+  const exports = exportPage.slice(0,200).sort((a, b) => b.createdAt - a.createdAt);
+  let exportRecord: Doc<'exports'> | undefined;
+  for(const candidate of exports){
+    if(candidate.projectId&&candidate.projectId!==production.projectId||candidate.studioExternalId!==production.studioExternalId)continue;
+    let manifestId=candidate.manifestId;
+    if(!manifestId&&candidate.renderJobId){const job=await ctx.db.get(candidate.renderJobId);if(job?.productionId===production._id&&job.projectId===production.projectId)manifestId=job.manifestId;}
+    if(await currentManifest(manifestId)){exportRecord=candidate;break;}
+  }
   if (exportRecord) {
     const exportNodeId = `export:${exportRecord._id}`;
     addNode(exportNodeId, "export", "Download", friendlyState(exportRecord.status), "exports", exportRecord._id, exportRecord.mimeType || "Final export");
@@ -140,8 +177,9 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
       hasPlan: Boolean(production.currentPlanId),
       hasVersion: Boolean(production.currentVersionId),
       hasTimeline: Boolean(latestTimeline),
-      hasReview: Boolean(review),
-      hasExport: Boolean(exportRecord),
+      hasReview: review?.status==='APPROVED',
+      hasExport: exportRecord?.status==='COMPLETED'&&Boolean(exportRecord.storageId),
+      finishingHistoryLimited: timelinePage.length>200||reviewPage.length>200||exportPage.length>200,
     },
   };
 }

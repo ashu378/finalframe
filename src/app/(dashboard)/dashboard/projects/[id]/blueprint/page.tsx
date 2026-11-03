@@ -54,7 +54,7 @@ export default async function BlueprintPage({ params, searchParams }: BlueprintP
 
     const [result, scenesResult] = await Promise.all([
         getProjectById(id),
-        getScenesForProject(id)
+        getScenesForProject(id, selectedProductionId)
     ]);
 
     if (!result.success || !result.project) {
