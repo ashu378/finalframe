@@ -15,11 +15,17 @@ export const saveProposal = mutation({ args: { productionId: v.id('productions')
   requireRecipeEnabled(); const {production,access} = await recipeProductionScope(ctx,args.productionId);
   const plan = await ctx.db.get(args.sourcePlanId); const version = await ctx.db.query('productionVersions').withIndex('by_source_plan',q=>q.eq('sourcePlanId',args.sourcePlanId)).unique();
   if (!plan || plan.productionId !== production._id || !version || version.productionId !== production._id) throw new Error('RECIPE_PROPOSAL_NEEDS_CURRENT_DRAFT');
-  const proposal = parseRecipeProposal(args.proposal); const snapshot = await draftSnapshot(ctx,version,plan.plan); const logicalShots = await snapshotLogicalShots(snapshot); const sourceDraftHash = await recipeHash(snapshot);
+  // Execution instructions can be added after approval without modifying the
+  // canonical plan. Approved shots bind only to their immutable snapshot;
+  // mutable graph rows are never re-frozen into an approved version here.
+  if (!['DRAFT','APPROVED'].includes(version.status)) throw new Error('RECIPE_CURRENT_PLAN_REQUIRED');
+  const proposal = parseRecipeProposal(args.proposal);
+  const snapshot = version.status === 'DRAFT' ? await draftSnapshot(ctx,version,plan.plan) : version.snapshot;
+  const logicalShots = await snapshotLogicalShots(snapshot); const sourceDraftHash = await recipeHash(snapshot);
   for (const step of proposal.steps) if(step.operation==='GENERATION'&&!logicalShots.some(shot=>shot.key===step.logicalShotKey)) throw new Error('RECIPE_LOGICAL_SHOT_UNKNOWN');
   const creationKey=recipeKey(args.idempotencyKey);const requestHash=await recipeHash({productionId:production._id,sourcePlanId:plan._id,sourceDraftHash,proposal});const previous=await ctx.db.query('recipeProposals').withIndex('by_creation_key',q=>q.eq('creationKey',creationKey)).unique();
   if(previous){if(previous.projectId!==production.projectId||previous.createdByUserId!==access.user._id||previous.requestHash!==requestHash)throw new Error('RECIPE_PROPOSAL_REPLAY_CONFLICT');return {proposalId:previous._id,sourceDraftHash,replayed:true};}
-  if(version.status!=='DRAFT')throw new Error('RECIPE_PROPOSAL_NEEDS_CURRENT_DRAFT');
+  if (production.currentPlanId !== plan._id || version.status === 'APPROVED' && (production.currentVersionId !== version._id || plan.status !== 'APPROVED')) throw new Error('RECIPE_CURRENT_PLAN_REQUIRED');
   const proposalId=await ctx.db.insert('recipeProposals',{projectId:production.projectId!,productionId:production._id,sourcePlanId:plan._id,sourceDraftHash,proposalVersion:1,proposal,logicalShots,creationKey,requestHash,createdByUserId:access.user._id,createdAt:Date.now()});return {proposalId,sourceDraftHash,replayed:false};
 }});
 
