@@ -13,6 +13,7 @@ import { getProjectLibraryPage } from '@/lib/project/library-actions';
 import { DashboardClient } from './dashboard-client';
 import { api } from '@/../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
+import { toLifecycleProjectCard } from '@/lib/project/lifecycle-presentation';
 
 export const metadata = {
     title: 'Productions | FinalFrame',
@@ -36,7 +37,7 @@ export default async function DashboardPage() {
         getCurrentUserProfile()
     ]);
 
-    const projects = projectPage.page.map((project) => ({ id: project.externalId, name: project.name, state: project.status === 'APPROVED' ? 'approved' as const : project.status === 'COMPLETED' ? 'rendered' as const : 'draft' as const }));
+    const projects = projectPage.page.map(toLifecycleProjectCard);
     const studioId = studioRes.success ? studioRes.studioId : undefined;
     const userAccount = profile?.full_name || user.email;
 
