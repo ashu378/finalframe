@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { api } from '../../../../convex/_generated/api';
@@ -33,6 +34,7 @@ function makeImpact(value: any): ProductionEditImpact {
 }
 
 export function EditSurface({ productionId, nodes }: { productionId: string; nodes: ProductionGraphNode[] }) {
+  const router = useRouter();
   const convexProductionId = asProductionId(productionId);
   const [selectedNode, setSelectedNode] = useState<ProductionGraphNode | null>(nodes.find((node) => ['videoTake', 'shot', 'image'].includes(node.kind)) ?? nodes[0] ?? null);
   const [impactRequested, setImpactRequested] = useState(false);
@@ -78,6 +80,11 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
     }
   }
 
+  function showCreatedTimeline(id: Id<'timelines'>) {
+    setActiveTimelineId(id);
+    router.refresh();
+  }
+
   async function handleTimelineEdit(event: TimelineEditEvent) {
     if (event.type === 'select-clip') { setReplacement(null); return; }
     if (!timeline || !canEditTimeline) return;
@@ -88,10 +95,10 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
       setMessage(null);
       if (event.type === 'undo') {
         const result = await undoTimelineEdit({ timelineId, idempotencyKey });
-        setActiveTimelineId(result.timelineId as Id<'timelines'>);
+        showCreatedTimeline(result.timelineId as Id<'timelines'>);
       } else if (event.type === 'redo') {
         const result = await redoTimelineEdit({ timelineId, idempotencyKey });
-        setActiveTimelineId(result.timelineId as Id<'timelines'>);
+        showCreatedTimeline(result.timelineId as Id<'timelines'>);
       } else if (event.type === 'replace') {
         setReplacement({ timelineId: timeline.id, clipId: event.clipId });
         setSaveStatus('saved');
@@ -114,7 +121,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
         if (event.type === 'captions') { kind = 'updateCaptions'; input = { clipId: event.clipId, cues: event.cues, language: event.language, style: event.style }; }
         if (event.type === 'audio-level') { kind = 'adjustAudio'; input = { clipId: event.clipId, volume: Math.pow(10, event.volumeDb / 20), muted: false }; }
         const result = await applyTimelineEdit({ timelineId, kind, input, idempotencyKey });
-        setActiveTimelineId(result.timelineId as Id<'timelines'>);
+        showCreatedTimeline(result.timelineId as Id<'timelines'>);
       }
       setSaveStatus('saved');
       setMessage('A new editable version is ready. Your previous version is still preserved.');
@@ -135,11 +142,11 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
       setSaveStatus('saving');
       try {
         const result = await applyTimelineEdit({ timelineId: timeline.id as Id<'timelines'>, kind: 'replace', input: { clipId: replacement.clipId, assetId }, idempotencyKey: `timeline-replace:${crypto.randomUUID()}` });
-        setActiveTimelineId(result.timelineId); setReplacement(null); setSaveStatus('saved'); setMessage('Replacement saved in a new draft timeline. The previous version is retained.');
+        showCreatedTimeline(result.timelineId); setReplacement(null); setSaveStatus('saved'); setMessage('Replacement saved in a new draft timeline. The previous version is retained.');
       } catch (error) { setSaveStatus('error'); throw error; }
     }} />}
-    {draft?.graphicsV2Enabled&&timeline&&draft.timeline.projectId&&<GraphicEditPanel key={'graphic:'+timeline.id} projectId={draft.timeline.projectId as Id<'projects'>} clips={draft.tracks.flatMap((track:any)=>track.clips)} fps={timeline.frameRate} disabled={!canEditTimeline||saveStatus==='saving'} onApply={async input=>{setSaveStatus('saving');try{const result=await applyTimelineEdit({timelineId:timeline.id as Id<'timelines'>,kind:'updateGraphic',input,idempotencyKey:crypto.randomUUID()});setActiveTimelineId(result.timelineId);setSaveStatus('saved');setMessage('Graphic saved in a new draft timeline. The previous version is retained.');}catch(error){setSaveStatus('error');throw error;}}}/>}
-    {timeline&&draft?.timeline?.projectId&&<MusicBeatEditor key={timeline.id} timeline={timeline} projectId={draft.timeline.projectId as Id<'projects'>} onCreatedTimeline={id=>{setActiveTimelineId(id);setMessage('A new beat-aligned draft is ready. The source timeline and soundtrack are retained.');}} />}
+    {draft?.graphicsV2Enabled&&timeline&&draft.timeline.projectId&&<GraphicEditPanel key={'graphic:'+timeline.id} projectId={draft.timeline.projectId as Id<'projects'>} clips={draft.tracks.flatMap((track:any)=>track.clips)} fps={timeline.frameRate} disabled={!canEditTimeline||saveStatus==='saving'} onApply={async input=>{setSaveStatus('saving');try{const result=await applyTimelineEdit({timelineId:timeline.id as Id<'timelines'>,kind:'updateGraphic',input,idempotencyKey:crypto.randomUUID()});showCreatedTimeline(result.timelineId);setSaveStatus('saved');setMessage('Graphic saved in a new draft timeline. The previous version is retained.');}catch(error){setSaveStatus('error');throw error;}}}/>}
+    {timeline&&draft?.timeline?.projectId&&<MusicBeatEditor key={timeline.id} timeline={timeline} projectId={draft.timeline.projectId as Id<'projects'>} onCreatedTimeline={id=>{showCreatedTimeline(id);setMessage('A new beat-aligned draft is ready. The source timeline and soundtrack are retained.');}} />}
     {message ? <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/45 p-4 text-sm" role="status"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[hsl(var(--success))]" aria-hidden="true" /><span>{message}</span></div> : null}
     {impactError ? <div className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive" role="alert"><CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{impactError}</span></div> : null}
   </div>;

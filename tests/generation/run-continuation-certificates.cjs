@@ -41,6 +41,27 @@ async function main() {
     await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');assert.deepEqual(state.rows.get(made._id).request.continuationQuote,quote);assert.equal(state.rows.get(made._id).submissionStartedAt,undefined);
     state.rows.get(made._id).providerJobId='accepted-before-version-change';assert.equal((await state.fence(made._id,state.live())).allowed,false);
   });
+  await check('BFL continuation intersects native5..15 with catalog while ordinarygeneration remains5..20',()=>{
+    const bfl={...model,modelId:'black-forest-labs/flux-3-video',canonicalSlug:'black-forest-labs/flux-3-video-20260804',supportedDurations:Array.from({length:16},(_,i)=>i+5)};
+    const request={videoType:'CINEMATIC_FILM',qualityTier:'STANDARD',task:'EXTEND',operation:'EXTEND',durationSeconds:15,aspectRatio:'16:9',resolution:'720p',audioPolicy:'SILENT',previousJobId,previousModelId:bfl.modelId};
+    assert.deepEqual(h.routing.supportedVideoOperationDurations(bfl,'EXTEND'),Array.from({length:11},(_,i)=>i+5));
+    assert.deepEqual(h.routing.supportedVideoOperationDurations(bfl,'GENERATE'),bfl.supportedDurations);
+    assert.equal(h.routing.videoOperationDurationBounds('openrouter',bfl.modelId,'EXTEND').maximumSeconds,15);
+    assert.equal(h.routing.videoOperationDurationBounds('other-provider',bfl.modelId,'EXTEND'),undefined);
+    for(const durationSeconds of [5,15]){const quote=h.routing.quoteVideoContinuation(bfl,{...request,durationSeconds});assert(quote);assert.equal(quote.billableDurationSeconds,durationSeconds);assert.equal(quote.costUsd,Math.ceil(41*durationSeconds/100*1e6)/1e6);assert.equal(h.routing.videoModelSupportsRequest(bfl,{...request,durationSeconds}),true);}
+    for(const durationSeconds of [4,16,20,5.5]){assert.equal(h.routing.quoteVideoContinuation(bfl,{...request,durationSeconds}),undefined);assert.equal(h.routing.videoModelSupportsRequest(bfl,{...request,durationSeconds}),false);assert.equal(h.routing.estimateVideoCost(bfl,{...request,durationSeconds}),undefined);}
+    assert.equal(h.routing.quoteVideoContinuation({...bfl,supportedDurations:[5]},request),undefined,'native bounds cannot add catalog-unadvertised controls');
+    for(const durationSeconds of [16,20])assert.equal(h.routing.videoModelSupportsRequest(bfl,{...request,operation:'GENERATE',task:'GENERATE',durationSeconds,previousJobId:undefined,previousModelId:undefined}),true);
+    assert.equal(h.routing.quoteVideoContinuation(model,{...request,durationSeconds:4,previousModelId:model.modelId}).billableDurationSeconds,4,'unrelated historicalmodel contracts stay unchanged');
+  });
+  await check('actual BFL create denies16/20 before reservation and old queued16s certificate fails fresh fence',async()=>{
+    function bflFixture(duration){const state=fixture(),catalog=state.rows.get('catalog'),modelId='black-forest-labs/flux-3-video';Object.assign(catalog,{modelId,canonicalSlug:'black-forest-labs/flux-3-video-20260804',supportedDurations:Array.from({length:16},(_,i)=>i+5)});catalog.reviewedCatalogFingerprint=h.routing.videoCatalogFingerprint(catalog);state.rows.get('policy').preferredModelIds=[modelId];state.rows.get('source-job').model=modelId;state.rows.get('source-take').model=modelId;state.rows.get('shot').durationSeconds=duration;return state;}
+    for(const duration of [16,20]){const state=bflFixture(duration),before=state.writes.length;await assert.rejects(state.create({model:'black-forest-labs/flux-3-video'}));assert.equal(state.creditReservations.length,0);assert.equal(state.writes.length,before);}
+    const valid=bflFixture(15),made=await valid.create({model:'black-forest-labs/flux-3-video'});assert.equal(valid.rows.get(made._id).request.continuationQuote.billableDurationSeconds,15);assert.equal(valid.rows.get(made._id).estimatedProviderCostUsd,6.15);assert.equal((await valid.fence(made._id,valid.live())).allowed,true);
+    const state=bflFixture(15),queued=await state.create({model:'black-forest-labs/flux-3-video'}),job=state.rows.get(queued._id);state.rows.get('shot').durationSeconds=16;job.request.duration=16;Object.assign(job.request.continuationQuote,{billableDurationSeconds:16,costUsd:6.56});job.estimatedProviderCostUsd=6.56;state.rows.get('hold').estimatedMicros=Math.ceil(h.contracts.videoBudgetReservationUsd(6.56)*1e6);const reservations=state.creditReservations.length;
+    await assert.rejects(state.fence(queued._id,state.live()),error=>error.code==='ROUTE_CHANGED');assert.equal(job.submissionStartedAt,undefined);assert.equal(state.rows.get(queued._id).submissionStartedAt,undefined);assert.equal(state.creditReservations.length,reservations);
+    state.rows.get(queued._id).providerJobId='already-accepted-before-contract-tightening';assert.equal((await state.fence(queued._id,state.live())).allowed,false);assert.equal(state.rows.get(queued._id).providerJobId,'already-accepted-before-contract-tightening');assert.equal(state.creditReservations.length,reservations);
+  });
   await check('canonical quote binds approved source provider job/model and newly requested output seconds', async () => {
     const state = fixture(); state.rows.get('video').durationSeconds = 120;
     const result = await state.create({ request: { previousJobId: 'forged', continuationQuote: { costUsd: .01 } } });

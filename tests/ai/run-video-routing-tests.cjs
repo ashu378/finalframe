@@ -154,6 +154,8 @@ const aliasMap = new Map([
   ['@/lib/ai/model-registry', compileSource('src/lib/ai/model-registry.ts', 'model-registry.js')],
   ['@/lib/ai/capabilities', compileSource('src/lib/ai/capabilities.ts', 'capabilities.js')],
   ['@/lib/ai/model-discovery', compileSource('src/lib/ai/model-discovery.ts', 'model-discovery.js')],
+  ['@/lib/ai/image-response', compileSource('src/lib/ai/image-response.ts', 'image-response.js')],
+  ['@/lib/ai/submission-diagnostic', compileSource('src/lib/ai/submission-diagnostic.ts', 'submission-diagnostic.js')],
   ['@/lib/types/database', path.join(tempRoot, 'database.js')],
 ]);
 fs.writeFileSync(path.join(tempRoot, 'database.js'), 'module.exports = {};\n');

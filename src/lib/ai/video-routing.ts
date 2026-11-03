@@ -218,6 +218,22 @@ export function quoteSuppliedAudioAvatar(model: VideoModelCapabilities, request:
     const billableDurationSeconds = Math.ceil(source.durationSeconds + 1 / 16000);
     return { version: contract.version, canonicalSlug: contract.canonicalSlug, catalogFingerprint: videoCatalogFingerprint(model), endpointFingerprint: avatarEndpointFingerprint(), source, portrait, billableDurationSeconds, sku: contract.sku, rateUsdPerSecond: contract.rateUsdPerSecond, costUsd: Math.ceil(billableDurationSeconds * contract.rateUsdPerSecond * 1e6) / 1e6 };
 }
+/** Provider mode limits narrow a generic model catalog only for that operation.
+ * OpenRouter advertises FLUX3's aggregate5..20s; native v2v is5..15s. */
+export const REVIEWED_VIDEO_OPERATION_DURATION_BOUNDS = [{
+    provider: 'openrouter', modelId: 'black-forest-labs/flux-3-video', operation: 'EXTEND',
+    minimumSeconds: 5, maximumSeconds: 15,
+    evidence: ['https://api.bfl.ai/openapi.json#/components/schemas/Flux3VideoV2VInputs', 'https://docs.bfl.ai/flux_3/flux3_overview#specifications'],
+}] as const;
+export function videoOperationDurationBounds(provider: string, modelId: string, operation: VideoOperation | VideoTask) {
+    return REVIEWED_VIDEO_OPERATION_DURATION_BOUNDS.find(bound => bound.provider === provider && bound.modelId === modelId && bound.operation === operation);
+}
+/** Reusable by routing and any catalog-backed authoring controls. Preserve the
+ * catalog's order and every unrelated model/operation's advertised durations. */
+export function supportedVideoOperationDurations(model: Pick<VideoModelCapabilities, 'provider' | 'modelId' | 'supportedDurations'>, operation: VideoOperation | VideoTask): number[] {
+    const bound = videoOperationDurationBounds(model.provider, model.modelId, operation);
+    return model.supportedDurations.filter(duration => !bound || Number.isInteger(duration) && duration >= bound.minimumSeconds && duration <= bound.maximumSeconds);
+}
 export const CONTINUATION_BILLING_VERSION = 'OPENROUTER_CONTINUATION_OUTPUT_SECOND_V1' as const;
 export interface ContinuationQuoteCertificate {
     version: typeof CONTINUATION_BILLING_VERSION; sourceProviderJobId: string; sourceModelId: string;
@@ -225,6 +241,7 @@ export interface ContinuationQuoteCertificate {
 }
 export function quoteVideoContinuation(model: VideoModelCapabilities, request: VideoRoutingRequest): ContinuationQuoteCertificate | undefined {
     if ((request.operation || request.task) !== 'EXTEND' || !request.previousJobId || !/^gen-vid-\d+-[0-9A-Za-z]{20}$/.test(request.previousJobId) || request.previousModelId !== model.modelId || !Number.isInteger(request.durationSeconds) || request.durationSeconds <= 0 || request.hasImageReferences || request.hasVideoReference || request.hasAudioReference || request.requiresFirstFrame || request.requiresLastFrame) return undefined;
+    if (videoOperationDurationBounds(model.provider, model.modelId, 'EXTEND') && !supportedVideoOperationDurations(model, 'EXTEND').includes(request.durationSeconds)) return undefined;
     const entries = Object.entries(model.pricingSkus || {});
     if (!entries.length || entries.some(([sku, price]) => !/^cents_per_second_(?:output|video_continuation)(?:_(?:720p|1080p|2k|4k))?$/i.test(sku) || !Number.isFinite(price) || price < 0)) return undefined;
     const resolution = request.resolution?.toLowerCase();
@@ -330,7 +347,7 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     } else if (sourceEdit) {
         if (!quoteVideoEdit(model, request)) return false;
     } else {
-        if (!model.supportedDurations.includes(request.durationSeconds)) return false;
+        if (!supportedVideoOperationDurations(model, operation).includes(request.durationSeconds)) return false;
         if (request.resolution && !model.supportedResolutions.includes(request.resolution)) return false;
         if (!model.supportedAspectRatios.includes(request.aspectRatio)) return false;
     }
