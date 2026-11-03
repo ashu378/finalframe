@@ -23,3 +23,7 @@ Checkpoint12 is Ready at revision00298224eb8446b8e8c72fd725b3ad066f0b2377. All e
 Do not certify the whole launch from template creation, contract tests or short supporting clips. Complete creative prompt-to-download recipes, social/explainer creative failures, exact comedy dialogue, unverified operation routes, broader role/mobile/action coverage and live interruption proof remain separate checklist gates.
 
 Provider aggregate was read through GET/key at09:37:27UTC on3November:5.965715632USD, unchanged; provider key limit15USD. Retain0.188902USD uncertain holds and the10USD application working ceiling. Conservative working authority remains3.845382368USD. No new paid submission is included in this packet. OpenRouter browser login is unnecessary.
+
+## Browser integration correction
+
+The first live localhost13 Takes visit loaded the current approved project but showed no Recipe to finished video panel. The route had a separate frontend environment predicate, while the authoritative online Convex recipe flag was already enabled. The workspace now renders the client shell on Storyboard/Takes and lets the existing authenticated recipeWorkspace.get.enabled value control rollout. Disabled Convex rollout still returns no controls; project access, worker enablement, estimates and explicit starts are unchanged. The executable component suite now includes this disabled state and passes9cases. No new provider call occurs on a page visit.
