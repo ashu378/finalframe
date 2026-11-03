@@ -6,15 +6,18 @@ import { v } from 'convex/values';
 import { settleProviderBudget } from './providerBudget';
 
 const refs = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;
+import {REVIEWED_OPERATION_CONTRACTS} from '../src/lib/ai/model-registry';
+const sfx=(job:any)=>job.operation==='PREPARATION'&&job.capability==='SFX_GENERATION'&&job.request?.preparationKind==='SFX'&&job.model===REVIEWED_OPERATION_CONTRACTS.sfx.modelId&&job.modelVersion===REVIEWED_OPERATION_CONTRACTS.sfx.canonicalSlug;
+const promptAudio=(job:any)=>music(job)||sfx(job);
 const music=(job:any)=>job.request?.preparationKind==='MUSIC';
-const validReceipt=(job:any)=>music(job)?/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??''):/^gen-tts-\d+-[A-Za-z0-9]+$/.test(job.providerRequestId??'');
+const validReceipt=(job:any)=>job.request?.preparationKind==='SFX'?sfx(job)&&/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??'')&&job.providerRequestId===job.response?.sfxGenerationId:music(job)?/^gen-[A-Za-z0-9._-]{1,180}$/.test(job.providerRequestId??''):/^gen-tts-\d+-[A-Za-z0-9]+$/.test(job.providerRequestId??'');
 const args = { jobId: v.id('generationJobs') };
 
 export const context = internalQuery({
   args, returns: v.any(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerCostUsd !== undefined || !job.providerBudgetReservationId || !validReceipt(job)) return null;
+    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||promptAudio(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerCostUsd !== undefined || !job.providerBudgetReservationId || !validReceipt(job)) return null;
     return { receiptId: job.providerRequestId, model: job.model };
   },
 });
@@ -23,7 +26,7 @@ export const record = internalMutation({
   args: { ...args, receiptId: v.string(), model: v.string(), costUsd: v.number() }, returns: v.null(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||music(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(music(job)?(input.model===job.model||input.model===job.modelVersion)&&input.costUsd>0:(input.model === job.model || input.model.startsWith(job.model + '-')))) throw new Error('Provider receipt does not match the completed speech job.');
+    if (!job || job.operation !== 'PREPARATION' || job.modality !== 'AUDIO' || job.provider !== 'openrouter' || !(job.status==='COMPLETED'||promptAudio(job)&&job.executionStage==='RECONCILIATION_REQUIRED') || !validReceipt(job) || job.providerRequestId !== input.receiptId || !job.providerBudgetReservationId || !Number.isFinite(input.costUsd) || input.costUsd < 0 || !(promptAudio(job)?(input.model===job.model||input.model===job.modelVersion)&&(sfx(job)||input.costUsd>0):(input.model === job.model || input.model.startsWith(job.model + '-')))) throw new Error('Provider receipt does not match the completed speech job.');
     if (job.providerCostUsd !== undefined) {
       if (job.providerCostUsd !== input.costUsd) throw new Error('Provider receipt cost conflicts with an already settled job.');
       return null;

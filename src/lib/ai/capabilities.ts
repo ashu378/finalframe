@@ -74,6 +74,7 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
     TEXT_TO_SPEECH: descriptor('TEXT_TO_SPEECH', ['text'], ['audio'], ['voice', 'speed', 'response_format', 'instructions', 'input_references', 'provider_options'], {
         model: modelId('TEXT_TO_SPEECH'),
     }),
+    SFX_GENERATION:descriptor('SFX_GENERATION',['text'],['audio'],['response_format'],{model:modelId('SFX_GENERATION')}),
     MUSIC_GENERATION:descriptor('MUSIC_GENERATION',['text'],['audio','text'],[],{model:modelId('MUSIC_GENERATION')}),
     TRANSCRIPTION: descriptor('TRANSCRIPTION', ['audio'], ['transcription'], ['language', 'temperature', 'provider_options'], {
         model: modelId('TRANSCRIPTION'),

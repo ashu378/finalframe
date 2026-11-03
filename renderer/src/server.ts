@@ -161,6 +161,7 @@ createServer(async (request, response) => {
           expectedChecksum: typeof payload.checksum === 'string' ? payload.checksum : undefined,
           expectedByteSize: typeof payload.byteSize === 'number' ? payload.byteSize : undefined,
           verifyAudioDuration: payload.verifyAudioDuration === true,
+          maxAudioDurationSeconds: payload.maxAudioDurationSeconds===undefined?undefined:typeof payload.maxAudioDurationSeconds==='number'?payload.maxAudioDurationSeconds:NaN,
           ffmpeg: new InjectableFFmpegAdapter(),
         });
         return json(response, 200, result);

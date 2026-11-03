@@ -28,6 +28,8 @@ try{
  assert.ok(full.durationSeconds<samples/rate+.2,JSON.stringify({decoded:full.durationSeconds,metadata:understated.durationSeconds}));checks++;
  const spoofedProbe={probe:async(path,options)=>({...await ffprobe.probe(path,options),format:{format_name:'mp3',duration:'.01'}})};
  const decoded=await measure(mp3,{ffprobe:spoofedProbe});assert.ok(decoded.durationSeconds>3);
+ for(const invalid of [0,601,1.5,NaN])await assert.rejects(measure(wav,{maxAudioDurationSeconds:invalid}),/duration cap/);await assert.rejects(measure(wav,{maxAudioDurationSeconds:4,verifyAudioDuration:false}),/duration cap/);checks++;
+ const capped=await measure(wav,{maxAudioDurationSeconds:4});assert.equal(capped.decodedSampleCount,samples);await assert.rejects(measure(wav,{maxAudioDurationSeconds:1}),/over1|truncated/);checks++;
  const generic=await measure(mp3,{ffprobe:spoofedProbe,verifyAudioDuration:false,ffmpeg:undefined});assert.equal(generic.durationSeconds,.01);assert.equal(generic.durationMeasurement,undefined);checks++;
  await assert.rejects(measure(wav,{ffmpeg:{execute:async args=>writeFile(args.at(-1),Buffer.alloc(601*rate*4))}}),/over600|truncated/);checks++;
  let decodedUnexpectedly=false;await assert.rejects(measure(wav,{expectedChecksum:'0'.repeat(64),ffmpeg:{execute:async()=>{decodedUnexpectedly=true;}}}),/bytes changed/);assert.equal(decodedUnexpectedly,false);checks++;

@@ -12,7 +12,7 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/image-response'))return imageResponse; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
@@ -21,6 +21,7 @@ const imageResponse = compile('src/lib/ai/image-response.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
 const registry = compile('src/lib/ai/model-registry.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
+const sfx=compile('src/lib/ai/sfx.ts',{'./model-registry':registry});
 const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music });
 const studioMemberships = compile('convex/studioMemberships.ts');
 const pricing = compile('src/lib/credits/pricing.ts');
@@ -132,7 +133,7 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
     './providerBudget': { settleProviderBudget: async (_,args) => { state.providerSettlements.push(args); }, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
     './videoRouting': routingFactory ? (state.routing = routingFactory(state, ctx, auth)) : { resolveUpscaleSourceCertificate: async () => ({ ...upscaleSource }), validateReviewedVideoJob: async (_, args) => { state.routeChecks.push(args.request); return { estimatedCostUsd: .04, selection: { provider: 'openrouter', modelId: args.modelId, path: 'AI_VIDEO', resolution: args.request.operation === 'UPSCALE' ? undefined : '720p', routeReason: 'Test-reviewed', policyVersion: 1, ...(args.request.operation === 'EXTEND' ? { continuationQuote: routing.quoteVideoContinuation(model, args.request) } : {}), ...(args.request.operation === 'UPSCALE' ? { upscaleQuote: routing.quoteVideoUpscale({ ...model, modelId: upscaleModelId, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: upscalePrices }, { ...args.request, upscaleSource }) } : {}) } }; } },
     './generationContinuity': { resolveGenerationContinuity: async (_, args) => ({ referenceAssetIds: args.referenceAssetIds, selectedResourceVersionIds: [], voiceIds: [], planningContextSnapshot: null }) },
-    './studioMemberships': studioMemberships, './voices': dependencies.voices || {}, './audioCertificates': dependencies.audio || {}, './imageCertificates': dependencies.image || {}, '../src/lib/ai/preparation': dependencies.preparation || preparation, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,
+    '../src/lib/ai/model-registry': registry, './studioMemberships': studioMemberships, './voices': dependencies.voices || {}, './audioCertificates': dependencies.audio || {}, './imageCertificates': dependencies.image || {}, '../src/lib/ai/preparation': dependencies.preparation || preparation, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,
     './generationWorkerContracts': { ...contracts, workerEnabled: () => true },
   });
   state.create = async (overrides = {}) => jobs.create.handler(ctx, { productionId: 'production', shotId: 'shot', provider: 'openrouter', model: metadata.operation === 'UPSCALE' ? upscaleModelId : 'test/reviewed', request: { ratio: '16:9', previousModelId: 'invented/model', upscaleFactor: 99, creativity: 99 }, estimatedCost: 1, idempotencyKey: 'operation-contract-00001', ...overrides });
@@ -229,5 +230,5 @@ async function main() {
   });
   console.log('Operation control contracts: PASS (' + checks + '); actual application actions and Convex handlers with isolated in-memory seams. No database or provider calls.');
 }
-module.exports = { compile, checksums, registry, preparation, music, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
+module.exports = { sfx, compile, checksums, registry, preparation, music, controls, routing, contracts, backendFixture, publicActionFixture, api, upscaleModelId, upscaleSource, upscalePrices, model, cleanup: () => fs.rmSync(temp, { recursive: true, force: true }) };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; }).finally(module.exports.cleanup);

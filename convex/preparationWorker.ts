@@ -2,10 +2,11 @@ import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { FunctionReference } from 'convex/server';
 import { internal } from './_generated/api';
-import { generateImage, synthesizeSpeech, transcribeAudio, generateMusic, extractUsageAndCost } from '../src/lib/adapters/openrouter-adapter';
+import { generateImage, synthesizeSpeech, transcribeAudio, generateMusic, generateSoundEffect, extractUsageAndCost } from '../src/lib/adapters/openrouter-adapter';
 import { quotePreparation, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { object } from './generationWorkerContracts';
 import {MUSIC_LIMITS,sameMusicQuote,musicQcError,assertMusicOutputProbe} from '../src/lib/ai/music';
+import { SFX_LIMITS, sameSfxQuote, assertSfxConsent, assertSfxOutputProbe, sfxError } from '../src/lib/ai/sfx';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { decodePreparedImage, IMAGE_RESPONSE_LIMITS } from '../src/lib/ai/image-response';
 const jobs = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
@@ -29,7 +30,7 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
   const job = input.job;
   const request = object(input.request);
   const kind = request.preparationKind as PreparationKind;
-  if(kind==='SFX')throw new Error('SFX_UNSUPPORTED');
+  if(kind==='SFX'){await runSfxPreparation(ctx,input,lease,beforeSubmit);return;}
   if(kind==='MUSIC'){await runMusicPreparation(ctx,input,lease,beforeSubmit);return;}
   if(kind==='CHARACTER_REFERENCE'&&input.imageOutput){await finishImage(ctx,input,lease);return;}
   const quote = await quotePreparation({ kind, text: String(request.text || ''), clone: request.clone === true, durationSeconds: Number(request.durationSeconds),durationMeasurement:object(request.transcriptSource).durationMeasurement as 'DECODED_PCM_SAMPLES_V1'|undefined });
@@ -115,4 +116,31 @@ async function runMusicPreparation(ctx: ActionCtx, input: any, lease: {
     const probe = await boundedProbe(response).catch(error=>{if(error?.code)throw error;throw musicQcError('MUSIC_QC_UNAVAILABLE');});
     assertMusicOutputProbe(probe,saved);
     await ctx.runMutation(jobs.completePreparation, { ...lease, storageId: saved.storageId, contentType: 'audio/mpeg', actualModel: job.model, providerRequestId: saved.providerRequestId, providerCostUsd: cost, musicProbe: probe });
+}
+
+async function boundedSfxProbe(response:Response) {
+  const reader=response.body?.getReader();if(!reader)throw sfxError('SFX_QC_UNAVAILABLE');
+  const chunks:Uint8Array[]=[];let size=0;
+  try{for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>16384)throw sfxError('SFX_QC_INVALID_RESPONSE');chunks.push(next.value);}}finally{await reader.cancel().catch(()=>undefined);}
+  const bytes=new Uint8Array(size);let at=0;for(const part of chunks){bytes.set(part,at);at+=part.length;}
+  try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw sfxError('SFX_QC_INVALID_RESPONSE');}
+}
+async function runSfxPreparation(ctx:ActionCtx,input:any,lease:{jobId:Id<'generationJobs'>;leaseId:string},beforeSubmit:(quote:unknown)=>Promise<void>) {
+  const job=input.job,request=object(input.request);let saved=input.sfxOutput;
+  if(!saved){
+    const quote=await quotePreparation({kind:'SFX',text:String(request.text??'')});
+    if(!sameSfxQuote(quote.sfxQuote,object(request.quote).sfxQuote)||quote.model!==job.model||quote.estimatedProviderCostUsd!==job.estimatedProviderCostUsd)throw sfxError('SFX_QUOTE_CHANGED');
+    assertSfxConsent(object(request.quote).sfxEstimateConsent,String(job.productionId),request.text,quote.sfxQuote);
+    await generateSoundEffect({model:job.model,prompt:String(request.text)}, {maxRetries:0,fallbackModels:[],idempotencyKey:job.idempotencyKey,timeoutMs:SFX_LIMITS.timeoutMs,maxResponseBytes:SFX_LIMITS.maxBytes,sfxDeadlineAt:Number(job.leaseExpiresAt)-15000,beforeMediaSubmit:()=>beforeSubmit(quote),
+      onSfxReceipt:receipt=>ctx.runMutation(jobs.recordSfxReceipt,{...lease,...receipt}),
+      onSfxCompleted:async result=>{const storageId=await ctx.storage.store(new Blob([Uint8Array.from(result.audio).buffer],{type:'audio/mpeg'}));await ctx.runMutation(jobs.recordSfxOutput,{...lease,storageId,actualModel:result.modelUsed,...(result.generationId?{providerRequestId:result.generationId}:{}),...(result.costUsd!==undefined&&Number.isFinite(result.costUsd)&&result.costUsd>=0?{providerCostUsd:result.costUsd}:{}),...(result.usage?{usage:result.usage}:{})});}
+    });
+    const current=await ctx.runQuery(jobs.getWorkerInput,lease);saved=current.sfxOutput;
+  }
+  if(!saved?.url)throw sfxError('SFX_OUTPUT_UNAVAILABLE');
+  const base=process.env.RENDER_WORKER_URL?.trim(),secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();if(!base||!secret)throw sfxError('SFX_QC_UNAVAILABLE');
+  const response=await fetch(base.replace(/\/$/,'')+'/media/probe',{method:'POST',headers:{'content-type':'application/json','x-finalframe-worker-secret':secret},body:JSON.stringify({kind:'audio',url:saved.url,verifyAudioDuration:true,maxAudioDurationSeconds:SFX_LIMITS.maxOriginalSeconds,checksum:saved.checksum,byteSize:saved.byteSize}),redirect:'error',signal:AbortSignal.timeout(70000)}).catch(()=>{throw sfxError('SFX_QC_UNAVAILABLE');});
+  if(!response.ok){await response.body?.cancel();throw sfxError([408,429].includes(response.status)||response.status>=500?'SFX_QC_UNAVAILABLE':'SFX_QC_AUTHORITY_DENIED');}
+  const probe=await boundedSfxProbe(response).catch(error=>{if(error?.code)throw error;throw sfxError('SFX_QC_UNAVAILABLE');});assertSfxOutputProbe(probe,saved);
+  await ctx.runMutation(jobs.completePreparation,{...lease,storageId:saved.storageId,contentType:'audio/mpeg',actualModel:job.model,...(saved.providerRequestId?{providerRequestId:saved.providerRequestId}:{}),sfxProbe:probe});
 }

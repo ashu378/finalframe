@@ -742,8 +742,8 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
         ...(input.aspectRatio ? ['aspect_ratio' as const] : []),
         ...(input.duration === undefined ? [] : ['duration' as const]),
         ...(input.resolution ? ['resolution' as const] : []),
-        ...(input.inputReferences ? ['input_references' as const] : []),
-        ...(input.frameImages ? ['frame_images' as const] : []),
+        ...(input.inputReferences?.length ? ['input_references' as const] : []),
+        ...(input.frameImages?.length ? ['frame_images' as const] : []),
         ...(input.generateAudio === undefined ? [] : ['generate_audio' as const]),
         ...(input.previousJobId ? ['previous_job_id' as const] : []),
         ...(input.upscaleFactor === undefined ? [] : ['upscale_factor' as const]),
@@ -756,12 +756,12 @@ export function buildVideoGenerationRequest(input: VideoGenerationRequest, optio
         ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
         ...(input.duration === undefined ? {} : { duration: input.duration }),
         ...(input.resolution ? { resolution: input.resolution } : {}),
-        ...(input.frameImages ? { frame_images: input.frameImages.map((frame) => ({
+        ...(input.frameImages?.length ? { frame_images: input.frameImages.map((frame) => ({
             type: 'image_url',
             ...( 'url' in frame ? { image_url: { url: frame.url } } : { image_url: { url: `data:${frame.mediaType || 'image/png'};base64,${frame.data}` } }),
             frame_type: frame.frameType,
         })) } : {}),
-        ...(input.inputReferences ? { input_references: input.inputReferences.map((reference) => {
+        ...(input.inputReferences?.length ? { input_references: input.inputReferences.map((reference) => {
             const kind = reference.kind || 'image';
             if (!['image', 'audio', 'video'].includes(kind)) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Unsupported reference media kind.', provider: 'openrouter', retryable: false });
             const defaultMime = kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/wav' : 'image/png';
@@ -1057,4 +1057,44 @@ export async function generateMusic(input: {
         clearTimeout(timeout);
         options.signal?.removeEventListener('abort', abort);
     }
+}
+
+/** Stateless prompt-to-SFX is its own reviewed operation. Narration continues
+ * to require a stock voice or an approved recording. Never retry this POST. */
+export async function generateSoundEffect(input: { model: string; prompt: string }, options: OpenRouterTransportOptions & {
+    sfxDeadlineAt: number;
+    onSfxReceipt?: (receipt: { generationId?: string; requestId?: string }) => Promise<void>;
+    onSfxCompleted?: (result: { audio: Uint8Array; contentType: 'audio/mpeg'; modelUsed: string; generationId?: string; requestId?: string; usage?: NormalizedUsage; costUsd?: number }) => Promise<void>;
+}) {
+    const { SFX_LIMITS, buildSoundEffectRequest, sfxError } = await import('../ai/sfx');
+    const body = buildSoundEffectRequest(input);
+    const validDeadline = () => Number.isFinite(options.sfxDeadlineAt) && options.sfxDeadlineAt > Date.now() && !options.signal?.aborted;
+    if (options.mock || !options.beforeMediaSubmit || options.baseUrl && options.baseUrl !== BASE_URL || !validDeadline()) throw sfxError('SFX_REQUEST_INVALID');
+    assertCapabilityRequest({ capability: 'SFX_GENERATION', model: input.model, inputModality: 'text', parameters: ['response_format'] });
+    requireKey(options, 'SFX_GENERATION', input.model);
+    await options.beforeMediaSubmit();
+    if (!validDeadline()) throw sfxError('SFX_SUBMISSION_DEADLINE');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(1, Math.min(SFX_LIMITS.timeoutMs, options.timeoutMs ?? SFX_LIMITS.timeoutMs, options.sfxDeadlineAt - Date.now())));
+    const abort = () => controller.abort(); options.signal?.addEventListener('abort', abort, { once: true });
+    try {
+        if (!validDeadline() || controller.signal.aborted) throw sfxError('SFX_SUBMISSION_DEADLINE');
+        const response = await (options.fetch ?? fetch)(BASE_URL + '/audio/speech', { method: 'POST', headers: requestHeaders(options, { headers: { 'content-type': 'application/json', accept: 'audio/mpeg' } }, 'POST', options.idempotencyKey), body: JSON.stringify(body), redirect: 'error', signal: controller.signal });
+        if (!response.ok) { await response.body?.cancel(); throw Object.assign(sfxError('SFX_HANDOFF_REJECTED'), { status: response.status }); }
+        const generationId = response.headers.get('x-generation-id') || undefined, requestId = response.headers.get('x-request-id') || undefined;
+        if (generationId && !/^gen-[A-Za-z0-9._-]{1,180}$/.test(generationId) || requestId && !/^[A-Za-z0-9._:-]{1,200}$/.test(requestId)) { await response.body?.cancel(); throw sfxError('SFX_RECEIPT_INVALID'); }
+        await options.onSfxReceipt?.({ ...(generationId ? { generationId } : {}), ...(requestId ? { requestId } : {}) });
+        if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'audio/mpeg') { await response.body?.cancel(); throw sfxError('SFX_OUTPUT_INVALID'); }
+        const declared = response.headers.get('content-length');
+        if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) <= 0 || Number(declared) > SFX_LIMITS.maxBytes)) { await response.body?.cancel(); throw sfxError('SFX_OUTPUT_TOO_LARGE'); }
+        const reader = response.body?.getReader(); if (!reader) throw sfxError('SFX_OUTPUT_INVALID');
+        const cancelRead=()=>{void reader.cancel().catch(()=>undefined);};controller.signal.addEventListener('abort',cancelRead,{once:true});
+        const chunks: Uint8Array[] = []; let size = 0;
+        try { for (;;) { if (controller.signal.aborted) throw sfxError('SFX_TRANSFER_INTERRUPTED'); const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > Math.min(options.maxResponseBytes ?? SFX_LIMITS.maxBytes, SFX_LIMITS.maxBytes)) throw sfxError('SFX_OUTPUT_TOO_LARGE'); chunks.push(part.value); } } finally { controller.signal.removeEventListener('abort',cancelRead);await reader.cancel().catch(() => undefined); }
+        if (controller.signal.aborted || !size || declared !== null && Number(declared) !== size) throw sfxError('SFX_TRANSFER_INTERRUPTED');
+        const audio = new Uint8Array(size); let at = 0; for (const part of chunks) { audio.set(part, at); at += part.length; }
+        const result = { audio, contentType: 'audio/mpeg' as const, modelUsed: input.model, ...(generationId ? { generationId } : {}), ...(requestId ? { requestId } : {}), ...usageFromHeaders(response.headers) };
+        await options.onSfxCompleted?.(result);
+        return result;
+    } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }

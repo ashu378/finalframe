@@ -20,9 +20,11 @@ export async function probeRemoteMedia(source: unknown, options: {
   allowedHosts: readonly string[]; ffprobe: FFprobeAdapter; fetch?: typeof fetch; maxBytes?: number;
   kind?: 'video' | 'audio';
   expectedChecksum?: string; expectedByteSize?: number;
-  verifyAudioDuration?: boolean; ffmpeg?: FFmpegAdapter;
+  verifyAudioDuration?: boolean; maxAudioDurationSeconds?: number; ffmpeg?: FFmpegAdapter;
 }) {
   const url = assertProbeUrl(source, options.allowedHosts);
+  const audioCap=options.maxAudioDurationSeconds??600;
+  if(!Number.isSafeInteger(audioCap)||audioCap<1||audioCap>600||options.maxAudioDurationSeconds!==undefined&&(options.kind!=='audio'||options.verifyAudioDuration!==true))throw new Error('Invalid verified audio duration cap.');
   if(options.expectedChecksum!==undefined&&!normalizeSha256(options.expectedChecksum))throw new Error('Invalid canonical SHA-256 checksum.');
   const deadline = Date.now() + 60_000;
   const remaining = (maximum: number) => { const left = deadline - Date.now(); if (left <= 0) throw new Error('Certified media measurement timed out.'); return Math.min(maximum,left); };
@@ -62,11 +64,12 @@ export async function probeRemoteMedia(source: unknown, options: {
       if (options.verifyAudioDuration) {
         if (!options.ffmpeg || !options.expectedChecksum || !Number.isSafeInteger(options.expectedByteSize) || !audio || video) throw new Error('Certified audio requires exact canonical bytes and an audio-only stream.');
         const pcm = join(directory,'verified-duration.f32'); const rate = 16000;
-        // A601s/fs stop is a sentinel, never a successful truncated result:
-        // anything beyond600 decoded seconds fails, including sentinel files.
-        await options.ffmpeg.execute(['-hide_banner','-loglevel','error','-y','-threads','1','-protocol_whitelist','file,pipe','-i',path,'-map','0:a:0','-vn','-ac','1','-ar',String(rate),'-t','601','-f','f32le','-fs',String(601*rate*4),pcm],{timeoutMs:remaining(45_000),maxOutputBytes:8192});
+        // One decoded sample beyond the cap is a sentinel, never a successful
+        // truncated result. The default600s compatibility bound is unchanged.
+        const maximumSamples=audioCap*rate;const sentinelSamples=maximumSamples+1;
+        await options.ffmpeg.execute(['-hide_banner','-loglevel','error','-y','-threads','1','-protocol_whitelist','file,pipe','-i',path,'-map','0:a:0','-vn','-ac','1','-ar',String(rate),'-t',String(sentinelSamples/rate),'-f','f32le','-fs',String(sentinelSamples*4),pcm],{timeoutMs:remaining(45_000),maxOutputBytes:8192});
         const decoded = await stat(pcm);
-        if (!decoded.isFile() || decoded.size < 4 || decoded.size % 4 || decoded.size > 600*rate*4) throw new Error('Decoded audio is empty, over600 seconds or truncated at its safety cap.');
+        if (!decoded.isFile() || decoded.size < 4 || decoded.size % 4 || decoded.size > maximumSamples*4) throw new Error(`Decoded audio is empty, over${audioCap} seconds or truncated at its safety cap.`);
         const decodedSampleCount = decoded.size / 4;
         audioDuration = decodedSampleCount / rate;
         verified = {durationMeasurement:'DECODED_PCM_SAMPLES_V1',decodedSampleCount,decodedSampleRate:rate};

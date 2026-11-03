@@ -23,7 +23,8 @@ export type CapabilityId =
     | 'IMAGE_GENERATION'
     | 'TEXT_TO_SPEECH'
     | 'TRANSCRIPTION'
-    | 'MUSIC_GENERATION';
+    | 'MUSIC_GENERATION'
+    | 'SFX_GENERATION';
 
 export type Modality = 'text' | 'image' | 'video' | 'audio' | 'file' | 'transcription';
 

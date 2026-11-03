@@ -5,8 +5,8 @@ const path = require('node:path');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-preparation-'));
-for (const name of ['model-registry', 'music','preparation']) fs.writeFileSync(path.join(temp, name + '.js'), ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/ai/' + name + '.ts'), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText);
-const { quotePreparation, preparationModel } = require(path.join(temp, 'preparation.js'));
+for (const relative of ['src/lib/ai/model-registry.ts','src/lib/ai/music.ts','src/lib/ai/sfx.ts','src/lib/ai/preparation.ts','renderer/src/media/sha256.ts']) {const target=path.join(temp,relative.replace(/\.ts$/,'.js'));fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,ts.transpileModule(fs.readFileSync(path.join(root,relative),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText);}
+const { quotePreparation, preparationModel } = require(path.join(temp, 'src/lib/ai/preparation.js'));
 const checks = [];
 const referenceEndpoint = { name: 'Seed | bytedance-seed/seed-audio-1-0-20260630', tag: 'seed', model_id: 'bytedance-seed/seed-audio-1-0', status: 0, supports_voice_cloning: true, supports_multiple_audio_references: true, supports_image_reference: true, pricing: {prompt:'0',completion:'0.0025',discount:0} };
 const referenceCatalog = (patch = {}) => ({ data: { id: referenceEndpoint.model_id, description: 'Current live description is truncated...', endpoints: [{...referenceEndpoint,...patch}] } });
@@ -45,7 +45,7 @@ async function main() {
     for (const patch of [{name:'Seed | new-version'}, {tag:'other'}, {supports_multiple_audio_references:false}, {status:-2}, {pricing:{prompt:0,completion:.0026,discount:0}}, {pricing:{prompt:0,completion:.0025,discount:0,unknown_input:1}}, {pricing:{prompt:null,completion:.0025,discount:0}}]) await assert.rejects(quotePreparation({kind:'NARRATION',text:'hello',clone:true},fetcher(referenceCatalog(patch))), /changed/);
     await assert.rejects(quotePreparation({kind:'NARRATION',text:'x'.repeat(3001),clone:true},fetcher(referenceCatalog())), /3000/);
     const quote = await quotePreparation({kind:'NARRATION',text:'hello',clone:true},fetcher(referenceCatalog()));
-    const {assertReferenceVoiceQuote} = require(path.join(temp,'preparation.js'));
+    const {assertReferenceVoiceQuote} = require(path.join(temp,'src/lib/ai/preparation.js'));
     assert.equal(assertReferenceVoiceQuote(quote.referenceVoiceQuote).maxOriginalOutputSeconds,120);
     assert.deepEqual(assertReferenceVoiceQuote(Object.fromEntries(Object.entries(quote.referenceVoiceQuote).reverse())), quote.referenceVoiceQuote, 'Convex object serialization order cannot invalidate a certificate');
     assert.throws(()=>assertReferenceVoiceQuote({...quote.referenceVoiceQuote,costUsd:.01}));
