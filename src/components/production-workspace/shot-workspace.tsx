@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import { VIDEO_OPERATIONS, type VideoOperation } from '@/lib/ai/video-routing';
 const operationLabels: Record<VideoOperation, string> = { GENERATE: 'Create footage', FRAME_TO_VIDEO: 'Animate a first frame', EDIT: 'Edit footage', APPEARANCE_EDIT: 'Change appearance or hairstyle', OBJECT_REPLACE: 'Replace a product, car, or object', PERFORMANCE_TRANSFER: 'Transfer a recorded performance', EXTEND: 'Extend an accepted clip', LIP_SYNC: 'Animate a portrait to recorded speech', UPSCALE: 'Upscale footage' };
 
 export function ShotWorkspace({ data }: { data: WorkspaceControlData }) {
-    return <div className="space-y-6"><GenerationStatus productionId={data.productionId} /><header><h2 className="text-2xl font-semibold">Shots and takes</h2><p className="mt-2 text-sm text-muted-foreground">Bind the exact references and operation before approving the plan. Model availability and costs are checked again when a job is queued.</p></header>
+    return <div className="space-y-6"><GenerationStatus productionId={data.productionId} canEdit={data.canEdit} /><header><h2 className="text-2xl font-semibold">Shots and takes</h2><p className="mt-2 text-sm text-muted-foreground">Bind the exact references and operation before approving the plan. Model availability and costs are checked again when a job is queued.</p></header>
         {data.versionState === 'APPROVED' ? <p role="status" className="rounded-xl border border-border bg-card p-4 text-sm">This plan is an immutable approved snapshot. Create a revised plan to change shot instructions or references. New takes preserve previous results.</p> : null}
         {!data.scenes.length ? <p className="ff-card p-6 text-sm text-muted-foreground">Create a draft plan to begin editing its scenes and shots.</p> : null}
         {data.scenes.map((scene) => <section key={scene.id} className="space-y-4" aria-label={scene.title}><div><h3 className="text-lg font-semibold">{scene.title}</h3><p className="text-sm text-muted-foreground">{scene.purpose}</p></div>{scene.shots.map((shot) => <ShotCard key={`${shot.id}:${data.versionState}`} data={data} shot={shot} />)}</section>)}
@@ -53,10 +53,28 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
     </article>;
 }
 
-function GenerationStatus({ productionId }: { productionId: string }) {
+function GenerationStatus({ productionId, canEdit }: { productionId: string; canEdit: boolean }) {
     const router = useRouter();
+    const retry = useMutation(api.generationJobs.retry);
+    const [resumingJobId, setResumingJobId] = useState<string | null>(null);
+    const [resumeMessage, setResumeMessage] = useState('');
+    const [resumeError, setResumeError] = useState('');
+    const resumePending = useRef(false);
     const result = useQuery(api.generationJobs.list, { productionId: productionId as Id<'productions'> });
-    const jobs = (result || []) as Array<{ _id: string; shotId?: string; status: string; executionStage?: string; progress?: number; errorMessage?: string; provider?: string; model?: string; estimatedProviderCostUsd?: number; providerCostUsd?: number; request?: { operation?: string } }>;
+    const jobs = (result || []) as Array<{ _id: string; shotId?: string; status: string; executionStage?: string; progress?: number; errorMessage?: string; provider?: string; providerJobId?: string; model?: string; estimatedProviderCostUsd?: number; providerCostUsd?: number; request?: { operation?: string } }>;
+    const canResume = (job: (typeof jobs)[number]) => canEdit && job.provider === 'openrouter' && Boolean(job.providerJobId?.trim()) && job.status === 'FAILED' && job.executionStage !== 'RECONCILIATION_REQUIRED';
+    async function resume(job: (typeof jobs)[number]) {
+        if (!canResume(job) || resumePending.current) return;
+        resumePending.current = true;
+        setResumingJobId(job._id); setResumeMessage(''); setResumeError('');
+        try {
+            await retry({ jobId: job._id as Id<'generationJobs'> });
+            router.refresh();
+            setResumeMessage('Resume requested for the existing accepted take.');
+        } catch {
+            setResumeError('Unable to resume this take. Refresh its saved status and check project access.');
+        } finally { resumePending.current = false; setResumingJobId(null); }
+    }
     if (!jobs.some((job) => job.shotId)) return null;
-    return <section className="ff-card space-y-3 p-5" aria-label="Generation job status"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Background generation</h2><Button variant="secondary" size="sm" onClick={() => router.refresh()}>Refresh saved takes</Button></div>{jobs.filter((job) => job.shotId).slice(0, 20).map((job) => <article key={job._id} className="space-y-2 rounded-xl border border-border p-3"><p className="text-sm font-medium">{job.executionStage === 'RECONCILIATION_REQUIRED' ? 'Needs an administrator check; this job will not be purchased again automatically.' : job.status.toLowerCase().replaceAll('_', ' ')}</p><progress className="h-2 w-full" max={100} value={job.progress || 0} aria-label="Persisted generation progress" /><p className="break-words text-xs text-muted-foreground">{job.provider} · {job.model}{typeof job.providerCostUsd === 'number' ? ` · reported provider cost $${job.providerCostUsd.toFixed(4)}` : typeof job.estimatedProviderCostUsd === 'number' ? ` · ${job.request?.operation === 'UPSCALE' ? 'provider cost ceiling' : 'estimated provider cost'} $${job.estimatedProviderCostUsd.toFixed(4)}` : ''}</p>{job.errorMessage ? <p className="text-sm text-destructive">{job.errorMessage}</p> : null}</article>)}</section>;
+    return <section className="ff-card space-y-3 p-5" aria-label="Generation job status"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Background generation</h2><Button variant="secondary" size="sm" onClick={() => router.refresh()}>Refresh saved takes</Button></div>{jobs.filter((job) => job.shotId).slice(0, 20).map((job) => <article key={job._id} className="space-y-2 rounded-xl border border-border p-3"><p className="text-sm font-medium">{job.executionStage === 'RECONCILIATION_REQUIRED' ? 'Needs an administrator check; this job will not be purchased again automatically.' : job.status.toLowerCase().replaceAll('_', ' ')}</p><progress className="h-2 w-full" max={100} value={job.progress || 0} aria-label="Persisted generation progress" /><p className="break-words text-xs text-muted-foreground">{job.provider} · {job.model}{typeof job.providerCostUsd === 'number' ? ` · reported provider cost $${job.providerCostUsd.toFixed(4)}` : typeof job.estimatedProviderCostUsd === 'number' ? ` · ${job.request?.operation === 'UPSCALE' ? 'provider cost ceiling' : 'estimated provider cost'} $${job.estimatedProviderCostUsd.toFixed(4)}` : ''}</p>{job.errorMessage ? <p className="text-sm text-destructive">{job.errorMessage}</p> : null}{canResume(job) ? <div className="space-y-2"><Button variant="secondary" size="sm" disabled={resumingJobId !== null} onClick={() => void resume(job)}>{resumingJobId === job._id ? 'Requesting resume…' : 'Resume accepted take'}</Button><p className="text-xs text-muted-foreground">Uses the existing accepted generation. Its saved status and recovery limits are checked again.</p></div> : null}</article>)}{resumeMessage ? <p role="status" className="text-sm text-muted-foreground">{resumeMessage}</p> : null}{resumeError ? <p role="alert" className="text-sm text-destructive">{resumeError}</p> : null}</section>;
 }
