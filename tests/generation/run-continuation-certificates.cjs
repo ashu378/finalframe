@@ -16,6 +16,31 @@ function fixture() {
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
 async function main() {
+  await check('BFL canonical versions invalidate fingerprints while unrelated historical formats stay stable', () => {
+    for (const modelId of ['black-forest-labs/flux-3-video','black-forest-labs/flux-video-edit','black-forest-labs/flux-video-upscale']) {
+      const original={...model,modelId,canonicalSlug:'reviewed-version-1'};
+      assert.notEqual(h.routing.videoCatalogFingerprint(original),h.routing.videoCatalogFingerprint({...original,canonicalSlug:'replacement-version-2'}));
+      assert.notEqual(h.routing.videoCatalogFingerprint(original),h.routing.videoCatalogFingerprint({...original,canonicalSlug:undefined}));
+    }
+    const common={provider:'openrouter',modelId:'other/video',canonicalSlug:'old-version',supportedDurations:[5],supportedResolutions:['720p'],supportedAspectRatios:['16:9'],supportedParameters:[]};
+    assert.equal(h.routing.videoCatalogFingerprint(common),'["openrouter","other/video",[5],["720p"],["16:9"],[],[]]');
+    const continuation={...common,pricingSkus:{cents_per_second_video_continuation_720p:41}};
+    assert.equal(h.routing.videoCatalogFingerprint(continuation),'["openrouter","other/video",[5],["720p"],["16:9"],[],[],[["cents_per_second_video_continuation_720p",41]],"OPENROUTER_CONTINUATION_OUTPUT_SECOND_V1"]');
+    assert.equal(h.routing.videoCatalogFingerprint(continuation),h.routing.videoCatalogFingerprint({...continuation,canonicalSlug:'another-version'}));
+    const upscale={...common,upscaleFactor:{min:1.5,max:3},creativityLevels:[0,1],pricingSkus:{cents_per_megapixel_second_precise:3.5,cents_per_megapixel_second_creative:5}};
+    assert.equal(h.routing.videoCatalogFingerprint(upscale),'["openrouter","other/video",[5],["720p"],["16:9"],[],[],[1.5,3],[0,1],[["cents_per_megapixel_second_creative",5],["cents_per_megapixel_second_precise",3.5]],"FLUX_OUTPUT_MEGAPIXEL_SECOND_V1"]');
+  });
+  await check('BFL version-only refresh blocks stale review and frozen continuation quote before POST',async()=>{
+    const state=fixture(),catalog=state.rows.get('catalog'),modelId='black-forest-labs/flux-3-video';
+    Object.assign(catalog,{modelId,canonicalSlug:'reviewed-flux-version-1',supportedDurations:[5]});catalog.reviewedCatalogFingerprint=h.routing.videoCatalogFingerprint(catalog);
+    state.rows.get('policy').preferredModelIds=[modelId];state.rows.get('source-job').model=modelId;state.rows.get('source-take').model=modelId;state.rows.get('shot').durationSeconds=5;
+    const made=await state.create({model:modelId});const quote=structuredClone(state.rows.get(made._id).request.continuationQuote);catalog.canonicalSlug='replacement-flux-version-2';
+    const writes=state.writes.length;await assert.rejects(state.create({model:modelId,idempotencyKey:'new-version-create-request'}));assert.equal(state.writes.length,writes);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');
+    catalog.reviewedCatalogFingerprint=h.routing.videoCatalogFingerprint(catalog);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');assert.deepEqual(state.rows.get(made._id).request.continuationQuote,quote);assert.equal(state.rows.get(made._id).submissionStartedAt,undefined);
+    state.rows.get(made._id).providerJobId='accepted-before-version-change';assert.equal((await state.fence(made._id,state.live())).allowed,false);
+  });
   await check('canonical quote binds approved source provider job/model and newly requested output seconds', async () => {
     const state = fixture(); state.rows.get('video').durationSeconds = 120;
     const result = await state.create({ request: { previousJobId: 'forged', continuationQuote: { costUsd: .01 } } });

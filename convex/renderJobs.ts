@@ -13,6 +13,7 @@ import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
 import { authorizeMovieRenderContext, movieActor, movieEnabled, movieWorkerEnabled, requiredMovieMediaAbi } from './movieAuthority';
 import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
+import { finishingRetryEligibility } from '../src/lib/render/recovery';
 
 type RenderStatus = "QUEUED" | "PROCESSING" | "SUBMITTED" | "COMPLETED" | "RETRYING" | "FAILED" | "CANCELED";
 
@@ -471,8 +472,9 @@ export const retry = mutation({
   returns: v.any(),
   handler: async (ctx, args) => {
     const { job, member } = await authorizedJob(ctx, args.jobId, true);
-    if (job.status !== "FAILED" && job.status !== "RETRYING") throw new Error(`Render job cannot be retried from ${job.status}.`);
-    if ((job.dispatchAttempt ?? 0) >= RENDER_MAX_ATTEMPTS) throw new Error("This export needs an administrator check before another render attempt.");
+    const project=job.projectId?await ctx.db.get(job.projectId):null;
+    const eligibility=finishingRetryEligibility(job,{archived:Boolean(project?.archivedAt||project?.status==='ARCHIVED')});
+    if(!eligibility.eligible)throw new Error(eligibility.reason!);
     await ctx.db.patch(job._id, { status: "QUEUED", createdByUserId: member.user._id, executionStage: "QUEUED", acceptedAt: undefined, dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, nextDispatchAt: undefined, progress: 0, errorCode: undefined, errorMessage: undefined, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now() });
     await schedule(ctx, "dispatch", 0, { jobId: job._id });
     return await ctx.db.get(job._id);

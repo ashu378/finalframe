@@ -265,12 +265,13 @@ export function validUpscaleSource(source: UpscaleSourceCertificate | undefined)
 
 export function videoCatalogFingerprint(model: { provider: string; modelId: string; canonicalSlug?: string; supportedDurations: number[]; supportedResolutions: string[]; supportedAspectRatios: string[]; supportedSizes?: string[]; supportedParameters: string[]; upscaleFactor?: { min: number; max: number }; creativityLevels?: number[]; pricingSkus?: Record<string, number> }) {
     const controls = [model.provider, model.modelId, [...model.supportedDurations].sort((a, b) => a - b), [...model.supportedResolutions].sort(), [...model.supportedAspectRatios].sort(), [...(model.supportedSizes || [])].sort(), [...model.supportedParameters].sort()];
-    // Preserve historical non-upscale review fingerprints. Upscale certification
-    // includes exact controls and prices, so changes withdraw that review.
+    // These BFL source/continuation contracts depend on the upstream version as
+    // well as controls/prices. Preserve unrelated models' historical fingerprints.
+    const versionedControls = ['black-forest-labs/flux-3-video', 'black-forest-labs/flux-video-edit', 'black-forest-labs/flux-video-upscale'].includes(model.modelId) ? [...controls, model.canonicalSlug ?? null] : controls;
     if (model.modelId === REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar.modelId) return JSON.stringify([...controls, model.canonicalSlug ?? null, Object.entries(model.pricingSkus || {}).sort(([a],[b])=>a.localeCompare(b)), REVIEWED_OPERATION_CONTRACTS.suppliedAudioAvatar.version]);
-    if (model.modelId === 'black-forest-labs/flux-video-edit') return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), VIDEO_EDIT_BILLING_VERSION]);
-    if (model.modelId === 'black-forest-labs/flux-3-video' || Object.keys(model.pricingSkus || {}).some(sku => sku.includes('video_continuation'))) return JSON.stringify([...controls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), CONTINUATION_BILLING_VERSION]);
-    return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...controls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : controls);
+    if (model.modelId === 'black-forest-labs/flux-video-edit') return JSON.stringify([...versionedControls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), VIDEO_EDIT_BILLING_VERSION]);
+    if (model.modelId === 'black-forest-labs/flux-3-video' || Object.keys(model.pricingSkus || {}).some(sku => sku.includes('video_continuation'))) return JSON.stringify([...versionedControls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), CONTINUATION_BILLING_VERSION]);
+    return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...versionedControls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : versionedControls);
 }
 
 export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoRoutingRequest): UpscaleQuoteCertificate | undefined {

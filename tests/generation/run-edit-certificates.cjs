@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const h = require('./run-operation-controls.cjs');
 const modelId = 'black-forest-labs/flux-video-edit';
-const model = { ...h.model, modelId, supportedDurations: [], supportedResolutions: [], supportedAspectRatios: [], pricingSkus: { cents_per_second_output: 3 }, reviewedOperations: ['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE'] };
+const model = { ...h.model, modelId, canonicalSlug:'reviewed-source-edit-version-1', supportedDurations: [], supportedResolutions: [], supportedAspectRatios: [], pricingSkus: { cents_per_second_output: 3 }, reviewedOperations: ['EDIT', 'APPEARANCE_EDIT', 'OBJECT_REPLACE'] };
 const source = { ...h.upscaleSource, hasAudio: true };
 const request = { videoType: 'SOCIAL_CUTDOWN', task: 'EDIT', operation: 'APPEARANCE_EDIT', audioPolicy: 'KEEP_SOURCE', qualityTier: 'STANDARD', durationSeconds: source.durationSeconds, aspectRatio: '1280:720', hasVideoReference: true, requiresSourceAudioPreservation: true, editSource: source };
 const definitions = { query: value => value, mutation: value => value, action: value => value, internalQuery: value => value, internalMutation: value => value };
@@ -21,6 +21,13 @@ function fixture(operation = 'APPEARANCE_EDIT') {
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
 async function main() {
+  await check('source-edit version change blocks stale review and old quote after re-review without repurchasing accepted work',async()=>{
+    const state=fixture();await state.certify();const made=await state.create();const quote=structuredClone(state.rows.get(made._id).request.editQuote),catalog=state.rows.get('catalog');catalog.canonicalSlug='replacement-source-edit-version-2';
+    const writes=state.writes.length;await assert.rejects(state.create({idempotencyKey:'new-edit-version-request'}));assert.equal(state.writes.length,writes);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');catalog.reviewedCatalogFingerprint=h.routing.videoCatalogFingerprint(catalog);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');assert.deepEqual(state.rows.get(made._id).request.editQuote,quote);assert.equal(state.rows.get(made._id).submissionStartedAt,undefined);
+    state.rows.get(made._id).providerJobId='accepted-before-version-change';assert.equal((await state.fence(made._id,state.live())).allowed,false);
+  });
   await check('documented edit quote charges complete measured footage and inherits null catalog generation controls', () => {
     assert.equal(h.routing.quoteVideoEdit(model, request).costUsd, .15);
     assert.equal(h.routing.videoModelSupportsRequest(model, request), true);

@@ -3,6 +3,9 @@
 import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import type { RenderJob } from '@/lib/types/database';
+import { makeFunctionReference } from 'convex/server';
+import type { Doc, Id } from '../../../convex/_generated/dataModel';
+import type { FinishingRecoverySnapshot, FinishingProductionPage } from './recovery';
 
 async function resolveWorkspace(client: Awaited<ReturnType<typeof getAuthenticatedConvexClient>>, projectOrProductionId: string) {
     const byProject = await client.query(api.productions.getWorkspaceByProject, { projectExternalId: projectOrProductionId });
@@ -70,19 +73,43 @@ export async function getRenderJobs(projectId: string): Promise<{ success: boole
 }
 
 export async function resetStuckRender(projectId: string): Promise<{ success: boolean; error?: string }> {
-    return resumeStuckJob(projectId);
+    void projectId;
+    return { success: false, error: 'Choose an individual job in Finishing jobs to check whether it can be retried.' };
 }
 
 export async function resumeStuckJob(projectId: string): Promise<{ success: boolean; error?: string }> {
+    return resetStuckRender(projectId);
+}
+
+export async function getFinishingProductions(projectId: string, cursor: string | null = null): Promise<{ success: boolean; choices?: FinishingProductionPage; error?: string }> {
+    try {
+        const client=await getAuthenticatedConvexClient();
+        const result=await client.query(api.productions.listByProject,{projectExternalId:projectId,paginationOpts:{cursor,numItems:25}});
+        return{success:true,choices:{page:result.page.map((production:Doc<'productions'>)=>({id:production._id.toString(),label:`${production.workflow.replaceAll('_',' ').slice(0,60)} · ${new Date(production.createdAt).toISOString().slice(0,10)} · ${production._id}`})),continueCursor:result.continueCursor,isDone:result.isDone}};
+    } catch {return{success:false,error:'We could not load this project’s videos and episodes. Check your project access and try again.'};}
+}
+
+export async function getFinishingRecovery(projectId: string, productionId?: string): Promise<{ success: boolean; snapshot?: FinishingRecoverySnapshot; error?: string }> {
     try {
         const client = await getAuthenticatedConvexClient();
-        const workspace = await resolveWorkspace(client, projectId);
-        if (!workspace.production) return { success: false, error: 'We could not find this video project.' };
-        const jobs = await client.query(api.renderJobs.list, { productionId: workspace.production._id });
-        const stuck = jobs.filter((job) => job.status === 'FAILED' || job.status === 'RETRYING');
-        for (const job of stuck) await client.mutation(api.renderJobs.retry, { jobId: job._id });
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'We could not resume the finishing jobs.' };
+        const reference=makeFunctionReference<'query',{projectExternalId:string;productionId?:Id<'productions'>},FinishingRecoverySnapshot>('renderRecovery:list');
+        return { success: true, snapshot: await client.query(reference,{projectExternalId:projectId,...(productionId?{productionId:productionId as Id<'productions'>}:{})}) };
+    } catch {
+        return { success: false, error: 'We could not load finishing jobs. Check your project access and episode selection.' };
+    }
+}
+
+export async function retryFinishingJob(projectId: string, jobId: string, productionId?: string): Promise<{ success: boolean; retried: number; jobId?: string; error?: string }> {
+    try {
+        const client=await getAuthenticatedConvexClient();
+        const reference=makeFunctionReference<'query',{projectExternalId:string;jobId:Id<'renderJobs'>;productionId?:Id<'productions'>},FinishingRecoverySnapshot>('renderRecovery:list');
+        const snapshot=await client.query(reference,{projectExternalId:projectId,jobId:jobId as Id<'renderJobs'>,...(productionId?{productionId:productionId as Id<'productions'>}:{})});
+        const job=snapshot.jobs.find(candidate=>candidate.id===jobId);
+        if(!job?.canRetry)return{success:false,retried:0,error:job?.retryReason??'This finishing job is unavailable for retry.'};
+        const result=await client.mutation(api.renderJobs.retry,{jobId:jobId as Id<'renderJobs'>});
+        if(result?.status!=='QUEUED')return{success:false,retried:0,error:'The retry could not be confirmed. Refresh this job before trying again.'};
+        return{success:true,retried:1,jobId};
+    } catch {
+        return{success:false,retried:0,error:'The retry could not be confirmed. Refresh this job and check your project access before trying again.'};
     }
 }

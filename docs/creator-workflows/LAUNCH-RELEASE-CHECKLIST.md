@@ -18,18 +18,18 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 | D01 | Caption authoring, burn-in, SRT/VTT, scope rebasing | caption-frame-acceptance | Pending |
 | D02 | Cut/dissolve/fade/wipe/slide with explicit duration and audio semantics | transition-frame-acceptance | Pending |
 | D03 | Automatic beats, editable confidence-bound beat map, apply as new timeline | beat-analysis-acceptance | Real online worker/manual correction/new timeline/12s PCM render and ordinary browser download passed; full music/tempo corpus still pending |
-| D04 | Native/recorded/dialogue/music/SFX audio mixing and source extraction | audio-content-acceptance | Mixing fixtures verified; bounded source-extraction implementation and real local worker/backend suites passed; online extraction pending |
+| D04 | Native/recorded/dialogue/music/SFX audio mixing and source extraction | audio-content-acceptance | Mixing fixtures verified; actual online exact-window extraction and deployed Preview form/repeated-intent completion passed; complete audio corpus and generated SFX route pending |
 | D05 | Exact titles/logos/UI/CTA/charts/explainer templates | graphics-content-acceptance | Three new templates passed actual online authoring/edit/lock/export replay, downloaded frames and retained certificate/APPLIED receipt; seven-template full browser/format matrix pending |
 | E01 | Correct lip-sync/extension/upscale public controls and canonical validation | operation-input-contract | Implementing |
 | E02 | Human hairstyle, appearance, masked edit, car/object choreography | live-edit-capabilities | Partial; object edit tested, human/masks unverified |
-| E03 | Performance transfer and supplied-audio lip sync | live-performance-lipsync | Pending |
+| E03 | Performance transfer and supplied-audio lip sync | live-performance-lipsync | Supplied-audio Avatar completed/downloaded once, actual $0.196416, audio correlation/alignment checked; subjective lip-sync and performance transfer acceptance pending |
 | E04 | Reusable consented voice/reference synthesis, revocation and lifecycle | live-personal-voice | Pending; consented source and certified route |
-| E05 | Accepted-job continuation and actual upscale | live-extension-upscale | Pending |
+| E05 | Accepted-job continuation and actual upscale | live-extension-upscale | Upscale completed/downloaded once, actual $0.03234,854×480→1280×720; one extra video frame recorded, content review and continuation pending |
 | F01 | Eight complete prompt-to-download recipes through ordinary UI | eight-recipes-browser | Partial; nineteen retained technical exports |
 | F02 | Cross-session episodes, exact continuity and immutable approved scenes | episodic-story-acceptance | Partial; online contracts and two-scene character fixture |
 | F03 | Movie versions, ordered scene/chapter exports, chunk recovery and 30-minute assembly | movie-fixture-acceptance | Real cloud30min/43,200frame repeated-fixture review+delivery completed; full download/SHA,60frame hashes,30audio windows/mappings and captions passed; live interruption not observed, creative movies pending |
 | Q01 | Missing keys/models, throttling/timeouts/balance, duplicates/uncertain acceptance, spend limits | provider-failure-matrix | Existing contracts; new operations need coverage |
-| Q02 | Every public/auth/creator/admin/API/legacy/error/loading route and displayed action | all-routes-browser | Pending |
+| Q02 | Every public/auth/creator/admin/API/legacy/error/loading route and displayed action | all-routes-browser | Desktop owner-session read-only review covered61 non-payment routes with no captured console warnings/errors; mutations/mobile/other-role matrix pending; misleading finishing-reset controls repaired with deliberate per-job retry |
 | Q03 | Real outputs reviewed for identity/action/dialogue/lip sync/readability/audio/pacing >=4/5 each | creative-output-review | Pending; no inferred artistic approval |
 | Z01 | Signup OTP, recovery, resend/attempt limits, real sending/inbox delivery | online-auth-email | LAST; provider credentials/domain required |
 | Z02 | Payment pages accurately disabled; no live checkout/charge | billing-disabled-browser | LAST; remains disabled under current authorization |
@@ -52,3 +52,5 @@ Second integration checkpoint: [account, operation certificates, beat analysis a
 Third integration checkpoint: [team, precise PCM finishing and immutable movie review/delivery](LAUNCH-COMPLETION-CHECKPOINT-3-2026-11-02.md). Small cloud movie proof is `movie-small/TECHNICAL-ACCEPTANCE.json`:24s/720frames, two explicitly repeated retained components,46 measured audio attacks below0.2ms, exact-version review and ordinary Preview delivery/download. No creative-story or whole-product certification is implied. Current development provider spend remains $4.697460633 plus retained uncertainty; no paid calls in these fixture checks.
 
 Sixth checkpoint: [recovery, project media and actual finishing proofs](LAUNCH-COMPLETION-CHECKPOINT-6-2026-11-03.md). Source-only recipe and three exact graphics completed online without AI spending; original paid portrait recovered without repurchase. These technical proofs do not certify eight creative launch recipes.
+
+Seventh checkpoint: [deliberate finishing recovery and model-version reviews](LAUNCH-COMPLETION-CHECKPOINT-7-2026-11-03.md). Exact job/production retry controls and BFL version fingerprints have focused regressions. New FLUX source, supplied-audio Avatar and upscale completed once with verified receipts; cumulative provider usage measured $5.958215632, with unknown holds retained. Source extraction also completed through the deployed Preview form. Current/historical production association and the broader launch gates remain open.

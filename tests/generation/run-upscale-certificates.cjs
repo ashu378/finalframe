@@ -3,7 +3,7 @@ const h = require('./run-operation-controls.cjs');
 let checks = 0;
 async function check(name, fn) { await fn(); checks++; console.log('PASS ' + name); }
 const source = { ...h.upscaleSource };
-const model = { ...h.model, modelId: h.upscaleModelId, supportedDurations: [], supportedResolutions: [], supportedAspectRatios: [], upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: { ...h.upscalePrices }, reviewedOperations: ['UPSCALE'] };
+const model = { ...h.model, modelId: h.upscaleModelId, canonicalSlug:'reviewed-upscale-version-1', supportedDurations: [], supportedResolutions: [], supportedAspectRatios: [], upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: { ...h.upscalePrices }, reviewedOperations: ['UPSCALE'] };
 const request = { videoType: 'SOCIAL_CUTDOWN', task: 'EDIT', operation: 'UPSCALE', qualityTier: 'STANDARD', durationSeconds: 4, aspectRatio: '16:9', hasVideoReference: true, upscaleFactor: 2, creativity: 0, upscaleSource: source };
 function certifiedFixture() {
   const state = h.backendFixture({ operation: 'UPSCALE', upscaleFactor: 2, creativity: 0 }, ['video'], (state, ctx, auth) => {
@@ -56,6 +56,13 @@ async function main() {
     const old = discovery.discoverOpenRouterVideoModels({ baseUrl: 'https://catalog.fixture', fetch: async () => { calls++; await new Promise(resolve => { release = resolve; }); return new Response(JSON.stringify({ data: [{ id: 'old/model' }] })); } });
     const fresh = await discovery.discoverOpenRouterVideoModels({ baseUrl: 'https://catalog.fixture', force: true, staleIfError: false, fetch: async () => { calls++; return new Response(JSON.stringify({ data: [{ id: 'current/model' }] })); } });
     assert.equal(fresh[0].id, 'current/model'); assert.equal(calls, 2); release(); await old;
+  });
+  await check('version-only change revokes upscale review and invalidates an older quote even after re-review',async()=>{
+    const state=certifiedFixture();await state.certify();const made=await state.create();const catalog=state.rows.get('catalog');const quote=structuredClone(state.rows.get(made._id).request.upscaleQuote);catalog.canonicalSlug='replacement-upscale-version-2';
+    const writes=state.writes.length;await assert.rejects(state.create({idempotencyKey:'new-upscale-version-request'}));assert.equal(state.writes.length,writes);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');catalog.reviewedCatalogFingerprint=h.routing.videoCatalogFingerprint(catalog);
+    await assert.rejects(state.fence(made._id,state.live()),error=>error.code==='ROUTE_CHANGED');assert.deepEqual(state.rows.get(made._id).request.upscaleQuote,quote);assert.equal(state.rows.get(made._id).submissionStartedAt,undefined);
+    state.rows.get(made._id).providerJobId='accepted-before-version-change';assert.equal((await state.fence(made._id,state.live())).allowed,false);
   });
   await check('canonical creation refuses forged asset metadata without an internal measured certificate', async () => {
     const state = certifiedFixture();
