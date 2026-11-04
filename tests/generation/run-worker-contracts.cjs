@@ -44,6 +44,12 @@ try {
     assert.equal(result.request.videoType, 'CINEMATIC_FILM');
     for (const secret of ['private-key', 'private prompt', 'https://private', 'secret-lease', 'private-hash', 'private-budget']) assert.ok(!JSON.stringify(result).includes(secret));
   });
+  check('a completed job from an earlier revision does not surface its old transient probe failure', () => {
+    const result = policy.publicJob({ _id: 'job', status: 'COMPLETED', errorCode: 'MEDIA_PROBE_UNAVAILABLE', response: { assetId: 'asset' } });
+    assert.equal(result.assetId, 'asset');
+    assert.equal(result.errorCode, undefined);
+    assert.equal(result.errorMessage, undefined);
+  });
   check('technical media checks reject missing streams and wrong duration, aspect or audio', () => {
     const valid = { durationSeconds: 5, width: 1280, height: 720, videoCodec: 'h264', hasAudio: true, audioCodec: 'aac' };
     assert.equal(policy.validateMediaProbe(valid, { duration: 5, ratio: '16:9', resolution: '720p', requiresAudio: true }).hasAudio, true);
@@ -74,7 +80,11 @@ try {
     assert.doesNotMatch(actions, /executeVideoGeneration|api\.generationJobs\.(claim|submit|succeed|fail)|api\.credits\.(reserve|finalize)/);
     assert.match(panel, /useQuery\(api\.generationJobs\.list/);
     assert.doesNotMatch(panel, /setInterval|active\.progress \+|fetch\(`\/api\/generation/);
-    assert.match(panel, /requestId: crypto.randomUUID\(\)/);
+    const button = fs.readFileSync(path.join(root, 'src/components/production/generate-shot-button.tsx'), 'utf8');
+    assert.match(panel, /<GenerateShotButton/);
+    assert.match(button, /requestId.current \?\?= crypto.randomUUID\(\)/);
+    assert.match(actions, /api\.generationJobs\.previewShotEstimate/);
+    assert.match(actions, /api\.generationJobs\.createReviewedTake/);
   });
   console.log(`Worker policy/contract checks: PASS (${checked}); no database process or provider request started.`);
 } finally { fs.rmSync(temp, { recursive: true, force: true }); }

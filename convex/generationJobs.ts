@@ -602,8 +602,8 @@ export const succeed = internalMutation({ args: { ...leaseArgs, assetId: v.id('a
   job.shotVersionId && await ctx.db.patch(job.shotVersionId, { status: 'COMPLETED', assetId: args.assetId, actualCost: job.estimatedCost });
   // Do not overwrite approved/locked shot state or select a take on the user's behalf.
   const attempt = await currentAttempt(ctx, job);
-  if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', completedAt: timestamp });
-  await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, response: { ...object(job.response), assetId: args.assetId, technicalProbe: args.technicalProbe, visualApproval: 'REQUIRES_HUMAN_REVIEW' }, actualCost: job.estimatedCost, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+  if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', errorCode: undefined, retryable: undefined, completedAt: timestamp });
+  await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, errorCode: undefined, errorMessage: undefined, nextAttemptAt: undefined, nextPollAt: undefined, response: { ...object(job.response), assetId: args.assetId, technicalProbe: args.technicalProbe, visualApproval: 'REQUIRES_HUMAN_REVIEW' }, actualCost: job.estimatedCost, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
   await settle(ctx, job, true, job.providerCostUsd);
   return { jobId: job._id, assetId: args.assetId };
 } });
