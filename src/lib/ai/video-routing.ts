@@ -280,6 +280,8 @@ export function validUpscaleSource(source: UpscaleSourceCertificate | undefined)
     return Boolean(source && typeof source.assetId === 'string' && source.assetId && typeof source.storageId === 'string' && source.storageId && typeof source.checksum === 'string' && source.checksum && Number.isSafeInteger(source.byteSize) && source.byteSize > 0 && source.byteSize <= 50_000_000 && Number.isInteger(source.width) && Number.isInteger(source.height) && source.width > 0 && source.height > 0 && Math.max(source.width, source.height) <= 2560 && Math.min(source.width, source.height) <= 1440 && source.width * source.height <= 2560 * 1440 && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 20);
 }
 
+export const VIDEO_CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 export function videoCatalogFingerprint(model: { provider: string; modelId: string; canonicalSlug?: string; supportedDurations: number[]; supportedResolutions: string[]; supportedAspectRatios: string[]; supportedSizes?: string[]; supportedParameters: string[]; upscaleFactor?: { min: number; max: number }; creativityLevels?: number[]; pricingSkus?: Record<string, number> }) {
     const controls = [model.provider, model.modelId, [...model.supportedDurations].sort((a, b) => a - b), [...model.supportedResolutions].sort(), [...model.supportedAspectRatios].sort(), [...(model.supportedSizes || [])].sort(), [...model.supportedParameters].sort()];
     // These BFL source/continuation contracts depend on the upstream version as
@@ -289,6 +291,15 @@ export function videoCatalogFingerprint(model: { provider: string; modelId: stri
     if (model.modelId === 'black-forest-labs/flux-video-edit') return JSON.stringify([...versionedControls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), VIDEO_EDIT_BILLING_VERSION]);
     if (model.modelId === 'black-forest-labs/flux-3-video' || Object.keys(model.pricingSkus || {}).some(sku => sku.includes('video_continuation'))) return JSON.stringify([...versionedControls, Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), CONTINUATION_BILLING_VERSION]);
     return JSON.stringify(model.upscaleFactor || model.creativityLevels ? [...versionedControls, model.upscaleFactor ? [model.upscaleFactor.min, model.upscaleFactor.max] : null, [...(model.creativityLevels || [])].sort(), Object.entries(model.pricingSkus || {}).sort(([a], [b]) => a.localeCompare(b)), UPSCALE_BILLING_VERSION] : versionedControls);
+}
+
+/** Compare the live quote with the reviewed row without invalidating older
+ * persisted review fingerprints or operation certificates. */
+export function videoCatalogQuoteFingerprint(model: Parameters<typeof videoCatalogFingerprint>[0]): string {
+    return JSON.stringify([
+        videoCatalogFingerprint(model), model.canonicalSlug ?? null,
+        Object.entries(model.pricingSkus ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+    ]);
 }
 
 export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoRoutingRequest): UpscaleQuoteCertificate | undefined {

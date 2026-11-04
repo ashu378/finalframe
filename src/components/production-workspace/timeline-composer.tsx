@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ApprovalControls, controlInput } from './resource-approval-controls';
 import { buildWorkspaceTimelineManifest, createWorkspaceTimeline } from '@/lib/production/workspace-actions';
@@ -29,7 +30,11 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     const [soundtrack, setSoundtrack] = useState<SoundtrackEntry[]>([]);
     const [outputPreset, setOutputPreset] = useState('');
     const [outputFps, setOutputFps] = useState<24 | 25 | 30 | 50 | 60>(30);
-    const takes = data.scenes.flatMap((scene) => scene.shots.flatMap((shot) => shot.takes.filter((take) => approved(take.state) && take.assetId).map((take) => ({ id: take.id, label: `${scene.title} / ${shot.title} · take ${take.versionNumber}`, durationSeconds: shot.durationSeconds }))));
+    const takes = data.scenes.flatMap((scene) => scene.shots.flatMap((shot) => shot.takes.filter((take) => approved(take.state) && take.assetId).map((take) => ({ id: take.id, assetId: take.assetId, label: `${scene.title} / ${shot.title} · take ${take.versionNumber}`, durationSeconds: shot.durationSeconds }))));
+    const selectedTake = takes.find((take) => take.id === takeId);
+    const selectedTakeAsset = selectedTake && data.assets.find((asset) => asset.id === selectedTake.assetId);
+    const takeNeedsMediaApproval = Boolean(selectedTakeAsset && !approved(selectedTakeAsset.state));
+    const mediaHref = `/dashboard/projects/${encodeURIComponent(data.projectExternalId)}/workspace/media?production=${encodeURIComponent(data.productionId)}`;
     const assets = data.assets.filter((asset) => approved(asset.state)); const total = entries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
     const editable = data.canEdit && data.versionState === 'APPROVED';
     function add(label: string, durationSeconds: number, clip: CompositionClip) {
@@ -42,7 +47,22 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     }
     return <section className="ff-card space-y-6 p-5 sm:p-7" aria-label="Compose a timeline"><div><h2 className="text-2xl font-semibold">Build the first timeline</h2><p className="mt-2 text-sm text-muted-foreground">Explicitly choose approved takes, your project media, or designed titles. Reorder the list, then save a draft for review. This does not purchase AI generation or start a render.</p></div>
         {!editable ? <p role="status" className="text-sm text-amber-300">Approve the current production plan before creating its timeline. Reviewers can inspect and approve existing timeline drafts below.</p> : <div className="space-y-5">
-            <div className="grid gap-4 lg:grid-cols-2"><div className="space-y-3 rounded-xl border border-border p-4"><label className="block text-sm font-medium">Approved shot take<select aria-label="Approved shot take" className={controlInput} value={takeId} onChange={(event) => setTakeId(event.target.value)}><option value="">Choose one take</option>{takes.map((take) => <option key={take.id} value={take.id}>{take.label}</option>)}</select></label><Button variant="secondary" size="sm" disabled={!takeId || pending} onClick={() => { const take = takes.find((entry) => entry.id === takeId); if (take) add(take.label, take.durationSeconds, { kind: 'TAKE', shotVersionId: take.id }); }}>Add selected take</Button></div>
+            <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-3 rounded-xl border border-border p-4">
+                    <label className="block text-sm font-medium">
+                        Approved shot take
+                        <select aria-label="Approved shot take" className={controlInput} value={takeId} onChange={(event) => setTakeId(event.target.value)}>
+                            <option value="">Choose one take</option>
+                            {takes.map((take) => <option key={take.id} value={take.id}>{take.label}</option>)}
+                        </select>
+                    </label>
+                    {takeNeedsMediaApproval && <p role="status" className="text-sm text-amber-300">
+                        Approve this take’s source asset before adding it to the timeline. <Link className="underline" href={mediaHref}>Review source in Media</Link>
+                    </p>}
+                    <Button variant="secondary" size="sm" disabled={!selectedTake || takeNeedsMediaApproval || pending} onClick={() => {
+                        if (selectedTake && !takeNeedsMediaApproval) add(selectedTake.label, selectedTake.durationSeconds, { kind: 'TAKE', shotVersionId: selectedTake.id });
+                    }}>Add selected take</Button>
+                </div>
                 <div className="space-y-3 rounded-xl border border-border p-4"><label className="block text-sm font-medium">Approved project footage or image<select aria-label="Approved project footage or image" className={controlInput} value={assetId} onChange={(event) => setAssetId(event.target.value)}><option value="">Choose project media</option>{assets.filter((asset) => /^(video|image)\//.test(asset.mimeType)).map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select></label><label className="block text-sm font-medium">Clip length in seconds<input type="number" min={0.1} max={60} step={0.1} className={controlInput} value={assetDuration} onChange={(event) => setAssetDuration(Number(event.target.value))} /></label><Button variant="secondary" size="sm" disabled={!assetId || pending} onClick={() => { const asset = assets.find((entry) => entry.id === assetId); if (asset) add(asset.name, assetDuration, { kind: 'ASSET', assetId, durationSeconds: assetDuration }); }}>Add project clip</Button></div></div>
             {data.graphicsV2Enabled?<section className="space-y-4 rounded-xl border border-border p-4" aria-label="Designed graphics"><h3 className="font-semibold">Designed graphics · exact content</h3><GraphicDesigner value={graphic} onChange={setGraphic} images={assets.filter(a=>a.mimeType.startsWith('image/'))} disabled={pending}/><label className="grid gap-1 text-sm">Graphic length in seconds<input type="number" min={0.1} max={60} step={0.1} value={graphicDuration} className={controlInput} onChange={e=>setGraphicDuration(Number(e.target.value))}/></label><Button type="button" variant="secondary" disabled={pending} onClick={()=>{try{const spec=parseGraphicsV2Authoring(graphic,Math.round(graphicDuration*outputFps),outputFps);add(graphic.props.title,graphicDuration,{kind:'GRAPHIC',...graphic,props:spec.props,durationSeconds:graphicDuration});}catch(error){setError(error instanceof Error?error.message:'Check graphic content.');}}}>Add exact graphic</Button></section>:<fieldset className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"><legend className="px-1 text-sm font-semibold">Designed graphics · exact text and project logo</legend><label className="text-sm font-medium">Card design<select aria-label="Card design" className={controlInput} value={template} onChange={(event) => setTemplate(event.target.value as typeof template)}><option value="brand-card">Product or brand introduction</option><option value="kinetic-title">Animated title</option><option value="feature-callout">Feature callout</option><option value="end-card">Closing card</option></select></label><label className="text-sm font-medium">Graphic length in seconds<input type="number" min={0.1} max={60} step={0.1} value={graphicDuration} className={controlInput} onChange={(event) => setGraphicDuration(Number(event.target.value))} /></label>
                 <label className="text-sm font-medium">Exact title<input maxLength={200} className={controlInput} value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="text-sm font-medium">Supporting text<input maxLength={500} className={controlInput} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} /></label><label className="text-sm font-medium">Project brand name · optional<input maxLength={160} className={controlInput} value={brand} onChange={(event) => setBrand(event.target.value)} /></label><label className="text-sm font-medium">Approved project logo · optional<select aria-label="Approved project logo · optional" className={controlInput} value={logo} disabled={template === 'kinetic-title'} onChange={(event) => setLogo(event.target.value)}><option value="">No logo</option>{assets.filter((asset) => asset.mimeType.startsWith('image/')).map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select></label>

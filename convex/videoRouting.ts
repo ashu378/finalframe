@@ -6,8 +6,9 @@ import type { FunctionReference } from 'convex/server';
 import { object } from './generationWorkerContracts';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { requireAdmin, requireMember, requireProjectRole } from "./authorization";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { videoCatalogFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
+import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
+import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
+import { videoCatalogFingerprint, videoCatalogQuoteFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
 
 function catalogFingerprint(model: Parameters<typeof videoCatalogFingerprint>[0]) {
   return videoCatalogFingerprint(model);
@@ -154,7 +155,7 @@ export const savePolicy = mutation({
     for (const modelId of args.preferredModelIds) {
       const model = await ctx.db.query("videoModelCatalog")
         .withIndex("by_studio_model", (q) => q.eq("studioExternalId", args.studioExternalId).eq("modelId", modelId)).unique();
-      if (!model || model.platformQuarantinedAt !== undefined || !model.available || !model.reviewedAt || model.lastSeenAt < Date.now() - 24 * 60 * 60 * 1000) throw new Error(`Model ${modelId} must be refreshed from the live catalog and capability-reviewed before activation.`);
+      if (!model || model.platformQuarantinedAt !== undefined || !model.available || !model.reviewedAt || model.lastSeenAt < Date.now() - VIDEO_CATALOG_MAX_AGE_MS) throw new Error(`Model ${modelId} must be refreshed from the live catalog and capability-reviewed before activation.`);
       if (args.path !== "MOTION_GRAPHICS" && !model.supportsTextToVideo && !model.reviewedOperations?.length) throw new Error(`Model ${modelId} is not reviewed for any supported video operation.`);
     }
     const updatedAt = Date.now();
@@ -182,6 +183,56 @@ export const forGeneration = query({
     ]);
     return { catalog: catalog.map(model => ({ ...model, available: model.available && model.platformQuarantinedAt === undefined })), policy: policy ?? undefined };
   },
+});
+
+const refreshQuoteArgs = { projectId: v.id('projects') };
+
+async function staleReviewedQuoteModels(ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, now: number) {
+  const { project } = await requireProjectRole(ctx, projectId, ['OWNER', 'EDITOR']);
+  if (project.moderationStatus === 'RESTRICTED') throw new Error('The project is unavailable for generation.');
+  const catalog = await ctx.db.query('videoModelCatalog').withIndex('by_studio', q => q.eq('studioExternalId', project.studioExternalId)).take(200);
+  return catalog.filter(model => model.provider === 'openrouter' && model.available && model.platformQuarantinedAt === undefined && model.reviewedAt
+    && model.reviewedCatalogFingerprint === catalogFingerprint(model) && model.lastSeenAt < now - VIDEO_CATALOG_MAX_AGE_MS);
+}
+
+export const needsReviewedQuoteRefresh = internalQuery({
+  args: { ...refreshQuoteArgs, now: v.number() }, returns: v.boolean(),
+  handler: async (ctx, { projectId, now }) => (await staleReviewedQuoteModels(ctx, projectId, now)).length > 0,
+});
+
+export const recordReviewedQuoteRefresh = internalMutation({
+  args: { ...refreshQuoteArgs, fingerprints: v.record(v.string(), v.string()), checkedAt: v.number() }, returns: v.null(),
+  handler: async (ctx, { projectId, fingerprints, checkedAt }) => {
+    const now = Date.now();
+    if (Object.keys(fingerprints).length > 200 || !Number.isFinite(checkedAt) || checkedAt > now + 1000 || checkedAt < now - 30_000) throw new Error('The catalog check expired.');
+    for (const model of await staleReviewedQuoteModels(ctx, projectId, now)) {
+      if (Object.prototype.hasOwnProperty.call(fingerprints, model.modelId) && fingerprints[model.modelId] === videoCatalogQuoteFingerprint(model)) {
+        await ctx.db.patch(model._id, { lastSeenAt: checkedAt });
+      }
+    }
+    return null;
+  },
+});
+
+/** Refresh matching reviewed rows only. The caller supplies a project ID and
+ * cannot attest to catalog data, reactivate a model or edit its review. */
+export async function refreshReviewedVideoCatalog(ctx: ActionCtx, projectId: Id<'projects'>) {
+  const refs = (internal as unknown as { videoRouting: Record<string, FunctionReference<any, 'internal', any, any>> }).videoRouting;
+  if (!await ctx.runQuery(refs.needsReviewedQuoteRefresh, { projectId, now: Date.now() })) return null;
+  const live = await discoverOpenRouterVideoModels({
+    staleIfError: false, ttlMs: 60_000,
+    fetch: (url, init) => fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(10_000) }),
+  });
+  if (live.length > 200 || new Set(live.map(model => model.id)).size !== live.length) throw new Error('The live video catalog exceeds its expected bounds.');
+  const fingerprints = Object.fromEntries(live.map(model => [model.id, videoCatalogQuoteFingerprint({ ...model, provider: 'openrouter', modelId: model.id, supportedParameters: model.allowedPassthroughParameters })]));
+  if (JSON.stringify(fingerprints).length > 256 * 1024) throw new Error('The live video catalog exceeds its expected bounds.');
+  await ctx.runMutation(refs.recordReviewedQuoteRefresh, { projectId, fingerprints, checkedAt: Date.now() });
+  return null;
+}
+
+export const refreshReviewedForQuote = action({
+  args: refreshQuoteArgs, returns: v.null(),
+  handler: (ctx, { projectId }) => refreshReviewedVideoCatalog(ctx, projectId),
 });
 
 
@@ -220,7 +271,7 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
   };
   const models: VideoModelCapabilities[] = catalog.map((model) => ({ ...model,
     reviewedOperations: model.reviewedOperations as VideoOperation[] | undefined,
-    available: model.available && model.platformQuarantinedAt === undefined && Boolean(model.reviewedAt) && model.lastSeenAt >= Date.now() - 24 * 60 * 60 * 1000
+    available: model.available && model.platformQuarantinedAt === undefined && Boolean(model.reviewedAt) && model.lastSeenAt >= Date.now() - VIDEO_CATALOG_MAX_AGE_MS
       && (!model.reviewedCatalogFingerprint || model.reviewedCatalogFingerprint === catalogFingerprint(model)),
   }));
   const selection = selectVideoRoute(request, models, policy ? { ...policy, updatedAt: policy.updatedAt } : undefined);

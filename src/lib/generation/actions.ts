@@ -5,7 +5,7 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
 import type { QualityTier } from '@/lib/types/database';
-import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
+import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { supportsCatalogUpscaleControls, validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '@/lib/production/workspace-controls';
@@ -125,6 +125,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
         if (typeRoutingEnabled) {
             if (!production.projectId) return { success: false, error: 'This production needs to belong to a project before style-aware generation can run.' };
             try {
+                await convex.action(api.videoRouting.refreshReviewedForQuote, { projectId: production.projectId }).catch(() => null);
                 const configuration = await convex.query(api.videoRouting.forGeneration, {
                     studioExternalId: production.studioExternalId,
                     videoType: videoType as never,
@@ -132,8 +133,15 @@ export async function previewShotGeneration(input: { productionId: string; shotI
                 });
                 const live = await discoverOpenRouterVideoModels({ staleIfError: false });
                 const liveById = new Map(live.map((entry) => [entry.id, entry]));
+                const oldestAllowed = Date.now() - VIDEO_CATALOG_MAX_AGE_MS;
                 const models: VideoModelCapabilities[] = configuration.catalog
-                    .filter((entry: any) => entry.provider === 'openrouter' && entry.available && entry.reviewedAt && liveById.has(entry.modelId) && (operation !== 'UPSCALE' || supportsCatalogUpscaleControls(liveById.get(entry.modelId)!.raw, operationControls.upscaleFactor, operationControls.creativity)))
+                    .filter((entry: any) => {
+                        const current = liveById.get(entry.modelId);
+                        return current && entry.provider === 'openrouter' && entry.available && entry.reviewedAt && entry.lastSeenAt >= oldestAllowed
+                            && (!entry.reviewedCatalogFingerprint || entry.reviewedCatalogFingerprint === videoCatalogFingerprint(entry))
+                            && videoCatalogQuoteFingerprint(entry) === videoCatalogQuoteFingerprint({ ...current, provider: 'openrouter', modelId: current.id, supportedParameters: current.allowedPassthroughParameters })
+                            && (operation !== 'UPSCALE' || supportsCatalogUpscaleControls(current.raw, operationControls.upscaleFactor, operationControls.creativity));
+                    })
                     .map((entry: any) => {
                         const current = liveById.get(entry.modelId)!;
                         return {

@@ -1,4 +1,4 @@
-import { action, internalMutation } from './_generated/server';
+import { action, internalMutation, internalQuery } from './_generated/server';
 import { internal } from './_generated/api';
 import type { FunctionReference } from 'convex/server';
 import {v} from 'convex/values';
@@ -7,11 +7,24 @@ import {recipeErrorCode} from './recipeErrors';
 import {recipeHash} from '../src/lib/production/recipes/compiler';
 import {quotePreparation} from '../src/lib/ai/preparation';
 import {discoverOpenRouterVideoModels} from '../src/lib/ai/model-discovery';
-import {videoCatalogFingerprint} from '../src/lib/ai/video-routing';
+import {videoCatalogQuoteFingerprint} from '../src/lib/ai/video-routing';
+import {refreshReviewedVideoCatalog} from './videoRouting';
 import {assertRecipeSourcesCurrent,boundedRecipeJson,recipeObject,recipeRunScope,requireRecipeEnabled} from './recipeAuthority';
 import {assertResolvedRecipeNode} from './recipeAdmissions';
 import {resolvePaidRecipeInput,reusableRecipeJob} from './recipePlanning';
 const refs:Record<string,FunctionReference<any,'internal',any,any>>=(internal as unknown as {recipeEstimates:Record<string,FunctionReference<any,'internal',any,any>>}).recipeEstimates;
+export const pendingVideoQuoteProject = internalQuery({
+ args: {runId: v.id('recipeRuns')}, returns: v.union(v.id('projects'), v.null()),
+ handler: async (ctx, {runId}) => {
+  requireRecipeEnabled();
+  const run = await ctx.db.get(runId);
+  if (!run || run.cancelRequestedAt || run.initializedNodeCount !== run.nodeCount) throw new Error('RECIPE_NOT_ESTIMABLE');
+  await requireProjectRole(ctx, run.projectId, ['OWNER', 'EDITOR']);
+  const nodes = await ctx.db.query('recipeRunNodes').withIndex('by_run_order', q => q.eq('runId', runId)).take(193);
+  if (nodes.length > 192) throw new Error('RECIPE_NODE_LIMIT');
+  return nodes.some(node => node.operation === 'GENERATION' && node.effect === 'PAID' && !node.linkedGenerationJobId && !['COMPLETED', 'CANCELED'].includes(node.status)) ? run.projectId : null;
+ },
+});
 export const resolveStage=internalMutation({args:{runId:v.id('recipeRuns')},returns:v.any(),handler:async(ctx,args)=>{
  requireRecipeEnabled();const {run}=await recipeRunScope(ctx,args.runId);await requireProjectRole(ctx,run.projectId,['OWNER','EDITOR']);if(run.cancelRequestedAt||run.initializedNodeCount!==run.nodeCount)throw new Error('RECIPE_NOT_ESTIMABLE');await assertRecipeSourcesCurrent(ctx,run);const nodes=await ctx.db.query('recipeRunNodes').withIndex('by_run_order',q=>q.eq('runId',run._id)).take(193);if(nodes.length>192)throw new Error('RECIPE_NODE_LIMIT');const inputs=[];const blocked=[];
  for(const node of nodes){if(node.effect!=='PAID'||node.linkedGenerationJobId||node.status==='COMPLETED'||node.status==='CANCELED')continue;try{const resolved=await resolvePaidRecipeInput(ctx,node,run);if(node.resolvedRequestHash&&node.resolvedRequestHash!==resolved.resolvedRequestHash)throw new Error('RECIPE_RESOLVED_INPUT_CHANGED');const intent=recipeObject(recipeObject(run.canonicalContext).executionIntent);let reusable;try{reusable=await reusableRecipeJob(ctx,node,resolved.bindings);}catch(error){if(!(error instanceof Error)||error.message!=='RECIPE_REGENERATION_REVIEW_REQUIRED'||!Array.isArray(intent.regenerateNodeIds)||!intent.regenerateNodeIds.includes(node.nodeId))throw error;}
@@ -22,8 +35,10 @@ export const resolveStage=internalMutation({args:{runId:v.id('recipeRuns')},retu
 }});
 /** Catalog GETs only. This action cannot dispatch a provider purchase. */
 export const preview=action({args:{runId:v.id('recipeRuns')},returns:v.any(),handler:async(ctx,args):Promise<any>=>{
+ const projectId = await ctx.runQuery(refs.pendingVideoQuoteProject,args);
+ if(projectId) await refreshReviewedVideoCatalog(ctx,projectId).catch(() => null);
  const stage=await ctx.runMutation(refs.resolveStage,args);const quotes:Record<string,any>={};let live:Awaited<ReturnType<typeof discoverOpenRouterVideoModels>>|undefined;
- for(const input of stage.inputs){const create=input.bindings.createArgs;try{let baseProviderUsd:number;let fingerprint=input.catalogFingerprint;let preparationQuote;if(input.operation==='GENERATION'){live??=await discoverOpenRouterVideoModels({force:true,staleIfError:false});const model=live.find(m=>m.id===create.model);if(!model||videoCatalogFingerprint({provider:'openrouter',modelId:model.id,...model,supportedParameters:model.allowedPassthroughParameters})!==fingerprint)throw new Error('RECIPE_LIVE_ROUTE_CHANGED');baseProviderUsd=create.estimatedProviderCostUsd;}else{preparationQuote=await quotePreparation({kind:create.kind,text:create.text,clone:create.clone,durationSeconds:create.durationSeconds,durationMeasurement:create.durationMeasurement});if(preparationQuote.model!==create.model)throw new Error('RECIPE_MODEL_CHANGED');baseProviderUsd=preparationQuote.estimatedProviderCostUsd;fingerprint=await recipeHash({...preparationQuote,checkedAt:0});}
+ for(const input of stage.inputs){const create=input.bindings.createArgs;try{let baseProviderUsd:number;let fingerprint=input.catalogFingerprint;let preparationQuote;if(input.operation==='GENERATION'){live??=await discoverOpenRouterVideoModels({force:true,staleIfError:false});const model=live.find(m=>m.id===create.model);if(!model||videoCatalogQuoteFingerprint({provider:'openrouter',modelId:model.id,...model,supportedParameters:model.allowedPassthroughParameters})!==input.catalogQuoteFingerprint)throw new Error('RECIPE_LIVE_ROUTE_CHANGED');baseProviderUsd=create.estimatedProviderCostUsd;}else{preparationQuote=await quotePreparation({kind:create.kind,text:create.text,clone:create.clone,durationSeconds:create.durationSeconds,durationMeasurement:create.durationMeasurement});if(preparationQuote.model!==create.model)throw new Error('RECIPE_MODEL_CHANGED');baseProviderUsd=preparationQuote.estimatedProviderCostUsd;fingerprint=await recipeHash({...preparationQuote,checkedAt:0});}
   quotes[input.key]={requestHash:input.requestHash,resolvedRequestHash:input.resolvedRequestHash,model:create.model,catalogFingerprint:fingerprint,baseProviderUsd,providerCeilingMicros:input.operation==='GENERATION'?input.providerCeilingMicros:Math.ceil(baseProviderUsd*1e6),creditCeiling:input.credits,checkedAt:Date.now(),...(preparationQuote?{preparationQuote}:{})};
  }catch(error){stage.blocked.push({nodeId:input.key,reason:recipeErrorCode(error)});}}
  return ctx.runMutation(refs.record,{runId:args.runId,quotes,blocked:stage.blocked});

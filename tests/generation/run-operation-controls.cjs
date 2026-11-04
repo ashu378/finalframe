@@ -12,7 +12,7 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
@@ -55,14 +55,18 @@ const upscalePrices = { cents_per_megapixel_second_precise: 3.5, cents_per_megap
 const baseControls = { operation: 'GENERATE', audioPolicy: 'SILENT', referenceAssetIds: [], firstFrameAssetId: '', lastFrameAssetId: '' };
 const assets = [{ id: 'image', mimeType: 'image/png' }, { id: 'video', mimeType: 'video/mp4' }, { id: 'audio', mimeType: 'audio/wav' }];
 function publicActionFixture(metadata, references = []) {
-  const fixture = { mutations: [], estimates: [], routingEnabled: true, model: { ...model }, source: { ...upscaleSource }, rawCatalog: { upscale_factor: { min: 1.5, max: 3 }, creativity: [0, 1] } };
+  const fixture = { mutations: [], estimates: [], actionCalls: [], routingEnabled: true, model: { ...model, supportedSizes: ['1280x720'], lastSeenAt: Date.now() }, source: { ...upscaleSource }, rawCatalog: { upscale_factor: { min: 1.5, max: 3 }, creativity: [0, 1] } };
   if (metadata.operation === 'UPSCALE') fixture.model = { ...fixture.model, modelId: upscaleModelId, pricingSkus: { ...upscalePrices }, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1] };
   const client = {
-    action: async ref => ({ ...(fixture.actionSources?.[ref] ?? fixture.source) }),
+    action: async (ref, args) => {
+      fixture.actionCalls.push({ ref, args });
+      if (ref === 'videoRouting.refreshReviewedForQuote') return null;
+      return { ...(fixture.actionSources?.[ref] ?? fixture.source) };
+    },
     query: async ref => {
       if (ref === 'account.current') return { user: { id: 'user' } };
       if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: 'LANDSCAPE' }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
-      if (ref === 'videoRouting.forGeneration') return { catalog: [fixture.model], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
+      if (ref === 'videoRouting.forGeneration') return { catalog: [{ lastSeenAt: Date.now(), ...fixture.model }], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
       throw new Error('Unexpected query ' + ref);
     },
     mutation: async (ref, args) => {
@@ -77,7 +81,7 @@ function publicActionFixture(metadata, references = []) {
     '@/lib/ai/capabilities': { assertCapability: () => ({ provider: 'openrouter', model: 'test/reviewed' }) },
     '@/lib/credits/service': { estimateProductionCost: async input => { fixture.estimates.push(input); return { totalCredits: 1 }; } },
     '@/lib/ai/video-routing': routing, '@/lib/config/feature-flags': { isFeatureEnabled: () => fixture.routingEnabled },
-    '@/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async () => [{ id: fixture.model.modelId, canonicalSlug: fixture.model.canonicalSlug, upscaleFactor: fixture.rawCatalog.upscale_factor, creativityLevels: fixture.rawCatalog.creativity, supportedDurations: fixture.model.supportedDurations, supportedResolutions: fixture.model.supportedResolutions, supportedAspectRatios: fixture.model.supportedAspectRatios, supportedSizes: ['1280x720'], pricingSkus: fixture.model.pricingSkus, allowedPassthroughParameters: fixture.model.supportedParameters, raw: fixture.rawCatalog }] },
+    '@/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async () => [{ id: fixture.model.modelId, canonicalSlug: fixture.model.canonicalSlug, upscaleFactor: fixture.model.upscaleFactor, creativityLevels: fixture.model.creativityLevels, supportedDurations: fixture.model.supportedDurations, supportedResolutions: fixture.model.supportedResolutions, supportedAspectRatios: fixture.model.supportedAspectRatios, supportedSizes: fixture.model.supportedSizes, pricingSkus: fixture.livePricing ?? fixture.model.pricingSkus, allowedPassthroughParameters: fixture.model.supportedParameters, raw: fixture.rawCatalog }] },
     '@/lib/production/workspace-controls': controls,
   });
   fixture.run = () => fixture.actions.previewShotGeneration({ productionId: 'production', shotId: 'shot', requestId: 'operation-contract-00001' });
@@ -157,6 +161,74 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   return state;
 }
 async function main() {
+  await check('a quote refresh updates only unchanged reviewed stale models in the authorized studio', async () => {
+    const now = Date.now();
+    const lastSeenAt = now - 36 * 60 * 60 * 1000;
+    const asLive = (row, patch = {}) => ({ id: row.modelId, ...row, allowedPassthroughParameters: row.supportedParameters, ...patch });
+    let live = [];
+    let discovers = 0;
+    let canEdit = true;
+    const state = backendFixture({ operation: 'GENERATE' }, [], (_, __, auth) => {
+      const definitions = { query: value => value, mutation: value => value, action: value => value, internalQuery: value => value, internalMutation: value => value };
+      const v = new Proxy({}, { get: () => () => ({}) });
+      return compile('convex/videoRouting.ts', {
+        './_generated/server': definitions, './_generated/api': { internal: api }, 'convex/values': { v },
+        './authorization': { requireProjectRole: async (ctx, id, roles) => {
+          assert.deepEqual(roles, ['OWNER', 'EDITOR']);
+          if (!canEdit || id !== 'project') throw Error('Project edit role required');
+          return auth();
+        } },
+        '../src/lib/ai/video-routing': routing, './generationWorkerContracts': contracts, './generationContinuity': {},
+        '../src/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async options => { discovers++; assert.equal(options.staleIfError, false); return live; } },
+      });
+    });
+    const row = (id, patch = {}) => {
+      const value = { ...model, _id: id, modelId: `test/${id}`, canonicalSlug: 'version-1', table: 'videoModelCatalog', studioExternalId: 'studio', lastSeenAt, ...patch };
+      state.rows.set(id, { ...value, reviewedCatalogFingerprint: routing.videoCatalogFingerprint(value) });
+      return state.rows.get(id);
+    };
+    const match = row('same');
+    const unavailable = row('disabled', { available: false });
+    const quarantined = row('quarantined', { platformQuarantinedAt: now });
+    const unreviewed = row('unreviewed', { reviewedAt: undefined });
+    const otherStudio = row('foreign', { studioExternalId: 'other' });
+    const changedPrice = row('price');
+    const changedVersion = row('version');
+    const changedControls = row('controls');
+    const missing = row('missing');
+    const fresh = row('fresh', { lastSeenAt: now });
+    live = [match, unavailable, quarantined, unreviewed, otherStudio, fresh].map(value => asLive(value)).concat(
+      asLive(changedPrice, { pricingSkus: { ...changedPrice.pricingSkus, cents_per_second_output: 2 } }),
+      asLive(changedVersion, { canonicalSlug: 'version-2' }), asLive(changedControls, { supportedDurations: [8] }),
+    );
+    const dispatch = (ref, args) => state.routing[ref.split('.')[1]].handler(state.ctx, args);
+    const actionContext = { runQuery: dispatch, runMutation: dispatch };
+    const refresh = projectId => state.routing.refreshReviewedForQuote.handler(actionContext, { projectId });
+    await assert.rejects(refresh('another-project'), /edit role/);
+    canEdit = false;
+    await assert.rejects(refresh('project'), /edit role/);
+    assert.equal(discovers, 0);
+    canEdit = true;
+    await refresh('project');
+    assert.equal(discovers, 1);
+    assert.equal(state.writes.length, 1);
+    assert.deepEqual(Object.keys(state.writes[0].patch), ['lastSeenAt']);
+    assert.deepEqual(state.rows.get(match._id), { ...match, lastSeenAt: state.writes[0].patch.lastSeenAt });
+    for (const unchanged of [unavailable, quarantined, unreviewed, otherStudio, changedPrice, changedVersion, changedControls, missing, fresh]) assert.deepEqual(state.rows.get(unchanged._id), unchanged);
+    assert.equal(state.creditReservations.length, 0);
+    assert.equal(state.schedules.length, 0);
+  });
+  await check('ordinary quote rejects a stale row or live price drift before recording an estimate', async () => {
+    const stale = publicActionFixture(baseControls);
+    stale.model.lastSeenAt = Date.now() - 36 * 60 * 60 * 1000;
+    assert.equal((await stale.run()).success, false);
+    assert.deepEqual(stale.actionCalls[0], { ref: 'videoRouting.refreshReviewedForQuote', args: { projectId: 'project' } });
+    assert.equal(stale.mutations.length, 0);
+    const changed = publicActionFixture(baseControls);
+    changed.livePricing = { ...changed.model.pricingSkus, cents_per_second_output: 2 };
+    assert.equal((await changed.run()).success, false);
+    assert.equal(changed.mutations.length, 0);
+  });
   await check('public creation rejects private recipe authority markers before reserving', async () => { const state=backendFixture({operation:'GENERATE'},[]);await assert.rejects(state.create({request:{ratio:'16:9',recipeRunNodeId:'foreign-node'}}),/PRIVATE_AUTHORITY/);assert.equal(state.creditReservations.length,0); });
   await check('a quote makes no purchase and only the exact unexpired consent can schedule a take', async () => {
     const state = backendFixture({ operation: 'GENERATE' });
