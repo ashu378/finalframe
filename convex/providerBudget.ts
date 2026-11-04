@@ -3,7 +3,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
-// Owner's current authorization: US$10 working budget, US$15 absolute ceiling.
+// Cumulative testing ceiling across all approved runs.
 const MAX_TEST_MICROS = 15_000_000;
 
 export function usdToMicros(value: number) {

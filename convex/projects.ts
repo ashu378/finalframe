@@ -7,6 +7,8 @@ import {
   requireMember,
   requireProjectAccess,
   requireProjectRole,
+  resolveProjectAccessForActor,
+  type AuthorizedProject,
 } from "./authorization";
 import { ConvexAuthError, ConvexAuthorizationError } from "./auth";
 import { normalizeProjectSearch, projectMatchesLibrary, type ProjectLibraryMode, type ProjectLibraryPage } from "../src/lib/project/library";
@@ -374,10 +376,19 @@ function isRecordedProjectOwner(project: { ownerUserId?: Id<'users'>; createdByU
   return project.ownerUserId === user._id || project.createdByUserId === user._id || Boolean(project.createdByExternalId && (project.createdByExternalId === user.externalId || project.createdByExternalId === user.authSubject));
 }
 
-/** Membership changes and removals share the same indexed invariant. */
-async function requireAnotherActiveOwner(ctx: MutationCtx, projectId: Id<'projects'>, targetUserId: Id<'users'>) {
-  const owners = await ctx.db.query('projectMembers').withIndex('by_project_role_status', q => q.eq('projectId', projectId).eq('role', 'OWNER').eq('status', 'ACTIVE')).take(2);
-  if (!owners.some(member => member.userId !== targetUserId)) throw new Error('A project must retain at least one owner.');
+/** An owner row only counts while its user can still access this workspace. */
+async function requireAnotherActiveOwner(ctx: MutationCtx, actor: AuthorizedProject, targetUserId: Id<'users'>) {
+  if (actor.user._id !== targetUserId) return;
+  const projectId = actor.project._id;
+  const owners = await ctx.db.query('projectMembers').withIndex('by_project_role_status', q => q.eq('projectId', projectId).eq('role', 'OWNER').eq('status', 'ACTIVE')).take(51);
+  for (const owner of owners) {
+    if (owner.userId === targetUserId) continue;
+    try { await resolveProjectAccessForActor(ctx, projectId, owner.userId, ['OWNER']); return; }
+    catch (error) {
+      if (!(error instanceof ConvexAuthError) && !(error instanceof ConvexAuthorizationError)) throw error;
+    }
+  }
+  throw new Error('A project must retain at least one owner with active workspace access.');
 }
 
 export const setMember = mutation({
@@ -399,7 +410,7 @@ export const setMember = mutation({
       .unique();
     const timestamp = now();
     const demotesOwner = existing ? existing.role === "OWNER" && existing.status === "ACTIVE" : isRecordedProjectOwner(actor.project, user);
-    if (demotesOwner && args.role !== "OWNER") await requireAnotherActiveOwner(ctx, args.projectId, args.userId);
+    if (demotesOwner && args.role !== "OWNER") await requireAnotherActiveOwner(ctx, actor, args.userId);
     if (existing) {
       await ctx.db.patch(existing._id, { role: args.role, status: "ACTIVE", updatedAt: timestamp });
       return await ctx.db.get(existing._id);
@@ -428,13 +439,13 @@ export const removeMember = mutation({
     if (!existing) {
       const target = await ctx.db.get(args.userId);
       if (!target || !isRecordedProjectOwner(actor.project, target)) return { ok: true };
-      await requireAnotherActiveOwner(ctx, args.projectId, args.userId);
+      await requireAnotherActiveOwner(ctx, actor, args.userId);
       const timestamp = now();
       // A durable explicit denial overrides recorded-creator migration access.
       await ctx.db.insert('projectMembers', { projectId: args.projectId, userId: args.userId, role: 'OWNER', status: 'REMOVED', invitedByUserId: actor.user._id, createdAt: timestamp, updatedAt: timestamp });
       return { ok: true };
     }
-    if (existing.role === "OWNER" && existing.status === "ACTIVE") await requireAnotherActiveOwner(ctx, args.projectId, args.userId);
+    if (existing.role === "OWNER" && existing.status === "ACTIVE") await requireAnotherActiveOwner(ctx, actor, args.userId);
     await ctx.db.patch(existing._id, { status: "REMOVED", updatedAt: now() });
     return { ok: true };
   },

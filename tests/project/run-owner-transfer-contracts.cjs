@@ -27,7 +27,7 @@ const ctx = { db: {
   get: async id => Object.values(rows).flat().find(row => row._id === id) || null,
   patch: async (id, patch) => { writes++; Object.assign(await ctx.db.get(id), patch); },
   insert: async (table, value) => { writes++; const id = table + '-new'; rows[table].push({ _id: id, ...value }); return id; },
-  query: table => ({ withIndex: (index, select) => { indexes.add(index); const conditions = []; const q = { eq: (key, value) => { conditions.push([key, value]); return q; } }; select(q); const matches = () => rows[table].filter(row => conditions.every(([key, value]) => row[key] === value)); return { unique: async () => matches()[0] || null, take: async limit => { assert(limit <= 2); return matches().slice(0, limit); }, paginate: async ({ cursor, numItems, maximumRowsRead }) => { assert.equal(maximumRowsRead, 50); const start = Number(cursor ?? 0); const end = start + numItems; return { page: matches().slice(start, end), continueCursor: String(end), isDone: end >= matches().length }; }, collect: async () => { throw new Error('Project access queries must use bounded indexes'); } }; } }),
+  query: table => ({ withIndex: (index, select) => { indexes.add(index); const conditions = []; const q = { eq: (key, value) => { conditions.push([key, value]); return q; } }; select(q); const matches = () => rows[table].filter(row => conditions.every(([key, value]) => row[key] === value)); return { unique: async () => matches()[0] || null, take: async limit => { assert(limit <= 51); return matches().slice(0, limit); }, paginate: async ({ cursor, numItems, maximumRowsRead }) => { assert.equal(maximumRowsRead, 50); const start = Number(cursor ?? 0); const end = start + numItems; return { page: matches().slice(start, end), continueCursor: String(end), isDone: end >= matches().length }; }, collect: async () => { throw new Error('Project access queries must use bounded indexes'); } }; } }),
 } };
 const projects = load('convex/projects.ts', { './_generated/server': { query: value => value, mutation: value => value }, './authorization': authorization, './auth': auth, '../src/lib/project/library': load('src/lib/project/library.ts') });
 (async () => {
@@ -60,9 +60,19 @@ const projects = load('convex/projects.ts', { './_generated/server': { query: va
   await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role: 'VIEWER' }), /retain at least one owner/, 'migration fallback owner cannot bypass the invariant by inserting a lower role');
   assert.equal(writes, 0); rows.projectMembers.unshift(originalOwner);
   await projects.setMember.handler(ctx, { projectId: 'project', userId: 'two', role: 'OWNER' });
+  const afterAddingPeer = writes;
+  suspended.status = 'removed';
+  await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role: 'VIEWER' }), /retain at least one owner/);
+  await assert.rejects(projects.removeMember.handler(ctx, { projectId: 'project', userId: 'one' }), /retain at least one owner/);
+  suspended.status = 'active'; rows.users[1].status = 'disabled';
+  await assert.rejects(projects.removeMember.handler(ctx, { projectId: 'project', userId: 'one' }), /retain at least one owner/);
+  rows.users[1].status = 'active';
+  assert.equal(writes, afterAddingPeer, 'disabled and removed peer owners must not permit writes');
   assert.deepEqual((await roster('AVAILABLE')).page, []);
   assert.equal((await roster('ASSIGNED')).page.find(person => person.userId === 'two').role, 'OWNER');
+  rows.projectMembers.splice(1, 0, { _id: 'stale-foreign-owner', projectId: 'project', userId: 'foreign', role: 'OWNER', status: 'ACTIVE' });
   await projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role: 'VIEWER' });
+  rows.projectMembers.splice(rows.projectMembers.findIndex(row => row._id === 'stale-foreign-owner'), 1);
   assert.equal(rows.projectMembers.find(row => row.userId === 'one').role, 'VIEWER');
   const afterHandoff = writes;
   await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'two', role: 'VIEWER' }), error => error.code === 'PROJECT_ACCESS_DENIED'); assert.equal(writes, afterHandoff, 'former creator/studio owner cannot override an explicit viewer role');
@@ -81,5 +91,5 @@ const projects = load('convex/projects.ts', { './_generated/server': { query: va
   assert.equal(rows.projectMembers.find(row => row.userId === 'one').status, 'REMOVED', 'removing a legacy recorded owner persists a denial tombstone');
   identity.externalId = identity.subject = 'subject-one';
   await assert.rejects(authorization.requireProjectAccess(ctx, 'project'), error => error.code === 'PROJECT_ACCESS_DENIED');
-  console.log('PASS project owner handoff: last-owner demotion/removal blocked before writes; inactive/foreign owners do not count; valid handoff/removal works; former creator role denied. Actual authorization/handlers, bounded indexed in-memory reads, no database/provider calls.');
+  console.log('PASS project owner handoff: last-owner demotion/removal blocked before writes; inactive, foreign, disabled and workspace-removed owners do not count; valid handoff/removal works; former creator role denied. Actual authorization/handlers, bounded indexed in-memory reads, no database/provider calls.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
