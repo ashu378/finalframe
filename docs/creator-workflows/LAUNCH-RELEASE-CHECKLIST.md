@@ -117,3 +117,10 @@ The reconciled OpenRouter cumulative usage was **$8.494995241**. The application
 | Worker process restart | Pass, isolated real process | A controlled restart resumed the cached component and replayed the stored callback after a later restart with one successful upload. Live worker interruption remains open. |
 
 The owner set **$15 cumulative**, superseding the earlier $10 working limit. The existing development ledger was raised to $15 and paused pending rotation of the confirmed exposed OpenRouter key. It retains **$8.343748** settled and **$0.188902** reserved. Last verified provider usage was **$8.494995241**, leaving at most **$6.316102759** after those holds and before any newer charges. This continuation made zero paid submissions.
+
+### Creative repairs verified through Preview delivery
+
+- **Pass, DraftDesk branding and CTA repair.** A separate eight-second SaaS assembly uses the original approved UI image and authored title and CTA. The phone-width output reads “Try DraftDesk” through the final hold. Sampled frames omit the template’s unwanted copy. The ordinary Preview download matched the signed renderer result. The earlier approved cut remains available.
+- **Pass, illustrated narrated explainer repair.** A separate four-second portrait assembly adds the owned tire and pressure-gauge close-up. The exact prior narration audio and caption timings were preserved. The ordinary Preview download matched the new verified export byte-for-byte. The approved prior timeline remains locked.
+- **Pass, online last eligible owner guard.** Deployed revision `da1c1db` denied both self-demotion and self-removal after the second recorded owner lost workspace access. The roster remained unchanged. Both isolated accounts were deactivated and their test project was soft-deleted.
+- **Blocked, paid acceptance.** OpenRouter reconfirmed $8.494995241 cumulative usage against the $15 key limit. The development app ledger stays paused while the exposed key is replaced. Its unresolved $0.188902 remains reserved. The repeatable no-cost checks and repairs above used no paid provider jobs.
