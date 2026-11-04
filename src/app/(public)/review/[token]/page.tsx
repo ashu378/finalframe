@@ -8,7 +8,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
     const { token } = await params;
     const data = await getPublicReviewData(token);
     if (!data) notFound();
-    return <main className="review-theme min-h-dvh bg-background px-5 py-10 text-foreground md:px-12">
+    return <div className="review-theme min-h-dvh bg-background px-5 py-10 text-foreground md:px-12">
         <div className="mx-auto max-w-7xl space-y-8"><header className="space-y-2"><p className="text-sm text-muted-foreground">FinalFrame · Private client review</p><h1 className="text-3xl font-semibold">{data.projectName}</h1><p>{data.label}</p></header><ScopedReview token={token} data={data} /><p className="text-xs text-muted-foreground">This link expires {new Date(data.expiresAt).toLocaleDateString()}. Anyone with this link can watch this version and leave feedback.</p></div>
-    </main>;
+    </div>;
 }

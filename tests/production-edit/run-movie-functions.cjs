@@ -3,7 +3,11 @@ const {fixture,assembly}=require('./run-finishing-v5.cjs');const root=path.resol
 const realStates=require(path.join(root,'convex/resourceStates.ts'));
 Module._load=function(request,parent,isMain){if(parent?.filename.includes('/convex/')&&request==='./_generated/server')return {query:value=>value,mutation:value=>value,internalMutation:value=>value,internalAction:value=>value,internalQuery:value=>value,action:value=>value};if(parent?.filename.includes('/convex/')&&request==='./resourceStates')return realStates;return previousLoad.call(this,request,parent,isMain);};
 const realApprovals=require(path.join(root,'convex/approvals.ts'));
-const loadStates=Module._load;Module._load=function(request,parent,isMain){if(parent?.filename.includes('/convex/')&&request==='./approvals')return realApprovals;return loadStates.call(this,request,parent,isMain);};
+const loadApprovals=Module._load;
+class FixtureAuthError extends Error { constructor(code,message){super(message);this.code=code;} }
+Module._load=function(request,parent,isMain){if(parent?.filename.includes('/convex/')&&request==='./auth')return {ConvexAuthError:FixtureAuthError,ConvexAuthorizationError:FixtureAuthError};return loadApprovals.call(this,request,parent,isMain);};
+const {resolveProjectAccessForActor}=require(path.join(root,'convex/authorization.ts'));
+const loadStates=Module._load;Module._load=function(request,parent,isMain){if(parent?.filename.includes('/convex/')&&request==='./approvals')return realApprovals;if(parent?.filename.endsWith('/convex/renderJobs.ts')&&request==='./authorization')return {...loadStates.call(this,request,parent,isMain),resolveProjectAccessForActor};return loadStates.call(this,request,parent,isMain);};
 const movies=require(path.join(root,'convex/movies.ts'));const outputs=require(path.join(root,'convex/movieExports.ts'));const merge=require(path.join(root,'convex/movieMergeJobs.ts'));const reviews=require(path.join(root,'convex/movieReviews.ts'));const render=require(path.join(root,'convex/renderJobs.ts'));const authority=require(path.join(root,'convex/movieAuthority.ts'));const {getFunctionName}=require('convex/server');
 const old={...process.env};const modules={movies,movieExports:outputs,movieMergeJobs:merge,renderJobs:render};let key=0;let checks=0;async function check(name,run){await run();checks++;console.log('PASS '+name);}
 function state(ctx,type,id,value){let row=[...ctx.rows.values()].find(item=>item.resourceType===type&&item.resourceId===id&&item.projectId==='project_1');if(row)ctx.rows.get(row._id).state=value;else ctx.put('resourceStates',{_id:'state_'+type+'_'+id,projectId:'project_1',resourceType:type,resourceId:id,state:value,createdAt:1,updatedAt:1});ctx.states.set(type+':'+id,value);}
@@ -27,7 +31,69 @@ async function complete(ctx,id,base64=false,beforeCallback){const {jobId,prepare
  await check('review frames map exact component versions and approved delivery reuses the reviewed artifact',async()=>{const ctx=await context();const id=await locked(ctx);const output=await ready(ctx,id);await complete(ctx,output);const {reviewId}=await reviews.request.handler(ctx,{movieExportId:output,idempotencyKey:'movie-review-'+(++key)});const commentId=await reviews.addComment.handler(ctx,{reviewId,body:'At the second exact occurrence.',movieFrame:240});assert.equal(ctx.rows.get(commentId).componentFrame,0);const parts=[...ctx.rows.values()].filter(row=>row.movieExportId===output&&row.componentId).sort((a,b)=>a.orderIndex-b.orderIndex);assert.equal(ctx.rows.get(commentId).componentId,parts[1].componentId);await assert.rejects(reviews.addComment.handler(ctx,{reviewId,body:'Beyond end',movieFrame:480}),/inside/);await realApprovals.approve.handler(ctx,{projectId:'project_1',resourceType:'movieReview',resourceId:reviewId});const before=ctx.count('movieMergeJobs');const preview=await outputs.preview.handler(ctx,{movieVersionId:id,selection:{scope:'MOVIE'}});const delivery=await outputs.request.handler(ctx,{movieVersionId:id,selection:{scope:'MOVIE'},purpose:'DELIVERY',approvedReviewId:reviewId,expectedPlanHash:preview.planHash,idempotencyKey:'movie-delivery-'+(++key)});assert.equal(ctx.rows.get(delivery.movieExportId).status,'QUEUED');for(let at=0;at<3;at++)await outputs.advance.handler(ctx,delivery);assert.equal(ctx.rows.get(delivery.movieExportId).status,'COMPLETED');assert.equal(ctx.rows.get(delivery.movieExportId).storageId,'storage_movie');assert.equal(ctx.count('movieMergeJobs'),before);assert.equal(ctx.count('renderJobs'),1);});
  await check('movie share capability is exact, hashed, revocable and cannot approve an assembly',async()=>{const ctx=await context();const id=await locked(ctx);const output=await ready(ctx,id);await complete(ctx,output);const {reviewId}=await reviews.request.handler(ctx,{movieExportId:output,idempotencyKey:'movie-shared-review-'+(++key)});const token=Buffer.alloc(32,7).toString('base64url');const tokenHash=require('node:crypto').createHash('sha256').update(token).digest('hex');const link=await reviews.createShareLink.handler(ctx,{reviewId,tokenHash,label:'Fixture client'});assert.equal(JSON.stringify([...ctx.rows.values()]).includes(token),false);const shared=await reviews.getSharedReview.handler(ctx,{token});assert.equal(shared.movieVersionNumber,1);const input={token,authorName:'Fixture reviewer',body:'Check this exact join.',movieFrame:240,requestId:'comment_movie_fixture'};const comment=await reviews.addSharedComment.handler(ctx,input);assert.equal((await reviews.addSharedComment.handler(ctx,input)).replayed,true);await assert.rejects(reviews.addSharedComment.handler(ctx,{...input,movieFrame:241}),/request changed/);await reviews.decideSharedReview.handler(ctx,{token,authorName:'Fixture reviewer',decision:'APPROVED'});assert.equal((await realStates.getEffectiveResourceState(ctx,'project_1','movieReview',reviewId)).currentState,'APPROVED');assert.equal((await realStates.getEffectiveResourceState(ctx,'project_1','movieVersion',id)).currentState,'LOCKED');assert.equal(ctx.rows.get(comment.id).componentFrame,0);await reviews.revokeShareLink.handler(ctx,{linkId:link.id});assert.equal(await reviews.getSharedReview.handler(ctx,{token}),null);await assert.rejects(reviews.addSharedComment.handler(ctx,{...input,requestId:'revoked_comment'}),/unavailable/);});
  await check('source approval/member/storage changes reject reuse and creation without modifying old versions',async()=>{for(const mutate of [ctx=>state(ctx,'asset','asset_red','REVISION_REQUESTED'),ctx=>ctx.rows.get('pm_1').role='VIEWER',ctx=>{ctx.rows.get('asset_red').storageId='replacement';ctx.storageObjects.set('replacement',{sha256:'a'.repeat(64),size:100,contentType:'video/mp4'});}]){const ctx=await context();const id=await locked(ctx);const before=structuredClone(ctx.rows.get(id));mutate(ctx);const output=await requested(ctx,id).catch(()=>null);if(output){await outputs.advance.handler(ctx,output);assert.equal(ctx.rows.get(output.movieExportId).status,'FAILED');}assert.deepEqual(ctx.rows.get(id),before);assert.equal(ctx.count('generationJobs'),0);}});
- await check('cancel retains ready chunks and late merge callbacks cannot revive canceled output',async()=>{const ctx=await context();const id=await locked(ctx);const output=await ready(ctx,id);const {jobId,prepared}=await accepted(ctx,output);await outputs.cancel.handler(ctx,{movieExportId:output});const parts=[...ctx.rows.values()].filter(row=>row.movieExportId===output&&row.componentId);assert.ok(parts.every(part=>part.status==='READY'&&part.storageId));await assert.rejects(merge.callback.handler(ctx,{jobId,projectId:'project_1',movieVersionId:id,movieExportId:output,planHash:prepared.payload.planHash,leaseId:prepared.leaseId,attempt:1,eventId:'late',idempotencyKey:prepared.payload.idempotencyKey,eventType:'render.failed',occurredAt:Date.now(),payloadHash:'late'}),/accepted attempt/);assert.equal(ctx.rows.get(output).status,'CANCELED');await assert.rejects(outputs.retry.handler(ctx,{movieExportId:output}),/Reconcile/);});
+ await check('cancel retains ready chunks and late merge callbacks cannot revive canceled output',async()=>{const ctx=await context();const id=await locked(ctx);const output=await ready(ctx,id);const {jobId,prepared}=await accepted(ctx,output);await outputs.cancel.handler(ctx,{movieExportId:output});const parts=[...ctx.rows.values()].filter(row=>row.movieExportId===output&&row.componentId);assert.ok(parts.every(part=>part.status==='READY'&&part.storageId));await assert.rejects(merge.callback.handler(ctx,{jobId,projectId:'project_1',movieVersionId:id,movieExportId:output,planHash:prepared.payload.planHash,leaseId:prepared.leaseId,attempt:1,eventId:'late',idempotencyKey:prepared.payload.idempotencyKey,eventType:'render.failed',occurredAt:Date.now(),payloadHash:'late'}),/accepted attempt/);assert.equal(ctx.rows.get(output).status,'CANCELED');const status=await outputs.get.handler(ctx,{movieExportId:output});assert.equal(status.canRetry,false);assert.match(status.retryReason,/recovery review/);await assert.rejects(outputs.retry.handler(ctx,{movieExportId:output}),/recovery review/);});
+ await check('canceled unknown handoff retains the exact lease and cannot start another merge',async()=>{
+   for(const handoff of ['dispatching','unknown']){
+     const ctx=await context();const id=await locked(ctx);const movieExportId=await ready(ctx,id);
+     const jobId=ctx.rows.get(movieExportId).mergeJobId;
+     const prepared=await merge.prepare.handler(ctx,{jobId});
+     if(handoff==='unknown')await merge.dispatchFailure.handler(ctx,{
+       jobId,leaseId:prepared.leaseId,dispatchLeaseId:prepared.dispatchLeaseId,
+       retryable:true,errorCode:'MOVIE_HANDOFF_UNKNOWN',
+     });
+     await outputs.cancel.handler(ctx,{movieExportId});
+     const saved=structuredClone(ctx.rows.get(jobId));const scheduled=ctx.scheduled.length;
+     assert.equal(saved.acceptedAt,undefined);
+     assert.equal(saved.leaseId,prepared.leaseId);
+     const status=await outputs.get.handler(ctx,{movieExportId});
+     assert.equal(status.canRetry,false);
+     assert.match(status.retryReason,/recovery review/);
+     await assert.rejects(outputs.retry.handler(ctx,{movieExportId}),/recovery review/);
+     assert.deepEqual(ctx.rows.get(jobId),saved);
+     assert.equal(ctx.scheduled.length,scheduled);
+   }
+ });
+ await check('definite merge failure can retry with verified parts and a fresh bounded attempt',async()=>{
+   const ctx=await context();const id=await locked(ctx);const movieExportId=await ready(ctx,id);
+   const {jobId,prepared}=await accepted(ctx,movieExportId);
+   await merge.callback.handler(ctx,{
+     jobId,projectId:'project_1',movieVersionId:id,movieExportId,planHash:prepared.payload.planHash,
+     leaseId:prepared.leaseId,attempt:1,eventId:'definite-failure-'+(++key),
+     idempotencyKey:prepared.payload.idempotencyKey,eventType:'render.failed',occurredAt:Date.now(),
+     payloadHash:'definite-failure-'+key,rendererVersion:'fixture-pcm-v1',errorCode:'MOVIE_MERGE_FAILED',
+   });
+   const readyParts=()=>[...ctx.rows.values()].filter(row=>row.movieExportId===movieExportId&&row.componentId);
+   const retained=structuredClone(readyParts());
+   const renderCount=ctx.count('renderJobs');
+   ctx.rows.get(jobId).nextDispatchAt=Date.now()+60_000;
+   ctx.rows.get(jobId).dispatchLeaseExpiresAt=Date.now()+60_000;
+   assert.equal((await outputs.get.handler(ctx,{movieExportId})).canRetry,true);
+   await outputs.retry.handler(ctx,{movieExportId});
+   assert.equal(ctx.rows.get(movieExportId).status,'MERGING');
+   assert.deepEqual(readyParts(),retained);
+   assert.equal(ctx.count('renderJobs'),renderCount);
+   assert.equal(ctx.count('generationJobs'),0);
+   const next=await merge.prepare.handler(ctx,{jobId});
+   assert.equal(next.payload.attempt,2);
+   assert.notEqual(next.leaseId,prepared.leaseId);
+   assert.notEqual(next.payload.idempotencyKey,prepared.payload.idempotencyKey);
+   assert.deepEqual(next.payload.parts,prepared.payload.parts);
+ });
+ await check('movie retry cannot reset an unresolved component dispatch',async()=>{
+   const ctx=await context();const id=await locked(ctx);const {movieExportId}=await requested(ctx,id);
+   await outputs.advance.handler(ctx,{movieExportId});
+   const part=[...ctx.rows.values()].find(row=>row.movieExportId===movieExportId&&row.orderIndex===0);
+   const jobId=part.renderJobId;
+   Object.assign(ctx.rows.get(jobId),{status:'RETRYING',dispatchPayload:{retained:true},leaseId:'unknown-lease'});
+   await outputs.cancel.handler(ctx,{movieExportId});
+   const saved=structuredClone(ctx.rows.get(jobId));const scheduled=ctx.scheduled.length;
+   const status=await outputs.get.handler(ctx,{movieExportId});
+   assert.equal(status.canRetry,false);
+   assert.match(status.retryReason,/recovery review/);
+   await assert.rejects(outputs.retry.handler(ctx,{movieExportId}),/recovery review/);
+   assert.deepEqual(ctx.rows.get(jobId),saved);
+   assert.equal(ctx.scheduled.length,scheduled);
+ });
  await check('canonical membership revocation and legacy foreign-user links deny actual asynchronous validation',async()=>{for(const mode of ['alias','foreign','canonical']){const ctx=await context();const id=await made(ctx,false,{},false);ctx.rows.get('user_1').authSubject='canonical|verified';if(mode==='canonical')ctx.rows.get('member_1').status='removed';else{ctx.rows.delete('member_1');ctx.put('studioMembers',{_id:'legacy_canonical',studioExternalId:'studio',userExternalId:'canonical',status:mode==='alias'?'removed':'active',role:'owner',...(mode==='foreign'?{userId:'other_user'}:{})});ctx.put('studioMembers',{_id:'stale_owner_alias',studioExternalId:'studio',userExternalId:'owner',status:'active',role:'owner'});}await movies.validateNext.handler(ctx,{movieVersionId:id});assert.equal(ctx.rows.get(id).state,'INVALID');assert.equal(ctx.count('renderJobs'),0);}});
  await check('canonical bible revision overrides stale mirrored approved state',async()=>{const ctx=await context();ctx.put('continuityBibles',{_id:'bible_one',projectId:'project_1',state:'APPROVED'});state(ctx,'continuityBible','bible_one','REVISION_REQUESTED');const id=await made(ctx,false,{continuityBibleId:'bible_one'});assert.equal(ctx.rows.get(id).state,'INVALID');});
  await check('first merge dispatch atomically denies changed approval, rights, storage and digest snapshots',async()=>{for(const mutate of [ctx=>state(ctx,'asset','asset_red','REVISION_REQUESTED'),ctx=>ctx.rows.get('asset_red').rights={status:'REVOKED'},ctx=>ctx.rows.get('asset_red').storageId='replacement',ctx=>ctx.storageObjects.get('storage_red').sha256='9'.repeat(64),ctx=>ctx.rows.get('asset_red').checksum='changed']){const ctx=await context();const id=await locked(ctx);const output=await ready(ctx,id);mutate(ctx);const jobId=ctx.rows.get(output).mergeJobId;await assert.rejects(merge.prepare.handler(ctx,{jobId}),/changed|snapshot/);assert.equal(ctx.rows.get(jobId).dispatchPayload,undefined);assert.equal(ctx.count('generationJobs'),0);}});

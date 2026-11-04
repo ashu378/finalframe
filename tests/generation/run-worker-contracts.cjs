@@ -50,6 +50,16 @@ try {
     assert.equal(result.errorCode, undefined);
     assert.equal(result.errorMessage, undefined);
   });
+  check('a saved take distinguishes a busy probe, a scheduled recheck and a paused check', () => {
+    const job = { _id: 'job', providerJobId: 'accepted', response: { assetId: 'asset' } };
+    const busy = policy.publicJob({ ...job, status: 'RETRYING', errorCode: 'MEDIA_PROBE_BUSY' });
+    assert.equal(busy.assetId, 'asset');
+    assert.equal(busy.providerJobId, 'accepted');
+    assert.match(busy.errorMessage, /check it when the renderer is free/);
+    assert.match(policy.publicJob({ ...job, status: 'PENDING', errorCode: 'MEDIA_PROBE_UNAVAILABLE' }).errorMessage, /retry its technical checks/);
+    assert.match(policy.publicJob({ ...job, status: 'FAILED', errorCode: 'MEDIA_PROBE_BUSY' }).errorMessage, /Resume this saved take/);
+    assert.match(policy.publicJob({ _id: 'rejected', status: 'FAILED', errorCode: 'INVALID_REQUEST' }).errorMessage, /Review the inputs/);
+  });
   check('technical media checks reject missing streams and wrong duration, aspect or audio', () => {
     const valid = { durationSeconds: 5, width: 1280, height: 720, videoCodec: 'h264', hasAudio: true, audioCodec: 'aac' };
     assert.equal(policy.validateMediaProbe(valid, { duration: 5, ratio: '16:9', resolution: '720p', requiresAudio: true }).hasAudio, true);
@@ -68,6 +78,8 @@ try {
     assert.match(worker, /maxRetries: 0, fallbackModels: \[\], idempotencyKey: job.idempotencyKey/);
     assert.match(worker, /generateVideo\(videoRequest, \{ \.\.\.options, beforeMediaSubmit: async/);
     assert.match(worker, /const rejected = !submissionAttempted/);
+    assert.match(worker, /redirect: 'error',\s*signal: AbortSignal\.timeout\(45_000\),\s*\}\)\.catch\(\(\) => \{ throw unavailable\(\); \}\)/);
+    assert.match(worker, /probeResponse\.status === 429 \? 'MEDIA_PROBE_BUSY' : 'MEDIA_PROBE_UNAVAILABLE'/);
     const fence = jobs.slice(jobs.indexOf('export const fenceSubmission'), jobs.indexOf('export const submit'));
     assert.match(fence, /validateReviewedVideoJob/);
     assert.match(fence, /estimatedMicros > reserved.estimatedMicros/);

@@ -11,7 +11,7 @@ function fixture(codec = 'h264', format = 'MP4', mimeType = 'video/mp4', version
   const state = { time: Date.now(), rows: new Map(), serial: 0, urlReads: 0, storage: { size: 128, contentType: mimeType, sha256: 'original-local-hash' } };
   const put = (table, value) => state.rows.set(value._id, { table, ...value });
   put('projects', { _id: 'project', studioExternalId: 'studio' });
-  put('productions', { _id: 'production', projectId: 'project', studioExternalId: 'studio' });
+  put('productions', { _id: 'production', projectId: 'project', studioExternalId: 'studio', workflow: 'IDEA_TO_VIDEO' });
   put('manifests', { _id: 'manifest', projectId: 'project', productionId: 'production', contractVersion: version, manifest: { version, output: { codec }, export: { format } } });
   put('renderJobs', { _id: 'job', projectId: 'project', productionId: 'production', manifestId: 'manifest', studioExternalId: 'studio', studioId: 'studio', status: 'SUBMITTED', executionStage: 'AWAITING_CALLBACK', progress: 80, leaseId: 'lease', leaseExpiresAt: state.time + 300_000, dispatchAttempt: 1, idempotencyKey: 'original-render-request', preset: 'original-preset' });
   const ctx = { db: {
@@ -22,7 +22,7 @@ function fixture(codec = 'h264', format = 'MP4', mimeType = 'video/mp4', version
     patch: async (id, value) => Object.assign(state.rows.get(id), value),
     query: table => {
       const constraints = []; const matches = () => [...state.rows.values()].filter(row => row.table === table && constraints.every(([field, value]) => row[field] === value));
-      const chain = { withIndex: (_index, apply) => { const q = { eq: (field, value) => { constraints.push([field, value]); return q; } }; apply(q); return chain; }, unique: async () => matches()[0] ?? null, take: async limit => matches().slice(0, limit) };
+      const chain = { withIndex: (_index, apply) => { const q = { eq: (field, value) => { constraints.push([field, value]); return q; } }; apply(q); return chain; }, order: () => chain, unique: async () => matches()[0] ?? null, take: async limit => matches().slice(0, limit) };
       return chain;
     },
   }, storage: { getUrl: async () => { state.urlReads++; return 'https://local.invalid/original-export'; } }, scheduler: { runAfter: async () => undefined } };
@@ -57,8 +57,10 @@ function fixture(codec = 'h264', format = 'MP4', mimeType = 'video/mp4', version
   state.exports = () => [...state.rows.values()].filter(row => row.table === 'exports');
   state.share = () => {
     const token = 'A'.repeat(43); const output = state.exports()[0];
-    put('timelines', { _id: 'timeline', projectId: 'project', productionId: 'production', versionNumber: 1, durationSeconds: 1 });
-    state.rows.get('manifest').manifest.timelineId = 'timeline';
+    put('timelines', { _id: 'timeline', projectId: 'project', productionId: 'production', versionNumber: 1, durationSeconds: 8 });
+    const manifest = state.rows.get('manifest').manifest;
+    Object.assign(manifest, { timelineId: 'timeline', timelineVersionNumber: 1, selection: { scope: 'SCENES' } });
+    Object.assign(manifest.output, { durationInFrames: 30, fps: 30 });
     put('reviews', { _id: 'review', projectId: 'project', productionId: 'production', manifestId: 'manifest', timelineId: 'timeline', timelineVersionNumber: 1, exportId: output._id, status: 'REQUESTED' });
     put('reviewLinks', { _id: 'review-link', projectId: 'project', productionId: 'production', reviewId: 'review', manifestId: 'manifest', timelineId: 'timeline', timelineVersionNumber: 1, exportId: output._id, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: state.time + 3_600_000, label: 'Original local review' });
     return token;
@@ -78,7 +80,34 @@ async function check(name, work) { await work(); checks++; console.log(`PASS ${n
       assert.equal((await state.call(state.jobs.applyRendererCallback, state.args)).duplicate, true); assert.equal(state.rows.size, count);
       const token = state.share();
       assert.equal((await state.call(state.review.getSharedReview, { token })).videoUrl, 'https://local.invalid/original-export');
+      const candidates = await state.call(state.review.shareCandidates, { projectId: 'project' });
+      assert.equal(candidates[0].id, output._id);
+      assert.match(candidates[0].label, /Selected scenes/);
     }
+  });
+  await check('selected-scene comments and display are bounded by the exact export, not the source timeline', async () => {
+    const state = fixture(); await state.call(state.jobs.applyRendererCallback, state.args); const token = state.share();
+    assert.equal((await state.call(state.review.getSharedReview, { token })).durationSeconds, 1);
+    const comment = { token, authorName: 'Reviewer', body: 'At the end of the selected scene.', requestId: 'scoped-review-test-request', timeSeconds: 1 };
+    const saved = await state.call(state.review.addSharedComment, comment);
+    assert.equal((await state.call(state.review.addSharedComment, comment)).id, saved.id);
+    await assert.rejects(state.call(state.review.addSharedComment, { ...comment, requestId: 'overrun-review-test-request', timeSeconds: 1.1 }), /timestamp/i);
+    state.rows.get('timeline').versionNumber = 2;
+    assert.deepEqual(await state.call(state.review.shareCandidates, { projectId: 'project' }), []);
+    assert.equal(await state.call(state.review.getSharedReview, { token }), null);
+  });
+  await check('creator reads only exact client feedback, including retained feedback after revocation', async () => {
+    const state = fixture(); await state.call(state.jobs.applyRendererCallback, state.args); const token = state.share();
+    const saved = await state.call(state.review.addSharedComment, { token, authorName: 'Reviewer', body: 'Client feedback.', requestId: 'retained-review-test-request', timeSeconds: 0.5 });
+    state.rows.set('foreign-comment', { table: 'comments', _id: 'foreign-comment', reviewLinkId: 'review-link', reviewId: 'another-review', body: 'Wrong review.' });
+    state.rows.set('decision', { table: 'approvals', _id: 'decision', projectId: 'project', productionId: 'production', reviewId: 'review', resourceType: 'review', resourceId: 'review', decision: 'CLIENT_REVISION_REQUESTED', note: 'Client requests a longer shot.' });
+    state.rows.get('review').status = 'CHANGES_REQUESTED';
+    state.rows.get('review-link').revokedAt = state.time;
+    const args = { projectId: 'project', linkId: 'review-link' };
+    const feedback = await state.call(state.review.getShareFeedback, args);
+    assert.deepEqual(feedback, { timelineVersionNumber: 1, status: 'CHANGES_REQUESTED', decisionNote: 'Client requests a longer shot.', comments: [{ id: saved.id, authorName: 'Reviewer', body: 'Client feedback.', timeSeconds: 0.5, resolved: false }] });
+    assert.equal(await state.call(state.review.getSharedReview, { token }), null);
+    await assert.rejects(state.call(state.review.getShareFeedback, { ...args, projectId: 'another-project' }), /link not found/);
   });
   await check('wrong claimed MIME, matching but wrong stored MIME and inconsistent manifest are denied atomically', async () => {
     for (const failure of ['wrong-claim', 'wrong-storage', 'both-wrong', 'missing-webm-claim', 'format-mismatch', 'version-mismatch']) {
@@ -116,6 +145,7 @@ async function check(name, work) { await work(); checks++; console.log(`PASS ${n
       if (failure === 'claimed') output.mimeType = 'video/mp4';
       if (failure === 'format') state.rows.get('manifest').manifest.export.format = 'MP4';
       assert.equal(await state.call(state.review.getSharedReview, { token }), null); assert.equal(state.urlReads, 0);
+      assert.deepEqual(await state.call(state.review.shareCandidates, { projectId: 'project' }), []);
       const count = state.rows.size;
       await assert.rejects(state.call(state.review.createShareLink, { projectId: 'project', exportId: output._id, tokenHash: 'b'.repeat(64) }), /media type|format/);
       assert.equal(state.rows.size, count);

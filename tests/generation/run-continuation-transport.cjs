@@ -195,18 +195,19 @@ async function main() {
     });
   });
   await check('diagnostic hashing failure cannot mask rejection or uncertainty and never triggers another POST', async () => {
-    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
-    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: { digest: async () => { throw new Error('PRIVATE_HASH_FAILURE'); } } } });
-    try {
-      for (const outcome of [400, 500, 'network']) await withTransport(outcome, async requests => {
-        const state = await fixture(); await worker.run.handler(state.workerCtx, { jobId: state.jobId });
+    for (const outcome of [400, 500, 'network']) await withTransport(outcome, async requests => {
+      const state = await fixture();
+      const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+      Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: { digest: async () => { throw new Error('PRIVATE_HASH_FAILURE'); } } } });
+      try {
+        await worker.run.handler(state.workerCtx, { jobId: state.jobId });
         const job = state.rows.get(state.jobId), unknown = outcome !== 400;
         assert.equal(job.executionStage, unknown ? 'RECONCILIATION_REQUIRED' : 'FAILED');
         assert.equal(job.response.submissionDiagnostic, undefined);
         assert.deepEqual(state.creditSettlements.map(row => row.outcome), [unknown ? 'COMMIT' : 'RELEASE']);
         await worker.run.handler(state.workerCtx, { jobId: state.jobId }); assert.equal(requests.length, 1);
-      });
-    } finally { if (original) Object.defineProperty(globalThis, 'crypto', original); else delete globalThis.crypto; }
+      } finally { if (original) Object.defineProperty(globalThis, 'crypto', original); else delete globalThis.crypto; }
+    });
   });
   console.log(`Continuation real transport: PASS (${checks}); isolated catalog/fetch/database/accounting seams, actual worker/adapter/job handlers; no network or database calls.`);
 }

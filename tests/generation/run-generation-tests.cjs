@@ -29,6 +29,7 @@ const aliasMap = new Map([
   ['@/lib/ai/capabilities', compile('src/lib/ai/capabilities.ts', 'capabilities.js')],
   ['@/lib/ai/model-discovery', compile('src/lib/ai/model-discovery.ts', 'model-discovery.js')],
   ['@/lib/ai/image-response', compile('src/lib/ai/image-response.ts', 'image-response.js')],
+  ['@/lib/ai/submission-diagnostic', compile('src/lib/ai/submission-diagnostic.ts', 'submission-diagnostic.js')],
   ['@/lib/types/database', path.join(tempRoot, 'database.js')],
 ]);
 fs.writeFileSync(path.join(tempRoot, 'database.js'), 'module.exports = {};\n', 'utf8');

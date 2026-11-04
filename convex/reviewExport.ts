@@ -235,18 +235,35 @@ async function hashToken(token: string) {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+async function shareableExport(ctx: ReadCtx, exportRecord: Doc<'exports'>, projectId: Id<'projects'>, productionId: Id<'productions'>) {
+  if (exportRecord.projectId !== projectId || exportRecord.productionId !== productionId || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId || !exportRecord.manifestId) return null;
+  const manifest = await ctx.db.get(exportRecord.manifestId);
+  if (!manifest || manifest.projectId !== projectId || manifest.productionId !== productionId || (manifest.contractVersion !== 4 && manifest.contractVersion !== 5)) return null;
+  const data = record(manifest.manifest);
+  if (data.version !== manifest.contractVersion || typeof data.timelineId !== 'string') return null;
+  const timelineId = ctx.db.normalizeId('timelines', data.timelineId);
+  if (!timelineId) return null;
+  const [timeline, storage] = await Promise.all([ctx.db.get(timelineId), ctx.db.system.get('_storage', exportRecord.storageId)]);
+  if (!timeline || timeline.projectId !== projectId || timeline.productionId !== productionId || (data.timelineVersionNumber !== undefined && timeline.versionNumber !== data.timelineVersionNumber) || !storage || storage.size <= 0) return null;
+  const { durationInFrames, fps } = record(data.output);
+  if (typeof durationInFrames !== 'number' || !Number.isSafeInteger(durationInFrames) || durationInFrames < 1 || typeof fps !== 'number' || !Number.isFinite(fps) || fps <= 0) return null;
+  return { manifest, timeline, storage, durationSeconds: durationInFrames / fps };
+}
+
+function exactLinkedReview(review: Doc<'reviews'> | null, link: Doc<'reviewLinks'>): review is Doc<'reviews'> {
+  return Boolean(review && review.projectId === link.projectId && review.productionId === link.productionId && review.timelineId === link.timelineId && review.manifestId === link.manifestId && review.exportId === link.exportId && review.timelineVersionNumber === link.timelineVersionNumber);
+}
+
 async function exactReviewScope(ctx: ReadCtx, link: Doc<'reviewLinks'>) {
   if (!isReviewLinkActive(link)) throw new Error('This review link is unavailable.');
-  const [project, production, review, timeline, manifest, exportRecord] = await Promise.all([
-    ctx.db.get(link.projectId), ctx.db.get(link.productionId), ctx.db.get(link.reviewId), ctx.db.get(link.timelineId), ctx.db.get(link.manifestId), link.exportId ? ctx.db.get(link.exportId) : null,
+  const [project, production, review, exportRecord] = await Promise.all([
+    ctx.db.get(link.projectId), ctx.db.get(link.productionId), ctx.db.get(link.reviewId), link.exportId ? ctx.db.get(link.exportId) : null,
   ]);
-  if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !review || review.projectId !== project._id || review.productionId !== production._id || review.timelineId !== link.timelineId || review.manifestId !== link.manifestId || review.exportId !== link.exportId || review.timelineVersionNumber !== link.timelineVersionNumber || !timeline || timeline.projectId !== project._id || timeline.productionId !== production._id || timeline.versionNumber !== link.timelineVersionNumber || !manifest || manifest.projectId !== project._id || manifest.productionId !== production._id || !exportRecord || exportRecord.projectId !== project._id || exportRecord.productionId !== production._id || exportRecord.manifestId !== manifest._id || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId) throw new Error('This review version is unavailable.');
-  const manifestData = record(manifest.manifest);
-  if (manifestData.timelineId !== timeline._id || (manifestData.version !== 4 && manifestData.version !== 5) || manifestData.version !== manifest.contractVersion) throw new Error('This review version is unavailable.');
-  const storage = await ctx.db.system.get('_storage', exportRecord.storageId);
-  if (!storage || storage.size < 1) throw new Error('This review video is unavailable.');
-  assertStoredRenderMediaType(manifest.manifest, manifest.contractVersion, storage.contentType, exportRecord.mimeType);
-  return { project, production, review, timeline, manifest, exportRecord };
+  if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !exactLinkedReview(review, link) || !exportRecord) throw new Error('This review version is unavailable.');
+  const output = await shareableExport(ctx, exportRecord, project._id, production._id);
+  if (!output || output.manifest._id !== link.manifestId || output.timeline._id !== link.timelineId || output.timeline.versionNumber !== link.timelineVersionNumber) throw new Error('This review version is unavailable.');
+  assertStoredRenderMediaType(output.manifest.manifest, output.manifest.contractVersion, output.storage.contentType, exportRecord.mimeType);
+  return { project, production, review, ...output, exportRecord };
 }
 async function sharedReview(ctx: ReadCtx, token: string) {
   const tokenHash = await hashToken(token);
@@ -255,25 +272,23 @@ async function sharedReview(ctx: ReadCtx, token: string) {
   return { link, tokenHash, ...await exactReviewScope(ctx, link) };
 }
 
-/** Owner-only creation accepts a SHA-256 hash; the application generates a
+/** Owner/editor creation accepts a SHA-256 hash. The application generates a
  * cryptographically random one-time token server-side and stores only its hash. */
 export const createShareLink = mutation({
   args: { projectId: v.id('projects'), exportId: v.id('exports'), tokenHash: v.string(), label: v.optional(v.string()), expiresAt: v.optional(v.number()) }, returns: v.any(),
   handler: async (ctx, args) => {
     const access = await requireProjectAccess(ctx, args.projectId, ['OWNER', 'EDITOR']);
+    if (access.project.archivedAt) throw new Error('Restore the project before sharing an export.');
     if (!/^[a-f0-9]{64}$/.test(args.tokenHash)) throw new Error('A secure review token hash is required.');
     const expiresAt = args.expiresAt ?? now() + REVIEW_LINK_DEFAULT_AGE_MS;
     if (!Number.isFinite(expiresAt) || expiresAt <= now() || expiresAt > now() + REVIEW_LINK_MAX_AGE_MS) throw new Error('Review expiry must be within the next 30 days.');
     const exportRecord = await ctx.db.get(args.exportId);
-    const manifest = exportRecord?.manifestId ? await ctx.db.get(exportRecord.manifestId) : null;
-    const timelineId = typeof record(manifest?.manifest).timelineId === 'string' ? ctx.db.normalizeId('timelines', record(manifest?.manifest).timelineId as string) : null;
-    const timeline = timelineId ? await ctx.db.get(timelineId) : null;
-    if (!exportRecord || exportRecord.projectId !== args.projectId || exportRecord.status !== 'COMPLETED' || !exportRecord.storageId || !manifest || manifest.projectId !== args.projectId || manifest.productionId !== exportRecord.productionId || (manifest.contractVersion !== 4 && manifest.contractVersion !== 5) || record(manifest.manifest).version !== manifest.contractVersion || !timeline || timeline.projectId !== args.projectId || timeline.productionId !== exportRecord.productionId) throw new Error('Choose a completed export from this project.');
+    const output = exportRecord ? await shareableExport(ctx, exportRecord, args.projectId, exportRecord.productionId) : null;
+    if (!exportRecord || !output) throw new Error('Choose a completed export from this project.');
+    const { manifest, timeline } = output;
     const production = await ctx.db.get(exportRecord.productionId);
     if (!production || production.projectId !== args.projectId) throw new Error('This production is outside this project.');
-    const storage = await ctx.db.system.get('_storage', exportRecord.storageId);
-    if (!storage || !storage.contentType?.startsWith('video/') || storage.size <= 0) throw new Error('This export has no stored video.');
-    assertStoredRenderMediaType(manifest.manifest, manifest.contractVersion, storage.contentType, exportRecord.mimeType);
+    assertStoredRenderMediaType(manifest.manifest, manifest.contractVersion, output.storage.contentType, exportRecord.mimeType);
     const previous = await ctx.db.query('reviewLinks').withIndex('by_token_hash', q => q.eq('tokenHash', args.tokenHash)).unique();
     if (previous) throw new Error('Create a new review token.');
     const timestamp = now();
@@ -291,6 +306,30 @@ export const listShareLinks = query({
     return rows.map(row => ({ id: row._id, projectId: row.projectId, exportId: row.exportId, timelineId: row.timelineId, timelineVersionNumber: row.timelineVersionNumber, label: row.label, expiresAt: row.expiresAt, createdAt: row.createdAt, revokedAt: row.revokedAt ?? null, active: isReviewLinkActive(row) }));
   },
 });
+
+export const getShareFeedback = query({
+  args: { projectId: v.id('projects'), linkId: v.id('reviewLinks') },
+  returns: v.object({
+    timelineVersionNumber: v.number(), status: v.string(), decisionNote: v.union(v.string(), v.null()),
+    comments: v.array(v.object({ id: v.id('comments'), authorName: v.string(), body: v.string(), timeSeconds: v.union(v.number(), v.null()), resolved: v.boolean() })),
+  }),
+  handler: async (ctx, args) => {
+    await requireProjectAccess(ctx, args.projectId, ['OWNER', 'EDITOR']);
+    const link = await ctx.db.get(args.linkId);
+    if (!link || link.projectId !== args.projectId) throw new Error('Review link not found.');
+    const review = await ctx.db.get(link.reviewId);
+    if (!exactLinkedReview(review, link) || !link.exportId) throw new Error('This review version is unavailable.');
+    const [comments, decisions] = await Promise.all([
+      ctx.db.query('comments').withIndex('by_review_link_request', q => q.eq('reviewLinkId', link._id)).take(REVIEW_COMMENT_LIMIT),
+      ctx.db.query('approvals').withIndex('by_resource', q => q.eq('resourceType', 'review').eq('resourceId', review._id)).order('desc').take(100),
+    ]);
+    const decision = decisions.find(row => row.projectId === args.projectId && row.productionId === link.productionId && row.reviewId === review._id && ['CLIENT_APPROVED', 'CLIENT_REVISION_REQUESTED'].includes(row.decision));
+    return {
+      timelineVersionNumber: link.timelineVersionNumber, status: review.status, decisionNote: decision?.note ?? null,
+      comments: comments.filter(row => row.reviewId === review._id).map(row => ({ id: row._id, authorName: row.authorName || 'Project reviewer', body: row.body, timeSeconds: row.timeSeconds ?? null, resolved: Boolean(row.resolvedAt) })),
+    };
+  },
+});
 export const revokeShareLink = mutation({
   args: { projectId: v.id('projects'), linkId: v.id('reviewLinks') }, returns: v.null(),
   handler: async (ctx, args) => {
@@ -305,15 +344,20 @@ export const shareCandidates = query({
   args: { projectId: v.id('projects') }, returns: v.any(),
   handler: async (ctx, args) => {
     const access = await requireProjectAccess(ctx, args.projectId, ['OWNER', 'EDITOR']);
-    const productions = await ctx.db.query('productions').withIndex('by_project', q => q.eq('externalProjectId', access.project.externalId)).take(100);
+    if (access.project.archivedAt) return [];
+    const productions = await ctx.db.query('productions').withIndex('by_project_id', q => q.eq('projectId', args.projectId)).take(100);
     const rows = [];
     for (const production of productions) {
       const exports = await ctx.db.query('exports').withIndex('by_production', q => q.eq('productionId', production._id)).order('desc').take(20);
-      for (const item of exports) if (item.projectId === args.projectId && item.status === 'COMPLETED' && item.storageId && item.manifestId) {
-        const manifest = await ctx.db.get(item.manifestId); const raw = record(manifest?.manifest);
-        const timelineId = typeof raw.timelineId === 'string' ? ctx.db.normalizeId('timelines', raw.timelineId) : null;
-        const timeline = timelineId ? await ctx.db.get(timelineId) : null;
-        if (timeline && manifest?.contractVersion === 4 && timeline.projectId === args.projectId) rows.push({ id: item._id, label: `Timeline v${timeline.versionNumber} · ${production.workflow}`, created_at: new Date(item.createdAt).toISOString() });
+      for (const item of exports) {
+        const output = await shareableExport(ctx, item, args.projectId, production._id);
+        if (output) {
+          try { assertStoredRenderMediaType(output.manifest.manifest, output.manifest.contractVersion, output.storage.contentType, item.mimeType); }
+          catch { continue; }
+          const scope = record(record(output.manifest.manifest).selection).scope;
+          const selection = scope === 'SHOTS' ? 'Selected shots' : scope === 'SCENES' ? 'Selected scenes' : scope === 'TIMELINE' ? 'Timeline cut' : 'Full project';
+          rows.push({ id: item._id, label: `Timeline v${output.timeline.versionNumber} · ${production.workflow} · ${selection}`, created_at: new Date(item.createdAt).toISOString() });
+        }
         if (rows.length >= 100) return rows;
       }
     }
@@ -326,7 +370,7 @@ export const getSharedReview = query({
     try {
       const scope = await sharedReview(ctx, args.token);
       const comments = await ctx.db.query('comments').withIndex('by_review', q => q.eq('reviewId', scope.review._id)).take(REVIEW_COMMENT_LIMIT);
-      return { projectName: scope.project.name, label: scope.link.label, timelineVersionNumber: scope.link.timelineVersionNumber, durationSeconds: scope.timeline.durationSeconds, status: scope.review.status, expiresAt: scope.link.expiresAt, videoUrl: await ctx.storage.getUrl(scope.exportRecord.storageId!), comments: comments.map(row => ({ id: row._id, authorName: row.authorName || 'Project reviewer', body: row.body, timeSeconds: row.timeSeconds ?? 0, createdAt: row.createdAt, resolved: Boolean(row.resolvedAt) })) };
+      return { projectName: scope.project.name, label: scope.link.label, timelineVersionNumber: scope.link.timelineVersionNumber, durationSeconds: scope.durationSeconds, status: scope.review.status, expiresAt: scope.link.expiresAt, videoUrl: await ctx.storage.getUrl(scope.exportRecord.storageId!), comments: comments.map(row => ({ id: row._id, authorName: row.authorName || 'Project reviewer', body: row.body, timeSeconds: row.timeSeconds ?? 0, createdAt: row.createdAt, resolved: Boolean(row.resolvedAt) })) };
     } catch { return null; }
   },
 });
@@ -335,7 +379,7 @@ export const addSharedComment = mutation({
   handler: async (ctx, args) => {
     const scope = await sharedReview(ctx, args.token);
     if (scope.review.status === 'APPROVED') throw new Error('This version is approved. Request a new review for another revision.');
-    const validated = validateReviewComment({ ...args, durationSeconds: scope.timeline.durationSeconds });
+    const validated = validateReviewComment({ ...args, durationSeconds: scope.durationSeconds });
     const previous = await ctx.db.query('comments').withIndex('by_review_link_request', q => q.eq('reviewLinkId', scope.link._id).eq('clientRequestId', args.requestId)).unique();
     if (previous) {
       if (previous.body !== validated.body || previous.authorName !== validated.authorName || previous.timeSeconds !== args.timeSeconds) throw new Error('Comment request ID is already used.');

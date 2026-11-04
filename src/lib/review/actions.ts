@@ -34,6 +34,10 @@ export async function getReviewLinks(projectId: string): Promise<ReviewLink[]> {
     // but their bearer credentials cannot be recovered from the database.
     return rows.map((row: any) => linkView(row));
 }
+export async function getReviewFeedback(projectId: string, linkId: string) {
+    const { client, project } = await ownedProject(projectId);
+    return await client.query(api.reviewExport.getShareFeedback, { projectId: project._id, linkId: linkId as Id<'reviewLinks'> });
+}
 export async function deleteReviewLink(id: string, projectId: string): Promise<{ success: boolean; error?: string }> {
     try {
         const { client, project } = await ownedProject(projectId);

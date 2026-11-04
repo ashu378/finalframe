@@ -12,6 +12,7 @@ import {createCanonicalRenderJob} from './renderJobs';
 import {serializeCaptionSidecars} from '../renderer/src/captions';
 import {validateLockedManifest} from '../renderer/src/manifest';
 import type {RenderManifest} from '../renderer/src/types';
+import {finishingRetryEligibility} from '../src/lib/render/recovery';
 export const movieSelectionValidator=v.object({scope:v.union(v.literal('MOVIE'),v.literal('CHAPTERS'),v.literal('SCENES'),v.literal('SHOTS')),chapterIds:v.optional(v.array(v.string())),occurrences:v.optional(v.array(v.object({componentId:v.id('movieComponents'),sceneId:v.optional(v.id('scenes')),shotVersionId:v.optional(v.id('shotVersions'))})))});
 const refs=(internal as unknown as {movieExports:Record<string,FunctionReference<any,'internal',any,any>>;movieMergeJobs:Record<string,FunctionReference<any,'internal',any,any>>});
 export async function movieExportPlan(ctx:import('./movieAuthority').MovieReadCtx,versionId:Id<'movieVersions'>,selection:MovieSelection,acceptedPrivate=false){const privateVersion=acceptedPrivate?await ctx.db.get(versionId):null;const privateMovie=privateVersion?await ctx.db.get(privateVersion.movieId):null;const {version,movie}=acceptedPrivate&&privateVersion&&privateMovie&&privateMovie.projectId===privateVersion.projectId?{version:privateVersion,movie:privateMovie}:await movieVersionContext(ctx,versionId);if(version.state!=='READY'||!version.contentHash||!version.durationInFrames)throw new Error('Validate this movie composition first.');const rows=await ctx.db.query('movieComponents').withIndex('by_version_order',q=>q.eq('movieVersionId',versionId)).take(129);const components=rows.map(movieReference);const header=await composeMovie({projectId:version.projectId,movieVersionId:versionId,output:version.output,components});if(header.contentHash!==version.contentHash||header.durationInFrames!==version.durationInFrames)throw new Error('Movie component identity changed.');return {version,movie,rows,components,plan:await planMovieExport(header,components,selection)};}
@@ -45,11 +46,94 @@ export const advance=internalMutation({args:{movieExportId:v.id('movieExports')}
   }catch{await ctx.db.patch(output._id,{status:'FAILED',errorCode:'MOVIE_SOURCE_OR_COMPONENT_UNAVAILABLE',updatedAt:Date.now()});}return null;
 }});
 function publicArtifact<T extends Record<string,any>>(value:T){const {storageId:_storage,checksum:_checksum,verification:_verification,...safe}=value;void _storage;void _checksum;void _verification;return safe;}
-export const get=query({args:{movieExportId:v.id('movieExports')},returns:v.any(),handler:async(ctx,args)=>{const {output,access}=await authorizedMovieExport(ctx,args.movieExportId);const parts=await ctx.db.query('movieExportParts').withIndex('by_export_order',q=>q.eq('movieExportId',output._id)).take(257);const storage=output.storageId&&output.status==='COMPLETED'?await ctx.db.system.get('_storage',output.storageId):null;let downloadUrl:string|null=null;let unavailableReason:string|undefined;if(storage&&sha256Equal(storage.sha256,output.checksum)&&storage.size===output.byteSize){try{await assertMovieExportExposure(ctx,output);downloadUrl=await ctx.storage.getUrl(output.storageId!);}catch{unavailableReason='Current source approvals, bytes or renderer compatibility need verification.';}}return {output:publicArtifact(output),parts:parts.map(publicArtifact),downloadUrl,...(unavailableReason?{unavailableReason}:{}),enabled:movieEnabled(),workerEnabled:movieWorkerEnabled(),canEdit:['OWNER','EDITOR'].includes(access.projectRole)};}});
+function isMovieRetryStatus(output: Doc<'movieExports'>) {
+  return output.status === 'FAILED' || output.status === 'CANCELED';
+}
+
+function mergeRetryBlock(output: Doc<'movieExports'>, job: Doc<'movieMergeJobs'> | null) {
+  if (!isMovieRetryStatus(output)) return 'Retry only failed or canceled movie work.';
+  if (!output.mergeJobId) return null;
+  if (!job || job.movieExportId !== output._id || job.projectId !== output.projectId || job.movieVersionId !== output.movieVersionId) {
+    return 'The saved movie merge needs an administrator check before retrying.';
+  }
+  // The worker may have accepted a dispatch even if its acknowledgement was lost.
+  if (job.acceptedAt !== undefined || job.dispatchPayload !== undefined || job.leaseId !== undefined ||
+      job.dispatchLeaseId !== undefined || ['AWAITING_CALLBACK', 'RECONCILIATION_REQUIRED', 'NEEDS_ATTENTION'].includes(job.executionStage)) {
+    return 'The previous merge handoff needs recovery review before another attempt.';
+  }
+  if (job.attempt >= 3 || !['FAILED', 'CANCELED'].includes(job.status)) {
+    return 'The saved movie merge needs an administrator check before retrying.';
+  }
+  return null;
+}
+
+async function retryComponents(ctx: import('./movieAuthority').MovieReadCtx, output: Doc<'movieExports'>, parts: Doc<'movieExportParts'>[]) {
+  const jobIds = new Set<Id<'renderJobs'>>();
+  for (const part of parts) {
+    if (part.status === 'READY' || !part.renderJobId) continue;
+    const job = await ctx.db.get(part.renderJobId);
+    if (!job || job.projectId !== output.projectId) {
+      return {jobIds, reason: 'A saved component needs an administrator check before retrying.'};
+    }
+    if (job.status === 'CANCELED' || ['RECONCILIATION_REQUIRED', 'NEEDS_ATTENTION'].includes(job.executionStage ?? '')) {
+      return {jobIds, reason: 'A saved component needs recovery review before another attempt.'};
+    }
+    if (job.status !== 'FAILED' && job.status !== 'RETRYING') continue;
+    const eligibility = finishingRetryEligibility(job);
+    if (!eligibility.eligible) return {jobIds, reason: eligibility.reason};
+    jobIds.add(job._id);
+  }
+  return {jobIds, reason: null};
+}
+
+function retryAvailability(project: Doc<'projects'>) {
+  if (!movieEnabled()) return 'Movie exports are currently disabled.';
+  if (!movieWorkerEnabled()) return 'Movie finishing is temporarily unavailable. Saved components are retained.';
+  if (project.archivedAt || project.status === 'ARCHIVED') return 'Restore this project before retrying the movie export.';
+  return null;
+}
+
+export const get=query({args:{movieExportId:v.id('movieExports')},returns:v.any(),handler:async(ctx,args)=>{const {output,access}=await authorizedMovieExport(ctx,args.movieExportId);const parts=await ctx.db.query('movieExportParts').withIndex('by_export_order',q=>q.eq('movieExportId',output._id)).take(257);const storage=output.storageId&&output.status==='COMPLETED'?await ctx.db.system.get('_storage',output.storageId):null;let downloadUrl:string|null=null;let unavailableReason:string|undefined;if(storage&&sha256Equal(storage.sha256,output.checksum)&&storage.size===output.byteSize){try{await assertMovieExportExposure(ctx,output);downloadUrl=await ctx.storage.getUrl(output.storageId!);}catch{unavailableReason='Current source approvals, bytes or renderer compatibility need verification.';}}
+  const canEdit = ['OWNER', 'EDITOR'].includes(access.projectRole);
+  const canRequestRetry = canEdit && isMovieRetryStatus(output);
+  const retryReason = canRequestRetry
+    ? retryAvailability(access.project)
+      ?? mergeRetryBlock(output, output.mergeJobId ? await ctx.db.get(output.mergeJobId) : null)
+      ?? (await retryComponents(ctx, output, parts)).reason
+    : null;
+  return {output:publicArtifact(output),parts:parts.map(publicArtifact),downloadUrl,...(unavailableReason?{unavailableReason}:{}),enabled:movieEnabled(),workerEnabled:movieWorkerEnabled(),canEdit,canRetry:canRequestRetry&&retryReason===null,retryReason};
+}});
 export const list=query({args:{movieVersionId:v.id('movieVersions')},returns:v.any(),handler:async(ctx,args)=>{const {version}=await movieVersionContext(ctx,args.movieVersionId);await requireProjectAccess(ctx,version.projectId);return (await ctx.db.query('movieExports').withIndex('by_version',q=>q.eq('movieVersionId',version._id)).order('desc').take(30)).map(publicArtifact);}});
 export const cancel=mutation({args:{movieExportId:v.id('movieExports')},returns:v.null(),handler:async(ctx,args)=>{const {output}=await authorizedMovieExport(ctx,args.movieExportId,true);if(['COMPLETED','CANCELED'].includes(output.status))return null;await ctx.db.patch(output._id,{status:'CANCELED',canceledAt:Date.now(),updatedAt:Date.now()});if(output.mergeJobId){const job=await ctx.db.get(output.mergeJobId);if(job&&!['COMPLETED','CANCELED'].includes(job.status))await ctx.db.patch(job._id,{status:'CANCELED',executionStage:'CANCELED',updatedAt:Date.now()});}return null;}});
-export const retry=mutation({args:{movieExportId:v.id('movieExports')},returns:v.null(),handler:async(ctx,args)=>{if(!movieEnabled())throw new Error('Movie exports are not enabled.');const {output,access}=await authorizedMovieExport(ctx,args.movieExportId,true);await movieVersionContext(ctx,output.movieVersionId,access.user._id,true);if(!['FAILED','CANCELED'].includes(output.status))throw new Error('Retry only failed or canceled movie work. Unknown accepted results require reconciliation.');if(output.mergeJobId){const job=await ctx.db.get(output.mergeJobId);if(job?.acceptedAt!==undefined||job?.status==='NEEDS_ATTENTION')throw new Error('Reconcile the retained accepted merge result before retrying.');if(job&&(job.attempt>=3||job.status==='COMPLETED'))throw new Error('The bounded merge needs administrator review.');if(job)await ctx.db.patch(job._id,{status:'QUEUED',executionStage:'QUEUED',createdByUserId:access.user._id,leaseId:undefined,leaseExpiresAt:undefined,dispatchPayload:undefined,updatedAt:Date.now()});}
-  const parts=await ctx.db.query('movieExportParts').withIndex('by_export_order',q=>q.eq('movieExportId',output._id)).take(257);for(const part of parts)if(part.status!=='READY'){if(part.renderJobId){const job=await ctx.db.get(part.renderJobId);if(job&&['FAILED','RETRYING'].includes(job.status)){if((job.dispatchAttempt??0)>=3||job.acceptedAt!==undefined)throw new Error('A retained component needs administrator reconciliation.');const component=await ctx.db.get(part.componentId);if(!component)throw new Error('Component unavailable.');await authorizeMovieRenderContext(ctx,{componentId:component._id,projectId:output.projectId,productionId:component.productionId,manifestId:component.manifestId,actorId:access.user._id});await ctx.db.patch(job._id,{status:'QUEUED',createdByUserId:access.user._id,executionStage:'QUEUED',dispatchPayload:undefined,dispatchLeaseId:undefined,dispatchLeaseExpiresAt:undefined,nextDispatchAt:undefined,leaseId:undefined,leaseExpiresAt:undefined,errorCode:undefined,updatedAt:Date.now()});await ctx.scheduler.runAfter(0,(internal as any).renderJobs.dispatch,{jobId:job._id});}}await ctx.db.patch(part._id,{status:'WAITING_RENDER',errorCode:undefined,updatedAt:Date.now()});}
+export const retry=mutation({args:{movieExportId:v.id('movieExports')},returns:v.null(),handler:async(ctx,args)=>{
+  const {output,access}=await authorizedMovieExport(ctx,args.movieExportId,true);
+  const unavailable = retryAvailability(access.project);
+  if (unavailable) throw new Error(unavailable);
+  await movieVersionContext(ctx,output.movieVersionId,access.user._id,true);
+  const mergeJob = output.mergeJobId ? await ctx.db.get(output.mergeJobId) : null;
+  const blocked = mergeRetryBlock(output, mergeJob);
+  if (blocked) throw new Error(blocked);
+  const parts = await ctx.db.query('movieExportParts').withIndex('by_export_order',q=>q.eq('movieExportId',output._id)).take(257);
+  const components = await retryComponents(ctx, output, parts);
+  if (components.reason) throw new Error(components.reason);
+  if (mergeJob) await ctx.db.patch(mergeJob._id, {
+    status: 'QUEUED', executionStage: 'QUEUED', createdByUserId: access.user._id,
+    progress: 0, leaseExpiresAt: undefined, dispatchLeaseExpiresAt: undefined,
+    nextDispatchAt: undefined, dispatchRetryCount: 0, callbackIdempotencyKey: undefined,
+    errorCode: undefined, updatedAt: Date.now(),
+  });
+  for (const part of parts) {
+    if (part.status === 'READY') continue;
+    const jobId = part.renderJobId;
+    if (jobId && components.jobIds.delete(jobId)) {
+      const component = await ctx.db.get(part.componentId);
+      if (!component) throw new Error('Component unavailable.');
+      await authorizeMovieRenderContext(ctx,{componentId:component._id,projectId:output.projectId,productionId:component.productionId,manifestId:component.manifestId,actorId:access.user._id});
+      await ctx.db.patch(jobId,{status:'QUEUED',createdByUserId:access.user._id,executionStage:'QUEUED',dispatchLeaseId:undefined,dispatchLeaseExpiresAt:undefined,nextDispatchAt:undefined,leaseExpiresAt:undefined,errorCode:undefined,updatedAt:Date.now()});
+      await ctx.scheduler.runAfter(0,(internal as any).renderJobs.dispatch,{jobId});
+    }
+    await ctx.db.patch(part._id,{status:'WAITING_RENDER',errorCode:undefined,updatedAt:Date.now()});
+  }
   await ctx.db.patch(output._id,{status:output.mergeJobId?'MERGING':'QUEUED',requestedByUserId:access.user._id,errorCode:undefined,canceledAt:undefined,updatedAt:Date.now()});if(output.mergeJobId)await ctx.scheduler.runAfter(0,refs.movieMergeJobs.run,{jobId:output.mergeJobId});else await schedule(ctx,output._id);return null;
 }});
 export const wakePending=internalMutation({args:{},returns:v.number(),handler:async(ctx)=>{if(!movieEnabled()||!movieWorkerEnabled())return 0;let count=0;for(const status of ['QUEUED','RENDERING_COMPONENTS'] as const){const rows=await ctx.db.query('movieExports').withIndex('by_status',q=>q.eq('status',status)).take(25);for(const row of rows){await schedule(ctx,row._id);count++;}}return count;}});

@@ -226,10 +226,16 @@ async function main() {
     });
     await check('Remotion caches and deduplicates bundles while failed bundles remain retryable', async () => {
       let bundleCalls = 0; let failNext = false;
+      let browsersOpened = 0; let browsersClosed = 0;
       const originalLoad = Module._load;
       Module._load = function (request, parent, isMain) {
         if (request === '@remotion/bundler') return { bundle: async () => { bundleCalls++; await new Promise(resolve => setImmediate(resolve)); if (failNext) { failNext = false; throw new Error('bundle unavailable'); } return 'http://local-bundle'; } };
-        if (request === '@remotion/renderer') return { selectComposition: async () => ({}), renderMedia: async options => { await fsp.writeFile(options.outputLocation, 'rendered media'); } };
+        if (request === '@remotion/renderer') return {
+          openBrowser: async () => { browsersOpened++; return { close: async () => { browsersClosed++; } }; },
+          makeCancelSignal: () => ({ cancelSignal: () => {}, cancel: () => {} }),
+          selectComposition: async () => ({}),
+          renderMedia: async options => { await fsp.writeFile(options.outputLocation, 'rendered media'); },
+        };
         return originalLoad.call(this, request, parent, isMain);
       };
       let Runtime;
@@ -245,6 +251,8 @@ async function main() {
       const retryRuntime = new Runtime(runtimeOptions); failNext = true;
       await assert.rejects(render(retryRuntime, 'cache-failed'), /bundle unavailable/);
       await render(retryRuntime, 'cache-retried'); assert.equal(bundleCalls, 3);
+      assert.equal(browsersOpened, 4);
+      assert.equal(browsersClosed, browsersOpened);
     });
     console.log(`Renderer transfer/outbox tests: ${checks} PASS; local HTTP/files only, no database/provider calls.`);
   } finally {

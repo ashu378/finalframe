@@ -105,14 +105,19 @@ export const run = internalAction({
       if (!assetId || !outputUrl) throw new Error('Canonical stored output is missing.');
       const rendererUrl = process.env.RENDER_WORKER_URL?.trim();
       const secret = process.env.RENDER_WORKER_SHARED_SECRET?.trim();
-      if (!rendererUrl || !secret) throw Object.assign(new Error('Media validation service is unavailable.'), { code: 'MEDIA_PROBE_UNAVAILABLE' });
+      const unavailable = () => Object.assign(new Error('Media validation service is unavailable.'), { code: 'MEDIA_PROBE_UNAVAILABLE' });
+      if (!rendererUrl || !secret) throw unavailable();
       const probeResponse = await fetch(`${rendererUrl.replace(/\/$/, '')}/media/probe`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-finalframe-worker-secret': secret },
         body: JSON.stringify({ url: outputUrl }),
+        redirect: 'error',
         signal: AbortSignal.timeout(45_000),
-      });
-      if (!probeResponse.ok) throw Object.assign(new Error('Media validation service failed.'), { code: 'MEDIA_PROBE_UNAVAILABLE' });
+      }).catch(() => { throw unavailable(); });
+      if (!probeResponse.ok) {
+        const code = probeResponse.status === 429 ? 'MEDIA_PROBE_BUSY' : 'MEDIA_PROBE_UNAVAILABLE';
+        throw Object.assign(new Error('Media validation service failed.'), { code });
+      }
       let technicalProbe;
       try { technicalProbe = validateMediaProbe(await probeResponse.json(), request); }
       catch { throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' }); }

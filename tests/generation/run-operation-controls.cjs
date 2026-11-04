@@ -24,6 +24,7 @@ const registry = compile('src/lib/ai/model-registry.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
 const sfx=compile('src/lib/ai/sfx.ts',{'./model-registry':registry});
 const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music });
+const shotEstimate = compile('src/lib/generation/shot-estimate.ts');
 const studioMemberships = compile('convex/studioMemberships.ts');
 const pricing = compile('src/lib/credits/pricing.ts');
 const routing = compile('src/lib/ai/video-routing.ts', { './model-registry': registry });
@@ -64,7 +65,12 @@ function publicActionFixture(metadata, references = []) {
       if (ref === 'videoRouting.forGeneration') return { catalog: [fixture.model], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
       throw new Error('Unexpected query ' + ref);
     },
-    mutation: async (ref, args) => { fixture.mutations.push({ ref, args }); return { _id: 'job' }; },
+    mutation: async (ref, args) => {
+      fixture.mutations.push({ ref, args });
+      if (ref === 'generationJobs.previewShotEstimate') return { estimateId: 'estimate', quoteHash: 'quote' };
+      if (ref === 'generationJobs.createReviewedTake') return { _id: 'job' };
+      throw new Error('Unexpected mutation ' + ref);
+    },
   };
   fixture.actions = compile('src/lib/generation/actions.ts', {
     '../../../convex/_generated/api': { api }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client },
@@ -74,7 +80,7 @@ function publicActionFixture(metadata, references = []) {
     '@/lib/ai/model-discovery': { discoverOpenRouterVideoModels: async () => [{ id: fixture.model.modelId, canonicalSlug: fixture.model.canonicalSlug, upscaleFactor: fixture.rawCatalog.upscale_factor, creativityLevels: fixture.rawCatalog.creativity, supportedDurations: fixture.model.supportedDurations, supportedResolutions: fixture.model.supportedResolutions, supportedAspectRatios: fixture.model.supportedAspectRatios, supportedSizes: ['1280x720'], pricingSkus: fixture.model.pricingSkus, allowedPassthroughParameters: fixture.model.supportedParameters, raw: fixture.rawCatalog }] },
     '@/lib/production/workspace-controls': controls,
   });
-  fixture.run = () => fixture.actions.createShotGenerationJob({ productionId: 'production', shotId: 'shot', requestId: 'operation-contract-00001' });
+  fixture.run = () => fixture.actions.previewShotGeneration({ productionId: 'production', shotId: 'shot', requestId: 'operation-contract-00001' });
   return fixture;
 }
 function workspaceActionFixture() {
@@ -110,6 +116,10 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   for (const asset of assets) row('assets', { _id: asset.id, projectId: 'project', productionId: 'production', scope: 'PROJECT', storageId: 'storage', mimeType: asset.mimeType });
   row('generationJobs', { _id: 'source-job', projectId: 'project', productionId: 'production', provider: 'openrouter', providerJobId, model: 'test/reviewed', status: 'COMPLETED', operation: 'SHOT_GENERATION', modality: 'VIDEO', shotVersionId: 'source-take', shotId: 'source-shot', response: { assetId: 'video' } });
   row('shotVersions', { _id: 'source-take', projectId: 'project', productionId: 'production', shotId: 'source-shot', provider: 'openrouter', model: 'test/reviewed', status: 'COMPLETED', assetId: 'video', versionNumber: 1 });
+  if (!routingFactory) {
+    row('videoModelCatalog', { _id: 'catalog', studioExternalId: 'studio', ...model });
+    row('videoModelCatalog', { _id: 'upscale-catalog', studioExternalId: 'studio', ...model, modelId: upscaleModelId, pricingSkus: upscalePrices });
+  }
   state.storage = { sha256: 'storage-checksum', size: 512, contentType: 'video/mp4' };
   const ctx = { storage: { getUrl: async () => 'https://fixture.convex.cloud/api/storage/video' }, db: {
     system: { get: async () => state.storage },
@@ -133,18 +143,40 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
     './resourceStates': dependencies.resourceStates || { ensureResourceState: async () => {}, getEffectiveResourceState: async (_, projectId, type, id) => ({ currentState: id === 'source-take' ? state.approval : 'DRAFT' }) },
     './financial': { estimateGenerationCredits: args => { state.creditEstimates.push(args); return pricing.estimateGenerationCredits(args); }, reserveGenerationCreditsInTransaction: async (_, args) => { state.creditReservations.push(args); return { reservationId: 'credit-hold' }; }, settleGenerationCreditsInTransaction: async (_,args) => { state.creditSettlements.push(args); } },
     './providerBudget': { settleProviderBudget: async (_,args) => { state.providerSettlements.push(args); }, reserveProviderBudget: async (_, args) => { row('providerBudgets', { _id: 'budget', status: 'ACTIVE', allowedStudioExternalIds: ['studio'] }); row('providerBudgetReservations', { _id: 'hold', jobId: args.jobId, budgetId: 'budget', status: 'RESERVED', estimatedMicros: Math.ceil(args.estimatedCostUsd * 1e6) }); return 'hold'; } },
-    './videoRouting': routingFactory ? (state.routing = routingFactory(state, ctx, auth)) : { resolveUpscaleSourceCertificate: async () => ({ ...upscaleSource }), validateReviewedVideoJob: async (_, args) => { state.routeChecks.push(args.request); return { estimatedCostUsd: .04, selection: { provider: 'openrouter', modelId: args.modelId, path: 'AI_VIDEO', resolution: args.request.operation === 'UPSCALE' ? undefined : '720p', routeReason: 'Test-reviewed', policyVersion: 1, ...(args.request.operation === 'EXTEND' ? { continuationQuote: routing.quoteVideoContinuation(model, args.request) } : {}), ...(args.request.operation === 'UPSCALE' ? { upscaleQuote: routing.quoteVideoUpscale({ ...model, modelId: upscaleModelId, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: upscalePrices }, { ...args.request, upscaleSource }) } : {}) } }; } },
+    './videoRouting': routingFactory ? (state.routing = routingFactory(state, ctx, auth)) : { resolveUpscaleSourceCertificate: async () => ({ ...upscaleSource }), validateReviewedVideoJob: async (_, args) => { state.routeChecks.push(args.request); return { request: args.request, estimatedCostUsd: .04, selection: { provider: 'openrouter', modelId: args.modelId, path: 'AI_VIDEO', resolution: args.request.operation === 'UPSCALE' ? undefined : '720p', routeReason: 'Test-reviewed', policyVersion: 1, ...(args.request.operation === 'EXTEND' ? { continuationQuote: routing.quoteVideoContinuation(model, args.request) } : {}), ...(args.request.operation === 'UPSCALE' ? { upscaleQuote: routing.quoteVideoUpscale({ ...model, modelId: upscaleModelId, upscaleFactor: { min: 1.5, max: 3 }, creativityLevels: [0, 1], pricingSkus: upscalePrices }, { ...args.request, upscaleSource }) } : {}) } }; } },
     './generationContinuity': { resolveGenerationContinuity: async (_, args) => ({ referenceAssetIds: args.referenceAssetIds, selectedResourceVersionIds: [], voiceIds: [], planningContextSnapshot: null }) },
     '../src/lib/ai/model-registry': registry, './studioMemberships': studioMemberships, './voices': dependencies.voices || {}, './audioCertificates': dependencies.audio || {}, './imageCertificates': dependencies.image || {}, '../src/lib/ai/preparation': dependencies.preparation || preparation, '../src/lib/production/workspace-controls': controls, '../src/lib/ai/video-routing': routing,
-    './generationWorkerContracts': { ...contracts, workerEnabled: () => true },
+    './generationWorkerContracts': { ...contracts, workerEnabled: () => true }, '../src/lib/generation/shot-estimate': shotEstimate,
   });
-  state.create = async (overrides = {}) => jobs.create.handler(ctx, { productionId: 'production', shotId: 'shot', provider: 'openrouter', model: metadata.operation === 'UPSCALE' ? upscaleModelId : 'test/reviewed', request: { ratio: '16:9', previousModelId: 'invented/model', upscaleFactor: 99, creativity: 99 }, estimatedCost: 1, idempotencyKey: 'operation-contract-00001', ...overrides });
+  const argsFor = (overrides = {}) => ({ productionId: 'production', shotId: 'shot', provider: 'openrouter', model: metadata.operation === 'UPSCALE' ? upscaleModelId : 'test/reviewed', request: { ratio: '16:9', previousModelId: 'invented/model', upscaleFactor: 99, creativity: 99 }, estimatedCost: 1, idempotencyKey: 'operation-contract-00001', ...overrides });
+  state.preview = async overrides => jobs.previewShotEstimate.handler(ctx, argsFor(overrides));
+  state.confirm = async ({ estimateId, quoteHash }) => jobs.createReviewedTake.handler(ctx, { estimateId, quoteHash });
+  state.create = async overrides => state.confirm(await state.preview(overrides));
   state.ctx = ctx; state.jobs = jobs;
   state.fence = async (id, extra = {}) => { state.rows.set(id, { ...state.rows.get(id), leaseId: 'lease', leaseExpiresAt: Date.now() + 60_000 }); return jobs.fenceSubmission.handler(ctx, { jobId: id, leaseId: 'lease', ...(state.rows.get(id).request?.continuationQuote ? { liveCatalogFingerprint: state.rows.get(id).request.continuationQuote.catalogFingerprint, liveCatalogCheckedAt: Date.now() } : {}), ...extra }); };
   return state;
 }
 async function main() {
   await check('public creation rejects private recipe authority markers before reserving', async () => { const state=backendFixture({operation:'GENERATE'},[]);await assert.rejects(state.create({request:{ratio:'16:9',recipeRunNodeId:'foreign-node'}}),/PRIVATE_AUTHORITY/);assert.equal(state.creditReservations.length,0); });
+  await check('a quote makes no purchase and only the exact unexpired consent can schedule a take', async () => {
+    const state = backendFixture({ operation: 'GENERATE' });
+    const quote = await state.preview();
+    assert.deepEqual(state.writes.map(write => write.table), ['estimates']);
+    assert.equal(state.creditReservations.length, 0);
+    assert.equal(state.schedules.length, 0);
+    await assert.rejects(state.confirm({ ...quote, quoteHash: 'forged' }), /SHOT_ESTIMATE_CHANGED/);
+    const estimate = state.rows.get(quote.estimateId);
+    estimate.expiresAt = Date.now() - 1;
+    await assert.rejects(state.confirm(quote), /SHOT_ESTIMATE_EXPIRED/);
+    assert.equal(state.creditReservations.length, 0);
+    assert.equal(state.schedules.length, 0);
+    const reviewed = await state.preview();
+    const job = await state.confirm(reviewed);
+    const replay = await state.confirm(reviewed);
+    assert.equal(replay._id, job._id);
+    assert.equal(state.creditReservations.length, 1);
+    assert.equal(state.schedules.length, 1);
+  });
   await check('authoring requires a selected approved history source and validates upscale controls', () => {
     assert.throws(() => controls.validateShotOperationControls({ ...baseControls, operation: 'EXTEND', previousJobId }, assets), /approved completed/);
     assert.deepEqual(controls.validateShotOperationControls({ ...baseControls, operation: 'EXTEND', previousJobId }, assets, [{ providerJobId, model: 'test/reviewed' }]), []);

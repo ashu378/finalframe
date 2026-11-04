@@ -160,7 +160,7 @@ const previousEnv = { enabled:process.env.FINALFRAME_PLATFORM_BOOTSTRAP_ENABLED,
   actorId='admin';assert.equal((await compatibilityGuards.requireAdmin()).is_admin,true);
   if(envUrl===undefined)delete process.env.NEXT_PUBLIC_CONVEX_URL;else process.env.NEXT_PUBLIC_CONVEX_URL=envUrl;
   const Link=({children,...props})=>React.createElement('a',props,children);
-  const Overview=load('src/app/(admin)/admin/page.tsx',{'next/link':Link,'@/lib/guards/platform':guards,'@/lib/platform-admin/contracts':contracts}).default;
+  const Overview=load('src/app/(admin)/admin/page.tsx',{'next/link':Link,'@/lib/guards/platform':guards,'@/lib/platform-admin/contracts':contracts,'@/lib/convex/server':{getAuthenticatedConvexClient:async()=>({query:async(reference)=>{assert.equal(getFunctionName(reference),'account:current');return fakeClient.query('account');}})}}).default;
   actorId='moderator';const overview=renderToStaticMarkup(await Overview());
   assert.match(overview,/Content reports/);assert.doesNotMatch(overview,/href="\/admin\/users"/);assert.doesNotMatch(overview,/href="\/admin\/roles"/);
   const reportContext=await authorization.requireProjectAccess(ctx,project._id).catch(()=>null);

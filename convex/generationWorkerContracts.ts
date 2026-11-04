@@ -39,7 +39,7 @@ export function canClaim(job: { status: string; executionStage?: string; leaseEx
   return !job.leaseExpiresAt || job.leaseExpiresAt <= timestamp;
 }
 
-export function safeGenerationError(code: string, preparation = false): string {
+export function safeGenerationError(code: string, preparation = false, active = false): string {
   if (preparation) {
     if(code.startsWith('SFX_'))return 'The saved sound effect needs an administrator check. It will not be purchased again automatically.';
     if (['MUSIC_OUTPUT_INVALID','MUSIC_OUTPUT_CHANGED','MUSIC_DURATION_REVIEW_REQUIRED','MUSIC_QC_INVALID_RESPONSE','MUSIC_QC_AUTHORITY_DENIED','MUSIC_OUTPUT_REVIEW_REQUIRED'].includes(code)) return 'The saved music needs an administrator check. It will not be purchased again automatically.';
@@ -52,6 +52,13 @@ export function safeGenerationError(code: string, preparation = false): string {
   if (code === 'PROVIDER_PAYMENT_REQUIRED') return 'Video generation is temporarily unavailable.';
   if (code === 'RECONCILIATION_REQUIRED') return 'This submission needs an administrator check before it can continue. It will not be submitted again automatically.';
   if (code === 'MEDIA_VALIDATION_FAILED') return 'The generated video did not pass its technical checks. Your other takes are unchanged.';
+  if (code === 'MEDIA_PROBE_BUSY' || code === 'MEDIA_PROBE_UNAVAILABLE') {
+    if (!active) return 'Automatic media checks paused. Resume this saved take to try again.';
+    return code === 'MEDIA_PROBE_BUSY'
+      ? 'Your video is saved. FinalFrame will check it when the renderer is free.'
+      : 'Your video is saved. FinalFrame will retry its technical checks shortly.';
+  }
+  if (code === 'INVALID_REQUEST') return 'This take’s media or settings could not be submitted. Review the inputs before creating another take.';
   return 'This take could not finish. Your project and approved takes are safe.';
 }
 
@@ -99,6 +106,7 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
 
 export function publicJob(job: Record<string, unknown>) {
   const request = object(job.request);
+  const status = String(job.status || 'QUEUED');
   const keys = ['_id', 'shotId', 'shotVersionId', 'productionId', 'projectId', 'status', 'executionStage', 'progress', 'provider', 'model', 'modelVersion', 'estimatedCost', 'estimatedProviderCostUsd', 'providerCostUsd', 'attemptCount', 'createdAt', 'updatedAt', 'completedAt', 'correlationId', 'providerJobId', 'providerRequestId', 'latencyMs', 'operation', 'capability', 'modality'];
   return {
     _id: job._id,
@@ -106,11 +114,11 @@ export function publicJob(job: Record<string, unknown>) {
     ...Object.fromEntries(keys.filter((key) => job[key] !== undefined).map((key) => [key, job[key]])),
     ...(typeof job.estimatedProviderCostUsd === 'number' ? { estimatedProviderCostUsd: job.estimatedProviderCostUsd } : {}),
     ...(typeof job.providerCostUsd === 'number' ? { providerCostUsd: job.providerCostUsd } : {}),
-    status: String(job.status || 'QUEUED'),
+    status,
     progress: typeof job.progress === 'number' ? job.progress : 0,
     model: typeof job.model === 'string' ? job.model : '',
-    errorCode: job.status !== 'COMPLETED' && typeof job.errorCode === 'string' ? job.errorCode : undefined,
-    errorMessage: job.status !== 'COMPLETED' && typeof job.errorCode === 'string' ? safeGenerationError(job.errorCode, job.operation === 'PREPARATION') : undefined,
+    errorCode: status !== 'COMPLETED' && typeof job.errorCode === 'string' ? job.errorCode : undefined,
+    errorMessage: status !== 'COMPLETED' && typeof job.errorCode === 'string' ? safeGenerationError(job.errorCode, job.operation === 'PREPARATION', !GENERATION_TERMINAL.has(status)) : undefined,
     ...(request.preparationKind==='MUSIC'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds),nominalDurationSeconds:30}:{}),
     ...(request.preparationKind==='SFX'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds)}:{}),
     assetId: typeof object(job.response).assetId === 'string' ? String(object(job.response).assetId) : undefined,
