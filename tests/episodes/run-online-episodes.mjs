@@ -133,30 +133,49 @@ try {
     await deny('story facts cannot commit before final timeline approval', () => client.mutation(api.continuity.acceptStoryState, acceptArgs), 'must be approved');
     await approve(project.projectId, 'timeline', composed.timelineId, first.productionId);
     const assembled = await client.mutation(api.assembly.createJob, { productionId: first.productionId, timelineId: composed.timelineId, selectionScope: 'FULL_PROJECT', idempotencyKey: `${marker}:manifest` });
-    assert.equal(assembled.manifest.version, 4);
+    const editorState = await client.query(api.timelineEditor.getDraft, { productionId: first.productionId, timelineId: composed.timelineId });
+    assert(editorState);
+    assert.equal(assembled.manifest.version, editorState.finishingV5Enabled ? 5 : 4);
     assert.equal(assembled.manifest.items.find(item => item.kind === 'motion-graphics').props.title, 'Exact project title');
     assert(assembled.manifest.items.find(item => item.kind === 'motion-graphics').props.logoUrl.includes('/api/storage/'));
     assert.equal(assembled.manifest.audioTracks[0].volume, 0.4);
     assert.equal(assembled.manifest.productionVersionId, approved.versionId);
-    pass('locked real authoring timeline freezes exact titles, canonical logos and selected audio volume into manifest v4');
+    pass('locked real authoring timeline freezes exact titles, canonical logos and selected audio volume into the active manifest contract');
     const accepted = await client.mutation(api.continuity.acceptStoryState, acceptArgs);
     const acceptedReplay = await client.mutation(api.continuity.acceptStoryState, acceptArgs);
     assert.equal(acceptedReplay.storyStateId, accepted.storyStateId);
     assert.equal(acceptedReplay.replayed, true);
     pass('final timeline approval commits one immutable accepted story snapshot');
 
-    const second = await client.mutation(api.episodes.create, { ...episodeArgs, episodeNumber: 2, title: 'Inside the envelope' });
-    const sharedApproval = await client.query(api.approvals.get, { projectId: project.projectId, productionId: second.productionId, resourceType: 'asset', resourceId: video.assetId });
+    const { client: nextSession } = await createAuthenticatedClient();
+    const second = await nextSession.mutation(api.episodes.create, { ...episodeArgs, episodeNumber: 2, title: 'Inside the envelope' });
+    const sharedApproval = await nextSession.query(api.approvals.get, { projectId: project.projectId, productionId: second.productionId, resourceType: 'asset', resourceId: video.assetId });
     assert.equal(sharedApproval.approved, true);
     pass('approved project-library asset remains usable by another episode in the same project');
-    const secondContext = await client.query(api.continuity.planningContext, { projectId: project.projectId, episodeId: second.episodeId, continuityBibleId: bible.bibleId });
+    const secondContext = await nextSession.query(api.continuity.planningContext, { projectId: project.projectId, episodeId: second.episodeId, continuityBibleId: bible.bibleId });
     assert.deepEqual(secondContext.storyState, story);
     assert.deepEqual(secondContext.bible.resourceBindings, bibleArgs.snapshot.resourceBindings);
     assert.notEqual(second.productionId, first.productionId);
-    await deny('ambiguous project-only production lookup requires selection', () => client.query(api.productions.getWorkspaceByProject, { projectExternalId: project.externalId }), 'select an episode');
-    const selected = await client.query(api.productions.getWorkspaceByProject, { projectExternalId: project.externalId, productionId: second.productionId });
+    await deny('ambiguous project-only production lookup requires selection', () => nextSession.query(api.productions.getWorkspaceByProject, { projectExternalId: project.externalId }), 'select an episode');
+    const selected = await nextSession.query(api.productions.getWorkspaceByProject, { projectExternalId: project.externalId, productionId: second.productionId });
     assert.equal(selected.production._id, second.productionId);
     pass('explicit episode selection keeps productions and accepted continuity independent');
+    const nextContext = await nextSession.query(api.continuity.productionPlanningContext, {
+        projectId: project.projectId, productionId: second.productionId, continuityBibleId: bible.bibleId,
+    });
+    const nextPlan = await nextSession.mutation(api.productions.createPlan, {
+        ...planArgs, productionId: second.productionId, idempotencyKey: `${marker}:next-plan`,
+        input: { ...planArgs.input, continuityBibleId: bible.bibleId, continuityContext: nextContext },
+    });
+    await nextSession.mutation(api.productions.approvePlan, { planId: nextPlan.planId });
+    const nextWorkspace = await nextSession.query(api.productions.getWorkspace, { productionId: second.productionId });
+    assert.equal(nextWorkspace.version.planningContextSnapshot.continuityBibleId, bible.bibleId);
+    assert.equal(nextWorkspace.version.planningContextSnapshot.resources[0].resourceVersionId, character.resourceVersionId);
+    const preservedFirst = await nextSession.query(api.productions.getWorkspace, { productionId: first.productionId });
+    assert.equal(preservedFirst.version._id, approvedWorkspace.version._id);
+    assert.deepEqual(preservedFirst.version.snapshot, approvedWorkspace.version.snapshot);
+    pass('a fresh authenticated session approves the next episode while preserving the first approved version');
+
     const revisedStory = { ...story, facts: ['Ada found a green envelope.'] };
     await client.mutation(api.continuity.acceptStoryState, { ...acceptArgs, previousAcceptedStateId: accepted.storyStateId, snapshot: revisedStory });
     const stale = await client.query(api.episodes.get, { projectId: project.projectId, episodeId: second.episodeId });
