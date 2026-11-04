@@ -5,7 +5,7 @@ const Module = require('node:module');
 const ts = require('typescript');
 const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '../..');
-const registration = Object.fromEntries(['internalMutation', 'internalAction', 'mutation', 'query'].map(name => [name, value => value]));
+const registration = Object.fromEntries(['internalMutation', 'internalAction', 'internalQuery', 'mutation', 'query'].map(name => [name, value => value]));
 const validator = new Proxy({}, { get: () => () => ({}) });
 function fixture(codec = 'h264', format = 'MP4', mimeType = 'video/mp4', version = 5) {
   const state = { time: Date.now(), rows: new Map(), serial: 0, urlReads: 0, storage: { size: 128, contentType: mimeType, sha256: 'original-local-hash' } };
@@ -79,7 +79,9 @@ async function check(name, work) { await work(); checks++; console.log(`PASS ${n
       const count = state.rows.size;
       assert.equal((await state.call(state.jobs.applyRendererCallback, state.args)).duplicate, true); assert.equal(state.rows.size, count);
       const token = state.share();
-      assert.equal((await state.call(state.review.getSharedReview, { token })).videoUrl, 'https://local.invalid/original-export');
+      assert.equal((await state.call(state.review.getSharedReview, { token })).videoUrl, `/api/review-media/export/${token}`);
+      assert.equal(state.urlReads, 1, 'public review has no direct storage URL read');
+      assert.deepEqual(await state.call(state.review.resolveSharedMedia, { token }), { url: 'https://local.invalid/original-export', size: 128, contentType: mimeType });
       const candidates = await state.call(state.review.shareCandidates, { projectId: 'project' });
       assert.equal(candidates[0].id, output._id);
       assert.match(candidates[0].label, /Selected scenes/);
@@ -107,7 +109,21 @@ async function check(name, work) { await work(); checks++; console.log(`PASS ${n
     const feedback = await state.call(state.review.getShareFeedback, args);
     assert.deepEqual(feedback, { timelineVersionNumber: 1, status: 'CHANGES_REQUESTED', decisionNote: 'Client requests a longer shot.', comments: [{ id: saved.id, authorName: 'Reviewer', body: 'Client feedback.', timeSeconds: 0.5, resolved: false }] });
     assert.equal(await state.call(state.review.getSharedReview, { token }), null);
+    assert.equal(await state.call(state.review.resolveSharedMedia, { token }), null);
+    assert.equal(state.urlReads, 0, 'revocation blocks storage resolution');
     await assert.rejects(state.call(state.review.getShareFeedback, { ...args, projectId: 'another-project' }), /link not found/);
+  });
+  await check('expired, archived and moderated reviews deny storage before getting the origin URL', async () => {
+    const state = fixture(); await state.call(state.jobs.applyRendererCallback, state.args); const token = state.share();
+    state.rows.get('review-link').expiresAt = Date.now() - 1;
+    assert.equal(await state.call(state.review.resolveSharedMedia, { token }), null);
+    state.rows.get('review-link').expiresAt = Date.now() + 60_000;
+    state.rows.get('project').status = 'ARCHIVED';
+    assert.equal(await state.call(state.review.resolveSharedMedia, { token }), null);
+    state.rows.get('project').status = 'ACTIVE';
+    state.rows.get('project').moderationStatus = 'RESTRICTED';
+    assert.equal(await state.call(state.review.resolveSharedMedia, { token }), null);
+    assert.equal(state.urlReads, 0);
   });
   await check('wrong claimed MIME, matching but wrong stored MIME and inconsistent manifest are denied atomically', async () => {
     for (const failure of ['wrong-claim', 'wrong-storage', 'both-wrong', 'missing-webm-claim', 'format-mismatch', 'version-mismatch']) {

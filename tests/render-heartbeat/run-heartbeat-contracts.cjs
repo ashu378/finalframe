@@ -24,6 +24,7 @@ check('unsigned stale callbacks remain denied; fresh delivery bounded',()=>{asse
 const routes = new Map();const originalLoad=Module._load;const secret='local-contract-secret';const previousSecret=process.env.RENDER_WORKER_SHARED_SECRET;
 process.env.RENDER_WORKER_SHARED_SECRET=secret;globalThis.crypto ??= webcrypto;
 Module._load=function(request,parent,isMain){if(parent?.filename.startsWith(temp)){if(request==='convex/server')return {httpRouter:()=>({route:r=>routes.set(r.path,r.handler)})};if(request==='./_generated/server')return {httpAction:fn=>fn};if(request==='./_generated/api')return {internal:{renderHeartbeat:{apply:'heartbeat'},renderJobs:{applyRendererCallback:'callback'}}};if(request==='./auth')return {auth:{addHttpRoutes(){}}};}return originalLoad.call(this,request,parent,isMain);};
+compile('convex/reviewMediaContract.ts','reviewMediaContract.js');
 require(compile('convex/http.ts','http.js'));Module._load=originalLoad;
 function sign(s){return 'sha256='+createHmac('sha256',secret).update(s).digest('hex');}
 let acceptancePending=false;

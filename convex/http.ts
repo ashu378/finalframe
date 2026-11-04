@@ -3,6 +3,7 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
+import { REVIEW_MEDIA_RESOLVER_PATH, respondToReviewMediaResolver } from './reviewMediaContract';
 import type {FunctionReference} from 'convex/server';
 
 const http = httpRouter();
@@ -33,6 +34,13 @@ async function sha256(rawBody: string) {
 }
 
 auth.addHttpRoutes(http);
+
+http.route({
+  path: REVIEW_MEDIA_RESOLVER_PATH,
+  method: 'POST',
+  handler: httpAction((ctx, request) => respondToReviewMediaResolver(request, process.env.FINALFRAME_REVIEW_MEDIA_SECRET, ({ kind, token }) =>
+    ctx.runQuery(kind === 'export' ? internal.reviewExport.resolveSharedMedia : internal.movieReviews.resolveSharedMedia, { token }))),
+});
 
 http.route({
   path: "/health",

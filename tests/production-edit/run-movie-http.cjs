@@ -13,5 +13,35 @@ const callback=routes.find(route=>route.path==='/renderer/movie-callback').handl
  await check('old body requires fresh delivery signature over the same exact raw body',async()=>{const raw=JSON.stringify({...envelope,occurredAt:new Date(Date.now()-11*60000).toISOString()});assert.equal((await callback(ctx,request(raw))).status,400);const time=new Date().toISOString();assert.equal((await callback(ctx,request(raw,{'x-finalframe-delivery-timestamp':time,'x-finalframe-delivery-signature':sign(time+'\n'+raw)}))).status,202);assert.ok(accepted.verifiedDeliveryAt);assert.equal((await callback(ctx,request(raw,{'x-finalframe-delivery-timestamp':time,'x-finalframe-delivery-signature':sign(time+'\n'+raw+' ')}))).status,401);});
  await check('expired delivery signature and nonmatching ABI shape fail before mutation',async()=>{const before=calls;const raw=JSON.stringify(envelope);const time=new Date(Date.now()-61000).toISOString();assert.equal((await callback(ctx,request(raw,{'x-finalframe-delivery-timestamp':time,'x-finalframe-delivery-signature':sign(time+'\n'+raw)}))).status,401);assert.equal((await callback(ctx,request(JSON.stringify({...envelope,rendererVersion:''})))).status,400);assert.equal(calls,before);});
  await check('heartbeat acceptance-pending425 then accepted200 preserves exact lease/project attempt',async()=>{const body=JSON.stringify({version:1,eventId:'heartbeat-one',jobId:'movie-job',projectId:'project',leaseId:'movie-lease',attempt:1,occurredAt:new Date().toISOString(),stage:'CALLBACK_PENDING'});pending=true;assert.equal((await heartbeat(ctx,request(body))).status,425);pending=false;assert.equal((await heartbeat(ctx,request(body))).status,200);assert.equal(accepted.leaseId,'movie-lease');assert.equal(accepted.stage,'CALLBACK_PENDING');});
+ await check('review resolver is registered and signs each exact public review kind with an independent key', async () => {
+   const { getFunctionName } = require('convex/server');
+   const contract = require(path.resolve(__dirname, '../../convex/reviewMediaContract.ts'));
+   const resolver = routes.find(route => route.path === contract.REVIEW_MEDIA_RESOLVER_PATH && route.method === 'POST').handler;
+   const previousSecret = process.env.FINALFRAME_REVIEW_MEDIA_SECRET;
+   const reviewSecret = 'ab'.repeat(32);
+   const token = 'A'.repeat(43);
+   const resolved = [];
+   const origin = { url: 'https://fixture.convex.cloud/api/storage/fixture', size: 3, contentType: 'video/mp4' };
+   const queryContext = { runQuery: async (ref, args) => { resolved.push([getFunctionName(ref), args]); return origin; } };
+   process.env.FINALFRAME_REVIEW_MEDIA_SECRET = reviewSecret;
+   try {
+     for (const [kind, moduleName] of [['export', 'reviewExport'], ['movie', 'movieReviews']]) {
+       const body = JSON.stringify({ kind, token });
+       const timestamp = Date.now().toString();
+       const send = async key => resolver(queryContext, new Request(`https://fixture.convex.site${contract.REVIEW_MEDIA_RESOLVER_PATH}`, { method: 'POST', body, headers: { [contract.REVIEW_MEDIA_TIMESTAMP]: timestamp, [contract.REVIEW_MEDIA_SIGNATURE]: await contract.signReviewMediaResolver(key, timestamp, body) } }));
+       const denied = await send(secret);
+       assert.equal(denied.status, 401);
+       assert.equal(await denied.text(), '');
+       const allowed = await send(reviewSecret);
+       assert.equal(allowed.status, 200);
+       assert.deepEqual(await allowed.json(), origin);
+       assert.deepEqual(resolved.at(-1), [`${moduleName}:resolveSharedMedia`, { token }]);
+     }
+     assert.equal(resolved.length, 2);
+   } finally {
+     if (previousSecret === undefined) delete process.env.FINALFRAME_REVIEW_MEDIA_SECRET;
+     else process.env.FINALFRAME_REVIEW_MEDIA_SECRET = previousSecret;
+   }
+ });
  console.log(`Movie HTTP: ${checks} PASS; real route handlers with signed fixture requests, no database/network/provider calls.`);
 }finally{if(old===undefined)delete process.env.RENDER_WORKER_SHARED_SECRET;else process.env.RENDER_WORKER_SHARED_SECRET=old;}})().catch(error=>{console.error(error);process.exitCode=1;});

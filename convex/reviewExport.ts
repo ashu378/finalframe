@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -10,6 +10,7 @@ import { assertReviewToken, isReviewLinkActive, REVIEW_COMMENT_LIMIT, REVIEW_LIN
 import { publicRenderJob } from "./renderWorkerContracts";
 import { now } from "./_shared";
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
+import { reviewMediaPath } from './reviewMediaContract';
 
 type ReadCtx = QueryCtx | MutationCtx;
 
@@ -259,7 +260,7 @@ async function exactReviewScope(ctx: ReadCtx, link: Doc<'reviewLinks'>) {
   const [project, production, review, exportRecord] = await Promise.all([
     ctx.db.get(link.projectId), ctx.db.get(link.productionId), ctx.db.get(link.reviewId), link.exportId ? ctx.db.get(link.exportId) : null,
   ]);
-  if (!project || project.deletedAt || project.archivedAt || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !exactLinkedReview(review, link) || !exportRecord) throw new Error('This review version is unavailable.');
+  if (!project || project.deletedAt || project.archivedAt || ['ARCHIVED', 'DELETED'].includes(String(project.status).toUpperCase()) || project.moderationStatus === 'RESTRICTED' || !production || production.projectId !== project._id || !exactLinkedReview(review, link) || !exportRecord) throw new Error('This review version is unavailable.');
   const output = await shareableExport(ctx, exportRecord, project._id, production._id);
   if (!output || output.manifest._id !== link.manifestId || output.timeline._id !== link.timelineId || output.timeline.versionNumber !== link.timelineVersionNumber) throw new Error('This review version is unavailable.');
   assertStoredRenderMediaType(output.manifest.manifest, output.manifest.contractVersion, output.storage.contentType, exportRecord.mimeType);
@@ -370,7 +371,18 @@ export const getSharedReview = query({
     try {
       const scope = await sharedReview(ctx, args.token);
       const comments = await ctx.db.query('comments').withIndex('by_review', q => q.eq('reviewId', scope.review._id)).take(REVIEW_COMMENT_LIMIT);
-      return { projectName: scope.project.name, label: scope.link.label, timelineVersionNumber: scope.link.timelineVersionNumber, durationSeconds: scope.durationSeconds, status: scope.review.status, expiresAt: scope.link.expiresAt, videoUrl: await ctx.storage.getUrl(scope.exportRecord.storageId!), comments: comments.map(row => ({ id: row._id, authorName: row.authorName || 'Project reviewer', body: row.body, timeSeconds: row.timeSeconds ?? 0, createdAt: row.createdAt, resolved: Boolean(row.resolvedAt) })) };
+      return { projectName: scope.project.name, label: scope.link.label, timelineVersionNumber: scope.link.timelineVersionNumber, durationSeconds: scope.durationSeconds, status: scope.review.status, expiresAt: scope.link.expiresAt, videoUrl: reviewMediaPath('export', args.token), comments: comments.map(row => ({ id: row._id, authorName: row.authorName || 'Project reviewer', body: row.body, timeSeconds: row.timeSeconds ?? 0, createdAt: row.createdAt, resolved: Boolean(row.resolvedAt) })) };
+    } catch { return null; }
+  },
+});
+export const resolveSharedMedia = internalQuery({
+  args: { token: v.string() },
+  returns: v.union(v.null(), v.object({ url: v.string(), size: v.number(), contentType: v.string() })),
+  handler: async (ctx, args) => {
+    try {
+      const scope = await sharedReview(ctx, args.token);
+      const url = await ctx.storage.getUrl(scope.exportRecord.storageId!);
+      return url && scope.storage.contentType ? { url, size: scope.storage.size, contentType: scope.storage.contentType } : null;
     } catch { return null; }
   },
 });

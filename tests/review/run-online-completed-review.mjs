@@ -31,7 +31,7 @@ async function createLink() {
 try {
     const { token, link } = await createLink();
     const view = await publicClient.query(api.reviewExport.getSharedReview, { token });
-    check(view && view.projectName === project.name && view.videoUrl?.startsWith('https://'), 'active bearer exposes its exact completed video');
+    check(view && view.projectName === project.name && view.videoUrl === `/api/review-media/export/${token}`, 'active bearer exposes only its same-origin media route');
     const expectedDuration = manifest.manifest.output.durationInFrames / manifest.manifest.output.fps;
     check(view.durationSeconds === expectedDuration, 'review duration equals the exact rendered export');
     check(!('production' in view) && !('manifest' in view) && !('tokenHash' in view) && !('assets' in view), 'public projection omits private planning, hashes and project assets');
