@@ -16,6 +16,26 @@ async function check(name,fn){await fn();checks++;console.log('PASS '+name);}
 (async()=>{try{
  await check('new authoring flag off fails before writes; legacy card retained',async()=>{delete process.env.FINALFRAME_GRAPHICS_V2_ENABLED;process.env.FINALFRAME_MANIFEST_V5_ENABLED='true';const ctx=fixture(),n=ctx.count('timelines');await assert.rejects(draft(ctx,chart),/not enabled/);assert.equal(ctx.count('timelines'),n);assert(await draft(ctx,{templateId:'brand-card',props:{title:'Legacy title'}}));process.env.FINALFRAME_GRAPHICS_V2_ENABLED='true';delete process.env.FINALFRAME_MANIFEST_V5_ENABLED;await assert.rejects(draft(fixture(),chart),/not enabled/);});
  process.env.FINALFRAME_MANIFEST_V5_ENABLED='true';process.env.FINALFRAME_GRAPHICS_V2_ENABLED='true';
+ await check('new v1 cards freeze authored copy and imports preserve the exact old or new policy',async()=>{
+   for(const templateId of ['kinetic-title','brand-card','feature-callout','end-card']){
+     const ctx=fixture();
+     const props={title:'Acme Tasks',...(templateId==='end-card'?{callToAction:'Start Trial'}:{})};
+     const next=await draft(ctx,{templateId,props});
+     const rendered=await build(ctx,next.timelineId);
+     const item=rendered.manifest.items[0];
+     assert.equal(item.props.copyPolicy,'authored-only');
+     assert.equal(item.props.title,props.title);
+     assert.equal(item.props.callToAction,props.callToAction);
+     const newImport=await timeline.createVersion.handler(ctx,{productionId:'production_1',manifestId:rendered.manifestId,idempotencyKey:'copy-policy-new-import'});
+     assert.deepEqual((await build(ctx,newImport._id)).manifest.items[0].props,item.props);
+     const legacy=await draft(ctx,{templateId,props});
+     const clip=(await ctx.draft(legacy.timelineId)).tracks[0].clips[0];
+     delete ctx.rows.get(clip.id).metadata.templateProps.copyPolicy;
+     const legacyRender=await build(ctx,legacy.timelineId);
+     const oldImport=await timeline.createVersion.handler(ctx,{productionId:'production_1',manifestId:legacyRender.manifestId,idempotencyKey:'copy-policy-legacy-import'});
+     assert.equal((await build(ctx,oldImport._id)).manifest.items[0].props.copyPolicy,undefined);
+   }
+ });
  await check('chart authoring freezes exact values and output in real assembly',async()=>{const ctx=fixture(),d=await draft(ctx,chart),r=await build(ctx,d.timelineId);assert.equal(r.manifest.version,5);assert.equal(r.manifest.output.width,320);assert.deepEqual(r.manifest.items[0].props.series,chart.props.series);assert.equal(r.manifest.items[0].props.layoutVersion,2);});
  await check('canonical screenshot binding cannot use another project or unapproved image',async()=>{for(const change of ['project','approval','mime']){const ctx=fixture();if(change==='project')ctx.rows.get('asset_image').projectId='other';if(change==='approval')ctx.states.set('asset:asset_image','REVISION_REQUESTED');if(change==='mime')ctx.rows.get('asset_image').mimeType='video/mp4';await assert.rejects(draft(ctx,ui),/project|approval|image/);}});
  await check('screenshot render URL resolved from canonical storage and media policy pinned',async()=>{const ctx=fixture(),d=await draft(ctx,ui),r=await build(ctx,d.timelineId);const item=r.manifest.items[0];assert.equal(item.assetId,'asset_image');assert.equal(item.props.screenUrl,'https://media.finalframe.app/storage_image');assert.equal(item.props.logoUrl,undefined);const policy=require(path.join(root,'renderer/src/media/source-policy.ts'));for(const bad of ['file:///etc/private.png','http://127.0.0.1/image.png','https://other.invalid/image.png']){const raw=structuredClone(r.manifest);raw.items[0].props.screenUrl=bad;const result=policy.validateManifestMediaSources(raw,{mode:'production',allowedRemoteHosts:['media.finalframe.app']});assert(!result.ok);assert(result.issues.some(i=>i.path.endsWith('.screenUrl')));}});

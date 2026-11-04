@@ -13,6 +13,7 @@ import {importedOutputAudio,posterSpec,type ImportedPosterBinding} from '../rend
 import { validateManifest } from "../renderer/src/manifest";
 import { finishingV5Enabled } from "./finishingContracts";
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
+import { AUTHORED_COPY_POLICY } from '../renderer/src/templates/contract';
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -217,7 +218,7 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
           const allowed=['title','subtitle','eyebrow','brandName','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor'];
           for(const [name,value]of Object.entries(object(input.props)))if(!allowed.includes(name)||typeof value!=='string'||value.length>2000||(/Color$/.test(name)&&!/^#[0-9a-f]{6}$/i.test(value)))throw new Error('Use bounded title text and hexadecimal colors.');
           if(input.logoAssetId){asset=await assetFor(input.logoAssetId);if(!asset.mimeType?.startsWith('image/'))throw new Error('Choose a project image for the exact logo.');}
-          metadata={motionTemplateId:input.templateId,templateProps:input.props};
+          metadata={motionTemplateId:input.templateId,templateProps:{...input.props,copyPolicy:AUTHORED_COPY_POLICY}};
         }
       }
       if (!Number.isFinite(duration) || duration <= 0 || duration > 60 || elapsed + duration > 60) throw new Error('This composition must total at most 60 seconds.');
