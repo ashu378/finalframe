@@ -141,14 +141,41 @@ async function traverse(mode = 'active', search = '') {
   assert.equal((await actions.changeLibraryProject({ projectId: viewer._id, action: 'delete' })).success, false);
   assert.equal((await actions.changeLibraryProject({ projectId: original._id, action: 'rename', name: ' ' })).success, false);
   const { ProjectLibraryControls } = load('src/components/project/project-library-controls.tsx', {
+    'next/link': ({ children, ...props }) => React.createElement('a', props, children),
     'next/navigation': { useRouter: () => ({ refresh: () => {} }) }, '@/lib/project/library-actions': actions,
   });
   const presentation = { id: 'project-ui', externalId: 'external-ui', name: 'A real project', description: null, status: 'DRAFT', role: 'OWNER', createdAt: 1, updatedAt: 1 };
   const ownerControls = renderToStaticMarkup(React.createElement(ProjectLibraryControls, { project: presentation, mode: 'active' }));
   assert.match(ownerControls, /Archive project/); assert.match(ownerControls, /Save name/); assert.match(ownerControls, /Confirm move to deleted/);
+  assert.match(ownerControls, /href="\/dashboard\/projects\/external-ui\/settings"[^>]*>Manage project access/);
+  const editorControls = renderToStaticMarkup(React.createElement(ProjectLibraryControls, { project: { ...presentation, role: 'EDITOR' }, mode: 'active' }));
+  assert.doesNotMatch(editorControls, /Manage project access/);
   const viewerControls = renderToStaticMarkup(React.createElement(ProjectLibraryControls, { project: { ...presentation, role: 'VIEWER' }, mode: 'active' }));
   assert.equal(viewerControls, '');
   const editorDeleted = renderToStaticMarkup(React.createElement(ProjectLibraryControls, { project: { ...presentation, role: 'EDITOR' }, mode: 'deleted' }));
   assert.match(editorDeleted, /Restore project/); assert.doesNotMatch(editorDeleted, /Save name|Confirm move to deleted/);
+  const link = ({ children, ...props }) => React.createElement('a', props, children);
+  const { ProjectAccessSettings } = load('src/components/project/project-access-settings.tsx', {
+    'next/link': link, '../../../convex/_generated/api': { api: { projects: { listMembers: 'listMembers', setMember: 'setMember', removeMember: 'removeMember' } } },
+    'convex/react': { useMutation: () => async () => assert.fail('render must not change access'), usePaginatedQuery: (_reference, args) => ({
+      results: args.scope === 'ASSIGNED'
+        ? [{ userId: 'owner-fixture', name: 'Fixture owner', self: true, role: 'OWNER', canAssign: true }]
+        : [{ userId: 'viewer-fixture', name: 'Fixture teammate', self: false, role: null, canAssign: true }],
+      status: args.scope === 'ASSIGNED' ? 'Exhausted' : 'CanLoadMore',
+    }) },
+  });
+  const accessMarkup = renderToStaticMarkup(React.createElement(ProjectAccessSettings, { projectId: original._id }));
+  assert.match(accessMarkup, /Fixture owner \(you\)/); assert.match(accessMarkup, /Fixture teammate/);
+  assert.match(accessMarkup, /Grant access/); assert.match(accessMarkup, /Load more people/);
+  assert.doesNotMatch(accessMarkup, /Revoke access|mailto:/);
+  const SettingsPage = load('src/app/(dashboard)/dashboard/projects/[id]/settings/page.tsx', {
+    'next/link': link, 'next/navigation': { notFound: () => { throw new Error('404'); } },
+    '../../../../../../../convex/_generated/api': { api: { projects: { accessSettings: 'accessSettings' } } },
+    '@/lib/convex/server': { getAuthenticatedConvexClient: async () => ({ query: async (_ref, args) => projects.accessSettings.handler(ctx, args) }) },
+    '@/lib/guards': { requireAuth: async () => {} }, '@/lib/project/route-id': load('src/lib/project/route-id.ts'),
+    '@/components/project/project-access-settings': { ProjectAccessSettings },
+  }).default;
+  assert.match(renderToStaticMarkup(await SettingsPage({ params: Promise.resolve({ id: encodeURIComponent(original.externalId) }) })), /Project access for Library rename/);
+  await assert.rejects(SettingsPage({ params: Promise.resolve({ id: encodeURIComponent(editor.externalId) }) }), /404/);
   console.log('PASS project library: complete membership+legacy cursor traversal beyond500, substring search past recent20, canonical roles/isolation/removal, mode/cursor/input guards, transport errors, lifecycle roundtrips/retained descendants and SSR controls/server actions. In-memory actual authorization/handlers; no database/provider calls.');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

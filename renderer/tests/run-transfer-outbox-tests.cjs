@@ -20,7 +20,7 @@ Module._extensions['.ts'] = function (module, filename) {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: filename }).outputText, filename);
 };
 
-const { assertTransferUrl, transferOrigins, boundedTransferTimeout, uploadRenderFile } = require(path.join(root, 'src/worker-transfer.ts'));
+const { assertTransferUrl, transferOrigins, boundedTransferTimeout, uploadRenderFile, requestRenderUploadRenewal } = require(path.join(root, 'src/worker-transfer.ts'));
 const { CompletionOutbox, FileRenderReceiptStore } = require(path.join(root, 'src/completion-outbox.ts'));
 const { sendRendererCallback, signCallbackBody } = require(path.join(root, 'src/contracts/callback.ts'));
 const { sendLeaseHeartbeat, LeaseHeartbeatMonitor } = require(path.join(root, 'src/lease-heartbeat.ts'));
@@ -33,10 +33,28 @@ async function main() {
   let redirectedRequests = 0;
   let uploadedBytes;
   let callbackReceipt;
+  let renewalRequests = 0;
+  let expiredUploads = 0;
+  let renewedUploads = 0;
   const server = http.createServer(async (request, response) => {
     if (request.url === '/redirect-target') { redirectedRequests++; response.end(); return; }
     if (request.url === '/redirect') { response.writeHead(307, { location: '/redirect-target' }); response.end(); return; }
     if (request.url === '/stall') return;
+    if (request.url === '/api/storage/upload?expired') {
+      request.resume();
+      expiredUploads++; response.writeHead(401); response.end(); return;
+    }
+    if (request.url === '/renderer/upload-capability') {
+      let raw = ''; for await (const chunk of request) raw += chunk;
+      assert.equal(request.headers['x-finalframe-renderer-signature'], signCallbackBody(raw, 'renew-test-secret'));
+      const input = JSON.parse(raw);
+      assert.equal(input.checksum, createHash('sha256').update(content).digest('base64'));
+      assert.equal(input.byteSize, content.length);
+      assert.equal(input.identity, 'renew-manifest');
+      if (++renewalRequests === 1) { response.writeHead(503); response.end(); return; }
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ uploadUrl: `${origin}/api/storage/upload?renewed` })); return;
+    }
     if (request.url === '/callback') {
       let raw = ''; for await (const chunk of request) raw += chunk;
       callbackReceipt = { raw, headers: request.headers };
@@ -45,6 +63,10 @@ async function main() {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     uploadedBytes = Buffer.concat(chunks);
+    if (request.url === '/api/storage/upload?renewed') {
+      renewedUploads++;
+      assert.equal(request.headers.digest, `sha-256=${createHash('sha256').update(uploadedBytes).digest('base64')}`);
+    }
     response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ storageId: 'storage_accepted' }));
   });
   server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
@@ -82,6 +104,73 @@ async function main() {
       await assert.rejects(uploadRenderFile(`${origin}/redirect`, artifact, { allowedOrigins: [origin], maxBytes: content.length }));
       assert.equal(redirectedRequests, 0);
       await assert.rejects(uploadRenderFile(`${origin}/stall`, artifact, { allowedOrigins: [origin], maxBytes: content.length, timeoutMs: 40 }));
+    });
+    await check('expired upload authorization resumes verified original bytes after a restart', async () => {
+      const recoveryRoot = path.join(directory, 'renewal-outbox');
+      const receipts = new FileRenderReceiptStore(path.join(directory, 'renewal-receipts'));
+      const callbacks = [];
+      const options = {
+        root: recoveryRoot, outputRoot: directory, receipts,
+        upload: (request, result, checksum) => uploadRenderFile(request.storageUploadUrl, result.outputPath, { allowedOrigins: [origin], maxBytes: content.length, checksum }),
+        renewUpload: (original, request) => requestRenderUploadRenewal(original.callbackUrl, original.storageUploadUrl, request, { secret: 'renew-test-secret', callbackOrigins: [origin], storageOrigins: [origin] }),
+        callback: async (_request, raw) => { callbacks.push(raw); if (callbacks.length === 1) throw new Error('Local callback outage'); },
+      };
+      let box = new CompletionOutbox(options);
+      const request = { jobId: 'renew-job', projectId: 'renew-project', manifestId: 'renew-manifest', leaseId: 'renew-lease',
+        attempt: 1, idempotencyKey: 'renew-exact-attempt', rendererVersion: 'fixture-worker', durationInFrames: 30,
+        callbackUrl: `${origin}/renderer/callback`, storageUploadUrl: `${origin}/api/storage/upload?expired` };
+      let record = await box.begin(request, request);
+      const outputPath = path.join(directory, `${record.key}.mp4`);
+      await fsp.writeFile(outputPath, content);
+      record = await box.rendered(record, { outputPath, jobId: request.jobId, manifestId: request.manifestId, durationInFrames: 30 });
+      record = await box.deliver(record);
+      assert.equal(record.stage, 'UPLOAD_PENDING');
+      assert.equal(record.uploadRenewal.checksum, createHash('sha256').update(content).digest('base64'));
+      assert.equal(expiredUploads, 1);
+      assert.equal(renewalRequests, 1);
+      box = new CompletionOutbox(options);
+      await box.recover();
+      record = await box.deliver(record);
+      assert.equal(record.stage, 'CALLBACK_PENDING');
+      assert.equal(renewalRequests, 2);
+      assert.equal(expiredUploads, 1);
+      assert.equal(renewedUploads, 1);
+      assert.deepEqual(uploadedBytes, content);
+      assert.equal(JSON.parse(callbacks[0]).payload.checksum, record.uploadRenewal.checksum);
+      box = new CompletionOutbox(options);
+      await box.recover();
+      assert.equal((await box.deliver(record)).stage, 'DELIVERED');
+      assert.deepEqual(callbacks, [callbacks[0], callbacks[0]]);
+      assert.equal(renewedUploads, 1);
+      assert.equal(renewalRequests, 2);
+    });
+    await check('upload renewal stays on the original Storage origin and never rotates for transient failures', async () => {
+      const foreignStorage = 'https://other.convex.cloud';
+      const source = `${origin}/api/storage/upload?source`;
+      await assert.rejects(requestRenderUploadRenewal(`${origin}/renderer/callback`, source, {}, {
+        secret: 'renew-test-secret', callbackOrigins: [origin], storageOrigins: [origin, foreignStorage],
+        fetch: async () => Response.json({ uploadUrl: `${foreignStorage}/api/storage/upload?wrong` }),
+      }), /invalid destination/);
+      const options = {
+        root: path.join(directory, 'transient-outbox'), outputRoot: directory, receipts: new FileRenderReceiptStore(path.join(directory, 'transient-receipts')),
+        upload: (request, result) => uploadRenderFile(request.storageUploadUrl, result.outputPath, {
+          allowedOrigins: [origin], maxBytes: content.length, fetch: async () => new Response(null, { status: 503 }),
+        }),
+        renewUpload: async () => { throw new Error('A transient upload must keep its existing capability'); },
+        callback: async () => { throw new Error('A failed upload must not call completion'); },
+      };
+      let renewalAttempted = false;
+      const box = new CompletionOutbox({ ...options, renewUpload: async () => { renewalAttempted = true; return options.renewUpload(); } });
+      const request = { jobId: 'transient-job', projectId: 'project', manifestId: 'manifest', leaseId: 'lease', attempt: 1,
+        idempotencyKey: 'transient-exact', rendererVersion: 'fixture', callbackUrl: `${origin}/renderer/callback`, storageUploadUrl: source };
+      let record = await box.begin(request, request);
+      const outputPath = path.join(directory, `${record.key}.mp4`);
+      await fsp.writeFile(outputPath, content);
+      record = await box.rendered(record, { outputPath, jobId: request.jobId, manifestId: request.manifestId, durationInFrames: 30 });
+      record = await box.deliver(record);
+      assert.equal(record.stage, 'UPLOAD_PENDING');
+      assert.equal(record.uploadRenewal, undefined);
+      assert.equal(renewalAttempted, false);
     });
     await check('callback keeps exact signed body plus authenticated delivery timestamp', async () => {
       const raw = JSON.stringify({ eventId: 'exact-event', occurredAt: '2026-01-01T00:00:00Z' });

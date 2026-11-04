@@ -1,6 +1,8 @@
 import { createReadStream } from 'node:fs';
+import { createHash, createHmac } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { outputFormatForMimeType, type RenderOutputMimeType } from './output-format.js';
+import { RENDER_UPLOAD_RENEWAL_PATH, type RenderUploadRenewal } from './contracts/upload-renewal.js';
 
 /** Transfer capabilities are accepted only on explicitly configured origins.
  * Do not derive an origin allowlist from an incoming render request. */
@@ -48,10 +50,47 @@ export async function readBoundedJsonReceipt(response: Response, maxBytes: numbe
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 }
 
+export class RenderStorageUploadRejected extends Error {
+  constructor(readonly status: number) { super('Render storage upload was rejected.'); }
+}
+
+export async function renderUploadArtifact(outputPath: string) {
+  const hash = createHash('sha256');
+  let byteSize = 0;
+  for await (const chunk of createReadStream(outputPath, { highWaterMark: 64 * 1024 })) {
+    byteSize += chunk.length;
+    if (byteSize > 2_000_000_000) throw new Error('Retained upload artifact exceeds its limit.');
+    hash.update(chunk);
+  }
+  if (!byteSize) throw new Error('Retained upload artifact is empty.');
+  return { byteSize, checksum: hash.digest('base64') };
+}
+
+export async function requestRenderUploadRenewal(callbackUrl: string, originalUploadUrl: string, request: RenderUploadRenewal, options: {
+  secret: string; callbackOrigins: readonly string[]; storageOrigins: readonly string[]; fetch?: typeof globalThis.fetch;
+}) {
+  const callback = assertTransferUrl(callbackUrl, options.callbackOrigins);
+  const original = assertTransferUrl(originalUploadUrl, options.storageOrigins);
+  if (!options.secret || !['/renderer/callback', '/renderer/movie-callback'].includes(callback.pathname) || callback.search) throw new Error('Invalid renderer upload authority.');
+  const url = new URL(RENDER_UPLOAD_RENEWAL_PATH, callback.origin);
+  const body = JSON.stringify({ ...request, occurredAt: Date.now() });
+  const signature = createHmac('sha256', options.secret).update(body).digest('hex');
+  const response = await (options.fetch ?? globalThis.fetch)(url, {
+    method: 'POST', body, redirect: 'error', signal: AbortSignal.timeout(15_000),
+    headers: { 'content-type': 'application/json', 'x-finalframe-renderer-signature': `sha256=${signature}` },
+  });
+  if (!response.ok) { await response.body?.cancel(); throw new Error('Renderer upload authorization could not renew.'); }
+  const receipt = await readBoundedJsonReceipt(response, 4096) as { uploadUrl?: unknown };
+  if (typeof receipt?.uploadUrl !== 'string') throw new Error('Renderer upload renewal returned an invalid receipt.');
+  const upload = assertTransferUrl(receipt.uploadUrl, options.storageOrigins);
+  if (upload.origin !== original.origin || upload.pathname !== '/api/storage/upload') throw new Error('Renderer upload renewal returned an invalid destination.');
+  return receipt.uploadUrl;
+}
+
 export async function uploadRenderFile(
   url: string,
   outputPath: string,
-  options: { allowedOrigins: readonly string[]; maxBytes: number; timeoutMs?: number; fetch?: typeof globalThis.fetch; mimeType?: RenderOutputMimeType },
+  options: { allowedOrigins: readonly string[]; maxBytes: number; timeoutMs?: number; fetch?: typeof globalThis.fetch; mimeType?: RenderOutputMimeType; checksum?: string },
 ): Promise<string> {
   assertTransferUrl(url, options.allowedOrigins);
   const { mimeType } = outputFormatForMimeType(options.mimeType);
@@ -64,11 +103,11 @@ export async function uploadRenderFile(
   controller.signal.addEventListener('abort', abortStream, { once: true });
   try {
     const init: RequestInit & { duplex: 'half' } = {
-      method: 'POST', headers: { 'content-type': mimeType, 'content-length': String(file.size) },
+      method: 'POST', headers: { 'content-type': mimeType, 'content-length': String(file.size), ...(options.checksum ? { digest: `sha-256=${options.checksum}` } : {}) },
       body: stream as unknown as BodyInit, duplex: 'half', redirect: 'error', signal: controller.signal,
     };
     const response = await (options.fetch ?? globalThis.fetch)(url, init);
-    if (!response.ok) { await response.body?.cancel(); throw new Error('Render storage upload was rejected.'); }
+    if (!response.ok) { await response.body?.cancel(); throw new RenderStorageUploadRejected(response.status); }
     // Bound the receipt as well as the streamed upload. Keep the timeout active
     // until the entire receipt has arrived, including a stalled response body.
     const receipt = await readBoundedJsonReceipt(response, 8_192) as { storageId?: unknown };

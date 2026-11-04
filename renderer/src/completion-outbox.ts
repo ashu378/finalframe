@@ -5,6 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import type { RenderReceiptStore, RenderResult } from './renderer.js';
 import { createCallbackBody } from './contracts/callback.js';
 import { outputFormatForMimeType, type RenderOutputMimeType } from './output-format.js';
+import { renderUploadArtifact, RenderStorageUploadRejected } from './worker-transfer.js';
+import type { RenderUploadRenewal } from './contracts/upload-renewal.js';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -77,6 +79,7 @@ export interface CompletionRecord {
   stage: 'RENDERING' | 'UPLOAD_PENDING' | 'CALLBACK_PENDING' | 'DELIVERED' | 'NEEDS_ATTENTION';
   result?: RenderResult;
   storageId?: string;
+  uploadRenewal?: { byteSize: number; checksum: string; uploadUrl?: string };
   callbackBody?: string;
   createdAt: number;
   updatedAt: number;
@@ -87,7 +90,8 @@ export interface CompletionRecord {
 export interface CompletionOutboxOptions {
   root: string;
   outputRoot: string;
-  upload: (request: CompletionRequest, result: RenderResult) => Promise<string>;
+  upload: (request: CompletionRequest, result: RenderResult, checksum?: string) => Promise<string>;
+  renewUpload?: (original: CompletionRequest, request: RenderUploadRenewal) => Promise<string>;
   callback: (request: CompletionRequest, exactBody: string) => Promise<void>;
   receipts: RenderReceiptStore;
   keepOutput?: boolean;
@@ -145,7 +149,7 @@ export class CompletionOutbox {
     const movieProof = proof ? {checkedBy:proof.checkedBy,checkedAt:proof.checkedAt,fileSizeBytes:proof.fileSizeBytes,width:proof.width,height:proof.height,fps:proof.fps,durationSeconds:proof.durationSeconds,videoCodec:proof.videoCodec,...(proof.audioCodec?{audioCodec:proof.audioCodec}:{}),hasAudio:proof.hasAudio,orderedPartIds:proof.orderedItemIds,durationInFrames:record.result!.durationInFrames} : undefined;
     return createCallbackBody({ eventId: randomUUID(), idempotencyKey: record.request.idempotencyKey, jobId: record.request.jobId, projectId: record.request.projectId, rendererVersion: record.request.rendererVersion, attempt: record.request.attempt, eventType,
       payload: eventType === 'render.completed'
-        ? { ...(record.request.graphicsCertificate?{graphicsCertificate:record.request.graphicsCertificate}:{}), storageId: record.storageId, leaseId: record.request.leaseId, mimeType: outputFormatForMimeType(record.request.mimeType).mimeType, durationInFrames: record.result!.durationInFrames, ...(movie?{...movie,checksum:record.result!.checksum,verification:movieProof}:{}) }
+        ? { ...(record.request.graphicsCertificate?{graphicsCertificate:record.request.graphicsCertificate}:{}), storageId: record.storageId, leaseId: record.request.leaseId, mimeType: outputFormatForMimeType(record.request.mimeType).mimeType, durationInFrames: record.result!.durationInFrames, ...(movie?{...movie,checksum:record.result!.checksum,verification:movieProof}:record.uploadRenewal?{checksum:record.uploadRenewal.checksum}:{}) }
         : { ...(record.request.graphicsCertificate?{graphicsCertificate:record.request.graphicsCertificate}:{}),leaseId: record.request.leaseId, errorCode: failure?.code??'RENDER_FAILED', errorMessage: failure?.message??'The renderer could not complete this export.', retryable: failure?.retryable??true, ...(movie??{}) },
     });
   }
@@ -173,7 +177,41 @@ export class CompletionOutbox {
     try {
       if (record.stage === 'UPLOAD_PENDING') {
         if (!record.result) throw new Error('Worker finishing record has no verified artifact.');
-        const storageId = await this.options.upload(record.request, record.result);
+        let storageId: string | undefined;
+        let proof: { byteSize: number; checksum: string } | undefined;
+        if (!record.uploadRenewal) {
+          try { storageId = await this.options.upload(record.request, record.result); }
+          catch (error) {
+            // Convex rejects an expired Storage upload token before reading the body.
+            if (!this.options.renewUpload || !(error instanceof RenderStorageUploadRejected) || error.status !== 401) throw error;
+            if (!await this.recoverableReceipt(record, record.result)) throw new Error('Retained upload artifact is unavailable.');
+            proof = await renderUploadArtifact(record.result.outputPath);
+            if (record.request.movieContext && Buffer.from(proof.checksum, 'base64').toString('hex') !== record.result.checksum) throw new Error('Retained movie upload checksum changed.');
+            record = { ...record, uploadRenewal: proof, updatedAt: this.now() };
+            await this.save(record);
+          }
+        }
+        if (!storageId) {
+          const renewal = record.uploadRenewal;
+          if (!renewal || !this.options.renewUpload) throw new Error('Renderer upload renewal is unavailable.');
+          const result = record.result!;
+          if (!proof) {
+            if (!await this.recoverableReceipt(record, result)) throw new Error('Retained upload artifact is unavailable.');
+            proof = await renderUploadArtifact(result.outputPath);
+          }
+          if (proof.checksum !== renewal.checksum || proof.byteSize !== renewal.byteSize) throw new Error('Retained upload artifact changed.');
+          const request = record.request;
+          const uploadUrl = renewal.uploadUrl ?? await this.options.renewUpload(request, {
+            jobId: request.jobId, projectId: request.projectId, leaseId: request.leaseId, attempt: request.attempt,
+            idempotencyKey: request.idempotencyKey, identity: request.movieContext?.planHash ?? request.manifestId,
+            mimeType: outputFormatForMimeType(request.mimeType).mimeType, byteSize: proof.byteSize, checksum: proof.checksum,
+          });
+          if (!renewal.uploadUrl) {
+            record = { ...record, uploadRenewal: { ...renewal, uploadUrl }, updatedAt: this.now() };
+            await this.save(record);
+          }
+          storageId = await this.options.upload({ ...request, storageUploadUrl: uploadUrl }, result, proof.checksum);
+        }
         record = { ...record, storageId, stage: 'CALLBACK_PENDING', updatedAt: this.now() };
         record.callbackBody = this.callbackBody(record, 'render.completed');
         // Persist the upload receipt and exact callback before any callback IO.
@@ -199,7 +237,7 @@ export class CompletionOutbox {
     await this.cleanupArtifact(record);
     // Keep an idempotency tombstone, without now-unused bearer URLs. Pending
     // records/artifacts are never removed by age or by a failed transfer.
-    const tombstone = { ...record, request: { ...record.request, callbackUrl: '', storageUploadUrl: '', heartbeatUrl: undefined }, callbackBody: undefined };
+    const tombstone = { ...record, request: { ...record.request, callbackUrl: '', storageUploadUrl: '', heartbeatUrl: undefined }, callbackBody: undefined, uploadRenewal: undefined };
     await writePrivateJson(this.path(record.key).replace(/\.json$/, '.done.json'), tombstone);
     await rm(this.path(record.key), { force: true });
   }

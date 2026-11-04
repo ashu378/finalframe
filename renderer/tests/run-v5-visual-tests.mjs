@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
 import { openBrowser, renderMedia, renderStill, selectComposition } from '@remotion/renderer';
 import { validateManifest } from '../dist/manifest.js';
+import { AUTHORED_COPY_POLICY } from '../dist/templates/contract.js';
 
 // Actual local Chromium/Remotion/FFmpeg fixtures. No database, provider, remote
 // source media or deployment is used. Keep artifacts for visual inspection.
@@ -97,6 +98,26 @@ try {
   await check('legacy v4 still ignores new transition metadata instead of reinterpreting saved exports', async () => {
     const old = structuredClone(base); old.version = 4; old.manifestId = 'legacy-v4-visual';
     assert.ok(blue(pixel(await still(old, 15, 'legacy-v4-overlap'), 80, 90)), 'legacy overlap retains the later opaque picture');
+  });
+  await check('authored v1 graphics drop template copy, retain explicit client copy, and preserve unmarked historical renders', async () => {
+    for (const templateId of ['kinetic-title', 'brand-card', 'feature-callout', 'end-card']) {
+      const manifest = {
+        ...base, manifestId: `graphic-${templateId}`, transitions: [],
+        output: { ...base.output, width: 1280, height: 720 },
+        items: [{ id: 'client-card', kind: 'motion-graphics', trackId: 'picture', templateId, startFrame: 0, durationInFrames: 30,
+          props: { title: 'ACME TASKS', brandName: 'ACME', ...(templateId === 'feature-callout' ? { feature: 'KEEP PROJECTS MOVING' } : {}) } }],
+      };
+      const historical = await still(manifest, 25, `copy-${templateId}-historical`);
+      const authored = structuredClone(manifest);
+      authored.items[0].props.copyPolicy = AUTHORED_COPY_POLICY;
+      const withoutDefaults = await still(authored, 25, `copy-${templateId}-authored`);
+      assert.notDeepEqual(withoutDefaults, historical, `${templateId} old sample copy is removed from new graphics`);
+      const explicit = structuredClone(authored);
+      explicit.items[0].props.eyebrow = 'CLIENT EDITION';
+      if (templateId === 'end-card') explicit.items[0].props.callToAction = 'START TRIAL';
+      assert.notDeepEqual(await still(explicit, 25, `copy-${templateId}-explicit`), withoutDefaults, `${templateId} still renders user-authored copy`);
+      assert.deepEqual(await still(manifest, 25, `copy-${templateId}-historical-replay`), historical, `${templateId} legacy frame replay is identical`);
+    }
   });
   const caption = structuredClone(base); caption.manifestId = 'actual-captions'; caption.transitions = []; caption.items[1].startFrame = 20; caption.output.durationInFrames = 40;
   caption.captionTracks = [{ id: 'en', language: 'en', style: { fontSize: 24, color: '#00ff00', backgroundColor: '#000000ff', position: 'TOP', maxLines: 2 }, cues: [{ id: 'words', startFrame: 5, durationInFrames: 5, text: 'Readable caption' }] }];

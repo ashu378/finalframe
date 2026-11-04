@@ -689,6 +689,12 @@ export default defineSchema({
   }).index("by_event_id", ["eventId"]).index("by_idempotency", ["idempotencyKey"])
     .index("by_job", ["jobId"]).index("by_project", ["projectId"]),
 
+  renderUploadRenewals: defineTable({
+    jobId: v.union(v.id('renderJobs'), v.id('movieMergeJobs')), projectId: v.id('projects'),
+    actorId: v.id('users'), leaseId: v.string(), attempt: v.number(), idempotencyKey: v.string(), identity: v.string(),
+    byteSize: v.number(), checksum: v.string(), mimeType: v.string(), uploadUrl: v.string(), issuedAt: timestamp,
+  }).index('by_job_attempt', ['jobId', 'attempt']),
+
   manifests: defineTable({
     ...studioOwned, projectId: v.optional(v.id("projects")), productionId: v.id("productions"), timelineId: v.optional(v.id("timelines")), contractVersion: v.optional(v.number()), selectionScope: v.optional(v.string()), exportScope: v.optional(v.string()), selectionIds: v.optional(v.array(v.string())), versionNumber: v.number(), manifest: json, sourceHashes: v.array(v.string()),
     rendererVersion: v.optional(v.string()), templateVersions: v.optional(json), createdAt: timestamp,

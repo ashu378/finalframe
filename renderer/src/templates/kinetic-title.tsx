@@ -1,7 +1,9 @@
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { CSSProperties } from 'react';
+import { AUTHORED_COPY_POLICY } from './contract.js';
 
 export interface KineticTitleProps {
+  copyPolicy?: typeof AUTHORED_COPY_POLICY;
   eyebrow?: string;
   title: string;
   subtitle?: string;
@@ -16,7 +18,8 @@ const textStyle: CSSProperties = {
 };
 
 export function KineticTitle({
-  eyebrow = 'FINALFRAME',
+  copyPolicy,
+  eyebrow = copyPolicy === AUTHORED_COPY_POLICY ? '' : 'FINALFRAME',
   title,
   subtitle,
   accentColor = '#87a8ff',

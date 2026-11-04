@@ -16,10 +16,10 @@ const identity = { externalId: 'subject-one', subject: 'subject-one' };
 const auth = { ConvexAuthError: AccessError, ConvexAuthorizationError: AccessError };
 const authorization = load('convex/authorization.ts', { './studioMemberships': load('convex/studioMemberships.ts'), './auth': auth, './identity': { getIdentity: async () => identity, requireIdentity: async () => identity } });
 const rows = {
-  users: [{ _id: 'one', externalId: 'subject-one', authSubject: 'subject-one', status: 'active' }, { _id: 'two', externalId: 'subject-two', authSubject: 'subject-two', status: 'active' }],
+  users: [{ _id: 'one', externalId: 'subject-one', authSubject: 'subject-one', status: 'active', email: 'private-one@example.test' }, { _id: 'two', externalId: 'subject-two', authSubject: 'subject-two', status: 'active', displayName: 'Editor candidate' }, { _id: 'foreign', status: 'active' }],
   studios: [{ _id: 'studio', externalId: 'workspace', ownerUserId: 'one', ownerExternalId: 'subject-one' }],
-  members: [{ _id: 'studio-one', studioId: 'studio', userId: 'one', role: 'owner', status: 'active' }, { _id: 'studio-two', studioId: 'studio', userId: 'two', role: 'member', status: 'active' }],
-  studioMembers: [], projects: [{ _id: 'project', studioId: 'studio', studioExternalId: 'workspace', ownerUserId: 'one', createdByUserId: 'one', status: 'DRAFT' }],
+  members: [{ _id: 'studio-one', studioId: 'studio', userId: 'one', role: 'owner', status: 'active' }, { _id: 'studio-two', studioId: 'studio', userId: 'two', role: 'member', status: 'active' }, { _id: 'studio-foreign', studioId: 'unrelated', userId: 'foreign', role: 'member', status: 'active' }],
+  studioMembers: [], projects: [{ _id: 'project', externalId: 'fixture-project', name: 'Fixture project', studioId: 'studio', studioExternalId: 'workspace', ownerUserId: 'one', createdByUserId: 'one', status: 'DRAFT' }],
   projectMembers: [{ _id: 'project-one', projectId: 'project', userId: 'one', role: 'OWNER', status: 'ACTIVE' }, { _id: 'inactive-owner', projectId: 'project', userId: 'inactive', role: 'OWNER', status: 'SUSPENDED' }, { _id: 'foreign-owner', projectId: 'other-project', userId: 'foreign', role: 'OWNER', status: 'ACTIVE' }],
 };
 let writes = 0; const indexes = new Set();
@@ -27,10 +27,32 @@ const ctx = { db: {
   get: async id => Object.values(rows).flat().find(row => row._id === id) || null,
   patch: async (id, patch) => { writes++; Object.assign(await ctx.db.get(id), patch); },
   insert: async (table, value) => { writes++; const id = table + '-new'; rows[table].push({ _id: id, ...value }); return id; },
-  query: table => ({ withIndex: (index, select) => { indexes.add(index); const conditions = []; const q = { eq: (key, value) => { conditions.push([key, value]); return q; } }; select(q); const matches = () => rows[table].filter(row => conditions.every(([key, value]) => row[key] === value)); return { unique: async () => matches()[0] || null, take: async limit => { assert(limit <= 2); return matches().slice(0, limit); }, collect: async () => { throw new Error('Owner invariant must use its bounded role/status index'); } }; } }),
+  query: table => ({ withIndex: (index, select) => { indexes.add(index); const conditions = []; const q = { eq: (key, value) => { conditions.push([key, value]); return q; } }; select(q); const matches = () => rows[table].filter(row => conditions.every(([key, value]) => row[key] === value)); return { unique: async () => matches()[0] || null, take: async limit => { assert(limit <= 2); return matches().slice(0, limit); }, paginate: async ({ cursor, numItems, maximumRowsRead }) => { assert.equal(maximumRowsRead, 50); const start = Number(cursor ?? 0); const end = start + numItems; return { page: matches().slice(start, end), continueCursor: String(end), isDone: end >= matches().length }; }, collect: async () => { throw new Error('Project access queries must use bounded indexes'); } }; } }),
 } };
 const projects = load('convex/projects.ts', { './_generated/server': { query: value => value, mutation: value => value }, './authorization': authorization, './auth': auth, '../src/lib/project/library': load('src/lib/project/library.ts') });
 (async () => {
+  const roster = (scope, numItems = 20, cursor = null) => projects.listMembers.handler(ctx, { projectId: 'project', scope, paginationOpts: { numItems, cursor } });
+  assert.deepEqual(await projects.accessSettings.handler(ctx, { externalId: 'fixture-project' }), { projectId: 'project', name: 'Fixture project' });
+  assert.deepEqual((await roster('ASSIGNED')).page, [{ userId: 'one', name: 'Workspace member', role: 'OWNER', self: true, canAssign: true }]);
+  const first = await roster('AVAILABLE', 1);
+  assert.deepEqual(first.page, []); assert.equal(first.isDone, false);
+  assert.deepEqual((await roster('AVAILABLE', 1, first.continueCursor)).page, [{ userId: 'two', name: 'Editor candidate', role: null, self: false, canAssign: true }]);
+  await assert.rejects(roster('AVAILABLE', 26), /between 1 and 25/);
+  await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'foreign', role: 'VIEWER' }), /active member of this workspace/);
+  const suspended = rows.members[1]; suspended.status = 'removed';
+  assert.deepEqual((await roster('AVAILABLE')).page, []);
+  await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'two', role: 'VIEWER' }), /active member of this workspace/);
+  suspended.status = 'active';
+  identity.externalId = identity.subject = 'subject-two';
+  assert.equal(await projects.accessSettings.handler(ctx, { externalId: 'fixture-project' }), null);
+  await assert.rejects(roster('ASSIGNED'), error => error.code === 'PROJECT_ACCESS_DENIED');
+  identity.externalId = identity.subject = 'subject-one';
+  rows.projects[0].archivedAt = 1;
+  assert.equal(await projects.accessSettings.handler(ctx, { externalId: 'fixture-project' }), null);
+  await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'two', role: 'VIEWER' }), /Restore the project/);
+  delete rows.projects[0].archivedAt;
+  assert.equal(writes, 0);
+  console.log('PASS owner-only bounded roster projects only IDs/display names, filters availability, and denies unrelated or inactive workspace grants.');
   for (const role of ['EDITOR', 'VIEWER', 'REVIEWER']) await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role }), /retain at least one owner/);
   await assert.rejects(projects.removeMember.handler(ctx, { projectId: 'project', userId: 'one' }), /retain at least one owner/);
   assert.equal(writes, 0); assert(indexes.has('by_project_role_status'));
@@ -38,6 +60,8 @@ const projects = load('convex/projects.ts', { './_generated/server': { query: va
   await assert.rejects(projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role: 'VIEWER' }), /retain at least one owner/, 'migration fallback owner cannot bypass the invariant by inserting a lower role');
   assert.equal(writes, 0); rows.projectMembers.unshift(originalOwner);
   await projects.setMember.handler(ctx, { projectId: 'project', userId: 'two', role: 'OWNER' });
+  assert.deepEqual((await roster('AVAILABLE')).page, []);
+  assert.equal((await roster('ASSIGNED')).page.find(person => person.userId === 'two').role, 'OWNER');
   await projects.setMember.handler(ctx, { projectId: 'project', userId: 'one', role: 'VIEWER' });
   assert.equal(rows.projectMembers.find(row => row.userId === 'one').role, 'VIEWER');
   const afterHandoff = writes;

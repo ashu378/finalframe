@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
 import { REVIEW_MEDIA_RESOLVER_PATH, respondToReviewMediaResolver } from './reviewMediaContract';
+import { rendererUploadAuthorization } from './renderUploadAuthorizationHttp';
 import type {FunctionReference} from 'convex/server';
 
 const http = httpRouter();
@@ -34,6 +35,7 @@ async function sha256(rawBody: string) {
 }
 
 auth.addHttpRoutes(http);
+http.route({ path: '/renderer/upload-capability', method: 'POST', handler: rendererUploadAuthorization });
 
 http.route({
   path: REVIEW_MEDIA_RESOLVER_PATH,

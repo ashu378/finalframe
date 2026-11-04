@@ -132,6 +132,14 @@
       "acceptance": "PENDING"
     },
     {
+      "route": "/api/review-media/[kind]/[token]",
+      "kind": "api",
+      "area": "api",
+      "source": "src/app/api/review-media/[kind]/[token]/route.ts",
+      "testId": "route:api:/api/review-media/[kind]/[token]",
+      "acceptance": "PENDING"
+    },
+    {
       "route": "/auth/callback",
       "kind": "api",
       "area": "authentication",
@@ -233,6 +241,14 @@
       "area": "creator",
       "source": "src/app/(dashboard)/dashboard/projects/[id]/report/page.tsx",
       "testId": "route:page:/dashboard/projects/[id]/report",
+      "acceptance": "PENDING"
+    },
+    {
+      "route": "/dashboard/projects/[id]/settings",
+      "kind": "page",
+      "area": "creator",
+      "source": "src/app/(dashboard)/dashboard/projects/[id]/settings/page.tsx",
+      "testId": "route:page:/dashboard/projects/[id]/settings",
       "acceptance": "PENDING"
     },
     {

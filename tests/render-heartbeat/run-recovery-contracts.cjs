@@ -51,7 +51,7 @@ function fixture() {
 }
 function httpRoutes(state) {
   const routes = new Map();
-  load('convex/http.ts', { 'convex/server': { httpRouter: () => ({ route: route => routes.set(route.path, route.handler) }) }, './_generated/server': { httpAction: value => value }, './_generated/api': { internal }, './auth': { auth: { addHttpRoutes() {} } }, './renderHeartbeatPolicy': policy, './reviewMediaContract': load('convex/reviewMediaContract.ts') });
+  load('convex/http.ts', { 'convex/server': { httpRouter: () => ({ route: route => routes.set(route.path, route.handler) }) }, './_generated/server': { httpAction: value => value }, './_generated/api': { internal }, './auth': { auth: { addHttpRoutes() {} } }, './renderHeartbeatPolicy': policy, './reviewMediaContract': load('convex/reviewMediaContract.ts'), './renderUploadAuthorizationHttp': { rendererUploadAuthorization() { throw Error('unexpected upload renewal'); } } });
   state.ctx.runMutation = async (ref, args) => state.invoke(ref === 'renderHeartbeat.apply' ? state.heartbeats.apply : state.jobs.applyRendererCallback, args);
   return routes;
 }

@@ -1,5 +1,6 @@
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { v } from "convex/values";
 import {
   requireCurrentMember,
@@ -317,18 +318,55 @@ export const softDelete = mutation({
   handler: async (ctx, args) => softDeleteProject(ctx, args.projectId),
 });
 
-export const listMembers = query({
-  args: { projectId: v.id("projects") },
+export const accessSettings = query({
+  args: { externalId: v.string() },
+  returns: v.union(v.null(), v.object({ projectId: v.id('projects'), name: v.string() })),
   handler: async (ctx, args) => {
-    await requireProjectAccess(ctx, args.projectId);
-    const members = await ctx.db
-      .query("projectMembers")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .collect();
-    return await Promise.all(members.map(async (member) => ({
-      ...member,
-      user: await ctx.db.get(member.userId),
-    })));
+    const project = await ctx.db.query('projects').withIndex('by_external_id', q => q.eq('externalId', args.externalId)).unique();
+    if (!project || !activeProject(project)) return null;
+    try { await requireProjectRole(ctx, project._id, ['OWNER']); }
+    catch (error) {
+      if (error instanceof ConvexAuthorizationError && ['PROJECT_NOT_FOUND', 'PROJECT_ACCESS_DENIED', 'NOT_A_MEMBER'].includes(error.code)) return null;
+      throw error;
+    }
+    return { projectId: project._id, name: project.name };
+  },
+});
+
+const unavailableCollaborator = (user: Doc<'users'> | null) => !user || ['DISABLED', 'SUSPENDED', 'REMOVED', 'ARCHIVED', 'DELETED'].includes(String(user.status).toUpperCase());
+const collaboratorName = (user: Doc<'users'> | null) => user?.displayName || user?.name || 'Workspace member';
+const projectRoleValidator = v.union(v.literal('OWNER'), v.literal('EDITOR'), v.literal('REVIEWER'), v.literal('VIEWER'));
+
+export const listMembers = query({
+  args: { projectId: v.id('projects'), scope: v.union(v.literal('ASSIGNED'), v.literal('AVAILABLE')), paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(v.object({ userId: v.id('users'), name: v.string(), role: v.union(projectRoleValidator, v.null()), self: v.boolean(), canAssign: v.boolean() })),
+  handler: async (ctx, args) => {
+    const { project, user, studio } = await requireProjectRole(ctx, args.projectId, ['OWNER']);
+    if (!activeProject(project)) throw new Error('Restore the project before changing its access.');
+    if (args.paginationOpts.numItems < 1 || args.paginationOpts.numItems > 25) throw new Error('Request between 1 and 25 project collaborators.');
+    const options = { ...args.paginationOpts, maximumRowsRead: 50 };
+    if (args.scope === 'ASSIGNED') {
+      const result = await ctx.db.query('projectMembers').withIndex('by_project_status', q => q.eq('projectId', project._id).eq('status', 'ACTIVE')).paginate(options);
+      const page = await Promise.all(result.page.map(async member => {
+        const [account, workspaceMember] = await Promise.all([
+          ctx.db.get(member.userId),
+          ctx.db.query('members').withIndex('by_studio_user', q => q.eq('studioId', studio._id).eq('userId', member.userId)).unique(),
+        ]);
+        return { userId: member.userId, name: collaboratorName(account), role: member.role, self: user._id === member.userId, canAssign: workspaceMember?.status === 'active' && !unavailableCollaborator(account) };
+      }));
+      return { ...result, page };
+    }
+    const result = await ctx.db.query('members').withIndex('by_studio', q => q.eq('studioId', studio._id)).paginate(options);
+    const rows = await Promise.all(result.page.map(async member => {
+      if (member.status !== 'active' || member.userId === user._id) return null;
+      const [account, existing] = await Promise.all([
+        ctx.db.get(member.userId),
+        ctx.db.query('projectMembers').withIndex('by_project_user', q => q.eq('projectId', project._id).eq('userId', member.userId)).unique(),
+      ]);
+      if (unavailableCollaborator(account) || existing?.status === 'ACTIVE') return null;
+      return { userId: member.userId, name: collaboratorName(account), role: null, self: false, canAssign: true };
+    }));
+    return { ...result, page: rows.filter(row => row !== null) };
   },
 });
 
@@ -346,12 +384,15 @@ export const setMember = mutation({
   args: {
     projectId: v.id("projects"),
     userId: v.id("users"),
-    role: v.union(v.literal("OWNER"), v.literal("EDITOR"), v.literal("REVIEWER"), v.literal("VIEWER")),
+    role: projectRoleValidator,
   },
   handler: async (ctx, args) => {
     const actor = await requireProjectRole(ctx, args.projectId, ["OWNER"]);
+    if (!activeProject(actor.project)) throw new Error('Restore the project before granting access.');
     const user = await ctx.db.get(args.userId);
-    if (!user || user.status === "disabled") throw new ConvexAuthError("USER_NOT_FOUND", "User not found.");
+    if (!user || unavailableCollaborator(user)) throw new ConvexAuthError("USER_NOT_FOUND", "User not found.");
+    const workspaceMember = await ctx.db.query('members').withIndex('by_studio_user', q => q.eq('studioId', actor.studio._id).eq('userId', user._id)).unique();
+    if (workspaceMember?.status !== 'active') throw new ConvexAuthorizationError('NOT_A_MEMBER', 'Choose an active member of this workspace.');
     const existing = await ctx.db
       .query("projectMembers")
       .withIndex("by_project_user", (q) => q.eq("projectId", args.projectId).eq("userId", args.userId))

@@ -14,7 +14,7 @@ import { safeExtractionError } from './media/audio-extraction-contracts.js';
 import { assertValidManifest, validateManifest } from './manifest.js';
 import { outputFormatForManifest, outputFormatForMimeType } from './output-format.js';
 import { RenderRequestQueue } from './request-queue.js';
-import { assertTransferUrl, transferOrigins, uploadRenderFile } from './worker-transfer.js';
+import { assertTransferUrl, requestRenderUploadRenewal, transferOrigins, uploadRenderFile } from './worker-transfer.js';
 import { CompletionOutbox, FileRenderReceiptStore, type CompletionRequest } from './completion-outbox.js';
 import { LeaseHeartbeatMonitor } from './lease-heartbeat.js';
 import { HeavyMediaGate } from './media/heavy-media-gate.js';
@@ -76,7 +76,10 @@ const outbox = new CompletionOutbox({
   onPending: record => heartbeatMonitor.track(record),
   onDelivered: record => heartbeatMonitor.stop(record.key),
   onAttention: record => { heartbeatMonitor.stop(record.key); console.error('FinalFrame worker finishing exceeded its recovery window; retained artifact requires administrator attention.'); },
-  upload: (request, result) => uploadRenderFile(request.storageUploadUrl, result.outputPath, { allowedOrigins: storageOrigins, maxBytes: maxOutputBytes, timeoutMs: Number(process.env.RENDER_UPLOAD_TIMEOUT_MS ?? 120_000), mimeType: request.mimeType }),
+  upload: (request, result, checksum) => uploadRenderFile(request.storageUploadUrl, result.outputPath, { allowedOrigins: storageOrigins, maxBytes: maxOutputBytes, timeoutMs: Number(process.env.RENDER_UPLOAD_TIMEOUT_MS ?? 120_000), mimeType: request.mimeType, checksum }),
+  ...(process.env.RENDER_UPLOAD_RENEWAL_ENABLED === 'true' ? {
+    renewUpload: (original, request) => requestRenderUploadRenewal(original.callbackUrl, original.storageUploadUrl, request, { secret, callbackOrigins, storageOrigins }),
+  } : {}),
   callback: (request, exactBody) => sendRendererCallback(request.callbackUrl, exactBody, secret, { allowedOrigins: callbackOrigins, timeoutMs: Number(process.env.RENDER_CALLBACK_TIMEOUT_MS ?? 15_000) }),
 });
 
