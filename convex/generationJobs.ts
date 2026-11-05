@@ -1,4 +1,5 @@
 import { internal } from './_generated/api';
+import { proposedCast, requireCastReadiness } from './castReadiness';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -121,6 +122,7 @@ export const previewShotEstimate = mutation({
     }),
     handler: async (ctx, args) => {
         const intent = await resolveGenerationIntent(ctx, args);
+        await requireCastReadiness(ctx,intent.access.project._id,intent.version.snapshot,intent.version.planningContextSnapshot);
         const quote = await resolveCanonicalShotQuote(ctx, args, intent);
         const createdAt = Date.now();
         const expiresAt = createdAt + SHOT_ESTIMATE_TTL_MS;
@@ -226,9 +228,15 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     const operation = (typeof metadata.operation === 'string' ? metadata.operation : typeof metadata.videoTask === 'string' ? metadata.videoTask : 'GENERATE') as ShotOperationControls['operation'];
   const ratio=typeof metadata.aspectRatio==='string'?metadata.aspectRatio:getOutputPreset(production.outputPreset).aspectRatio;
   if(!OUTPUT_PRESETS.some(preset=>preset.aspectRatio===ratio))throw new Error('OUTPUT_ASPECT_RATIO_UNSUPPORTED');
+    // Map screenplay names to the exact approved selected identity. Cast roles
+    // alone are opaque when a reusable project character has a different name.
+    const cast = proposedCast(version.snapshot);
+    const assignedCast = cast.flatMap(item=>continuity.resourceBindings.filter(binding=>binding.role===item.key).map(binding=>({role:item.key,proposedName:item.name,resourceVersionId:binding.resourceVersionId})));
+    const castIds = new Set(continuity.resourceBindings.map(binding=>binding.resourceVersionId));
+    const promptContext = continuity.promptContext ? {...continuity.promptContext,...(cast.length?{castAssignments:assignedCast,noNamedCast:object(metadata.castCoverage).noNamedCast===true,resources:continuity.promptContext.resources.filter(resource=>resource.kind!=='CHARACTER'||castIds.has(String(resource.resourceVersionId)))}:{})} : null;
     const normalizedRequest: Record<string, unknown> = {
       ...requested, ...object(requested.constraints), ...recipeMarkers, referenceBindings: references.referenceBindings, editInstructions: references.editInstructions,
-      prompt: continuity.promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : references.prompt, duration: shot.durationSeconds,
+      prompt: promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(promptContext)}` : references.prompt, duration: shot.durationSeconds,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,voiceVersionIds:continuity.voiceVersionIds,
       resourceBindings:continuity.resourceBindings,dialogueSegments:continuity.dialogueSegments,
       durationSeconds: shot.durationSeconds, qualityTier, videoType,
@@ -340,6 +348,7 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
       if (existing.productionId !== production._id || existing.createdByUserId !== access.user._id || existing.requestHash !== requestHash) throw new Error('Idempotency key is already used for another request.');
       return publicJob(existing as unknown as Record<string, unknown>);
     }
+    await requireCastReadiness(ctx,access.project._id,version.snapshot,version.planningContextSnapshot);
     const quote=await resolveCanonicalShotQuote(ctx,args,intent,execution);
     const {normalizedRequest,estimatedProviderCostUsd,estimatedCost}=quote;
     const estimateId=execution?undefined:await requireStoredShotEstimate(ctx,args,intent,quote);
@@ -494,6 +503,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     if (!shot || !scene) throw new Error('Generation graph is unavailable.');
     await requireUnlockedGraph(ctx, project._id, shot, scene);
   }
+  if(job.operation !== 'PREPARATION'){const version=job.productionVersionId?await ctx.db.get(job.productionVersionId):null;if(!version)throw new Error('RECIPE_CAST_BINDING_CHANGED');await requireCastReadiness(ctx,project._id,version.snapshot,version.planningContextSnapshot);}
   const request = object(job.request);
   if (job.operation !== 'PREPARATION') await resolveGenerationContinuity(ctx, { projectId: project._id, productionId: job.productionId, snapshot: request.planningContextSnapshot, explicitResourceVersionIds: request.selectedResourceVersionIds, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [],shotMetadata:request,durationSeconds:Number(request.durationSeconds??request.duration) });
   if (request.targetVoiceId) {

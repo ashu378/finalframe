@@ -16,6 +16,9 @@ interface PlanPreviewProps {
     onRevise: (note: string) => void;
     onApprove: () => void;
     onBack: () => void;
+    referenceSetupHref?: string;
+    referenceBindingHref?: string;
+    castReferencesRequired?: boolean;
 }
 
 function outputLabel(outputPreset: OutputPreset): string {
@@ -56,7 +59,7 @@ function GuideList({ icon: Icon, title, items, empty }: { icon: typeof Users; ti
     );
 }
 
-export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSubmitting, onRevise, onApprove, onBack }: PlanPreviewProps) {
+export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSubmitting, onRevise, onApprove, onBack, referenceSetupHref, referenceBindingHref, castReferencesRequired = false }: PlanPreviewProps) {
     const [revisionOpen, setRevisionOpen] = useState(false);
     const [revisionNote, setRevisionNote] = useState('');
     const affordable = balance >= preview.estimate.totalCredits;
@@ -82,6 +85,8 @@ export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSub
                 </div>
                 {differentGenerationShape ? <p role="status" className="mt-4 text-sm leading-6 text-muted-foreground">A proposed generation shape differs from the requested final canvas. Review the framing assumptions before approval, then review fit or crop in the editor before export.</p> : null}
             </section>
+
+            {castReferencesRequired ? <section role="status" className="ff-card space-y-3 p-5"><h3 className="font-semibold">Approve and bind your character references first</h3><p className="text-sm text-muted-foreground">These cast descriptions propose identities; they are not approved project characters. Set up and approve the references, then bind them to the exact shots in a new draft. Your saved text plan is retained and binding makes no AI purchase.</p><div className="flex flex-wrap gap-4">{referenceSetupHref ? <a className="inline-flex min-h-11 items-center text-sm text-primary underline" href={referenceSetupHref}>Set up project characters and bible</a> : null}{referenceBindingHref ? <a className="inline-flex min-h-11 items-center text-sm text-primary underline" href={referenceBindingHref}>Bind approved references to this draft</a> : null}</div></section> : null}
 
             <nav className="overflow-x-auto rounded-2xl border border-border/70 bg-card p-2" aria-label="Plan sections">
                 <div className="flex min-w-max gap-1 text-sm font-semibold">
@@ -115,7 +120,7 @@ export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSub
 
             {revisionOpen && <section className="rounded-2xl border border-primary/45 bg-[#151b25] p-5 sm:p-6" aria-labelledby="revision-title"><div className="flex items-start gap-3"><Pencil className="mt-1 size-5 text-accent" aria-hidden="true" /><div className="min-w-0 flex-1"><h3 id="revision-title" className="font-semibold">What should change?</h3><p className="mt-1 text-sm leading-6 text-muted-foreground">The plan will be revised and saved as a new version. Nothing will be generated yet.</p><textarea value={revisionNote} onChange={(event) => setRevisionNote(event.target.value)} placeholder="Make the opening faster, give the character a stronger reaction…" className="mt-4 min-h-28 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm leading-6 outline-none focus:border-primary" autoFocus /><div className="mt-3 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" className="ff-button-quiet" onClick={() => setRevisionOpen(false)} disabled={isSubmitting}>Keep this plan</button><button type="button" className="ff-button-primary" onClick={submitRevision} disabled={isSubmitting || !revisionNote.trim()}>{isSubmitting ? 'Revising…' : 'Revise the plan'}</button></div></div></div></section>}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><button type="button" onClick={onBack} disabled={isSubmitting} className="ff-button-quiet min-h-12 border border-border"><Pencil className="size-4" aria-hidden="true" /> Change the brief</button><button type="button" onClick={() => setRevisionOpen((open) => !open)} disabled={isSubmitting} className="ff-button-quiet min-h-12"><Pencil className="size-4" aria-hidden="true" /> Ask for a revision</button><button type="button" onClick={onApprove} disabled={isSubmitting} aria-busy={isSubmitting} className={cn('ff-button-primary min-h-12 sm:min-w-64')}>{isSubmitting ? 'Saving approval…' : 'Approve this plan'}</button></div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><button type="button" onClick={onBack} disabled={isSubmitting} className="ff-button-quiet min-h-12 border border-border"><Pencil className="size-4" aria-hidden="true" /> Change the brief</button><button type="button" onClick={() => setRevisionOpen((open) => !open)} disabled={isSubmitting} className="ff-button-quiet min-h-12"><Pencil className="size-4" aria-hidden="true" /> Ask for a revision</button><button type="button" onClick={onApprove} disabled={isSubmitting || castReferencesRequired} aria-busy={isSubmitting} className={cn('ff-button-primary min-h-12 sm:min-w-64')}>{isSubmitting ? 'Saving approval…' : 'Approve this plan'}</button></div>
             <p className="text-center text-xs leading-5 text-muted-foreground">{qualityTier.toLowerCase()} quality · {outputLabel(outputPreset)} · Approval saves your plan only. Generation and payment happen later, after the next confirmation.</p>
         </div>
     );

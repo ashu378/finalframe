@@ -123,7 +123,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
     }
 
     if (plan) {
-        return <div className="space-y-4">{planError ? <p role="alert" className="rounded-xl border border-destructive/40 p-4 text-sm text-destructive">{planError}</p> : null}<PlanPreview preview={plan.planningPreview} balance={plan.balance} outputPreset={outputPreset} qualityTier={qualityTier} isSubmitting={isSubmitting} onBack={() => setPlan(null)} onRevise={(revision) => requestPlan({ existingProjectId: plan.projectId, inputAssetIds: plan.inputAssetIds, revision })} onApprove={handleApprove} /></div>;
+        return <div className="space-y-4">{planError ? <p role="alert" className="rounded-xl border border-destructive/40 p-4 text-sm text-destructive">{planError}</p> : null}<PlanPreview castReferencesRequired={Boolean(plan.plan.bible.characters?.length)} referenceSetupHref={`/dashboard/projects/${encodeURIComponent(plan.projectId)}/workspace/media?production=${encodeURIComponent(plan.productionId)}#guided-character-setup`} referenceBindingHref={`/dashboard/projects/${encodeURIComponent(plan.projectId)}/workspace/storyboard?production=${encodeURIComponent(plan.productionId)}#draft-cast-bindings`} preview={plan.planningPreview} balance={plan.balance} outputPreset={outputPreset} qualityTier={qualityTier} isSubmitting={isSubmitting} onBack={() => setPlan(null)} onRevise={(revision) => requestPlan({ existingProjectId: plan.projectId, inputAssetIds: plan.inputAssetIds, revision })} onApprove={handleApprove} /></div>;
     }
 
     return (

@@ -1,5 +1,7 @@
 'use client';
 
+import { DraftCastBindingPanel } from './draft-cast-binding-panel';
+
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
@@ -17,7 +19,7 @@ const operationLabels: Record<VideoOperation, string> = { GENERATE: 'Create foot
 const referenceRoleLabels: Record<ReferenceRole, string> = { SOURCE_PERFORMANCE: 'Source performance and camera', IDENTITY: 'Character identity', COSTUME: 'Outfit', OBJECT: 'Product or object', ENVIRONMENT: 'Environment', RECORDING: 'Voice or soundtrack recording' };
 
 export function ShotWorkspace({ data }: { data: WorkspaceControlData }) {
-    return <div className="space-y-6"><GenerationStatus productionId={data.productionId} canEdit={data.canEdit} /><header><h2 className="text-2xl font-semibold">Shots and takes</h2><p className="mt-2 text-sm text-muted-foreground">Bind the exact references and operation before approving the plan. Model availability and costs are checked again when a job is queued.</p></header>
+    return <div className="space-y-6"><DraftCastBindingPanel key={`${data.productionId}:${data.versionId ?? 'draft'}`} data={data} /><GenerationStatus productionId={data.productionId} canEdit={data.canEdit} /><header><h2 className="text-2xl font-semibold">Shots and takes</h2><p className="mt-2 text-sm text-muted-foreground">Bind the exact references and operation before approving the plan. Model availability and costs are checked again when a job is queued.</p></header>
         {data.versionState === 'APPROVED' ? <p role="status" className="rounded-xl border border-border bg-card p-4 text-sm">This plan is an immutable approved snapshot. Create a revised plan to change shot instructions or references. New takes preserve previous results.</p> : null}
         {!data.scenes.length ? <p className="ff-card p-6 text-sm text-muted-foreground">Create a draft plan to begin editing its scenes and shots.</p> : null}
         {data.scenes.map((scene) => <section key={scene.id} className="space-y-4" aria-label={scene.title}><div><h3 className="text-lg font-semibold">{scene.title}</h3><p className="text-sm text-muted-foreground">{scene.purpose}</p></div>{scene.shots.map((shot) => <ShotCard key={`${shot.id}:${data.versionState}`} data={data} shot={shot} />)}</section>)}

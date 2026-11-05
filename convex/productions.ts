@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
+import { requireCastReadiness, proposedCast, castPlanShots } from "./castReadiness";
+import { recipeHash } from "../src/lib/production/recipes/compiler";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
@@ -227,14 +229,13 @@ export async function draftSnapshot(ctx: ReadCtx, version: Doc<"productionVersio
   return { ...record(original), sequences: result };
 }
 
-export const createPlan = mutation({
-  args: {
+const createPlanArgs = {
     studioExternalId: v.string(), projectExternalId: v.string(), workflow: v.string(), inputMode: v.string(),
     durationSeconds: v.number(), language: v.string(), outputPreset: v.string(), input: v.any(), plan: v.any(),
     estimate: v.any(), idempotencyKey: v.optional(v.string()), productionId: v.optional(v.id("productions")),
-  },
-  returns: v.any(),
-  handler: async (ctx, args) => {
+  };
+const createPlanValidator = v.object(createPlanArgs);
+export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof createPlanValidator>, privateBinding?: { receiptCreatorUserId?: Id<"users"> }) {
     getOutputPreset(args.outputPreset);
     const member = await requireMember(ctx, args.studioExternalId);
     const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
@@ -243,6 +244,7 @@ export const createPlan = mutation({
     await validatePlanGraph(ctx, project._id, args.plan);
 
     const sourceInput = {...record(args.input)};
+    if (sourceInput.castBindingReview && !privateBinding) throw new Error("RECIPE_CAST_BINDING_CHANGED");
     let production = await selectProjectProduction(ctx, project, args.productionId);
     const requestedVideoType=planningVideoType(sourceInput,production?.projectType??project.projectType);
     if (production && production.studioExternalId !== member.studio.externalId) throw new Error("Project not found");
@@ -294,7 +296,7 @@ export const createPlan = mutation({
       : continuityContext;
     if (sourceInput.continuityContext && stableSerialize(sourceInput.continuityContext) !== stableSerialize(comparisonContext)) throw new Error("Continuity changed while the plan was being prepared. Refresh its references and create a revised plan.");
     let canonicalInput = continuityContext ? { ...sourceInput, continuityContext } : sourceInput;
-    const automaticReceipt=await automaticPlanningReceipt(ctx,project._id,sourceInput,access.user._id);
+    const automaticReceipt=await automaticPlanningReceipt(ctx,project._id,sourceInput,privateBinding?.receiptCreatorUserId ?? access.user._id);
     if(automaticReceipt){const planningVideoContract=await validateAutomaticVideoPlan(ctx,project,sourceInput,args.outputPreset,args.durationSeconds,args.plan,production._id,continuityContext);canonicalInput={...canonicalInput,planningVideoContract};}
     else {const {planningVideoContract:_untrusted,...manualInput}=canonicalInput;canonicalInput=manualInput;}
     for(const sequence of record(args.plan).sequences as Array<{scenes:Array<{shots:Record<string,unknown>[]}>}>){
@@ -334,8 +336,8 @@ export const createPlan = mutation({
     if (version) await materializeApprovedPlan(ctx, production, version, createdPlan);
     await ctx.db.patch(production._id, { currentPlanId: planId, status: "PLANNING", updatedAt: timestamp });
     return { productionId: production._id, planId, versionId: version?._id, estimate: args.estimate };
-  },
-});
+}
+export const createPlan = mutation({ args: createPlanArgs, returns: v.any(), handler: (ctx, args) => createCanonicalPlan(ctx, args) });
 
 export const approvePlan = mutation({
   args: { planId: v.id("directorPlans"), idempotencyKey: v.optional(v.string()) },
@@ -358,8 +360,9 @@ export const approvePlan = mutation({
     await materializeApprovedPlan(ctx, production, version, planRecord);
     const snapshot = await draftSnapshot(ctx, version, planRecord.plan);
     await validatePlanGraph(ctx, production.projectId, snapshot);
+    await requireCastReadiness(ctx, production.projectId, snapshot, version.planningContextSnapshot);
     const planningInput = record(planRecord.input);
-    if(await automaticPlanningReceipt(ctx,production.projectId,planningInput,planRecord.createdByUserId)){await validateAutomaticVideoPlan(ctx,access.project,planningInput,production.outputPreset,production.requestedDurationSeconds,snapshot,production._id,version.planningContextSnapshot);}
+    if(await automaticPlanningReceipt(ctx,production.projectId,planningInput,await castReceiptAuthor(ctx,planRecord))){await validateAutomaticVideoPlan(ctx,access.project,planningInput,production.outputPreset,production.requestedDurationSeconds,snapshot,production._id,version.planningContextSnapshot);}
     const bibleId = typeof planningInput.continuityBibleId === "string" ? ctx.db.normalizeId("continuityBibles", planningInput.continuityBibleId) : null;
     const currentContinuity = await resolvePlanningContinuity(ctx, production.projectId, production._id, bibleId ?? undefined,String(planningInput.prompt??planningInput.script??'').slice(0,256));
     if (fingerprint(currentContinuity) !== fingerprint(version.planningContextSnapshot ?? null)) throw new Error("Continuity changed. Create a new draft before approving this plan.");
@@ -430,5 +433,93 @@ export const listByProject = query({
     if (!project) throw new Error("Project not found.");
     await requireProjectAccess(ctx, project._id);
     return await ctx.db.query("productions").withIndex("by_project", (q) => q.eq("externalProjectId", project.externalId)).order("desc").paginate(args.paginationOpts);
+  },
+});
+
+
+/** Only a server-created binding audit can transfer the original text receipt
+ * into a draft authored by another authorized project editor. */
+async function castReceiptAuthor(ctx: ReadCtx, plan: PlanRecord) {
+  const review = record(record(plan.input).castBindingReview);
+  if (!Object.keys(review).length) return plan.createdByUserId;
+  const audit = await ctx.db.query('audit').withIndex('by_correlation', q => q.eq('correlationId', `cast-binding:${plan._id}`)).unique();
+  const proof = record(audit?.metadata);
+  if (!audit || audit.action !== 'PRODUCTION_CAST_BOUND' || audit.entityId !== plan._id || audit.actorUserId !== plan.createdByUserId || proof.requestHash !== review.requestHash || proof.sourcePlanId !== review.sourcePlanId || proof.receiptId !== (record(record(plan.input).planningReceipt).requestId ?? null)) throw new Error('RECIPE_CAST_BINDING_CHANGED');
+  return typeof proof.receiptCreatorUserId === 'string' ? proof.receiptCreatorUserId as Id<'users'> : plan.createdByUserId;
+}
+async function castDraftInfo(ctx: ReadCtx, productionId: Id<'productions'>) {
+  const production = await authorizedProduction(ctx, productionId);
+  if (!production.projectId || !production.currentPlanId) throw new Error('RECIPE_PROPOSAL_NEEDS_CURRENT_DRAFT');
+  const plan = await ctx.db.get(production.currentPlanId);
+  const version = await ctx.db.query('productionVersions').withIndex('by_source_plan', q => q.eq('sourcePlanId', production.currentPlanId!)).unique();
+  if (!plan || !version || plan.productionId !== productionId || version.productionId !== productionId) throw new Error('RECIPE_CAST_BINDING_CHANGED');
+  const snapshot = version.status === 'DRAFT' ? await draftSnapshot(ctx, version, plan.plan) : version.snapshot;
+  const shots = [];
+  const sequences = await ctx.db.query('sequences').withIndex('by_version', q => q.eq('productionVersionId', version._id)).take(61);
+  if (sequences.length > 60) throw new Error('RECIPE_GRAPH_LIMIT');
+  for (const sequence of sequences.filter(row=>!['DELETED','ARCHIVED'].includes(String(row.status))).sort((a,b)=>a.orderIndex-b.orderIndex)) {
+    const scenes = await ctx.db.query('scenes').withIndex('by_sequence', q=>q.eq('sequenceId',sequence._id)).take(61);
+    if (scenes.length > 60) throw new Error('RECIPE_GRAPH_LIMIT');
+    for (const scene of scenes.filter(row=>!['DELETED','ARCHIVED'].includes(String(row.status))).sort((a,b)=>a.orderIndex-b.orderIndex)) {
+      const rows = await ctx.db.query('shots').withIndex('by_scene',q=>q.eq('sceneId',scene._id)).take(201);
+      shots.push(...rows.filter(row=>!['DELETED','ARCHIVED'].includes(String(row.status))).sort((a,b)=>a.orderIndex-b.orderIndex));
+      if (shots.length > 200) throw new Error('RECIPE_GRAPH_LIMIT');
+    }
+  }
+  return { production, plan, version, snapshot, shots };
+}
+export const draftCastOptions = query({
+  args: { productionId: v.id('productions'), continuityBibleId: v.optional(v.id('continuityBibles')) }, returns: v.any(),
+  handler: async (ctx,args) => {
+    const production=await authorizedProduction(ctx,args.productionId);if(!production.currentPlanId)return null;
+    const scope = await castDraftInfo(ctx,args.productionId), projectId=scope.production.projectId!;
+    const access=await requireProjectAccess(ctx,projectId);
+    let ready=true;try{await requireCastReadiness(ctx,projectId,scope.snapshot,scope.version.planningContextSnapshot);}catch{ready=false;}
+    const characters=[];let selectedBibleAvailable=true;
+    if(args.continuityBibleId){try{
+      const context=await resolvePlanningContinuity(ctx,projectId,args.productionId,args.continuityBibleId,String(record(scope.plan.input).prompt??record(scope.plan.input).script??'').slice(0,256));
+      for(const raw of Array.isArray(record(context).resources)?record(context).resources as unknown[]:[]){const row=record(raw);if(row.kind==='CHARACTER')characters.push({id:String(row.resourceVersionId),name:String(row.name),assetCount:Array.isArray(row.assetIds)?row.assetIds.length:0});}
+    }catch{selectedBibleAvailable=false;}}
+    return { selectedBibleAvailable,projectId, planId:scope.plan._id,versionId:scope.version._id,versionState:scope.version.status,updatedAt:scope.version.updatedAt ?? scope.version.createdAt, snapshotHash:await recipeHash(scope.snapshot),cast:proposedCast(scope.snapshot),shots:scope.shots.map(shot=>({id:shot._id,title:shot.title})),characters,ready,canEdit:['OWNER','EDITOR'].includes(access.projectRole) };
+  },
+});
+export const rebindDraftContinuity = mutation({
+  args: { projectId:v.id('projects'),productionId:v.id('productions'),sourcePlanId:v.id('directorPlans'),sourceVersionId:v.id('productionVersions'),expectedUpdatedAt:v.number(),expectedSnapshotHash:v.string(),continuityBibleId:v.id('continuityBibles'),castAssignments:v.array(v.object({proposalKey:v.string(),characterVersionId:v.id('projectResourceVersions')})),shotAssignments:v.array(v.object({shotId:v.id('shots'),castKeys:v.array(v.string()),noNamedCast:v.boolean()})),idempotencyKey:v.string() }, returns:v.any(),
+  handler: async(ctx,args)=>{
+    const access=await requireProjectRole(ctx,args.projectId,['OWNER','EDITOR']);
+    const requestedProduction=await ctx.db.get(args.productionId);if(!requestedProduction||requestedProduction.projectId!==args.projectId)throw new Error('RECIPE_CAST_BINDING_CHANGED');
+    const requestHash=await recipeHash(args),key=`cast-rebind:${args.productionId}:${await recipeHash(args.idempotencyKey)}`;
+    const existing=await findPlanByKey(ctx,args.productionId,key);
+    if(existing){const review=record(record(existing.input).castBindingReview);if(review.requestHash!==requestHash)throw new Error('RECIPE_CAST_BINDING_CHANGED');await castReceiptAuthor(ctx,existing);const version=await ctx.db.query('productionVersions').withIndex('by_source_plan',q=>q.eq('sourcePlanId',existing._id)).unique();return{productionId:args.productionId,planId:existing._id,versionId:version!._id,replayed:true};}
+    const scope=await castDraftInfo(ctx,args.productionId);
+    if(scope.production.projectId!==args.projectId||scope.plan._id!==args.sourcePlanId||scope.version._id!==args.sourceVersionId||scope.version.status!=='DRAFT'||!['READY','DRAFT'].includes(scope.plan.status)||(scope.version.updatedAt ?? scope.version.createdAt)!==args.expectedUpdatedAt||await recipeHash(scope.snapshot)!==args.expectedSnapshotHash)throw new Error('RECIPE_CAST_REVISION_CONFLICT');
+    const cast=proposedCast(scope.snapshot),mapping=new Map(args.castAssignments.map(item=>[item.proposalKey,item.characterVersionId]));
+    if(!cast.length||mapping.size!==cast.length||args.castAssignments.length!==cast.length||cast.some(item=>!mapping.has(item.key)))throw new Error('RECIPE_CAST_REFERENCES_REQUIRED');
+    const selections=new Map(args.shotAssignments.map(item=>[String(item.shotId),item]));
+    if(selections.size!==scope.shots.length||args.shotAssignments.length!==scope.shots.length||scope.shots.some(shot=>!selections.has(String(shot._id))))throw new Error('RECIPE_CAST_REFERENCES_REQUIRED');
+    const context=await resolvePlanningContinuity(ctx,args.projectId,args.productionId,args.continuityBibleId,String(record(scope.plan.input).prompt??record(scope.plan.input).script??'').slice(0,256));
+    const snapshot=JSON.parse(JSON.stringify(scope.snapshot));const planned=castPlanShots(snapshot);
+    if(planned.length!==scope.shots.length)throw new Error('RECIPE_CAST_BINDING_CHANGED');
+    for(const[index,shot]of scope.shots.entries()){
+      const choice=selections.get(String(shot._id))!,target=planned[index],metadata={...record(target.metadata)};
+      if(new Set(choice.castKeys).size!==choice.castKeys.length||choice.noNamedCast!==(choice.castKeys.length===0)||choice.castKeys.some(key=>!mapping.has(key)))throw new Error('RECIPE_CAST_REFERENCES_REQUIRED');
+      const retained=(Array.isArray(metadata.resourceBindings)?metadata.resourceBindings:[]).map(record).filter(binding=>!/^cast_\d+$/.test(String(binding.role)));
+      const oldIds=new Set((Array.isArray(metadata.resourceBindings)?metadata.resourceBindings:[]).map(record).filter(binding=>/^cast_\d+$/.test(String(binding.role))).map(binding=>binding.resourceVersionId));
+      const bindings=choice.castKeys.map(key=>({role:key,resourceVersionId:mapping.get(key)!}));
+      const known=Array.isArray(record(context).resources)?record(context).resources as unknown[]:[];
+      const imageIds=bindings.flatMap(binding=>{const resource=known.map(record).find(row=>row.resourceVersionId===binding.resourceVersionId);return Array.isArray(resource?.assetIds)?resource.assetIds as string[]:[];});
+      metadata.resourceBindings=[...retained,...bindings];metadata.resourceVersionIds=[...new Set([...(Array.isArray(metadata.resourceVersionIds)?metadata.resourceVersionIds:[]).filter(id=>!oldIds.has(id)),...bindings.map(binding=>binding.resourceVersionId)])];metadata.castCoverage={version:1,castKeys:choice.castKeys,noNamedCast:choice.noNamedCast};
+      const former=new Set(Array.isArray(metadata.castReferenceAssetIds)?metadata.castReferenceAssetIds:[]);target.requiredAssetIds=[...new Set([...(target.requiredAssetIds??[]).filter((id:string)=>!former.has(id)),...imageIds])];metadata.castReferenceAssetIds=imageIds;target.metadata=metadata;
+      // Canonical controls live in metadata; remove stale duplicated top-level fields.
+      for(const field of ['resourceBindings','dialogueSegments','audioPolicy','aspectRatio'])if(target[field]!==undefined){if(field!=='resourceBindings'&&metadata[field]===undefined)metadata[field]=target[field];delete target[field];}
+    }
+    await requireCastReadiness(ctx,args.projectId,snapshot,context);
+    const input={...record(scope.plan.input)};const originalCreator=await castReceiptAuthor(ctx,scope.plan);
+    const receipt=await automaticPlanningReceipt(ctx,args.projectId,input,originalCreator);
+    const timestamp=now();input.continuityBibleId=args.continuityBibleId;input.continuityContext=context;input.castBindingReview={version:1,requestHash,sourcePlanId:scope.plan._id,sourceVersionId:scope.version._id,sourceSnapshotHash:args.expectedSnapshotHash,sourceBibleId:record(scope.plan.input).continuityBibleId??null,selectedBibleId:args.continuityBibleId,actorUserId:access.user._id,createdAt:timestamp};
+    const made=await createCanonicalPlan(ctx,{studioExternalId:access.project.studioExternalId,projectExternalId:access.project.externalId,productionId:args.productionId,workflow:scope.production.workflow,inputMode:scope.production.inputMode,durationSeconds:scope.production.requestedDurationSeconds,language:scope.production.language,outputPreset:scope.production.outputPreset,input,plan:snapshot,estimate:scope.plan.estimate,idempotencyKey:key},{receiptCreatorUserId:receipt?.createdByUserId??originalCreator});
+    await ctx.db.insert('audit',{studioExternalId:access.project.studioExternalId,studioId:access.project.studioId,actorUserId:access.user._id,action:'PRODUCTION_CAST_BOUND',entityType:'directorPlan',entityId:made.planId,correlationId:`cast-binding:${made.planId}`,metadata:{projectId:args.projectId,productionId:args.productionId,sourcePlanId:scope.plan._id,sourceVersionId:scope.version._id,requestHash,receiptId:record(input.planningReceipt).requestId??null,receiptCreatorUserId:receipt?.createdByUserId??null,castAssignments:args.castAssignments,shotAssignments:args.shotAssignments},createdAt:timestamp});
+    await ctx.db.patch(scope.plan._id,{status:'SUPERSEDED',updatedAt:timestamp});await ctx.db.patch(scope.version._id,{status:'SUPERSEDED',updatedAt:timestamp});
+    return{...made,replayed:false};
   },
 });

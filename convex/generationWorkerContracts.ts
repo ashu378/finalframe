@@ -47,6 +47,7 @@ export function safeGenerationError(code: string, preparation = false, active = 
     if (code === 'MISSING_API_KEY' || code === 'WORKER_DISABLED') return 'Media preparation is not configured yet.';
     return 'This preparation could not finish. Your project and existing media are safe.';
   }
+  if (['RECIPE_CAST_REFERENCES_REQUIRED','RECIPE_CAST_BINDING_CHANGED','RECIPE_CAST_RESOURCE_UNAVAILABLE'].includes(code)) return 'This character needs approved project references. Open character setup, bind the draft to those references, and review it before creating a new take.';
   if (code === 'MISSING_API_KEY' || code === 'WORKER_DISABLED') return 'Video generation is not configured yet.';
   if (code === 'PROVIDER_RATE_LIMIT') return 'The video provider is busy. FinalFrame will check again shortly.';
   if (code === 'PROVIDER_PAYMENT_REQUIRED') return 'Video generation is temporarily unavailable.';

@@ -32,6 +32,8 @@ function routingFailure(error: unknown): string {
 }
 
 function userSafeGenerationError(error: unknown): string {
+    const castCode=(error as {data?:{code?:string}})?.data?.code;
+    if(['RECIPE_CAST_REFERENCES_REQUIRED','RECIPE_CAST_RESOURCE_UNAVAILABLE','RECIPE_CAST_BINDING_CHANGED'].includes(castCode??''))return 'Approve project character references and a bible, then explicitly bind them to the draft shots before buying a new video take. Existing paid results remain retained.';
     if (error instanceof Error && /OUTPUT_PRESET_INVALID/.test(error.message)) return 'Choose a supported video format before reviewing generation costs.';
     if (error instanceof Error && /SHOT_ESTIMATE_(EXPIRED|CHANGED|REVIEW_REQUIRED)/.test(error.message)) return 'This estimate is no longer valid. Review a fresh estimate before making the take.';
     if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';

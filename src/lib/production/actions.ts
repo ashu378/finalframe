@@ -173,6 +173,7 @@ function planningFallbackEnabled(): boolean {
 function planningFailureMessage(error: unknown): string {
     if(error instanceof ShotDurationPlanningError)return error.message;
     const safe=(error as {data?:{code?:string;message?:string}})?.data;
+    if(safe?.code==='RECIPE_CAST_REFERENCES_REQUIRED'||safe?.code==='RECIPE_CAST_RESOURCE_UNAVAILABLE')return 'Approve project character references and a bible, then explicitly bind each proposed character to the draft shots before approval. A description alone does not establish a recurring identity.';
     if(safe?.code==='SHOT_NOT_SUPPORTED'&&safe.message==='Preserving source audio requires an explicit project video. Revise the shot source before approval.')return 'The proposed plan needs source audio, but no project video is bound. Check the selected continuity bible and source media. For original silent footage, deliberately select a matching or blank bible before requesting another plan. No executable plan was saved.';
     if(safe&&['NO_COMPATIBLE_DURATIONS','TOTAL_NOT_DECOMPOSABLE','PLAN_TOTAL_MISMATCH','SHOT_NOT_SUPPORTED','PLANNING_CHECK_EXPIRED'].includes(safe.code??'')&&typeof safe.message==='string')return safe.message;
     if (!(error instanceof AICapabilityError)) {

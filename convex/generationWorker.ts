@@ -123,8 +123,9 @@ export const run = internalAction({
       catch { throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' }); }
       await ctx.runMutation(jobs.succeed, { ...lease, assetId, technicalProbe });
     } catch (error) {
-      const details = error as { code?: string; status?: number; retryable?: boolean; details?: unknown };
-      const code = details.code || 'GENERATION_WORKER_ERROR';
+      const details = error as { code?: string; status?: number; retryable?: boolean; details?: unknown; data?: {code?:string} };
+      const castCode = ['RECIPE_CAST_REFERENCES_REQUIRED','RECIPE_CAST_RESOURCE_UNAVAILABLE','RECIPE_CAST_BINDING_CHANGED'].includes(details.data?.code ?? '') ? details.data!.code : undefined;
+      const code = details.code || castCode || 'GENERATION_WORKER_ERROR';
       const rejected = !submissionAttempted || (typeof details.status === 'number' && details.status >= 400 && details.status < 500 && details.status !== 408);
       const submissionDiagnostic = sanitizeSubmissionDiagnostic(object(details.details).submissionDiagnostic);
       await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: code !== 'MEDIA_VALIDATION_FAILED', ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {

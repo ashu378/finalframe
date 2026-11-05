@@ -1,3 +1,4 @@
+import { requireCastReadiness } from './castReadiness';
 import type { Doc, Id } from './_generated/dataModel';
 import {reusableRecipeJob} from './recipeReuse';
 import type { MutationCtx } from './_generated/server';
@@ -41,6 +42,7 @@ export async function assertResolvedRecipeNode(ctx: RecipeReadCtx, node: Doc<'re
 
 export async function assertRecipeAdmission(ctx: MutationCtx, execution: {nodeId:Id<'recipeRunNodes'>;leaseId:string}, cost:{model:string;providerCeilingUsd:number;credits:number}) {
   const scope=await recipeExecutionScope(ctx,execution);const {node,run}=scope;const resolved=await assertResolvedRecipeNode(ctx,node);const intent=recipeObject(recipeObject(run.canonicalContext).executionIntent);const fresh=Array.isArray(intent.regenerateNodeIds)&&intent.regenerateNodeIds.includes(node.nodeId);let reusable;try{reusable=await reusableRecipeJob(ctx,node,resolved.bindings);}catch(error){if(!(error instanceof Error)||error.message!=='RECIPE_REGENERATION_REVIEW_REQUIRED'||!fresh)throw error;}if(reusable&&(!fresh||reusable.job.status!=='COMPLETED'))throw new Error('RECIPE_REUSE_NOW_AVAILABLE');
+  if(node.operation==='GENERATION'){const version=await ctx.db.get(run.productionVersionId);if(!version)throw new Error('RECIPE_CAST_BINDING_CHANGED');await requireCastReadiness(ctx,run.projectId,version.snapshot,version.planningContextSnapshot);}
   const estimate=run.reviewedEstimateId?await ctx.db.get(run.reviewedEstimateId):null;const quote=recipeObject(recipeObject(estimate?.quotes)[node.nodeId]);const micros=Math.ceil(cost.providerCeilingUsd*1_000_000);
   if(!estimate||estimate.runId!==run._id||estimate.projectId!==run.projectId||!estimate.complete||run.reviewedEstimateHash!==estimate.quoteHash||!run.reviewedAt||Date.now()>estimate.expiresAt||!estimate.stageNodeIds.includes(node.nodeId)||quote.requestHash!==node.requestHash||quote.resolvedRequestHash!==node.resolvedRequestHash||quote.model!==cost.model||typeof quote.checkedAt!=='number'||Date.now()-quote.checkedAt>30000||quote.checkedAt>Date.now()+1000||!Number.isSafeInteger(micros)||micros<=0||!Number.isSafeInteger(cost.credits)||cost.credits<=0||micros>Number(quote.providerCeilingMicros)||cost.credits>Number(quote.creditCeiling))throw new Error('RECIPE_REVIEWED_ESTIMATE_REQUIRED');
   if(node.allocationMicros!==undefined||node.allocationCredits!==undefined||node.admissionHash)throw new Error('RECIPE_NODE_ALREADY_ALLOCATED');
