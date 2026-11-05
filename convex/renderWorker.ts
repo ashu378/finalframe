@@ -5,6 +5,7 @@ import { v } from 'convex/values';
 import { record, renderWorkerEnabled } from './renderWorkerContracts';
 import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
 import { graphicsWorkerSupports, readGraphicsHandshake } from './renderGraphicsHandshake';
+import { formatVariantRequirements } from '../renderer/src/output-variants';
 
 const jobs = (internal as unknown as { renderJobs: Record<string, FunctionReference<'mutation', 'internal', any, any>> }).renderJobs;
 
@@ -30,7 +31,7 @@ export const run = internalAction({
     if (!prepared) return null;
     const lease = { jobId: args.jobId, leaseId: prepared.leaseId, dispatchLeaseId: prepared.dispatchLeaseId };
     const graphicsCertificate = expectedGraphicsCertificate({ jobId: args.jobId, leaseId: prepared.leaseId, attempt: prepared.attempt, manifest: record(prepared.payload).manifest });
-    if (graphicsCertificate) {
+    if (graphicsCertificate || formatVariantRequirements(record(prepared.payload).manifest)) {
       try {
         const health = await fetch(new URL('/health', rendererUrl), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(5_000) });
         if (!health.ok) throw new Error('RENDER_GRAPHICS_CAPABILITY_UNAVAILABLE');
@@ -42,6 +43,8 @@ export const run = internalAction({
         await ctx.runMutation(jobs.recordDispatchFailure, { ...lease, errorCode: 'RENDER_GRAPHICS_CAPABILITY_UNAVAILABLE', retryable: true });
         return null;
       }
+    }
+    if (graphicsCertificate) {
       try {
         if (!await ctx.runMutation(jobs.recordGraphicsHandshakeUnknown, lease)) return null;
       } catch { return null; }

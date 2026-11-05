@@ -8,6 +8,17 @@ import { resolvePlanningContinuity } from "./continuityPlanning";
 import { selectProjectProduction } from "./projectProductions";
 import { paginationOptsValidator } from "convex/server";
 import { resolveGenerationContinuity } from "./generationContinuity";
+import {getOutputPreset} from '../renderer/src/output-presets';
+import {validateShotBindings} from './continuityContracts';
+
+function canonicalShotMetadata(shot:Record<string,unknown>){
+  const metadata={...record(shot.metadata)};
+  for(const field of ['resourceBindings','dialogueSegments'])if(shot[field]!==undefined){
+    if(metadata[field]!==undefined&&stableSerialize(metadata[field])!==stableSerialize(shot[field]))throw new Error('Shot continuity fields conflict with their metadata.');
+    metadata[field]=shot[field];
+  }
+  return metadata;
+}
 
 type ReadCtx = QueryCtx | MutationCtx;
 type PlanRecord = Doc<"directorPlans">;
@@ -187,7 +198,7 @@ async function materializeApprovedPlan(ctx: MutationCtx, production: Doc<"produc
           orderIndex: typeof shot.orderIndex === "number" ? shot.orderIndex : 0,
           camera: shot.camera ?? {},
           requiredAssetIds: Array.isArray(shot.requiredAssetIds) ? shot.requiredAssetIds.filter((id): id is string => typeof id === "string") : [],
-          metadata: record(shot.metadata),
+          metadata: canonicalShotMetadata(shot),
           status: graphStatus,
         });
       }
@@ -230,6 +241,7 @@ export const createPlan = mutation({
   },
   returns: v.any(),
   handler: async (ctx, args) => {
+    getOutputPreset(args.outputPreset);
     const member = await requireMember(ctx, args.studioExternalId);
     const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
     if (!project || project.studioExternalId !== member.studio.externalId) throw new Error("Project not found");
@@ -275,7 +287,7 @@ export const createPlan = mutation({
     const requestedBible = typeof sourceInput.continuityBibleId === "string" ? sourceInput.continuityBibleId : undefined;
     const bibleId = requestedBible ? ctx.db.normalizeId("continuityBibles", requestedBible) : undefined;
     if (requestedBible && !bibleId) throw new Error("Choose a valid approved project continuity bible.");
-    const continuityContext = await resolvePlanningContinuity(ctx, project._id, production._id, bibleId ?? undefined);
+    const continuityContext = await resolvePlanningContinuity(ctx, project._id, production._id, bibleId ?? undefined,String(sourceInput.prompt??sourceInput.script??'').slice(0,256));
     // Initial planning reads the bible before a production exists. Binding that
     // otherwise identical snapshot to its newly created production is expected,
     // not a continuity revision. Also accept an idempotent first-plan replay.
@@ -286,6 +298,9 @@ export const createPlan = mutation({
       : continuityContext;
     if (sourceInput.continuityContext && stableSerialize(sourceInput.continuityContext) !== stableSerialize(comparisonContext)) throw new Error("Continuity changed while the plan was being prepared. Refresh its references and create a revised plan.");
     const canonicalInput = continuityContext ? { ...sourceInput, continuityContext } : sourceInput;
+    for(const sequence of record(args.plan).sequences as Array<{scenes:Array<{shots:Record<string,unknown>[]}>}>){
+      for(const scene of sequence.scenes)for(const shot of scene.shots)await validateShotBindings(ctx,project._id,continuityContext,canonicalShotMetadata(shot),Number(shot.durationSeconds));
+    }
 
     const idempotencyKey = requireIdempotencyKey(args.idempotencyKey?.trim() || `canonical-plan:${args.projectExternalId}:${fingerprint({ input: canonicalInput, plan: args.plan, estimate: args.estimate })}`);
     const existingPlan = await findPlanByKey(ctx, production._id, idempotencyKey);
@@ -345,10 +360,10 @@ export const approvePlan = mutation({
     await validatePlanGraph(ctx, production.projectId, snapshot);
     const planningInput = record(planRecord.input);
     const bibleId = typeof planningInput.continuityBibleId === "string" ? ctx.db.normalizeId("continuityBibles", planningInput.continuityBibleId) : null;
-    const currentContinuity = await resolvePlanningContinuity(ctx, production.projectId, production._id, bibleId ?? undefined);
+    const currentContinuity = await resolvePlanningContinuity(ctx, production.projectId, production._id, bibleId ?? undefined,String(planningInput.prompt??planningInput.script??'').slice(0,256));
     if (fingerprint(currentContinuity) !== fingerprint(version.planningContextSnapshot ?? null)) throw new Error("Continuity changed. Create a new draft before approving this plan.");
     for (const sequence of record(snapshot).sequences as Array<{ scenes: Array<{ shots: Array<{ requiredAssetIds: string[]; metadata: unknown }> }> }>) {
-      for (const scene of sequence.scenes) for (const shot of scene.shots) await resolveGenerationContinuity(ctx, { projectId: production.projectId, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: record(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds });
+      for (const scene of sequence.scenes) for (const shot of scene.shots) await resolveGenerationContinuity(ctx, { projectId: production.projectId, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: record(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds,shotMetadata:shot.metadata,durationSeconds:Number(record(shot).durationSeconds) });
     }
     await ctx.db.patch(version._id, {
       status: "APPROVED",

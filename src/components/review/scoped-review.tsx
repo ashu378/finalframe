@@ -37,7 +37,7 @@ export function ScopedReview({ token, data }: { token: string; data: ReviewData 
     }
     return <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         <section className="space-y-5">
-            <video ref={player} controls preload="metadata" src={data.videoUrl ?? undefined} className="aspect-video w-full rounded-2xl border border-border bg-black" aria-label="Video under review" onTimeUpdate={event => setTimeSeconds(Math.min(data.durationSeconds, Math.round(event.currentTarget.currentTime * 10) / 10))} />
+            <video ref={player} controls preload="metadata" src={data.videoUrl ?? undefined} className="max-h-[80vh] w-full rounded-2xl border border-border bg-black object-contain" aria-label="Video under review" onTimeUpdate={event => setTimeSeconds(Math.min(data.durationSeconds, Math.round(event.currentTarget.currentTime * 10) / 10))} />
             <div className="rounded-2xl border border-border bg-card p-6"><h2 className="text-xl font-semibold">Timeline version {data.timelineVersionNumber}</h2><p className="mt-2 text-sm text-muted-foreground">Feedback and decisions apply to this exact export. New edits require a new review link.</p><p className="mt-3 text-sm">Status: {data.status.replaceAll('_', ' ').toLowerCase()}</p></div>
             <div className="flex flex-wrap gap-3"><Button disabled={pending || decided || !authorName.trim()} onClick={() => decide('APPROVED')}>Approve this version</Button><Button variant="secondary" disabled={pending || decided || !authorName.trim() || !body.trim()} onClick={() => decide('CHANGES_REQUESTED')}>Request changes</Button></div>
         </section>

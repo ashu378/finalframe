@@ -19,6 +19,8 @@ import {
 } from './types.js';
 import { parseGraphicsV2Render } from './templates/graphics-v2-contract.js';
 import { SUPPORTED_MOTION_TEMPLATE_IDS } from './templates/contract.js';
+import { getOutputPreset, OUTPUT_FPS } from './output-presets.js';
+import { FORMAT_VARIANT_VERSION, variantFraming } from './output-variants.js';
 
 export const RENDER_LIMITS = {
   maxWidth: 7680,
@@ -111,6 +113,7 @@ function validateItem(value: unknown, index: number, outputDuration: number, fps
   }
 
   if (value.kind === 'video' || value.kind === 'image') {
+    if (value.backgroundColor !== undefined && (typeof value.backgroundColor !== 'string' || !/^#[a-f0-9]{6}$/i.test(value.backgroundColor))) issues.push({path:`${path}.backgroundColor`,message:'must be a six-digit hexadecimal color'});
     if (!isSafeMediaSource(value.src)) issues.push({ path: `${path}.src`, message: 'must be a safe HTTP(S), file, or local source without control characters' });
     if (value.trimStartInFrames !== undefined && (!isFiniteInteger(value.trimStartInFrames) || value.trimStartInFrames < 0)) {
       issues.push({ path: `${path}.trimStartInFrames`, message: 'must be a non-negative integer' });
@@ -118,6 +121,8 @@ function validateItem(value: unknown, index: number, outputDuration: number, fps
     if (value.kind === 'video' && value.volume !== undefined && (typeof value.volume !== 'number' || value.volume < 0 || value.volume > 1)) {
       issues.push({ path: `${path}.volume`, message: 'must be between 0 and 1' });
     }
+    if (value.kind === 'video' && value.fit !== undefined && !['cover', 'contain'].includes(String(value.fit))) issues.push({path:`${path}.fit`,message:'must be cover or contain'});
+    if (value.kind === 'video' && value.position !== undefined && (typeof value.position !== 'string' || !/^\d+(?:\.\d+)?% \d+(?:\.\d+)?%$/.test(value.position) || value.position.split(' ').some(part=>Number.parseFloat(part)>100))) issues.push({path:`${path}.position`,message:'must be bounded percentage coordinates'});
     if (value.kind === 'image') {
       if (value.fit !== undefined && !['cover', 'contain', 'fill'].includes(value.fit as string)) issues.push({ path: `${path}.fit`, message: 'must be cover, contain, or fill' });
       if (value.position !== undefined && !isBoundedString(value.position, 128)) issues.push({ path: `${path}.position`, message: 'must be a bounded position string' });
@@ -354,9 +359,27 @@ export function validateManifest(input: unknown): ValidationResult {
   }
 
   const output = input.output;
+  if (isRecord(input.metadata) && input.metadata.formatVariant !== undefined) {
+    const variant=input.metadata.formatVariant;
+    try {
+      if(input.version!==5||!isRecord(variant)||variant.version!==FORMAT_VARIANT_VERSION||
+        !isBoundedString(variant.sourceTimelineId,256)||!isBoundedString(variant.rootTimelineId,256)||
+        !isFiniteInteger(variant.sourceVersionNumber)||variant.sourceVersionNumber<1||
+        !(variant.sourceUpdatedAt===null||typeof variant.sourceUpdatedAt==='number'&&Number.isFinite(variant.sourceUpdatedAt))) throw new Error('Invalid variant lineage');
+      variantFraming(variant);
+      const selected=getOutputPreset(variant.presetId);
+      if(!isRecord(output)||output.presetId!==selected.id)throw new Error('Invalid variant output');
+    }catch{issues.push({path:'$.metadata.formatVariant',message:'requires exact v5 format lineage, framing and output preset'});}
+  }
   if (!isRecord(output)) {
     issues.push({ path: '$.output', message: 'must be an object' });
   } else {
+    if (output.presetId !== undefined) {
+      try {
+        const preset=getOutputPreset(output.presetId);
+        if (input.version!==5 || preset.id!==output.presetId || preset.width!==output.width || preset.height!==output.height || !OUTPUT_FPS.includes(output.fps as typeof OUTPUT_FPS[number])) throw new Error('Invalid preset');
+      } catch { issues.push({path:'$.output.presetId',message:'must match an exact supported v5 output preset and frame rate'}); }
+    }
     if (!isFiniteInteger(output.width) || output.width < 1 || output.width > RENDER_LIMITS.maxWidth) issues.push({ path: '$.output.width', message: `must be an integer from 1 to ${RENDER_LIMITS.maxWidth}` });
     if (!isFiniteInteger(output.height) || output.height < 1 || output.height > RENDER_LIMITS.maxHeight) issues.push({ path: '$.output.height', message: `must be an integer from 1 to ${RENDER_LIMITS.maxHeight}` });
     if (!isFiniteInteger(output.fps) || output.fps < 1 || output.fps > RENDER_LIMITS.maxFps) issues.push({ path: '$.output.fps', message: `must be an integer from 1 to ${RENDER_LIMITS.maxFps}` });

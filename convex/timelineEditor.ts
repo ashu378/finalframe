@@ -14,6 +14,8 @@ import {resolveGraphicImage} from './graphicsAssets';
 import {graphicsV2Enabled,parseGraphicsV2Authoring} from './graphicsContracts';
 import { planBeatCuts } from './beatCutContracts';
 import { timelineMatchesCurrentVersion } from '../src/lib/production/timeline-lineage';
+import { getOutputPreset } from '../renderer/src/output-presets';
+import { FORMAT_VARIANT_VERSION, framingRenderProps, variantFraming, variantGraphic } from '../renderer/src/output-variants';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -63,6 +65,7 @@ const editKind = v.union(
   v.literal("updateCaptions"),
   v.literal("adjustAudio"),
   v.literal("addTransition"),
+  v.literal('adjustFraming'),
 );
 
 function record(value: unknown): JsonRecord {
@@ -331,6 +334,13 @@ function applyEdit(state: TimelineState, kind: string, rawInput: unknown): Timel
 
   if (!clipId) throw new Error("A clip ID is required for this edit.");
   const { clip } = findClip(state, clipId);
+
+  if (kind === 'adjustFraming') {
+    if (process.env.FINALFRAME_FORMAT_VARIANTS_ENABLED !== 'true' || !finishingV5Enabled()) throw new Error('Format editing is currently disabled.');
+    if (!['VIDEO', 'IMAGE'].includes(clip.kind)) throw new Error('Choose a video or image to reframe.');
+    clip.metadata = { ...clip.metadata, renderItem: { ...record(clip.metadata.renderItem), ...framingRenderProps(variantFraming(input)) } };
+    return state;
+  }
 
   if (kind === "replace") {
     clip.assetId = stringValue(input.assetId, "Replacement asset ID");
@@ -713,6 +723,57 @@ export const duplicate = mutation({
   },
 });
 
+export type FormatVariantInput = {
+  timelineId: Id<'timelines'>; presetId: string; expectedVersionNumber: number; expectedUpdatedAt: number | null;
+  idempotencyKey: string; fit?: 'contain' | 'cover'; focalPoint?: { x: number; y: number }; backgroundColor?: string;
+};
+
+export async function createTimelineFormatVariant(ctx: MutationCtx, args: FormatVariantInput) {
+  if (process.env.FINALFRAME_FORMAT_VARIANTS_ENABLED !== 'true' || !finishingV5Enabled()) throw new Error('Format variants are currently disabled.');
+  const preset = getOutputPreset(args.presetId);
+  const framing = variantFraming(args);
+  const key = idempotencyKey(args.idempotencyKey);
+  const { timeline, member, production, resourceState } = await getTimelineForMember(ctx, args.timelineId);
+  const project=await ctx.db.get(production.projectId!);
+  if(!project||project.deletedAt||project.archivedAt||['ARCHIVED','DELETED'].includes(project.status??''))throw new Error('Restore this project before creating a format variant.');
+  const input = { sourceTimelineId: timeline._id, sourceVersionNumber: args.expectedVersionNumber, sourceUpdatedAt: args.expectedUpdatedAt, presetId: preset.id, ...framing };
+  const previous = await findOperationByKey(ctx, key);
+  if (previous) {
+    const old = operationInput(previous);
+    const focal = record(old.focalPoint);
+    if (previous.kind !== 'CREATE_FORMAT_VARIANT' || previous.actorUserId !== member.user._id || previous.productionId !== production._id ||
+        old.sourceTimelineId !== input.sourceTimelineId || old.sourceVersionNumber !== input.sourceVersionNumber || old.sourceUpdatedAt !== input.sourceUpdatedAt ||
+        old.presetId !== input.presetId || old.fit !== input.fit || old.backgroundColor !== input.backgroundColor ||
+        focal.x !== input.focalPoint.x || focal.y !== input.focalPoint.y) throw new Error('This format request belongs to another edit or user.');
+    return { timelineId: previous.outputResourceIds[0] as Id<'timelines'>, operationId: previous._id, replayed: true };
+  }
+  await requireCurrentTimeline(ctx, timeline, production);
+  if (!['APPROVED', 'LOCKED'].includes(resourceState.currentState) || !['DRAFT', 'APPROVED'].includes(timeline.status)) throw new Error('Approve the source edit before creating another format.');
+  if (timeline.versionNumber !== args.expectedVersionNumber || (timeline.updatedAt ?? null) !== args.expectedUpdatedAt) throw new Error('The source edit changed. Refresh its version.');
+  const state = await getTimelineState(ctx, timeline);
+  const fps = finishingFps(state.metadata);
+  for (const track of state.tracks) for (const clip of track.clips) {
+    if(clip.assetId&&['VIDEO','IMAGE','AUDIO'].includes(clip.kind))await replacementAsset(ctx,production.projectId!,member.studio.externalId,clip,clip.assetId);
+    if (['VIDEO', 'IMAGE'].includes(clip.kind)) clip.metadata = { ...clip.metadata, renderItem: { ...record(clip.metadata.renderItem), ...framingRenderProps(framing) } };
+    if (clip.kind === 'GRAPHIC') {
+      if (!graphicsV2Enabled()) throw new Error('Responsive graphics are required to adapt this edit.');
+      if(clip.assetId)await resolveGraphicImage(ctx,{assetId:clip.assetId,projectId:production.projectId!,studioExternalId:member.studio.externalId});
+      const spec = variantGraphic(String(clip.metadata.motionTemplateId ?? clip.metadata.templateId ?? 'kinetic-title'), record(clip.metadata.templateProps ?? clip.metadata.props), Math.round(clip.durationSeconds * fps), fps, clip.assetId);
+      clip.metadata = { ...clip.metadata, motionTemplateId: spec.templateId, templateProps: spec.props, graphicAssetRole: spec.assetRole ?? null };
+    }
+  }
+  const priorVariant = record(state.metadata.formatVariant);
+  delete state.metadata.lockState;
+  state.metadata = { ...state.metadata, approvalStatus: 'DRAFT', outputPresetId: preset.id,
+    authoredOutput: { width: preset.width, height: preset.height },
+    ...(state.metadata.importedOutput ? { importedOutput: { ...record(state.metadata.importedOutput), width: preset.width, height: preset.height, presetId: preset.id } } : {}),
+    formatVariant: { version: FORMAT_VARIANT_VERSION, ...input, rootTimelineId: priorVariant.rootTimelineId ?? timeline._id } };
+  const draft = await persistDraft(ctx, timeline, state, member, timeline._id, production.projectId!, { preserveTiming: true });
+  await ctx.db.patch(draft.timelineId, { outputPreset: preset.id, durationSeconds: timeline.durationSeconds });
+  const operationId = await insertOperation(ctx, member, timeline, 'CREATE_FORMAT_VARIANT', key, input, [draft.timelineId, ...draft.createdTrackIds, ...draft.createdClipIds]);
+  return { timelineId: draft.timelineId, operationId, replayed: false };
+}
+
 export const replacementAssets = query({
   args: { timelineId: v.id('timelines'), clipId: v.string(), paginationOpts: paginationOptsValidator },
   returns: v.object({ page: v.array(v.object({ id: v.id('assets'), name: v.string(), mimeType: v.string() })), continueCursor: v.string(), isDone: v.boolean() }),
@@ -730,6 +791,20 @@ export const replacementAssets = query({
       } catch { /* Pagination advances even when a page has no eligible media. */ }
     }
     return { page, continueCursor: result.continueCursor, isDone: result.isDone };
+  },
+});
+
+export const formatPreview = query({
+  args:{timelineId:v.id('timelines'),clipId:v.string()},returns:v.any(),handler:async(ctx,args)=>{
+    const {timeline,production,member}=await getTimelineForMember(ctx,args.timelineId);
+    const {clip}=findClip(await getTimelineState(ctx,timeline),args.clipId);
+    if(!clip.assetId||!['IMAGE','VIDEO'].includes(clip.kind))return null;
+    const asset=await replacementAsset(ctx,production.projectId!,member.studio.externalId,clip,clip.assetId);
+    const url=await ctx.storage.getUrl(asset.storageId!);
+    const probe=clip.kind==='IMAGE'
+      ? await ctx.db.query('verifiedImageProbes').withIndex('by_asset',q=>q.eq('assetId',asset._id)).unique()
+      : await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',asset._id)).unique();
+    return {url,kind:clip.kind,sourceWidth:probe?.width??null,sourceHeight:probe?.height??null};
   },
 });
 
@@ -792,7 +867,7 @@ export const undo = mutation({
     await requireCurrentTimeline(ctx, timeline, production);
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
-    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
+    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADJUSTFRAMING", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
     if (!original) throw new Error("There is no completed edit to undo for this timeline.");
     const sourceTimelineId = optionalString(operationInput(original).sourceTimelineId, "Source timeline ID");
     if (!sourceTimelineId) throw new Error("The previous edit does not contain a recoverable source version.");

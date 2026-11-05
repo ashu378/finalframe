@@ -147,14 +147,15 @@ async function assertProjectAssetReferences(ctx: ReadCtx, projectId: Id<"project
   }
 }
 
-async function validateResourceBindings(ctx: MutationCtx, production: Doc<"productions">, versionId: Id<"productionVersions">, metadata: unknown, referenceAssetIds: string[]) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || !("resourceVersionIds" in metadata)) return;
+async function validateResourceBindings(ctx: MutationCtx, production: Doc<"productions">, versionId: Id<"productionVersions">, metadata: unknown, referenceAssetIds: string[], durationSeconds: number) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return;
+  if (!["resourceVersionIds", "resourceBindings", "dialogueSegments"].some((key) => key in metadata)) return;
   const version = await ctx.db.get(versionId);
   await resolveGenerationContinuity(ctx, {
     projectId: production.projectId!, productionId: production._id,
     snapshot: version?.planningContextSnapshot,
     explicitResourceVersionIds: (metadata as Record<string, unknown>).resourceVersionIds,
-    referenceAssetIds,
+    referenceAssetIds, shotMetadata: metadata, durationSeconds,
   });
 }
 
@@ -542,7 +543,7 @@ export const createShot = mutation({
     const title = text(args.title, "Shot title", 200, true);
     const prompt = text(args.prompt, "Shot prompt", 20_000, true);
     await assertProjectAssetReferences(ctx, production.projectId!, args.requiredAssetIds);
-    await validateResourceBindings(ctx, production, version._id, args.metadata, args.requiredAssetIds ?? []);
+    await validateResourceBindings(ctx, production, version._id, args.metadata, args.requiredAssetIds ?? [], duration(args.durationSeconds));
     const existing = active(await ctx.db.query("shots").withIndex("by_scene", (q) => q.eq("sceneId", scene._id)).collect());
     const shotId = await ctx.db.insert("shots", {
       studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: production.projectId,
@@ -556,14 +557,20 @@ export const createShot = mutation({
   },
 });
 
+function stableShotMetadata(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key] ?? null])) : item);
+}
+
 export const updateShot = mutation({
   args: {
     shotId: v.id("shots"), title: v.optional(v.string()), prompt: v.optional(v.string()), durationSeconds: v.optional(v.number()),
     orderIndex: v.optional(v.number()), camera: v.optional(v.any()), requiredAssetIds: v.optional(v.array(v.string())),
-    referencePackIds: v.optional(v.array(v.id("referencePacks"))), metadata: v.optional(v.any()),
+    referencePackIds: v.optional(v.array(v.id("referencePacks"))), metadata: v.optional(v.any()), expectedMetadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const { production, shot } = await shotFor(ctx, args.shotId);
+    if (args.expectedMetadata !== undefined && stableShotMetadata(args.expectedMetadata) !== stableShotMetadata(shot.metadata)) throw new Error("SHOT_METADATA_CHANGED");
     await editableVersion(ctx, production._id, shot.productionVersionId!);
     await resourceEditable(ctx, production.projectId!, production._id, "shot", shot._id.toString());
     const patch: Record<string, unknown> = {};
@@ -578,10 +585,10 @@ export const updateShot = mutation({
       patch.requiredAssetIds = requiredAssetIds;
     }
     if (args.referencePackIds !== undefined) patch.referencePackIds = args.referencePackIds;
-    if (args.metadata !== undefined) {
-      await validateResourceBindings(ctx, production, shot.productionVersionId!, args.metadata, args.requiredAssetIds ?? shot.requiredAssetIds ?? []);
-      patch.metadata = args.metadata;
+    if (args.metadata !== undefined || args.durationSeconds !== undefined || args.requiredAssetIds !== undefined) {
+      await validateResourceBindings(ctx, production, shot.productionVersionId!, args.metadata ?? shot.metadata, args.requiredAssetIds ?? shot.requiredAssetIds ?? [], duration(args.durationSeconds ?? shot.durationSeconds));
     }
+    if (args.metadata !== undefined) patch.metadata = args.metadata;
     if (Object.keys(patch).length === 0) return shot;
     await ctx.db.patch(shot._id, patch as never);
     return await ctx.db.get(shot._id);

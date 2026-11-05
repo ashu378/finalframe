@@ -11,16 +11,19 @@ import {GraphicDesigner,emptyGraphicDraft} from './graphic-designer';
 import {parseGraphicsV2Authoring} from '../../../renderer/src/templates/graphics-v2-contract';
 import { SoundtrackEditor, type SoundtrackEntry } from './soundtrack-editor';
 import type { CompositionClip, WorkspaceControlData } from '@/lib/production/workspace-controls';
+import { OUTPUT_PRESETS, OUTPUT_FPS, getOutputPreset, normalizeOutputPresetId } from '../../../renderer/src/output-presets';
 
 type ClipEntry = { id: string; label: string; durationSeconds: number; clip: CompositionClip };
 const approved = (state: string) => state === 'APPROVED' || state === 'LOCKED';
 const outputPresets = [
     { id: 'small-landscape', label: 'Small landscape · 320 × 180', width: 320, height: 180 },
     { id: 'landscape-720', label: 'Landscape · 1280 × 720', width: 1280, height: 720 },
-    { id: 'landscape-1080', label: 'Landscape · 1920 × 1080', width: 1920, height: 1080 },
-    { id: 'square', label: 'Square · 1080 × 1080', width: 1080, height: 1080 },
-    { id: 'portrait', label: 'Portrait · 1080 × 1920', width: 1080, height: 1920 },
-] as const;
+    ...OUTPUT_PRESETS.map(preset=>({...preset,label:`${preset.label} · ${preset.aspectRatio} · ${preset.width} × ${preset.height}`})),
+];
+function timelineFormat(timeline: WorkspaceControlData['timelines'][number]) {
+    const id=normalizeOutputPresetId(timeline.outputPreset);
+    return `${id?getOutputPreset(id).label:'Custom format'}${timeline.width&&timeline.height?` · ${timeline.width}×${timeline.height}`:''}`;
+}
 
 export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     const router = useRouter(); const [pending, start] = useTransition(); const [error, setError] = useState(''); const [message, setMessage] = useState('');
@@ -73,12 +76,12 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
             <fieldset className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" disabled={pending}>
                 <legend className="px-1 text-sm font-semibold">Output settings</legend>
                 <label className="text-sm font-medium">Video size<select aria-label="Video size" className={controlInput} value={outputPreset} onChange={(event) => setOutputPreset(event.target.value)}><option value="">Project format</option>{outputPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
-                <label className="text-sm font-medium">Frames per second<select aria-label="Frames per second" className={controlInput} value={outputFps} onChange={(event) => setOutputFps(Number(event.target.value) as typeof outputFps)}>{[24, 25, 30, 50, 60].map((fps) => <option key={fps} value={fps}>{fps} fps</option>)}</select></label>
+                <label className="text-sm font-medium">Frames per second<select aria-label="Frames per second" className={controlInput} value={outputFps} onChange={(event) => setOutputFps(Number(event.target.value) as typeof outputFps)}>{OUTPUT_FPS.map((fps) => <option key={fps} value={fps}>{fps} fps</option>)}</select></label>
                 <p className="text-sm text-muted-foreground sm:col-span-2">A smaller output uses less rendering time and storage. These settings belong to this new timeline version.</p>
             </fieldset>
             <Button disabled={pending || !entries.length || total > 60} onClick={() => { const audioTracks = soundtrack.map(entry => entry.track); try { validateCompositionAudioTracks(audioTracks, total); } catch (failure) { setError(failure instanceof Error ? failure.message : "Check the audio timing."); return; } const selectedOutput = outputPresets.find((preset) => preset.id === outputPreset); run(() => createWorkspaceTimeline({ projectExternalId: data.projectExternalId, productionId: data.productionId, versionId: data.versionId!, requestId: crypto.randomUUID(), clips: entries.map((entry) => entry.clip), audioTracks, fps: outputFps, ...(selectedOutput ? { outputSettings: { width: selectedOutput.width, height: selectedOutput.height } } : {}) }), "Draft timeline saved. Review its media and approve the exact version below."); }}>Create draft timeline</Button>
         </div>}
-        <section className="space-y-3" aria-label="Timeline versions"><h3 className="font-semibold">Saved timeline versions</h3>{data.timelines.map((timeline) => <article key={timeline.id} className="space-y-3 rounded-xl border border-border p-4"><h4 className="font-medium">Timeline version {timeline.versionNumber}</h4>{!timeline.matchesProductionVersion ? <p className="text-xs text-muted-foreground">Historical or unbound timeline · read-only. Its media and approval history are retained. State: {timeline.state.toLowerCase().replaceAll('_', ' ')}.</p> : <ApprovalControls data={data} resourceType="timeline" resourceId={timeline.id} state={timeline.state} />}{data.canEdit && timeline.matchesProductionVersion && approved(timeline.state) ? <Button variant="secondary" size="sm" disabled={pending} onClick={() => run(() => buildWorkspaceTimelineManifest({ projectExternalId: data.projectExternalId, productionId: data.productionId, timelineId: timeline.id }), 'Canonical assembly manifest saved. Rendering is a separate asynchronous operation.')}>Build canonical manifest</Button> : null}</article>)}</section>
+        <section className="space-y-3" aria-label="Timeline versions"><h3 className="font-semibold">Saved timeline versions</h3>{data.timelines.map((timeline) => <article key={timeline.id} className="space-y-3 rounded-xl border border-border p-4"><h4 className="font-medium">Timeline version {timeline.versionNumber} · {timelineFormat(timeline)}</h4>{!timeline.matchesProductionVersion ? <p className="text-xs text-muted-foreground">Historical or unbound timeline · read-only. Its media and approval history are retained. State: {timeline.state.toLowerCase().replaceAll('_', ' ')}.</p> : <ApprovalControls data={data} resourceType="timeline" resourceId={timeline.id} state={timeline.state} />}{data.canEdit && timeline.matchesProductionVersion && approved(timeline.state) ? <Button variant="secondary" size="sm" disabled={pending} onClick={() => run(() => buildWorkspaceTimelineManifest({ projectExternalId: data.projectExternalId, productionId: data.productionId, timelineId: timeline.id }), 'Canonical assembly manifest saved. Rendering is a separate asynchronous operation.')}>Build canonical manifest</Button> : null}</article>)}</section>
         {message ? <p role="status" className="text-sm text-emerald-300">{message}</p> : null}{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </section>;
 }

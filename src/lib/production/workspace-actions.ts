@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { api } from '../../../convex/_generated/api';
 import type { Doc, Id } from '../../../convex/_generated/dataModel';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
-import { validateShotOperationControls, videoTaskForOperation, type ContinuationSourceView, type ShotOperationControls } from './workspace-controls';
+import { REFERENCE_ROLES, resolveShotReferencePrompt, validateShotOperationControls, videoTaskForOperation, type ContinuationSourceView, type ShotControlView, type ShotOperationControls, type ReferenceAssetBinding } from './workspace-controls';
 import type { ProjectResourceKind, ResourceVersionView, StorySnapshotView, WorkspaceControlData, WorkspaceResourceState } from './workspace-controls';
 import { validateAuthoringOutputSettings } from '../../../renderer/src/output-settings';
 import { timelineMatchesCurrentVersion } from './timeline-lineage';
@@ -15,6 +15,7 @@ function object(value: unknown): Record<string, unknown> {
 
 function safeError(error: unknown) {
     const message = error instanceof Error ? error.message : '';
+    if (/SHOT_METADATA_CHANGED/.test(message)) return 'Another change was saved to this shot. Refresh the page, review its current settings and try again.';
     if (/OUTPUT_SETTINGS_INVALID/.test(message)) return 'Choose a supported output size with even dimensions, up to 1080p.';
     if (/immutable|new draft version/i.test(message)) return 'This production version is immutable. Create a revised plan before changing its shots.';
     if (/resource is.*locked|only a locked|unlocking/i.test(message)) return 'This resource is locked. An owner must unlock it with a reason before requesting changes.';
@@ -38,7 +39,7 @@ type RawResourceVersion = Omit<ResourceVersionView, 'id'> & { resourceVersionId:
 function resourceView(row: RawResourceVersion): ResourceVersionView {
     return { id: row.resourceVersionId, resourceId: row.resourceId, kind: row.kind, name: row.name,
         versionNumber: row.versionNumber, latestVersionNumber: row.latestVersionNumber, profile: object(row.profile),
-        assetIds: row.assetIds, voiceId: row.voiceId, state: row.state };
+        assetIds: row.assetIds, voiceId: row.voiceId, voiceVersionId: row.voiceVersionId, state: row.state };
 }
 
 /** Offer only canonical, human-approved output from this production. Provider
@@ -90,14 +91,17 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
             const versionId = String(binding.resourceVersionId || '');
             const current = await client.query(api.approvals.get, { projectId: project._id, resourceType: 'projectResourceVersion', resourceId: versionId });
             const resource = current.resource as Doc<'projectResourceVersions'>;
-            return { id: versionId, resourceId: String(binding.resourceId), name: String(binding.name || ''), kind: binding.kind as ProjectResourceKind, versionNumber: resource.versionNumber, state: current.currentState };
+            return { id: versionId, resourceId: String(binding.resourceId), name: String(binding.name || ''), kind: binding.kind as ProjectResourceKind, versionNumber: resource.versionNumber, state: current.currentState, voiceVersionId: resource.voiceVersionId?.toString() };
         })),
         Promise.all(timelines.filter(timeline => timeline.productionId === workspace.production!._id && timeline.studioExternalId === project.studioExternalId && (!timeline.projectId || timeline.projectId === project._id)).slice(0, 50).map(async (timeline) => {
             const [state, manifest] = await Promise.all([
                 client.query(api.approvals.get, { projectId: project._id, productionId: workspace.production!._id, resourceType: 'timeline', resourceId: timeline._id }),
                 timeline.manifestId ? client.query(api.assembly.getManifest, { manifestId: timeline.manifestId }) : Promise.resolve(null),
             ]);
-            return { id: timeline._id.toString(), versionNumber: timeline.versionNumber, state: state.currentState, matchesProductionVersion: timelineMatchesCurrentVersion(timeline, workspace.production, workspace.version, manifest) };
+            const metadata = object(object(timeline.tracks).metadata);
+            const output = object(metadata.authoredOutput ?? metadata.importedOutput);
+            return { id: timeline._id.toString(), versionNumber: timeline.versionNumber, state: state.currentState, matchesProductionVersion: timelineMatchesCurrentVersion(timeline, workspace.production, workspace.version, manifest), outputPreset: timeline.outputPreset,
+                ...(typeof output.width === 'number' ? { width: output.width } : {}), ...(typeof output.height === 'number' ? { height: output.height } : {}) };
         })),
         episode?.acceptedStoryStateId ? client.query(api.approvals.get, { projectId: project._id, resourceType: 'episodeStoryState', resourceId: episode.acceptedStoryStateId }) : Promise.resolve(null),
     ]);
@@ -108,10 +112,24 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
         shots: await Promise.all(scene.shots.map(async (shot) => {
             const state = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'shot', resourceId: shot._id });
             const metadata = object(shot.metadata);
+            const referenceBindings = (Array.isArray(metadata.referenceBindings) ? metadata.referenceBindings : []).flatMap((raw) => {
+                const binding = object(raw);
+                return typeof binding.assetId === 'string' && mediaById.has(binding.assetId) && typeof binding.alias === 'string' && REFERENCE_ROLES.includes(binding.role as ReferenceAssetBinding['role'])
+                    ? [{ assetId: binding.assetId, alias: binding.alias, role: binding.role as ReferenceAssetBinding['role'] }] : [];
+            });
+            const edit = object(metadata.editInstructions);
             return { id: shot._id.toString(), title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds,
                 state: state.state as WorkspaceResourceState,
                 resourceVersionIds: Array.isArray(metadata.resourceVersionIds) ? metadata.resourceVersionIds.filter((id): id is string => typeof id === 'string') : [],
-                operationControls: { operation: (typeof metadata.operation === 'string' ? metadata.operation : 'GENERATE') as ShotOperationControls['operation'], audioPolicy: (typeof metadata.audioPolicy === 'string' ? metadata.audioPolicy : 'SILENT') as ShotOperationControls['audioPolicy'], referenceAssetIds: (shot.requiredAssetIds ?? []).filter((id) => mediaById.has(id)), firstFrameAssetId: typeof metadata.firstFrameAssetId === 'string' ? metadata.firstFrameAssetId : '', lastFrameAssetId: typeof metadata.lastFrameAssetId === 'string' ? metadata.lastFrameAssetId : '', previousJobId: typeof metadata.previousJobId === 'string' ? metadata.previousJobId : '', ...(typeof metadata.upscaleFactor === 'number' ? { upscaleFactor: metadata.upscaleFactor } : {}), ...(metadata.creativity === 0 ? { upscaleMode: 'PRECISE' as const } : metadata.creativity === 1 ? { upscaleMode: 'CREATIVE' as const } : {}) },
+                resourceBindings: (Array.isArray(metadata.resourceBindings) ? metadata.resourceBindings : []).map((value) => {
+                    const binding = object(value);
+                    return { role: String(binding.role || ''), resourceVersionId: String(binding.resourceVersionId || ''), ...(typeof binding.voiceVersionId === 'string' ? { voiceVersionId: binding.voiceVersionId } : {}), ...(typeof binding.characterResourceVersionId === 'string' ? { characterResourceVersionId: binding.characterResourceVersionId } : {}) };
+                }),
+                dialogueSegments: (Array.isArray(metadata.dialogueSegments) ? metadata.dialogueSegments : []).map((value) => {
+                    const segment = object(value);
+                    return { speakerResourceVersionId: String(segment.speakerResourceVersionId || ''), voiceVersionId: String(segment.voiceVersionId || ''), startSeconds: Number(segment.startSeconds), durationSeconds: Number(segment.durationSeconds), text: String(segment.text || ''), ...(typeof segment.delivery === 'string' ? { delivery: segment.delivery } : {}) };
+                }),
+                operationControls: { operation: (typeof metadata.operation === 'string' ? metadata.operation : 'GENERATE') as ShotOperationControls['operation'], audioPolicy: (typeof metadata.audioPolicy === 'string' ? metadata.audioPolicy : 'SILENT') as ShotOperationControls['audioPolicy'], referenceAssetIds: (shot.requiredAssetIds ?? []).filter((id) => mediaById.has(id)), firstFrameAssetId: typeof metadata.firstFrameAssetId === 'string' ? metadata.firstFrameAssetId : '', lastFrameAssetId: typeof metadata.lastFrameAssetId === 'string' ? metadata.lastFrameAssetId : '', previousJobId: typeof metadata.previousJobId === 'string' ? metadata.previousJobId : '', referenceBindings, editInstructions: { change: typeof edit.change === 'string' ? edit.change : '', preserve: typeof edit.preserve === 'string' ? edit.preserve : '', timing: typeof edit.timing === 'string' ? edit.timing : '' }, ...(typeof metadata.upscaleFactor === 'number' ? { upscaleFactor: metadata.upscaleFactor } : {}), ...(metadata.creativity === 0 ? { upscaleMode: 'PRECISE' as const } : metadata.creativity === 1 ? { upscaleMode: 'CREATIVE' as const } : {}) },
                 takes: await Promise.all(shot.takes.map(async (take) => {
                     const approval = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'shotVersion', resourceId: take._id });
                     const media = take.assetId ? mediaById.get(take.assetId) : undefined;
@@ -130,7 +148,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
         role: resourceRows.projectRole, canEdit: resourceRows.projectRole === 'OWNER' || resourceRows.projectRole === 'EDITOR',
         resources: resourceRows.page.filter((row) => !row.archived).map(resourceView), resourceCursor: resourceRows.isDone ? null : resourceRows.continueCursor,
         assets: await Promise.all(assetRows.map(async (asset) => { const state = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'asset', resourceId: asset._id }); return { id: asset._id.toString(), name: asset.name || (asset.roles.includes('NARRATION') ? `Narration · ${asset._id.toString().slice(-6)}` : 'Project media'), mimeType: asset.mimeType || 'application/octet-stream', url: asset.storageUrl ?? null, state: state.state as WorkspaceResourceState }; })),
-        voices: await Promise.all(voices.map(async (voice) => { const state = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'voice', resourceId: voice._id }); return { id: voice._id.toString(), name: voice.name, kind: voice.kind, status: voice.status, state: state.state as WorkspaceResourceState, hasConsent: voice.hasConsent, sampleCount: voice.sampleAssetIds?.length ?? 0, sampleAssetIds: (voice.sampleAssetIds ?? []).map(String) }; })), bibles,
+        voices: await Promise.all(voices.map(async (voice) => { const state = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'voice', resourceId: voice._id }); return { id: voice._id.toString(), name: voice.name, kind: voice.kind, status: voice.status, state: state.state as WorkspaceResourceState, hasConsent: voice.hasConsent, sampleCount: voice.sampleAssetIds?.length ?? 0, sampleAssetIds: (voice.sampleAssetIds ?? []).map(String), voiceVersionId: voice.voiceVersionId?.toString() }; })), bibles,
         boundResources, plannedBibleId: typeof snapshot.continuityBibleId === 'string' ? snapshot.continuityBibleId : null,
         continuationSources, scenes, timelines: timelineRows, acceptedStoryStateId: episode?.acceptedStoryStateId?.toString() ?? null,
         acceptedStory: accepted ? (accepted.resource as Doc<'episodeStoryStates'>).snapshot as StorySnapshotView : null,
@@ -179,12 +197,13 @@ export async function changeWorkspaceApproval(input: { projectExternalId: string
     } catch (error) { return { success: false as const, error: safeError(error) }; }
 }
 
-export async function bindShotResources(input: { projectExternalId: string; productionId: string; shotId: string; resourceVersionIds: string[] }) {
+export async function bindShotResources(input: { projectExternalId: string; productionId: string; shotId: string; resourceVersionIds: string[]; resourceBindings?: ShotControlView['resourceBindings']; dialogueSegments?: ShotControlView['dialogueSegments'] }) {
     try {
         const { client, project } = await projectContext(input.projectExternalId);
         const shot = await client.query(api.scenes.getShot, { shotId: input.shotId as Id<'shots'> });
         if (shot.projectId !== project._id || shot.productionId !== input.productionId) throw new Error('Shot does not belong to this project.');
-        await client.mutation(api.scenes.updateShot, { shotId: shot._id, metadata: { ...object(shot.metadata), resourceVersionIds: input.resourceVersionIds } });
+        await client.mutation(api.scenes.updateShot, { shotId: shot._id, expectedMetadata: shot.metadata ?? null, metadata: { ...object(shot.metadata), resourceVersionIds: input.resourceVersionIds,
+            ...(input.resourceBindings !== undefined ? { resourceBindings: input.resourceBindings } : {}), ...(input.dialogueSegments !== undefined ? { dialogueSegments: input.dialogueSegments } : {}) } });
         revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
         return { success: true as const };
     } catch (error) { return { success: false as const, error: safeError(error) }; }
@@ -214,16 +233,18 @@ export async function saveShotOperationControls(input: { projectExternalId: stri
         if (shot.projectId !== project._id || shot.productionId !== input.productionId) throw new Error('Shot does not belong to this project.');
         const continuationSources = input.controls.operation === 'EXTEND' ? await loadContinuationSources(client, project, shot.productionId as Id<'productions'>) : [];
         const requiredAssetIds = validateShotOperationControls(input.controls, assets.map((asset) => ({ id: asset._id.toString(), mimeType: asset.mimeType || '' })), continuationSources);
+        const referenceIntent = resolveShotReferencePrompt({ ...input.controls, prompt: shot.prompt, assets: assets.map(asset => ({ id: asset._id.toString(), mimeType: asset.mimeType || '' })) });
         const previous = continuationSources.find(source => source.providerJobId === input.controls.previousJobId);
         const operation = input.controls.operation;
         const videoTask = videoTaskForOperation(operation);
         const metadata = { ...object(shot.metadata), operation, videoTask, audioPolicy: input.controls.audioPolicy,
+            referenceBindings: referenceIntent.referenceBindings, editInstructions: referenceIntent.editInstructions ?? null,
             previousJobId: operation === 'EXTEND' ? previous!.providerJobId : null, previousModelId: operation === 'EXTEND' ? previous!.model : null,
             upscaleFactor: operation === 'UPSCALE' ? input.controls.upscaleFactor : null, creativity: operation === 'UPSCALE' ? (input.controls.upscaleMode === 'CREATIVE' ? 1 : 0) : null,
             generateAudio: input.controls.audioPolicy === 'GENERATE', requiresSourceAudioPreservation: input.controls.audioPolicy === 'KEEP_SOURCE',
             firstFrameAssetId: input.controls.firstFrameAssetId || null, lastFrameAssetId: input.controls.lastFrameAssetId || null,
             requiresFirstFrame: Boolean(input.controls.firstFrameAssetId), requiresLastFrame: Boolean(input.controls.lastFrameAssetId) };
-        await client.mutation(api.scenes.updateShot, { shotId: shot._id, requiredAssetIds, metadata });
+        await client.mutation(api.scenes.updateShot, { shotId: shot._id, expectedMetadata: shot.metadata ?? null, requiredAssetIds, metadata });
         revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
         return { success: true as const };
     } catch (error) {

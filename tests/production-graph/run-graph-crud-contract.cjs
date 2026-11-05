@@ -115,8 +115,10 @@ function db() {
 }
 
 const calls = [];
+const actualContinuity = require('../recipes/backend-fixture.cjs').load('convex/generationContinuity.ts');
 const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
+  if (request === './generationContinuity') return actualContinuity;
   if (request === 'convex/values') {
     return { v: { union: (...values) => values, literal: (value) => value, id: (value) => value, optional: (value) => value, string: () => 'string', number: () => 'number', any: () => 'any', array: (value) => [value] } };
   }

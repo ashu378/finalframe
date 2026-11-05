@@ -15,12 +15,13 @@ import {GRAPHICS_V2_TEMPLATE_IDS,parseGraphicsV2Render} from '../renderer/src/te
 import type { CaptionTrack } from '../renderer/src/types';
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
+import { getOutputPreset, normalizeOutputPresetId, type OutputPresetId } from '../renderer/src/output-presets';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Production = Doc<"productions">;
 type Timeline = Doc<"timelines">;
 
-type RenderPreset = { name: string; width: number; height: number; fps: number; codec: "h264" };
+type RenderPreset = { name: string; width: number; height: number; fps: number; codec: "h264"; presetId?: OutputPresetId };
 type SelectionScope = "FULL_PROJECT" | "TIMELINE" | "SCENES" | "SHOTS";
 
 type SourceItem = {
@@ -95,7 +96,8 @@ function timelineMetadata(timeline: Timeline) {
 
 function outputPreset(name: string, metadata: Record<string, unknown>): RenderPreset {
   const normalized = name.trim().toLowerCase();
-  const dimensions = normalized.includes("1080x1920") || normalized.includes("9:16") || normalized.includes("vertical") || normalized.includes("tiktok") || normalized.includes("reel")
+  const registryId = normalizeOutputPresetId(name);
+  const dimensions = registryId ? getOutputPreset(registryId) : normalized.includes("1080x1920") || normalized.includes("9:16") || normalized.includes("vertical") || normalized.includes("tiktok") || normalized.includes("reel")
     ? { width: 1080, height: 1920 }
     : normalized.includes("1080x1080") || normalized.includes("1:1") || normalized.includes("square")
       ? { width: 1080, height: 1080 }
@@ -108,7 +110,9 @@ function outputPreset(name: string, metadata: Record<string, unknown>): RenderPr
   if (imported.codec && imported.codec !== 'h264') throw new Error('This imported codec needs an explicit supported output conversion before re-export.');
   const fps = numberValue(metadata.fps) ?? 30;
   if (![24, 25, 30, 50, 60].includes(fps)) throw new Error(`Frame rate ${fps} is not supported for this export.`);
-  return { name, ...exactDimensions, fps, codec: "h264" };
+  const presetId = metadata.outputPresetId === undefined ? undefined : getOutputPreset(metadata.outputPresetId).id;
+  if (presetId) { const selected=getOutputPreset(presetId); if(selected.width!==exactDimensions.width||selected.height!==exactDimensions.height)throw new Error('The timeline dimensions do not match its selected format.'); }
+  return { name, width:exactDimensions.width,height:exactDimensions.height, fps, codec: "h264", ...(presetId?{presetId}:{}) };
 }
 
 function hasDeniedRights(value: unknown) {
@@ -355,7 +359,7 @@ function rendererItems(sources: SourceItem[], fps: number, version = 4) {
   return sources.filter((source) => !["AUDIO", "CAPTIONS"].includes(source.trackKind.toUpperCase())).map((source) => {
     const startFrame = Math.max(0, sourceFrame(source, 'startFrame', source.startSeconds, fps, version === 5 ? 'round' : 'floor'));
     const durationInFrames = Math.max(1, sourceFrame(source, 'durationInFrames', source.durationSeconds, fps, version === 5 ? 'round' : 'ceil'));
-    const base = { id: source.timelineClipId, startFrame, durationInFrames, orderIndex: source.orderIndex, shotId: source.shotId, shotVersionId: source.shotVersionId, assetId: source.assetId, ...(version === 5 ? { trackId: source.trackId } : {}), ...(source.renderItem?.opacity !== undefined ? { opacity: Number(source.renderItem.opacity) } : {}) };
+    const base = { id: source.timelineClipId, startFrame, durationInFrames, orderIndex: source.orderIndex, shotId: source.shotId, shotVersionId: source.shotVersionId, assetId: source.assetId, ...(version === 5 ? { trackId: source.trackId } : {}), ...(source.renderItem?.opacity !== undefined ? { opacity: Number(source.renderItem.opacity) } : {}), ...(version===5&&source.renderItem?.backgroundColor?{backgroundColor:String(source.renderItem.backgroundColor)}:{}) };
     if (source.sourceKind === "GRAPHIC" || source.sourceKind === "TEXT") {
       const supportedTemplates:readonly string[] = GRAPHICS_V2_TEMPLATE_IDS;
       const requestedTemplate = source.graphicTemplateId;
@@ -370,7 +374,7 @@ function rendererItems(sources: SourceItem[], fps: number, version = 4) {
     }
     if (!source.sourceUrl) throw new Error("Assembly is blocked because a media source has no canonical URL.");
     if (source.trackKind.toUpperCase() === "IMAGE") return { ...base, kind: "image" as const, src: source.sourceUrl, ...(source.renderItem?.fit ? { fit: String(source.renderItem.fit) } : {}), ...(source.renderItem?.position ? { position: String(source.renderItem.position) } : {}) };
-    return { ...base, kind: "video" as const, src: source.sourceUrl, trimStartInFrames: Math.max(0, sourceFrame(source, 'trimStartInFrames', source.trimStartSeconds ?? 0, fps, version === 5 ? 'round' : 'floor')), volume: source.volume ?? 1 };
+    return { ...base, kind: "video" as const, src: source.sourceUrl, trimStartInFrames: Math.max(0, sourceFrame(source, 'trimStartInFrames', source.trimStartSeconds ?? 0, fps, version === 5 ? 'round' : 'floor')), volume: source.volume ?? 1, ...(version===5&&source.renderItem?.fit?{fit:String(source.renderItem.fit)}:{}),...(version===5&&source.renderItem?.position?{position:String(source.renderItem.position)}:{}) };
   });
 }
 
@@ -484,9 +488,9 @@ export async function createCanonicalAssembly(ctx:MutationCtx,args:Infer<typeof 
       correlationId: args.correlationId,
       selection: { scope: selectionScope, ids: [...selectedIds].sort() },
       export: { scope: selectionScope, format: "MP4" },
-      metadata: timelineState.currentState === "LOCKED" ? { lockState: "LOCKED", lockId: timeline._id.toString(), lockedAt: new Date(timelineState.state?.lockedAt ?? timestamp).toISOString(), lockedBy: timelineState.state?.lockedByUserId?.toString() ?? "FinalFrame" } : { lockState: "APPROVED" },
+      metadata: { ...(timelineState.currentState === "LOCKED" ? { lockState: "LOCKED", lockId: timeline._id.toString(), lockedAt: new Date(timelineState.state?.lockedAt ?? timestamp).toISOString(), lockedBy: timelineState.state?.lockedByUserId?.toString() ?? "FinalFrame" } : { lockState: "APPROVED" }), ...(version===5&&timelineMetadata(timeline).formatVariant?{formatVariant:timelineMetadata(timeline).formatVariant}:{}) },
       preset,
-      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec, audio: outputAudio??rendererOutputAudio(built.sources) },
+      output: { width: preset.width, height: preset.height, fps: preset.fps, durationInFrames: built.durationInFrames, codec: preset.codec, audio: outputAudio??rendererOutputAudio(built.sources),...(version===5&&preset.presetId?{presetId:preset.presetId}:{}) },
       ...(poster?{poster}:{}),
       totalDurationSeconds: built.durationInFrames / preset.fps,
       items,

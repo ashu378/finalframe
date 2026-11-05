@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { requireProjectAccess, requireProjectRole } from "./authorization";
 import { boundedText } from "./continuityContracts";
+import { outputPresetValidator } from "./outputPresets";
 
 const MAX_EPISODES = 500;
 const episodeFields = {
@@ -31,7 +32,7 @@ export const create = mutation({
   args: {
     projectId: v.id("projects"), episodeNumber: v.number(), title: v.string(),
     durationSeconds: v.number(), workflow: v.string(), inputMode: v.string(), language: v.string(),
-    outputPreset: v.union(v.literal("SOCIAL_VERTICAL"), v.literal("LANDSCAPE"), v.literal("SQUARE")),
+    outputPreset: outputPresetValidator,
   },
   returns: v.object({ episodeId: v.id("episodes"), productionId: v.id("productions"), replayed: v.boolean() }),
   handler: async (ctx, args) => {

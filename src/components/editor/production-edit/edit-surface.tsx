@@ -15,6 +15,7 @@ import { TimelineEditor, type TimelineEditEvent } from '@/components/editor/time
 import {GraphicEditPanel} from './graphic-edit-panel';
 import { MusicBeatEditor } from './music-beat-editor';
 import { MediaReplacementPanel } from './media-replacement-panel';
+import { FormatVariantPanel } from './format-variant-panel';
 
 type ProductionId = Id<'productions'>;
 
@@ -58,7 +59,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
   const canEditTimeline = draft?.canEdit === true && canonicalTimelineState !== undefined && ['DRAFT', 'REVISION_REQUESTED'].includes(canonicalTimelineState.currentState);
   const canDuplicateTimeline = draft?.canEdit === true && canonicalTimelineState !== undefined && ['APPROVED', 'LOCKED'].includes(canonicalTimelineState.currentState) && ['DRAFT', 'APPROVED'].includes(draft.timeline.status);
   const history = draft?.operations?.filter((operation: any) => operation.outputResourceIds.includes(String(draft.timeline._id))) ?? [];
-  const canUndo = canEditTimeline && history.some((operation: any) => !['CREATE_TIMELINE', 'DUPLICATE_TIMELINE'].includes(operation.kind));
+  const canUndo = canEditTimeline && history.some((operation: any) => !['CREATE_TIMELINE', 'DUPLICATE_TIMELINE', 'CREATE_FORMAT_VARIANT'].includes(operation.kind));
   const canRedo = canEditTimeline && history.some((operation: any) => operation.kind === 'UNDO');
 
   const impact = impactRequested && impactQuery ? makeImpact(impactQuery) : null;
@@ -163,6 +164,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
     <PromptEditPanel selectedNode={selectedNode} impact={impact} impactLoading={impactRequested && impactQuery === undefined} impactError={impactError} onPreviewImpact={handlePromptPreview} onSubmitOperation={handlePromptSubmit} />
     {canDuplicateTimeline ? <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" disabled={saveStatus === 'saving'} onClick={() => void handleDuplicateTimeline()}>Create editable copy</Button><p className="text-sm text-muted-foreground">Continue editing in a new draft while keeping this approved version.</p></div> : null}
     <TimelineEditor timeline={timeline} frameRate={timeline?.frameRate} finishingV5Enabled={draft?.finishingV5Enabled === true} isLoading={draft === undefined || Boolean(draft?.timeline && canonicalTimelineState === undefined)} readOnly={!canEditTimeline} saveStatus={saveStatus} canUndo={canUndo} canRedo={canRedo} onEdit={handleTimelineEdit} />
+    {draft?.canEdit && timeline ? <FormatVariantPanel key={`format:${timeline.id}`} timeline={draft.timeline} clips={draft.tracks.flatMap((track: any) => track.clips)} canCreate={canDuplicateTimeline} canEdit={canEditTimeline} rootTimelineId={(draft.metadata?.formatVariant as {rootTimelineId?:Id<'timelines'>}|undefined)?.rootTimelineId} onCreated={id=>{showCreatedTimeline(id);setMessage('The format is ready as a separate draft. Review its framing and approve it before export.');}} /> : null}
     {replacement && timeline && replacement.timelineId === timeline.id && <MediaReplacementPanel key={`${timeline.id}:${replacement.clipId}`} timelineId={timeline.id as Id<'timelines'>} clipId={replacement.clipId} disabled={!canEditTimeline || saveStatus === 'saving'} onCancel={() => setReplacement(null)} onApply={async assetId => {
       setSaveStatus('saving');
       try {

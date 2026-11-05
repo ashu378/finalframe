@@ -8,15 +8,16 @@ const sfxConsentValidator=v.object({requestHash:v.string(),quoteFingerprint:v.st
 const jobs: Record<string, FunctionReference<any, 'internal', any, any>> = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 
 export const create = action({
-  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string(), sfxEstimateConsent:v.optional(sfxConsentValidator) },
+  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')),voiceVersionId:v.optional(v.id('voiceVersions')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string(), sfxEstimateConsent:v.optional(sfxConsentValidator) },
   returns: v.any(),
   handler: async (ctx, args): Promise<any> => {
     if(args.kind==='SFX'&&process.env.FINALFRAME_SFX_PREPARATION_ENABLED!=='true')throw new Error('Sound effect generation is not enabled.');
     if(args.kind!=='SFX'&&args.sfxEstimateConsent)throw new Error('SFX_ESTIMATE_REVIEW_REQUIRED');
     if(args.kind==='MUSIC'&&process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true')throw new Error('Music generation is not enabled.');
     if (process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not configured yet.');
+    if(args.voiceVersionId&&!args.voiceId)throw new Error('Select the project voice owning this version.');
     if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) && (args.voiceId || args.primaryVoiceSampleAssetId) || args.kind !== 'TRANSCRIPT' && args.sourceAssetId) throw new Error('Choose only the sources used by this preparation type.');
-    const context = await ctx.runQuery(jobs.preparationContext, { productionId: args.productionId, voiceId: args.voiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId });
+    const context = await ctx.runQuery(jobs.preparationContext, { productionId: args.productionId, voiceId: args.voiceId,voiceVersionId:args.voiceVersionId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId });
     const text = (args.text || '').trim();
     if (text.length > 4000 || (args.kind !== 'TRANSCRIPT' && !text)) throw new Error('Use between one and 4000 characters.');
     const clone = context.voice?.mode === 'REFERENCE_CLONE';
@@ -42,7 +43,9 @@ export const create = action({
     if(args.kind==='SFX')validateSfxPrompt(args.text);
     const quote = await quotePreparation({ kind: args.kind as PreparationKind, text, clone, durationSeconds,durationMeasurement });
     if(args.kind==='SFX'){const consent=assertSfxConsent(args.sfxEstimateConsent,String(args.productionId),text,quote.sfxQuote);Object.assign(quote,{sfxEstimateConsent:consent});}
-    return ctx.runMutation(jobs.createPreparation, { productionId: args.productionId, kind: args.kind, text, targetVoiceId: args.voiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, clone, durationSeconds, model: quote.model, capability: quote.capability, estimatedProviderCostUsd: quote.estimatedProviderCostUsd, quote, idempotencyKey: args.idempotencyKey });
+    return ctx.runMutation(jobs.createPreparation, { productionId: args.productionId, kind: args.kind, text, targetVoiceId: args.voiceId,
+      ...(context.voice?{voiceVersionId:context.voice.voiceVersionId,voiceConfigSnapshot:context.voice.voiceConfigSnapshot,voiceConfigHash:context.voice.voiceConfigHash}:{}),
+      primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, clone, durationSeconds, model: quote.model, capability: quote.capability, estimatedProviderCostUsd: quote.estimatedProviderCostUsd, quote, idempotencyKey: args.idempotencyKey });
   },
 });
 

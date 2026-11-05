@@ -12,11 +12,12 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
 const checksums = compile('renderer/src/media/sha256.ts');
+const outputPresets = compile('renderer/src/output-presets.ts');
 const imageResponse = compile('src/lib/ai/image-response.ts');
 const submissionDiagnostic = compile('src/lib/ai/submission-diagnostic.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
@@ -65,7 +66,7 @@ function publicActionFixture(metadata, references = []) {
     },
     query: async ref => {
       if (ref === 'account.current') return { user: { id: 'user' } };
-      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: 'LANDSCAPE' }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
+      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: fixture.outputPreset || 'LANDSCAPE' }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
       if (ref === 'videoRouting.forGeneration') return { catalog: [{ lastSeenAt: Date.now(), ...fixture.model }], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
       throw new Error('Unexpected query ' + ref);
     },
@@ -92,7 +93,7 @@ function workspaceActionFixture() {
   const client = {
     query: async ref => {
       if (ref === 'projects.getByExternalId') return { _id: 'project' };
-      if (ref === 'scenes.getShot') return { _id: 'shot', projectId: 'project', productionId: 'production', metadata: { previousJobId: 'obsolete', upscaleFactor: 3, creativity: 1 } };
+      if (ref === 'scenes.getShot') return { _id: 'shot', projectId: 'project', productionId: 'production', prompt: 'Continue the scene.', metadata: { previousJobId: 'obsolete', upscaleFactor: 3, creativity: 1 } };
       if (ref === 'assetStorage.listProjectAssets') return assets.map(asset => ({ _id: asset.id, mimeType: asset.mimeType }));
       if (ref === 'generationJobs.list') return [{ _id: 'source-job', projectId: 'project', productionId: 'production', provider: 'openrouter', modality: 'VIDEO', operation: 'SHOT_GENERATION', providerJobId, model: 'test/reviewed', shotVersionId: 'source-take', assetId: 'video' }];
       if (ref === 'approvals.get') return { currentState: 'APPROVED', resource: { projectId: 'project', productionId: 'production', provider: 'openrouter', model: 'test/reviewed', status: 'COMPLETED', assetId: 'video', versionNumber: 1 } };
@@ -113,7 +114,7 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   row('users', { _id: 'user', status: 'active' });
   row('studios', { _id: 'studio-id', externalId: 'studio', ownerUserId: 'user', status: 'active' });
   row('members', { _id: 'studio-member', studioId: 'studio-id', userId: 'user', role: 'owner', status: 'active' });
-  row('productions', { _id: 'production', projectId: 'project', studioExternalId: 'studio', currentVersionId: 'version' });
+  row('productions', { _id: 'production', projectId: 'project', studioExternalId: 'studio', currentVersionId: 'version', outputPreset: 'LANDSCAPE' });
   row('productionVersions', { _id: 'version', productionId: 'production', status: 'APPROVED' });
   row('shots', { _id: 'shot', projectId: 'project', productionId: 'production', productionVersionId: 'version', sceneId: 'scene', prompt: 'Continue', durationSeconds: 4, requiredAssetIds: referenceAssetIds, metadata });
   row('scenes', { _id: 'scene', productionId: 'production', sequenceId: 'sequence' });
@@ -268,6 +269,27 @@ async function main() {
     const forged = workspaceActionFixture();
     assert.equal((await forged.save({ ...baseControls, operation: 'EXTEND', previousJobId: 'gen-vid-123-xxxxxxxxxxxxxxxxxxxx' })).success, false);
     assert.equal(forged.mutations.length, 0);
+  });
+  await check('named media authoring saves normalized role intent and denies foreign aliases before writes', async () => {
+    const fixture = workspaceActionFixture();
+    const selected = { ...baseControls, operation: 'EDIT', audioPolicy: 'KEEP_SOURCE', referenceAssetIds: ['video', 'image'], referenceBindings: [{ assetId: 'image', alias: 'Lead', role: 'IDENTITY' }], editInstructions: { change: 'Use @lead.', preserve: 'Keep the camera.', timing: 'At 1–2 seconds.' } };
+    assert.equal((await fixture.save(selected)).success, true);
+    assert.equal(fixture.mutations[0].args.metadata.referenceBindings[0].alias, 'lead');
+    assert.equal(fixture.mutations[0].args.metadata.editInstructions.change, 'Use @lead.');
+    const before = fixture.mutations.length;
+    assert.equal((await fixture.save({ ...selected, editInstructions: { ...selected.editInstructions, preserve: '@foreign' } })).success, false);
+    assert.equal(fixture.mutations.length, before);
+  });
+  await check('seven project formats reach routing without silent landscape conversion', async () => {
+    for (const preset of outputPresets.OUTPUT_PRESETS) {
+      const fixture = publicActionFixture({}); fixture.outputPreset = preset.id;
+      fixture.model = { ...fixture.model, supportedAspectRatios: [preset.aspectRatio], supportedSizes: [`${preset.width}x${preset.height}`] };
+      const result = await fixture.run();
+      assert.equal(result.success, true, preset.id);
+      assert.equal(fixture.mutations.find(call => call.ref === 'generationJobs.previewShotEstimate').args.request.ratio, preset.aspectRatio);
+    }
+    const invalid = publicActionFixture({ aspectRatio: 'arbitrary' });
+    assert.equal((await invalid.run()).success, false); assert.equal(invalid.mutations.length, 0);
   });
   await check('portrait plus recording passes input validation without source video but uncertified lip-sync cannot queue', async () => {
     const fixture = publicActionFixture({ operation: 'LIP_SYNC', videoTask: 'EDIT', audioPolicy: 'USE_RECORDING' }, ['image', 'audio']);

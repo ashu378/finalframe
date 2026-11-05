@@ -9,13 +9,15 @@ import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCat
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { supportsCatalogUpscaleControls, validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '@/lib/production/workspace-controls';
+import { getOutputPreset, OUTPUT_PRESETS } from '../../../renderer/src/output-presets';
 
 function object(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function safeRatio(value: string | undefined) {
-    return value === '9:16' || value === '1:1' || value === '16:9' ? value : '16:9';
+    if (!OUTPUT_PRESETS.some(preset => preset.aspectRatio === value)) throw new Error('OUTPUT_PRESET_INVALID');
+    return value!;
 }
 
 function generationTask(value: unknown): VideoTask {
@@ -30,6 +32,7 @@ function routingFailure(error: unknown): string {
 }
 
 function userSafeGenerationError(error: unknown): string {
+    if (error instanceof Error && /OUTPUT_PRESET_INVALID/.test(error.message)) return 'Choose a supported video format before reviewing generation costs.';
     if (error instanceof Error && /SHOT_ESTIMATE_(EXPIRED|CHANGED|REVIEW_REQUIRED)/.test(error.message)) return 'This estimate is no longer valid. Review a fresh estimate before making the take.';
     if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';
     const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
@@ -63,7 +66,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
         const videoType = normalizeVideoType(shotContext.project?.projectType || production.projectType || production.preset || production.workflow);
         const outputPreset = String(production.outputPreset || 'LANDSCAPE');
         const typeRoutingEnabled = isFeatureEnabled('videoTypeRouting');
-        let aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : outputPreset === 'SOCIAL_VERTICAL' ? '9:16' : outputPreset === 'SQUARE' ? '1:1' : '16:9');
+        let aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : getOutputPreset(outputPreset).aspectRatio);
         let durationSeconds = Number(shot.durationSeconds);
         const requestedResolution = typeof shotMetadata.resolution === 'string' ? shotMetadata.resolution : undefined;
         const firstFrameAssetId = typeof shotMetadata.firstFrameAssetId === 'string' ? shotMetadata.firstFrameAssetId : undefined;

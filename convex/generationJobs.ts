@@ -14,7 +14,7 @@ import { isSourceVideoEdit, videoCatalogFingerprint } from '../src/lib/ai/video-
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
 import { SHOT_ESTIMATE_VERSION, SHOT_ESTIMATE_TTL_MS, shotEstimateHash, stableShotEstimate, assertShotEstimateTime } from '../src/lib/generation/shot-estimate';
 import { resolveGenerationContinuity } from './generationContinuity';
-import { resolveVoiceSynthesisInput } from './voices';
+import { resolveVoiceSynthesisInput, resolveFrozenVoiceSynthesisInput, freezeVoiceVersion } from './voices';
 import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
 import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
 import {freshSfxQuote,assertSfxQuote,sameSfxQuote,assertSfxConsent,validateSfxPrompt,SFX_LIMITS,assertSfxOutputProbe,retryableSfxQc,safeSfxQcCode,sfxError} from '../src/lib/ai/sfx';
@@ -24,8 +24,9 @@ import {freshMusicQuote,sameMusicQuote,MUSIC_LIMITS,assertMusicOutputProbe,MUSIC
 import {normalizeSha256,sha256Equal} from '../renderer/src/media/sha256';
 import { resolvePortraitSourceCertificate } from './imageCertificates';
 import { studioRoleForUser, userExternalKey } from './studioMemberships';
-import { validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '../src/lib/production/workspace-controls';
+import { validateVideoOperationRequirements, videoTaskForOperation, resolveShotReferencePrompt, type ShotOperationControls } from '../src/lib/production/workspace-controls';
 import { canClaim, GENERATION_LEASE_MS, GENERATION_POLL_MS, GENERATION_TERMINAL, object, publicJob, recoveryStage, hasStoredSfxOutput, hasStoredMusicOutput, hasStoredImageOutput, boundedProviderUsage, videoBudgetReservationUsd, workerEnabled } from './generationWorkerContracts';
+import {getOutputPreset,OUTPUT_PRESETS} from '../renderer/src/output-presets';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Job = Doc<'generationJobs'>;
@@ -188,7 +189,7 @@ async function resolveGenerationIntent(ctx: ReadCtx, args: GenerationCreateArgs,
     const grants = recipeNode ? await resolveRecipeSlotGrants(ctx,recipeNode) : [];
     const recipeMarkers = recipeNode ? {recipeRunNodeId:recipeNode._id,recipeResolvedRequestHash:recipeNode.resolvedRequestHash} : {};
     const metadata = object(shot.metadata);
-    const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)] });
+    const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)],shotMetadata:metadata,durationSeconds:shot.durationSeconds });
     const qualityTier: 'ECONOMY' | 'STANDARD' | 'PREMIUM' = requested.qualityTier === 'ECONOMY' || requested.qualityTier === 'PREMIUM' ? requested.qualityTier : 'STANDARD';
     const request = { ...requested, ...recipeMarkers, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
     const requestHash = stable({ productionId: production._id, versionId: version._id, shotId: shot._id, model: args.model, provider: args.provider, request, shotMetadata: metadata });
@@ -215,12 +216,19 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     const lastFrame = typeof metadata.lastFrameAssetId === 'string' ? metadata.lastFrameAssetId : undefined;
     const inputFrameIds = new Set([firstFrame, lastFrame].filter(Boolean));
     for (const frameId of inputFrameIds) if (!sourceAssets.some((asset) => asset._id === frameId && asset.mimeType?.startsWith('image/'))) throw new Error('Required frames must be stored images in this project.');
+  const references = resolveShotReferencePrompt({ prompt: shot.prompt, referenceBindings: metadata.referenceBindings, editInstructions: metadata.editInstructions,
+    referenceAssetIds: continuity.referenceAssetIds, assets: sourceAssets.map(asset=>({id:asset._id,mimeType:asset.mimeType??''})),
+    firstFrameAssetId:firstFrame,lastFrameAssetId:lastFrame });
     const operation = (typeof metadata.operation === 'string' ? metadata.operation : typeof metadata.videoTask === 'string' ? metadata.videoTask : 'GENERATE') as ShotOperationControls['operation'];
+  const ratio=typeof metadata.aspectRatio==='string'?metadata.aspectRatio:getOutputPreset(production.outputPreset).aspectRatio;
+  if(!OUTPUT_PRESETS.some(preset=>preset.aspectRatio===ratio))throw new Error('OUTPUT_ASPECT_RATIO_UNSUPPORTED');
     const normalizedRequest: Record<string, unknown> = {
-      ...requested, ...object(requested.constraints), ...recipeMarkers, prompt: continuity.promptContext ? `${shot.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : shot.prompt, duration: shot.durationSeconds,
-      planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,
+      ...requested, ...object(requested.constraints), ...recipeMarkers, referenceBindings: references.referenceBindings, editInstructions: references.editInstructions,
+      prompt: continuity.promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : references.prompt, duration: shot.durationSeconds,
+      planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,voiceVersionIds:continuity.voiceVersionIds,
+      resourceBindings:continuity.resourceBindings,dialogueSegments:continuity.dialogueSegments,
       durationSeconds: shot.durationSeconds, qualityTier,
-      ratio: String(requested.ratio || '16:9'), aspectRatio: String(requested.ratio || '16:9'),
+      ratio, aspectRatio:ratio,
       operation, task: videoTaskForOperation(operation),
       previousJobId: operation === 'EXTEND' && typeof metadata.previousJobId === 'string' ? metadata.previousJobId : undefined,
       previousModelId: undefined,
@@ -483,8 +491,13 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     await requireUnlockedGraph(ctx, project._id, shot, scene);
   }
   const request = object(job.request);
-  if (job.operation !== 'PREPARATION') await resolveGenerationContinuity(ctx, { projectId: project._id, productionId: job.productionId, snapshot: request.planningContextSnapshot, explicitResourceVersionIds: request.selectedResourceVersionIds, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
-  if (request.targetVoiceId) await resolveVoiceSynthesisInput(ctx, { projectId: project._id, voiceId: request.targetVoiceId as Id<'voices'>, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: request.primaryVoiceSampleAssetId as Id<'assets'> | undefined });
+  if (job.operation !== 'PREPARATION') await resolveGenerationContinuity(ctx, { projectId: project._id, productionId: job.productionId, snapshot: request.planningContextSnapshot, explicitResourceVersionIds: request.selectedResourceVersionIds, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [],shotMetadata:request,durationSeconds:Number(request.durationSeconds??request.duration) });
+  if (request.targetVoiceId) {
+    if (!request.voiceVersionId || !request.voiceConfigHash || !request.voiceConfigSnapshot) throw new Error('VOICE_FROZEN_CONFIG_REQUIRED');
+    await resolveFrozenVoiceSynthesisInput(ctx, { projectId: project._id, voiceId: request.targetVoiceId as Id<'voices'>,
+      voiceVersionId: request.voiceVersionId as Id<'voiceVersions'>, voiceConfigHash: String(request.voiceConfigHash), voiceConfigSnapshot: request.voiceConfigSnapshot,
+      use: 'SYNTHESIZE', primaryVoiceSampleAssetId: request.primaryVoiceSampleAssetId as Id<'assets'> | undefined });
+  }
   const reserved = job.providerBudgetReservationId ? await ctx.db.get(job.providerBudgetReservationId) : null;
   const budget = reserved ? await ctx.db.get(reserved.budgetId) : null;
   if (!reserved || reserved.jobId !== job._id || reserved.status !== 'RESERVED' || !budget || budget.status !== 'ACTIVE') throw new Error('Paid testing is paused.');
@@ -684,10 +697,10 @@ export const reconcileAcceptedSubmission = internalMutation({
 
 const preparationKindValidator = v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX'));
 export const preparationContext = internalQuery({
-  args: { productionId: v.id('productions'), voiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')) }, returns: v.any(),
+  args: { productionId: v.id('productions'), voiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')) }, returns: v.any(),
   handler: async (ctx, args) => {
     const { production, access } = await productionAccess(ctx, args.productionId, true);
-    const voice = args.voiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.voiceId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
+    const voice = args.voiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.voiceId, voiceVersionId: args.voiceVersionId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
     const asset = args.sourceAssetId ? await ctx.db.get(args.sourceAssetId) : null;
     if (args.sourceAssetId && (!asset || asset.projectId !== access.project._id || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('audio/'))) throw new Error('Select a project-owned recording.');
     const stored = asset?.storageId ? await ctx.db.system.get('_storage', asset.storageId) : null;
@@ -695,12 +708,19 @@ export const preparationContext = internalQuery({
     return { productionId: production._id, projectId: access.project._id, voice, source: asset?.storageId && stored ? { assetId: asset._id,storageId:asset.storageId,checksum:stored.sha256,byteSize:stored.size,mimeType:asset.mimeType,url:await ctx.storage.getUrl(asset.storageId) } : null };
   },
 });
-const preparationCreateArgs = { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() };
+const preparationCreateArgs = { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), voiceConfigSnapshot: v.optional(v.any()), voiceConfigHash: v.optional(v.string()), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() };
 type PreparationCreateArgs = Infer<ReturnType<typeof preparationArgsValidator>>;
 function preparationArgsValidator(){return v.object(preparationCreateArgs);}
 export const createPreparation=internalMutation({args:preparationCreateArgs,returns:v.any(),handler:(ctx,args)=>createCanonicalPreparationJob(ctx,args)});
 export async function createCanonicalPreparationJob(ctx:MutationCtx,args:PreparationCreateArgs,execution?:RecipeExecution){
     const { production, access } = await productionAccess(ctx, args.productionId, true, execution);
+    const previous=await ctx.db.query('generationJobs').withIndex('by_idempotency',q=>q.eq('idempotencyKey',key(args.idempotencyKey))).unique();
+    if(args.targetVoiceId&&['NARRATION','VOICE_PREVIEW'].includes(args.kind)&&previous&&previous.operation==='PREPARATION'&&previous.projectId===access.project._id&&previous.productionId===production._id&&previous.createdByUserId===access.user._id
+      &&!object(previous.request).voiceConfigHash&&(previous.status==='COMPLETED'||previous.providerJobId||previous.submissionStartedAt)){
+      const saved=object(previous.request);
+      if(previous.model!==args.model||saved.preparationKind!==args.kind||saved.text!==args.text.trim()||saved.targetVoiceId!==args.targetVoiceId||saved.primaryVoiceSampleAssetId!==args.primaryVoiceSampleAssetId||saved.sourceAssetId!==args.sourceAssetId||saved.clone!==args.clone)throw new Error('Idempotency key conflict.');
+      return publicJob(previous as unknown as Record<string,unknown>);
+    }
     if(args.kind==='SFX'&&(process.env.FINALFRAME_SFX_PREPARATION_ENABLED!=='true'||args.clone||args.targetVoiceId||args.primaryVoiceSampleAssetId||args.sourceAssetId||args.durationSeconds!==undefined))throw sfxError('SFX_DISABLED_OR_INVALID');
     if(args.kind==='MUSIC'&&(process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true'||args.clone||args.durationSeconds!==undefined))throw new Error('MUSIC_DISABLED_OR_INVALID');
     if (access.project.moderationStatus === 'RESTRICTED') throw new Error('This project is restricted from new preparation.');
@@ -708,7 +728,9 @@ export async function createCanonicalPreparationJob(ctx:MutationCtx,args:Prepara
     if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) && (args.targetVoiceId || args.primaryVoiceSampleAssetId) || args.kind !== 'TRANSCRIPT' && args.sourceAssetId) throw new Error('Choose only the sources used by this preparation type.');
     if (args.text.length > 4000 || (args.kind !== 'TRANSCRIPT' && !args.text.trim())) throw new Error('Use between one and 4000 characters.');
     if ((args.kind === 'NARRATION' || args.kind === 'VOICE_PREVIEW') && !args.targetVoiceId) throw new Error('Select an approved project voice.');
-    const voice = args.targetVoiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.targetVoiceId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
+    if(!args.targetVoiceId&&(args.voiceVersionId||args.voiceConfigHash||args.voiceConfigSnapshot))throw new Error('Select the project voice owning this version.');
+    const voice = args.targetVoiceId ? await resolveVoiceSynthesisInput(ctx, { projectId: access.project._id, voiceId: args.targetVoiceId, voiceVersionId: args.voiceVersionId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId }) : null;
+    if (voice && (!args.voiceConfigHash || !args.voiceConfigSnapshot || args.voiceConfigHash !== voice.voiceConfigHash || stable(args.voiceConfigSnapshot) !== stable(voice.voiceConfigSnapshot))) throw new Error('VOICE_QUOTE_CONFIG_CHANGED');
     let cloneSource;
     if (args.clone) {
       if (!['NARRATION','VOICE_PREVIEW'].includes(args.kind) || voice?.mode !== 'REFERENCE_CLONE' || !args.primaryVoiceSampleAssetId || voice.references.length !== 1 || voice.references[0].assetId !== args.primaryVoiceSampleAssetId || args.text.length > 3000) throw new Error('Select an approved primary recording for this cloned narration.');
@@ -730,8 +752,10 @@ export async function createCanonicalPreparationJob(ctx:MutationCtx,args:Prepara
       if(args.durationSeconds!==transcriptSource.durationSeconds||quoted.inputDurationSeconds!==transcriptSource.durationSeconds||quoted.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||quoted.billableInputSeconds!==Math.ceil(transcriptSource.durationSeconds+1/16000)||quoted.estimatedProviderCostUsd!==args.estimatedProviderCostUsd||quoted.model!==args.model||typeof quoted.checkedAt!=='number'||Date.now()-quoted.checkedAt>30000||quoted.checkedAt>Date.now()+1000)throw new Error('Obtain a fresh decoded transcription quote.');
     }
     const recipeMarker=execution?{recipeRunNodeId:execution.nodeId,recipeResolvedRequestHash:(await recipeExecutionScope(ctx,execution)).node.resolvedRequestHash}:{};
-    const request = { ...recipeMarker, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
-    const requestHash = stable({ ...recipeMarker, productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
+    const voiceVersionId = voice ? await freezeVoiceVersion(ctx,voice,access.user._id) : undefined;
+    const frozenVoice = voice ? {voiceVersionId,voiceConfigSnapshot:voice.voiceConfigSnapshot,voiceConfigHash:voice.voiceConfigHash} : {};
+    const request = { ...recipeMarker, ...frozenVoice, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
+    const requestHash = stable({ ...recipeMarker, ...(voice?{voiceConfigHash:voice.voiceConfigHash}:{}), productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
     const idempotencyKey = key(args.idempotencyKey);
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
     if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id||(musicQuote||sfxQuote)&&existing.createdByUserId!==access.user._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }

@@ -22,13 +22,20 @@ const camera = {
 const shot = {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera'],
+    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera', 'resourceBindings', 'dialogueSegments'],
     properties: {
         title: { type: 'string', minLength: 1 },
         prompt: { type: 'string', minLength: 1 },
         durationSeconds: { type: 'number', exclusiveMinimum: 0 },
         orderIndex: { type: 'integer', minimum: 0 },
         requiredAssetIds: stringList,
+        resourceBindings: {type:'array',maxItems:32,items:{type:'object',additionalProperties:false,required:['role','resourceVersionId','voiceVersionId','characterResourceVersionId'],properties:{
+            role:{type:'string',minLength:1,maxLength:64},resourceVersionId:{type:'string',minLength:1},
+            voiceVersionId:{anyOf:[{type:'string',minLength:1},{type:'null'}]},characterResourceVersionId:{anyOf:[{type:'string',minLength:1},{type:'null'}]},
+        }}},
+        dialogueSegments:{type:'array',maxItems:32,items:{type:'object',additionalProperties:false,required:['speakerResourceVersionId','voiceVersionId','startSeconds','durationSeconds','text','delivery'],properties:{
+            speakerResourceVersionId:{type:'string',minLength:1},voiceVersionId:{type:'string',minLength:1},startSeconds:{type:'number',minimum:0},durationSeconds:{type:'number',exclusiveMinimum:0},text:{type:'string',minLength:1,maxLength:1000},delivery:{type:'string',maxLength:400},
+        }}},
         camera,
     },
 };

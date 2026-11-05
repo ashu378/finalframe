@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectAccess, requireProjectRole } from "./authorization";
 import { ensureResourceState, requireEditable } from "./resourceStates";
 import { PREPARATION_MODELS } from "../src/lib/ai/model-registry";
+import { sha256Equal } from '../renderer/src/media/sha256';
 
 const voiceKind = v.union(v.literal("CLONED"), v.literal("STOCK"), v.literal("RECORDED"));
 const voiceStatus = v.union(
@@ -43,6 +44,7 @@ function publicVoice(voice: Doc<"voices">, includePrivateProjectFields: boolean)
     sampleAssetIds: includePrivateProjectFields ? voice.sampleAssetIds : undefined,
     previewAssetId: includePrivateProjectFields ? voice.previewAssetId : undefined,
     originVoiceId: includePrivateProjectFields ? voice.originVoiceId : undefined,
+    voiceVersionId: voice.currentVersionId ?? null,
     createdByUserId: voice.createdByUserId,
     createdAt: voice.createdAt,
     updatedAt: voice.updatedAt,
@@ -332,7 +334,7 @@ export async function validateVoiceForApproval(ctx: QueryCtx | MutationCtx, proj
   }
 }
 
-export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, args: {
+async function resolveMutableVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, args: {
   projectId: Id<"projects">; voiceId: Id<"voices">; use: "SYNTHESIZE" | "AVATAR_LIPSYNC"; primaryVoiceSampleAssetId?: Id<'assets'>;
 }) {
   const [project, voice] = await Promise.all([ctx.db.get(args.projectId), ctx.db.get(args.voiceId)]);
@@ -369,10 +371,150 @@ export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, ar
   return { projectId: project._id, voiceId: voice._id, mode: voice.kind === "RECORDED" ? "RECORDED" as const : "REFERENCE_CLONE" as const, references, consentId, provider: undefined, providerVoiceId: undefined };
 }
 
+export interface VoiceConfigSnapshot {
+  version: 1;
+  projectId: Id<'projects'>;
+  voiceId: Id<'voices'>;
+  kind: 'STOCK' | 'CLONED' | 'RECORDED';
+  language: string | null;
+  provider: string | null;
+  providerVoiceId: string | null;
+  settingsSnapshot: unknown;
+  sampleAssetIds: Id<'assets'>[];
+  sampleProofs: Array<{ assetId: Id<'assets'>; storageId: Id<'_storage'>; checksum: string; byteSize: number; mimeType: string }>;
+  consentId: Id<'voiceConsents'> | null;
+}
+
+function stableVoiceConfig(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableVoiceConfig).join(',')}]`;
+  const row = value as Record<string, unknown>;
+  return `{${Object.keys(row).sort().map(key => `${JSON.stringify(key)}:${stableVoiceConfig(row[key])}`).join(',')}}`;
+}
+
+export async function voiceConfigHash(snapshot: unknown): Promise<string> {
+  const serialized = stableVoiceConfig(snapshot);
+  if (new TextEncoder().encode(serialized).byteLength > 24_000) throw new Error('Voice settings exceed the snapshot limit.');
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized)))).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function snapshotVoice(ctx: QueryCtx | MutationCtx, voice: Doc<'voices'>): Promise<VoiceConfigSnapshot> {
+  const sampleProofs: VoiceConfigSnapshot['sampleProofs'] = [];
+  if (voice.sampleAssetIds.length > 3) throw new Error('VOICE_SAMPLE_REQUIRED');
+  for (const assetId of voice.sampleAssetIds) {
+    const asset = await ctx.db.get(assetId);
+    const stored = asset?.storageId ? await ctx.db.system.get('_storage', asset.storageId) : null;
+    if (!asset || asset.projectId !== voice.projectId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !stored || !stored.contentType?.startsWith('audio/') || !stored.sha256 || stored.size < 1) throw new Error('VOICE_SAMPLE_UNAVAILABLE');
+    sampleProofs.push({ assetId, storageId: asset.storageId, checksum: stored.sha256, byteSize: stored.size, mimeType: stored.contentType });
+  }
+  return {
+    version: 1, projectId: voice.projectId, voiceId: voice._id, kind: voice.kind, language: voice.language ?? null,
+    provider: voice.provider ?? null, providerVoiceId: voice.providerVoiceId ?? null,
+    settingsSnapshot: voice.settingsSnapshot ?? {}, sampleAssetIds: [...voice.sampleAssetIds], sampleProofs,
+    consentId: voice.currentConsentId ?? null,
+  };
+}
+
+type VoiceResolveArgs = {
+  projectId: Id<'projects'>; voiceId: Id<'voices'>; use: 'SYNTHESIZE' | 'AVATAR_LIPSYNC';
+  primaryVoiceSampleAssetId?: Id<'assets'>; voiceVersionId?: Id<'voiceVersions'>;
+};
+
+/** Reads an exact immutable voice version while checking live revocation and
+ * source rights. Mutable profile settings never replace this snapshot. */
+export async function resolveFrozenVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, args: VoiceResolveArgs & {
+  voiceVersionId: Id<'voiceVersions'>; voiceConfigHash?: string; voiceConfigSnapshot?: unknown;
+}) {
+  const [version, voice, project] = await Promise.all([ctx.db.get(args.voiceVersionId), ctx.db.get(args.voiceId), ctx.db.get(args.projectId)]);
+  if (!project || project.deletedAt || !voice || voice.projectId !== project._id || voice.deletedAt || voice.revokedAt || ['REVOKED', 'REVOKING', 'DELETED'].includes(voice.status)
+    || !version || version.projectId !== project._id || version.voiceId !== voice._id) throw new Error('VOICE_NOT_READY');
+  const snapshot = version.snapshot as VoiceConfigSnapshot;
+  if (snapshot.version !== 1 || snapshot.projectId !== project._id || snapshot.voiceId !== voice._id || version.configHash !== await voiceConfigHash(snapshot)
+    || args.voiceConfigHash !== undefined && args.voiceConfigHash !== version.configHash
+    || args.voiceConfigSnapshot !== undefined && stableVoiceConfig(args.voiceConfigSnapshot) !== stableVoiceConfig(snapshot)) throw new Error('VOICE_VERSION_CHANGED');
+  if (snapshot.kind === 'CLONED') {
+    const consent = snapshot.consentId ? await ctx.db.get(snapshot.consentId) : null;
+    const revoked = snapshot.consentId ? await ctx.db.query('voiceConsentEvents').withIndex('by_consent_event', q => q.eq('consentId', snapshot.consentId!).eq('event', 'REVOKED')).first() : null;
+    if (!consent || consent.projectId !== project._id || consent.voiceId !== voice._id || !consent.permittedUses.includes(args.use)
+      || consent.expiresAt !== undefined && consent.expiresAt <= Date.now() || revoked) throw new Error('VOICE_CONSENT_REQUIRED');
+  }
+  if (snapshot.kind === 'STOCK') {
+    if (args.primaryVoiceSampleAssetId || snapshot.provider !== 'openrouter' || !snapshot.providerVoiceId || (snapshot.settingsSnapshot as { modelId?: string })?.modelId !== PREPARATION_MODELS.narration.id) throw new Error('VOICE_PROVIDER_REQUIRED');
+  } else if (!snapshot.sampleProofs.length || snapshot.sampleProofs.length > 3 || args.primaryVoiceSampleAssetId && (snapshot.kind !== 'CLONED' || !snapshot.sampleAssetIds.includes(args.primaryVoiceSampleAssetId))) throw new Error('VOICE_SAMPLE_REQUIRED');
+  const references = [];
+  for (const proof of snapshot.sampleProofs) {
+    const asset = await ctx.db.get(proof.assetId);
+    const stored = asset?.storageId ? await ctx.db.system.get('_storage', asset.storageId) : null;
+    const rejected = [asset?.rights, asset?.provenance, asset?.moderation].some(value => {
+      const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+      return data.approved === false || data.consent === false || ['DENIED','REJECTED','REVOKED','EXPIRED'].includes(String(data.status ?? data.state ?? '').toUpperCase());
+    });
+    if (!asset || asset.projectId !== project._id || asset.scope !== 'PROJECT' || asset.deletedAt || asset.storageId !== proof.storageId || !stored || stored.size !== proof.byteSize || stored.contentType !== proof.mimeType || !sha256Equal(stored.sha256, proof.checksum) || rejected) throw new Error('VOICE_SAMPLE_UNAVAILABLE');
+    if (args.primaryVoiceSampleAssetId && proof.assetId !== args.primaryVoiceSampleAssetId) continue;
+    if (args.primaryVoiceSampleAssetId) {
+      const state = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', project._id).eq('resourceType', 'asset').eq('resourceId', proof.assetId)).unique();
+      if (!state || !['APPROVED','LOCKED'].includes(state.state)) throw new Error('VOICE_SAMPLE_UNAVAILABLE');
+    }
+    const url = await ctx.storage.getUrl(proof.storageId);
+    if (!url) throw new Error('VOICE_SAMPLE_UNAVAILABLE');
+    references.push({ assetId: proof.assetId, url, format: proof.mimeType.split('/')[1] });
+  }
+  return {
+    projectId: project._id, voiceId: voice._id, voiceVersionId: version._id, voiceConfigSnapshot: snapshot, voiceConfigHash: version.configHash,
+    mode: snapshot.kind === 'STOCK' ? 'STOCK' as const : snapshot.kind === 'RECORDED' ? 'RECORDED' as const : 'REFERENCE_CLONE' as const,
+    provider: snapshot.provider ?? undefined, providerVoiceId: snapshot.providerVoiceId ?? undefined, references, consentId: snapshot.consentId ?? undefined,
+  };
+}
+
+export async function resolveVoiceSynthesisInput(ctx: QueryCtx | MutationCtx, args: VoiceResolveArgs) {
+  if (args.voiceVersionId) return resolveFrozenVoiceSynthesisInput(ctx, { ...args, voiceVersionId: args.voiceVersionId });
+  const resolved = await resolveMutableVoiceSynthesisInput(ctx, args);
+  const voice = await ctx.db.get(args.voiceId);
+  if (!voice) throw new Error('VOICE_NOT_READY');
+  const snapshot = await snapshotVoice(ctx, voice);
+  const hash = await voiceConfigHash(snapshot);
+  const saved = await ctx.db.query('voiceVersions').withIndex('by_voice_hash', q => q.eq('voiceId', args.voiceId).eq('configHash', hash)).unique();
+  return { ...resolved, voiceVersionId: saved?._id, voiceConfigSnapshot: snapshot, voiceConfigHash: hash };
+}
+
+export async function freezeVoiceVersion(ctx: MutationCtx, input: Awaited<ReturnType<typeof resolveVoiceSynthesisInput>>, actorUserId: Id<'users'>) {
+  if (input.voiceVersionId) return input.voiceVersionId;
+  const voice = await ctx.db.get(input.voiceId);
+  if (!voice || input.voiceConfigHash !== await voiceConfigHash(input.voiceConfigSnapshot)) throw new Error('VOICE_VERSION_CHANGED');
+  const state = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', input.projectId).eq('resourceType', 'voice').eq('resourceId', voice._id)).unique();
+  if (!state || !['APPROVED','LOCKED'].includes(state.state)) throw new Error('VOICE_APPROVAL_REQUIRED');
+  const latest = await ctx.db.query('voiceVersions').withIndex('by_voice_version', q => q.eq('voiceId', voice._id)).order('desc').first();
+  const timestamp = Date.now();
+  const id = await ctx.db.insert('voiceVersions', { projectId: input.projectId, voiceId: voice._id, versionNumber: (latest?.versionNumber ?? 0) + 1,
+    snapshot: input.voiceConfigSnapshot, configHash: input.voiceConfigHash, approvedFromVoiceAt: state.approvedAt ?? state.updatedAt,
+    createdByUserId: actorUserId, createdAt: timestamp });
+  await ctx.db.patch(voice._id, { currentVersionId: id });
+  return id;
+}
+
+export const freezeVersion = mutation({
+  args: { projectId: v.id('projects'), voiceId: v.id('voices') },
+  returns: v.object({ voiceVersionId: v.id('voiceVersions'), versionNumber: v.number() }),
+  handler: async (ctx,args) => {
+    const access = await requireProjectRole(ctx,args.projectId,['OWNER','EDITOR']);
+    const resolved = await resolveVoiceSynthesisInput(ctx,{...args,use:'SYNTHESIZE'});
+    const voiceVersionId = await freezeVoiceVersion(ctx,resolved,access.user._id);
+    const version = await ctx.db.get(voiceVersionId);
+    return {voiceVersionId,versionNumber:version!.versionNumber};
+  },
+});
+
 export const resolveForSynthesis = internalQuery({
-  args: { projectId: v.id("projects"), voiceId: v.id("voices"), use: v.union(v.literal("SYNTHESIZE"), v.literal("AVATAR_LIPSYNC")), primaryVoiceSampleAssetId: v.optional(v.id('assets')) },
+  args: { projectId: v.id("projects"), voiceId: v.id("voices"), use: v.union(v.literal("SYNTHESIZE"), v.literal("AVATAR_LIPSYNC")), primaryVoiceSampleAssetId: v.optional(v.id('assets')), voiceVersionId: v.optional(v.id('voiceVersions')) },
   returns: v.any(),
   handler: resolveVoiceSynthesisInput,
+});
+
+export const resolveFrozenForSynthesis = internalQuery({
+  args: { projectId: v.id('projects'), voiceId: v.id('voices'), voiceVersionId: v.id('voiceVersions'), voiceConfigHash: v.string(), voiceConfigSnapshot: v.any(),
+    use: v.union(v.literal('SYNTHESIZE'),v.literal('AVATAR_LIPSYNC')), primaryVoiceSampleAssetId: v.optional(v.id('assets')) },
+  returns: v.any(), handler: resolveFrozenVoiceSynthesisInput,
 });
 
 /** UI-safe availability: never return signed sample URLs or provider IDs. */

@@ -1,5 +1,6 @@
 import {expectedGraphicsCertificate} from './templates/graphics-v2-certificate.js';
 import {SUPPORTED_MOTION_TEMPLATE_IDS} from './templates/contract.js';
+import { FORMAT_VARIANT_VERSION } from './output-variants.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -127,7 +128,7 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
     if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];

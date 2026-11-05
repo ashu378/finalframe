@@ -340,7 +340,7 @@ export interface ReviewComment {
  */
 export type ProductionWorkflow = 'SOCIAL' | 'COMEDY' | 'BUSINESS_AD' | 'FOOTAGE_TRANSFORM';
 export type ProductionInputMode = 'IDEA' | 'SCRIPT' | 'VOICE' | 'IMAGES' | 'FOOTAGE' | 'AD';
-export type OutputPreset = 'SOCIAL_VERTICAL' | 'SQUARE' | 'LANDSCAPE';
+export type OutputPreset = import('../../../renderer/src/output-presets').OutputPresetId | 'SOCIAL_VERTICAL';
 export type QualityTier = 'ECONOMY' | 'STANDARD' | 'PREMIUM';
 export type ProductionStatus = 'DRAFT' | 'PLANNED' | 'APPROVED' | 'GENERATING' | 'REVIEW' | 'EXPORTED' | 'FAILED';
 export type GenerationJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
@@ -369,6 +369,8 @@ export interface DirectorShotPlan {
     orderIndex: number;
     requiredAssetIds: string[];
     camera?: CameraConfig;
+    resourceBindings?: Array<{role:string;resourceVersionId:string;voiceVersionId?:string|null;characterResourceVersionId?:string|null}>;
+    dialogueSegments?: Array<{speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string;delivery?:string}>;
 }
 
 export interface DirectorScenePlan {

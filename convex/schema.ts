@@ -239,7 +239,7 @@ export default defineSchema({
 
   projectResourceVersions: defineTable({
     projectId: v.id("projects"), resourceId: v.id("projectResources"), versionNumber: v.number(), profile: json,
-    assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), createdByUserId: v.id("users"), createdAt: timestamp,
+    assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), voiceVersionId: v.optional(v.id("voiceVersions")), createdByUserId: v.id("users"), createdAt: timestamp,
   }).index("by_resource_and_version", ["resourceId", "versionNumber"]).index("by_project", ["projectId"]),
 
   continuityBibles: defineTable({
@@ -257,6 +257,16 @@ export default defineSchema({
     continuityBibleId: v.optional(v.id("continuityBibles")), predecessorStoryStateId: v.optional(v.id("episodeStoryStates")),
     snapshot: json, createdByUserId: v.id("users"), createdAt: timestamp,
   }).index("by_episode", ["episodeId"]).index("by_version", ["productionVersionId"]),
+
+  // Searchable approved facts retain their exact accepted episode provenance.
+  // Superseded facts remain auditable and are excluded by source validation.
+  projectMemoryFacts: defineTable({
+    projectId: v.id('projects'), episodeId: v.id('episodes'), episodeNumber: v.number(),
+    storyStateId: v.id('episodeStoryStates'), productionVersionId: v.id('productionVersions'), timelineId: v.id('timelines'),
+    kind: v.union(v.literal('SUMMARY'), v.literal('FACT'), v.literal('THREAD'), v.literal('CHARACTER'), v.literal('CLIFFHANGER'), v.literal('PAYOFF')),
+    ordinal: v.number(), text: v.string(), sourceHash: v.string(), createdAt: timestamp,
+  }).index('by_project_episode', ['projectId', 'episodeNumber']).index('by_story_state', ['storyStateId'])
+    .searchIndex('search_text', { searchField: 'text', filterFields: ['projectId'] }),
 
   // Provider dollars are separate from internal product credits. One run can
   // cover multiple studios without multiplying the approved testing ceiling.
@@ -348,11 +358,18 @@ export default defineSchema({
     sampleAssetIds: v.array(v.id("assets")), previewAssetId: v.optional(v.id("assets")), currentConsentId: v.optional(v.id("voiceConsents")),
     originVoiceId: v.optional(v.id("voices")), importedByUserId: v.optional(v.id("users")), importedAt: v.optional(timestamp),
     settingsSnapshot: v.optional(json), providerMetadata: v.optional(json), retentionPolicy: v.optional(json),
+    currentVersionId: v.optional(v.id('voiceVersions')),
     createdByUserId: v.id("users"), idempotencyKey: v.optional(v.string()), revokedAt: v.optional(timestamp), deletedAt: v.optional(timestamp),
     createdAt: timestamp, updatedAt: timestamp,
   }).index("by_project", ["projectId"]).index("by_project_status", ["projectId", "status"])
     .index("by_character", ["characterId"]).index("by_production", ["productionId"])
     .index("by_idempotency", ["idempotencyKey"]).index("by_provider_voice", ["provider", "providerVoiceId"]),
+
+  voiceVersions: defineTable({
+    projectId: v.id('projects'), voiceId: v.id('voices'), versionNumber: v.number(), snapshot: json, configHash: v.string(),
+    approvedFromVoiceAt: timestamp, createdByUserId: v.id('users'), createdAt: timestamp,
+  }).index('by_voice_version', ['voiceId', 'versionNumber']).index('by_project', ['projectId'])
+    .index('by_voice_hash', ['voiceId', 'configHash']),
 
   // Grants are immutable. Revocation and other lifecycle changes are appended
   // to voiceConsentEvents so the original consent record remains auditable.
@@ -370,7 +387,7 @@ export default defineSchema({
     event: v.union(v.literal("GRANTED"), v.literal("REVOKED")), actorUserId: v.id("users"),
     reason: v.optional(v.string()), idempotencyKey: v.string(), createdAt: timestamp,
   }).index("by_project", ["projectId"]).index("by_voice", ["voiceId"])
-    .index("by_consent", ["consentId"]).index("by_idempotency", ["idempotencyKey"]),
+    .index("by_consent", ["consentId"]).index("by_consent_event", ["consentId", "event"]).index("by_idempotency", ["idempotencyKey"]),
 
   locations: defineTable({
     ...studioOwned, productionId: v.optional(v.id("productions")), productionVersionId: v.optional(v.id("productionVersions")),
@@ -571,6 +588,7 @@ export default defineSchema({
     status: v.union(v.literal('WAITING'), v.literal('READY'), v.literal('QUEUED'), v.literal('RUNNING'), v.literal('ACCEPTED'), v.literal('WAITING_APPROVAL'), v.literal('COMPLETED'), v.literal('FAILED'), v.literal('RECONCILIATION_REQUIRED'), v.literal('CANCELED')),
     approvalTarget: v.optional(v.string()), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(timestamp), attemptCount: v.number(), linkedGenerationJobId: v.optional(v.id('generationJobs')), linkedBeatJobId: v.optional(v.id('beatAnalysisJobs')), linkedRenderJobId: v.optional(v.id('renderJobs')),
     resultId: v.optional(v.string()), resultHash: v.optional(v.string()), errorCode: v.optional(v.string()), createdAt: timestamp, updatedAt: timestamp,
+    voiceVersionId: v.optional(v.id('voiceVersions')),
     allocationMicros: v.optional(v.number()), allocationCredits: v.optional(v.number()), admissionHash: v.optional(v.string()), admissionEstimateId: v.optional(v.id('recipeEstimates')), admissionModel: v.optional(v.string()), resolvedBindings: v.optional(json), resolvedRequestHash: v.optional(v.string()),
   }).index('by_run_order', ['runId', 'orderIndex']).index('by_run_node', ['runId', 'nodeId']).index('by_idempotency', ['idempotencyKey']).index('by_status', ['status', 'updatedAt']).index('by_generation_job', ['linkedGenerationJobId']).index('by_project_request', ['projectId', 'operation', 'requestHash']),
 

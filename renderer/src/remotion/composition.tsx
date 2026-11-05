@@ -23,13 +23,13 @@ export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) 
         const crossfade = incoming?.audioPolicy === 'CROSSFADE' || outgoing?.audioPolicy === 'CROSSFADE';
         return (
         <Sequence key={item.id} from={item.startFrame} durationInFrames={item.durationInFrames} layout="none">
-          <AbsoluteFill style={visualPresentation(item, frame, incoming, outgoing)}>
+          <AbsoluteFill style={{...visualPresentation(item, frame, incoming, outgoing),...(plan.version===5&&item.backgroundColor?{backgroundColor:item.backgroundColor}:{})}}>
           {item.kind === 'video' ? (
             <Video
               src={item.src}
               startFrom={item.trimStartInFrames ?? 0}
               volume={crossfade ? localFrame => nativeVideoVolume(item.volume ?? 1, item.startFrame + localFrame, incoming, outgoing) : item.volume ?? 1}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              style={{ width: '100%', height: '100%', objectFit: plan.version===5 ? item.fit ?? 'cover' : 'cover', objectPosition: plan.version===5 ? item.position ?? 'center' : 'center' }}
             />
           ) : item.kind === 'image' ? (
             <Img

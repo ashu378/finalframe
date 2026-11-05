@@ -10,7 +10,7 @@ import { SFX_LIMITS, sameSfxQuote, assertSfxConsent, assertSfxOutputProbe, sfxEr
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { decodePreparedImage, IMAGE_RESPONSE_LIMITS } from '../src/lib/ai/image-response';
 const jobs = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
-const voices = (internal as unknown as { voices: { resolveForSynthesis: FunctionReference<'query', 'internal', any, any> } }).voices;
+const voices = (internal as unknown as { voices: { resolveFrozenForSynthesis: FunctionReference<'query', 'internal', any, any> } }).voices;
 async function boundedAudio(url: string, expected: Record<string, unknown>) {
   const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
   if (!response.ok || !response.headers.get('content-type')?.startsWith('audio/')) throw new Error('Recording is unavailable.');
@@ -52,7 +52,10 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
     const result = await transcribeAudio({ model: job.model, audio: { data, format } }, options);
     await ctx.runMutation(jobs.completePreparation, { ...lease, actualModel: result.modelUsed, text: result.text, segments: result.segments, providerRequestId: result.requestId, providerCostUsd: result.costUsd, usage: result.usage });
   } else {
-    const voice = await ctx.runQuery(voices.resolveForSynthesis, { projectId: job.projectId, voiceId: request.targetVoiceId, use: 'SYNTHESIZE', primaryVoiceSampleAssetId: request.primaryVoiceSampleAssetId });
+    if (!request.voiceVersionId || !request.voiceConfigHash || !request.voiceConfigSnapshot) throw new Error('VOICE_FROZEN_CONFIG_REQUIRED');
+    const voice = await ctx.runQuery(voices.resolveFrozenForSynthesis, { projectId: job.projectId, voiceId: request.targetVoiceId,
+      voiceVersionId: request.voiceVersionId, voiceConfigHash: request.voiceConfigHash, voiceConfigSnapshot: request.voiceConfigSnapshot,
+      use: 'SYNTHESIZE', primaryVoiceSampleAssetId: request.primaryVoiceSampleAssetId });
     if (voice.mode === 'STOCK' && voice.provider !== 'openrouter') throw new Error('This voice provider is unavailable.');
     if (voice.mode === 'RECORDED' || (voice.mode === 'REFERENCE_CLONE') !== (request.clone === true)) throw new Error('Voice mode changed.');
     if (voice.mode === 'REFERENCE_CLONE' && (!request.primaryVoiceSampleAssetId || voice.references.length !== 1 || voice.references[0].assetId !== request.primaryVoiceSampleAssetId)) throw new Error('The explicit primary voice recording changed.');

@@ -3,6 +3,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireProjectAccess } from "./authorization";
 import { requireApprovedResource } from "./resourceStates";
 import { validateBibleBindings } from "./continuityContracts";
+import {retrieveApprovedMemory} from './projectMemory';
 
 type ReadCtx = QueryCtx | MutationCtx;
 
@@ -18,7 +19,7 @@ export async function planningSelection(ctx: ReadCtx, projectId: Id<"projects">,
 }
 
 /** Canonical planning reads exact project-owned snapshots, never global defaults. */
-export async function resolvePlanningContinuity(ctx: ReadCtx, projectId: Id<"projects">, productionId?: Id<"productions">, bibleId?: Id<"continuityBibles">) {
+export async function resolvePlanningContinuity(ctx: ReadCtx, projectId: Id<"projects">, productionId?: Id<"productions">, bibleId?: Id<"continuityBibles">, memoryQuery='') {
   const { production, episode } = await planningSelection(ctx, projectId, productionId);
   if (episode && !bibleId) throw new Error("Choose an approved project continuity bible or explicitly create a blank bible before planning this episode.");
   if (!bibleId) return null;
@@ -38,16 +39,20 @@ export async function resolvePlanningContinuity(ctx: ReadCtx, projectId: Id<"pro
     // validateBibleBindings checked ownership, but keep null guards explicit.
     if (!resource || !version) throw new Error("A continuity reference is no longer available.");
     const voice = version.voiceId ? await ctx.db.get(version.voiceId) : null;
+    const voiceVersion = version.voiceVersionId ? await ctx.db.get(version.voiceVersionId) : null;
+    if(voiceVersion&&(voiceVersion.projectId!==projectId||voiceVersion.voiceId!==voice?._id))throw new Error('Voice version does not belong to this character.');
+    const frozenVoice = voiceVersion?.snapshot as {kind?:string;language?:string|null}|undefined;
     return {
       resourceId: resource._id, resourceVersionId: version._id, kind: resource.kind,
       name: resource.name, profile: version.profile, assetIds: version.assetIds,
-      voice: voice ? { voiceId: voice._id, kind: voice.kind, language: voice.language ?? null } : null,
+      voice: voice ? { voiceId: voice._id, voiceVersionId: voiceVersion?._id??null, versionNumber: voiceVersion?.versionNumber??null, kind: frozenVoice?.kind??voice.kind, language: frozenVoice?.language??voice.language??null } : null,
     };
   }));
   return {
     projectId, productionId: production?._id ?? null, episodeId: episode?._id ?? null,
     continuityBibleId: bible._id, continuityBibleVersion: bible.versionNumber,
     inputStoryStateId: inputStory?._id ?? null, acceptedPredecessorStory: inputStory?.snapshot ?? null,
+    approvedEpisodeMemory: await retrieveApprovedMemory(ctx,projectId,episode?.episodeNumber,memoryQuery),
     bible: bible.snapshot, resources,
   };
 }

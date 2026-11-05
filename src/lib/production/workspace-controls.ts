@@ -13,6 +13,7 @@ export interface ResourceVersionView {
     profile: Record<string, unknown>;
     assetIds: string[];
     voiceId: string | null;
+    voiceVersionId?: string;
     state: WorkspaceResourceState;
 }
 
@@ -54,6 +55,8 @@ export interface ShotControlView {
     durationSeconds: number;
     state: WorkspaceResourceState;
     resourceVersionIds: string[];
+    resourceBindings?: Array<{ role: string; resourceVersionId: string; voiceVersionId?: string; characterResourceVersionId?: string }>;
+    dialogueSegments?: Array<{ speakerResourceVersionId: string; voiceVersionId: string; startSeconds: number; durationSeconds: number; text: string; delivery?: string }>;
     operationControls: ShotOperationControls;
     takes: Array<{ id: string; versionNumber: number; status: string; state: WorkspaceResourceState; model?: string; provider?: string; assetId?: string; url?: string; mimeType?: string }>;
 }
@@ -72,13 +75,13 @@ export interface WorkspaceControlData {
     resources: ResourceVersionView[];
     resourceCursor: string | null;
     assets: WorkspaceAssetView[];
-    voices: Array<{ id: string; name: string; kind: string; status: string; state: WorkspaceResourceState; hasConsent: boolean; sampleCount: number; sampleAssetIds: string[] }>;
+    voices: Array<{ id: string; name: string; kind: string; status: string; state: WorkspaceResourceState; hasConsent: boolean; sampleCount: number; sampleAssetIds: string[]; voiceVersionId?: string }>;
     bibles: BibleView[];
-    boundResources: Array<{ id: string; resourceId: string; name: string; kind: ProjectResourceKind; versionNumber: number; state: WorkspaceResourceState }>;
+    boundResources: Array<{ id: string; resourceId: string; name: string; kind: ProjectResourceKind; versionNumber: number; state: WorkspaceResourceState; voiceVersionId?: string }>;
     plannedBibleId: string | null;
     continuationSources: ContinuationSourceView[];
     scenes: Array<{ id: string; title: string; purpose: string; shots: ShotControlView[] }>;
-    timelines: Array<{ id: string; versionNumber: number; state: WorkspaceResourceState; matchesProductionVersion: boolean }>;
+    timelines: Array<{ id: string; versionNumber: number; state: WorkspaceResourceState; matchesProductionVersion: boolean; outputPreset?: string; width?: number; height?: number }>;
     acceptedStoryStateId: string | null;
     acceptedStory: StorySnapshotView | null;
 }
@@ -100,6 +103,84 @@ export interface ShotOperationControls {
     previousJobId?: string;
     upscaleFactor?: number;
     upscaleMode?: 'PRECISE' | 'CREATIVE';
+    referenceBindings?: ReferenceAssetBinding[];
+    editInstructions?: EditInstructions;
+}
+
+export const REFERENCE_ROLES = ['SOURCE_PERFORMANCE', 'IDENTITY', 'COSTUME', 'OBJECT', 'ENVIRONMENT', 'RECORDING'] as const;
+export type ReferenceRole = (typeof REFERENCE_ROLES)[number];
+export interface ReferenceAssetBinding { assetId: string; alias: string; role: ReferenceRole }
+export interface EditInstructions { change: string; preserve: string; timing: string }
+
+/** Resolve authoring aliases only after the caller has authorized project assets.
+ * Roles describe intent in the prompt; they do not invent provider API controls. */
+export function resolveShotReferencePrompt(input: {
+    prompt: string;
+    referenceBindings?: unknown;
+    editInstructions?: unknown;
+    referenceAssetIds: string[];
+    assets: Array<{ id: string; mimeType: string }>;
+    firstFrameAssetId?: string;
+    lastFrameAssetId?: string;
+}) {
+    const raw = input.referenceBindings ?? [];
+    if (!Array.isArray(raw) || raw.length > 50) throw new Error('Choose at most 50 named references.');
+    const byId = new Map(input.assets.map(asset => [asset.id, asset]));
+    const selected = new Set(input.referenceAssetIds);
+    const aliases = new Set<string>(); const boundAssets = new Set<string>();
+    const referenceBindings: ReferenceAssetBinding[] = raw.map(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Choose a valid named reference.');
+        const binding = value as Record<string, unknown>;
+        if (typeof binding.assetId !== 'string' || !selected.has(binding.assetId) || !byId.has(binding.assetId)) throw new Error('Select named media from this project.');
+        if (typeof binding.alias !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(binding.alias)) throw new Error('Choose reference names starting with a letter, using up to 40 letters, numbers, underscores or hyphens.');
+        const alias = binding.alias.toLowerCase();
+        if (aliases.has(alias) || boundAssets.has(binding.assetId)) throw new Error('Choose each reference name and asset only once.');
+        if (!REFERENCE_ROLES.includes(binding.role as ReferenceRole)) throw new Error('Choose a supported reference role.');
+        const role = binding.role as ReferenceRole; const mime = byId.get(binding.assetId)!.mimeType;
+        if (role === 'SOURCE_PERFORMANCE' ? !mime.startsWith('video/') : role === 'RECORDING' ? !mime.startsWith('audio/') : !mime.startsWith('image/') && !mime.startsWith('video/')) throw new Error('Choose media matching its reference role.');
+        aliases.add(alias); boundAssets.add(binding.assetId);
+        return { assetId: binding.assetId, alias, role };
+    });
+    const frameIds = new Set([input.firstFrameAssetId, input.lastFrameAssetId].filter(Boolean));
+    const counters = { image: 0, video: 0, audio: 0 };
+    const labels = new Map<string, string>();
+    for (const id of input.referenceAssetIds) {
+        const asset = byId.get(id);
+        if (!asset || frameIds.has(id)) continue;
+        const kind = asset.mimeType.split('/')[0] as keyof typeof counters;
+        if (kind in counters) labels.set(id, `${kind} reference ${++counters[kind]}`);
+    }
+    for (const binding of referenceBindings) {
+        if (binding.assetId === input.firstFrameAssetId) labels.set(binding.assetId, 'first frame');
+        else if (binding.assetId === input.lastFrameAssetId) labels.set(binding.assetId, 'last frame');
+        if (!labels.has(binding.assetId)) throw new Error('Choose supported image, video or audio references.');
+    }
+    const byAlias = new Map(referenceBindings.map(binding => [binding.alias, binding]));
+    const resolveMentions = (text: string) => text.replace(/(^|[^A-Za-z0-9_@])@([A-Za-z][A-Za-z0-9_-]*)/g, (match, before: string, name: string) => {
+        const binding = byAlias.get(name.toLowerCase());
+        if (!binding) throw new Error('Select a named project reference for every @mention.');
+        return `${before}${labels.get(binding.assetId)}`;
+    });
+    let editInstructions: EditInstructions | undefined;
+    if (input.editInstructions !== undefined && input.editInstructions !== null) {
+        if (typeof input.editInstructions !== 'object' || Array.isArray(input.editInstructions)) throw new Error('Choose valid change, preservation and timing instructions.');
+        const value = input.editInstructions as Record<string, unknown>;
+        const read = (field: keyof EditInstructions) => {
+            if (typeof value[field] !== 'string' || value[field].length > 2000) throw new Error('Choose instructions of at most 2000 characters per field.');
+            return value[field].trim();
+        };
+        editInstructions = { change: read('change'), preserve: read('preserve'), timing: read('timing') };
+    }
+    // Legacy prompts stay byte-for-byte unchanged unless the creator explicitly
+    // enables named references or structured editing instructions.
+    const hasIntent = referenceBindings.length > 0 || Boolean(editInstructions && Object.values(editInstructions).some(Boolean));
+    if (!hasIntent) return { prompt: input.prompt, referenceBindings, editInstructions };
+    const sections = [resolveMentions(input.prompt)];
+    if (referenceBindings.length) sections.push('Reference assignments:\n' + referenceBindings.map(binding => `${labels.get(binding.assetId)}: ${binding.role.toLowerCase().replaceAll('_', ' ')}.`).join('\n'));
+    if (editInstructions?.change) sections.push(`Requested changes: ${resolveMentions(editInstructions.change)}`);
+    if (editInstructions?.preserve) sections.push(`Preserve: ${resolveMentions(editInstructions.preserve)}`);
+    if (editInstructions?.timing) sections.push(`Action timing: ${resolveMentions(editInstructions.timing)}`);
+    return { prompt: sections.join('\n'), referenceBindings, editInstructions };
 }
 
 /** Shared by authoring and generation: requirements follow the operation,
@@ -158,6 +239,7 @@ export function validateShotOperationControls(controls: ShotOperationControls, a
         if (!asset) throw new Error('Select media from this project.');
         return asset;
     });
+    resolveShotReferencePrompt({ ...controls, prompt: '', assets });
     for (const frame of [controls.firstFrameAssetId, controls.lastFrameAssetId].filter(Boolean)) {
         if (!byId.get(frame)?.mimeType.startsWith('image/')) throw new Error('Frames must be project images.');
     }

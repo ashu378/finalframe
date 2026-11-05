@@ -1,4 +1,5 @@
 import { graphicsRequirements } from '../renderer/src/templates/graphics-v2-certificate';
+import { FORMAT_VARIANT_VERSION, formatVariantRequirements } from '../renderer/src/output-variants';
 
 /** Read only the small capability/acknowledgement response, never a render body. */
 export async function readGraphicsHandshake(response: Response): Promise<unknown> {
@@ -26,9 +27,11 @@ export async function readGraphicsHandshake(response: Response): Promise<unknown
 
 export function graphicsWorkerSupports(manifest: unknown, health: unknown): boolean {
   const required = graphicsRequirements(manifest);
-  if (!required) return true;
+  const formatRequired = formatVariantRequirements(manifest);
+  if (!required && !formatRequired) return true;
   const value = health && typeof health === 'object' && !Array.isArray(health) ? health as Record<string, unknown> : {};
   return value.ok === true && value.service === 'finalframe-renderer'
-    && Array.isArray(value.graphicsLayoutVersions) && value.graphicsLayoutVersions.includes(2)
-    && Array.isArray(value.motionTemplateIds) && required.templateIds.every(id => (value.motionTemplateIds as unknown[]).includes(id));
+    && (!formatRequired || value.formatVariantVersion === FORMAT_VARIANT_VERSION)
+    && (!required || Array.isArray(value.graphicsLayoutVersions) && value.graphicsLayoutVersions.includes(2)
+    && Array.isArray(value.motionTemplateIds) && required.templateIds.every(id => (value.motionTemplateIds as unknown[]).includes(id)));
 }

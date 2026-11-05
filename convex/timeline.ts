@@ -14,10 +14,32 @@ import { validateManifest } from "../renderer/src/manifest";
 import { finishingV5Enabled } from "./finishingContracts";
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
 import { AUTHORED_COPY_POLICY } from '../renderer/src/templates/contract';
+import { OUTPUT_PRESETS, normalizeOutputPresetId } from '../renderer/src/output-presets';
+import { createTimelineFormatVariant } from './timelineEditor';
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+
+export const formatOptions = query({args:{},returns:v.any(),handler:async()=>({enabled:process.env.FINALFRAME_FORMAT_VARIANTS_ENABLED==='true'&&finishingV5Enabled(),presets:OUTPUT_PRESETS})});
+
+export const createFormatVariant = mutation({
+  args: { timelineId: v.id('timelines'), presetId: v.string(), expectedVersionNumber: v.number(), expectedUpdatedAt: v.union(v.number(), v.null()),
+    idempotencyKey: v.string(), fit: v.optional(v.union(v.literal('contain'), v.literal('cover'))),
+    focalPoint: v.optional(v.object({ x: v.number(), y: v.number() })), backgroundColor: v.optional(v.string()) },
+  returns: v.object({timelineId:v.id('timelines'),operationId:v.id('productionOperations'),replayed:v.boolean()}),
+  handler: createTimelineFormatVariant,
+});
+
+export const formatVariants = query({
+  args:{productionId:v.id('productions')},returns:v.any(),handler:async(ctx,args)=>{
+    const production=await ctx.db.get(args.productionId);
+    if(!production?.projectId)throw new Error('Project production unavailable.');
+    await requireProjectAccess(ctx,production.projectId);
+    const timelines=await ctx.db.query('timelines').withIndex('by_production_version',q=>q.eq('productionId',production._id)).order('desc').take(201);
+    return {hasMore:timelines.length>200,variants:timelines.slice(0,200).flatMap(row=>{const metadata=object(object(row.tracks).metadata);const presetId=normalizeOutputPresetId(metadata.outputPresetId);return metadata.formatVariant&&presetId?[{id:row._id,versionNumber:row.versionNumber,presetId,source:metadata.formatVariant,status:row.status}]:[];})};
+  },
+});
 
 export const createVersion = mutation({
   args: { productionId: v.id("productions"), manifestId: v.id("manifests"), outputPreset: v.optional(v.string()), idempotencyKey: v.optional(v.string()), metadata: v.optional(v.any()) },
@@ -64,7 +86,7 @@ export const createVersion = mutation({
     if (!targetVersion || targetVersion.productionId !== production._id || targetVersion.status !== 'APPROVED' || payload.productionVersionId !== targetVersion._id) throw new Error('Historical or unbound manifests are read-only. Import the exact current approved production manifest.');
     const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq("productionId", args.productionId)).order("desc").first();
     const timestamp = now();
-    const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output,...(importedPoster?{importedPoster}:{}) };
+    const metadata = { ...object(args.metadata), productionVersionId: payload.productionVersionId, fps, importedManifestVersion: payload.version, importedOutput: output,...(importedPoster?{importedPoster}:{}),...(output.presetId?{outputPresetId:output.presetId}:{}),...(object(payload.metadata).formatVariant?{formatVariant:object(payload.metadata).formatVariant}:{}) };
     const timelineId = await ctx.db.insert("timelines", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId, productionId: args.productionId, manifestId: args.manifestId, creationKey: key, selectionScope: String(object(payload.selection).scope ?? "TIMELINE"), versionNumber: (latest?.versionNumber ?? 0) + 1, durationSeconds: Number(output.durationInFrames) / fps, tracks: { idempotencyKey: key, manifestId: args.manifestId.toString(), metadata, productionVersionId: payload.productionVersionId }, outputPreset: args.outputPreset ?? String(payload.outputPreset ?? "FULL_HD"), status: "DRAFT", createdByUserId: member.user._id, createdAt: timestamp, updatedAt: timestamp });
     const importedTracks = new Map<string, Id<"timelineTracks">>();
     const descriptors = Array.isArray(payload.tracks) ? payload.tracks.map(object) : [];
@@ -94,7 +116,7 @@ export const createVersion = mutation({
       const shotVersionId = typeof item.shotVersionId === "string" ? ctx.db.normalizeId("shotVersions", item.shotVersionId) : null;
       if (shotVersionId) { const take = await ctx.db.get(shotVersionId); if (!take || take.projectId !== projectId || take.productionId !== production._id || take.productionVersionId !== targetVersion._id || take.assetId !== assetId) throw new Error("Imported take is outside this production."); await requireApprovedResource(ctx, projectId, "shotVersion", shotVersionId, production._id); }
       const transition = (Array.isArray(payload.transitions) ? payload.transitions.map(object) : []).find(row => row.fromItemId === item.id);
-      const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props,...(object(item.props).layoutVersion===2?{graphicAssetRole:item.templateId==='product-ui'?'screen':'logo'}:{}) } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
+      const clipMetadata = { orderIndex: index, rendererOrderIndex: item.orderIndex ?? index, manifestItemId: item.id, clipKind: kind, ...(kind === "GRAPHIC" ? { motionTemplateId: item.templateId, templateProps: item.props,...(object(item.props).layoutVersion===2?{graphicAssetRole:item.templateId==='product-ui'?'screen':'logo'}:{}) } : {}), renderItem: { opacity: item.opacity, fit: item.fit, position: item.position,...(item.backgroundColor?{backgroundColor:item.backgroundColor}:{}) }, rendererTiming: { fps, startFrame: item.startFrame, durationInFrames: item.durationInFrames, trimStartInFrames: item.trimStartInFrames } };
       await ctx.db.insert("timelineClips", { studioExternalId: member.studio.externalId, studioId: member.studio._id, timelineId, trackId, assetId, shotVersionId: shotVersionId ?? undefined, startSeconds: Number(item.startFrame) / fps, durationSeconds: Number(item.durationInFrames) / fps, trimStartSeconds: typeof item.trimStartInFrames === "number" ? item.trimStartInFrames / fps : undefined, volume: typeof item.volume === "number" ? item.volume : undefined, ...(transition && payload.version === 5 ? { transition: { out: { kind: transition.kind, durationSeconds: Number(transition.durationInFrames) / fps, audioPolicy: transition.audioPolicy } } } : {}), metadata: JSON.parse(JSON.stringify(clipMetadata)) });
     }
     for (const [index, item] of audio.entries()) {
@@ -161,6 +183,7 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
     const key = args.idempotencyKey.trim();
     if (key.length < 8 || key.length > 200) throw new Error('A valid composition request key is required.');
     const authoredOutput = args.outputSettings === undefined ? undefined : validateAuthoringOutputSettings(args.outputSettings);
+    const selectedPreset = authoredOutput ? OUTPUT_PRESETS.find(preset=>preset.width===authoredOutput.width&&preset.height===authoredOutput.height)?.id : normalizeOutputPresetId(production.outputPreset);
     // Preserve creation hashes for requests authored before optional finishing
     // controls existed. Only explicit new controls change the request identity.
     const serialized = JSON.stringify({ productionId: args.productionId, productionVersionId: args.productionVersionId, clips: args.clips, audioTracks: args.audioTracks ?? [],...(args.fps===undefined?{}:{fps:args.fps}),...(args.captionId===undefined?{}:{captionId:args.captionId}),...(authoredOutput?{outputSettings:authoredOutput}:{}) });
@@ -245,7 +268,7 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
     const latest = await ctx.db.query('timelines').withIndex('by_production_version', q => q.eq('productionId', production._id)).order('desc').first();
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
     const timestamp = now();
-    const timelineId = await ctx.db.insert('timelines', { projectId, productionId: production._id, studioId: access.studio._id, studioExternalId: access.studio.externalId, versionNumber, creationKey: key, creationHash: hash, durationSeconds: elapsed, outputPreset: production.outputPreset, tracks: { metadata: { approvalStatus: 'DRAFT', productionVersionId: version._id,fps:args.fps??30,...(authoredOutput?{authoredOutput}:{}) }, productionVersionId: version._id }, status: 'DRAFT', createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
+    const timelineId = await ctx.db.insert('timelines', { projectId, productionId: production._id, studioId: access.studio._id, studioExternalId: access.studio.externalId, versionNumber, creationKey: key, creationHash: hash, durationSeconds: elapsed, outputPreset: selectedPreset??production.outputPreset, tracks: { metadata: { approvalStatus: 'DRAFT', productionVersionId: version._id,fps:args.fps??30,...(authoredOutput?{authoredOutput}:{}),...(selectedPreset?{outputPresetId:selectedPreset}:{}) }, productionVersionId: version._id }, status: 'DRAFT', createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
     for (const [orderIndex, kind] of (finishingV5Enabled() ? ['PICTURE', 'AUDIO'] : ['VIDEO', 'IMAGE', 'GRAPHIC', 'AUDIO']).entries()) {
       const selected = clips.filter(clip => kind === 'PICTURE' ? clip.kind !== 'AUDIO' : clip.kind === kind);
       if (!selected.length) continue;

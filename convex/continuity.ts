@@ -10,6 +10,8 @@ import {
   validateProjectResourceReferences, validateBibleBindings,
 } from "./continuityContracts";
 import { planningSelection, resolvePlanningContinuity } from "./continuityPlanning";
+import {materializeAcceptedMemory} from './projectMemory';
+import {freezeVoiceVersion,resolveVoiceSynthesisInput} from './voices';
 
 function stable(value: unknown): string {
   if (value === undefined) return "null";
@@ -19,7 +21,7 @@ function stable(value: unknown): string {
 }
 
 export const createResource = mutation({
-  args: { projectId: v.id("projects"), kind: projectResourceKind, name: v.string(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")) },
+  args: { projectId: v.id("projects"), kind: projectResourceKind, name: v.string(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), voiceVersionId: v.optional(v.id('voiceVersions')) },
   returns: v.object({ resourceId: v.id("projectResources"), resourceVersionId: v.id("projectResourceVersions"), versionNumber: v.number() }),
   handler: async (ctx, args) => {
     const access = await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
@@ -27,9 +29,10 @@ export const createResource = mutation({
     boundedSnapshot(args.profile);
     await validateProjectResourceReferences(ctx, args.projectId, args);
     if (args.voiceId && args.kind !== "CHARACTER") throw new Error("Only a character resource can bind a voice.");
+    const voiceVersionId = args.voiceVersionId ?? (args.voiceId ? await freezeVoiceVersion(ctx,await resolveVoiceSynthesisInput(ctx,{projectId:args.projectId,voiceId:args.voiceId,use:'SYNTHESIZE'}),access.user._id) : undefined);
     const timestamp = Date.now();
     const resourceId = await ctx.db.insert("projectResources", { projectId: args.projectId, kind: args.kind, name, createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
-    const resourceVersionId = await ctx.db.insert("projectResourceVersions", { projectId: args.projectId, resourceId, versionNumber: 1, profile: args.profile, assetIds: args.assetIds, voiceId: args.voiceId, createdByUserId: access.user._id, createdAt: timestamp });
+    const resourceVersionId = await ctx.db.insert("projectResourceVersions", { projectId: args.projectId, resourceId, versionNumber: 1, profile: args.profile, assetIds: args.assetIds, voiceId: args.voiceId, voiceVersionId, createdByUserId: access.user._id, createdAt: timestamp });
     await ensureResourceState(ctx, { projectId: args.projectId, resourceType: "projectResourceVersion", resourceId: resourceVersionId.toString() });
     return { resourceId, resourceVersionId, versionNumber: 1 };
   },
@@ -37,7 +40,7 @@ export const createResource = mutation({
 
 /** Revising creates a separate snapshot even if a previous version is approved or locked. */
 export const reviseResource = mutation({
-  args: { projectId: v.id("projects"), resourceId: v.id("projectResources"), expectedVersionNumber: v.number(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")) },
+  args: { projectId: v.id("projects"), resourceId: v.id("projectResources"), expectedVersionNumber: v.number(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), voiceVersionId: v.optional(v.id('voiceVersions')) },
   returns: v.object({ resourceId: v.id("projectResources"), resourceVersionId: v.id("projectResourceVersions"), versionNumber: v.number() }),
   handler: async (ctx, args) => {
     const access = await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
@@ -46,10 +49,11 @@ export const reviseResource = mutation({
     boundedSnapshot(args.profile);
     await validateProjectResourceReferences(ctx, args.projectId, args);
     if (args.voiceId && resource.kind !== "CHARACTER") throw new Error("Only a character resource can bind a voice.");
+    const voiceVersionId = args.voiceVersionId ?? (args.voiceId ? await freezeVoiceVersion(ctx,await resolveVoiceSynthesisInput(ctx,{projectId:args.projectId,voiceId:args.voiceId,use:'SYNTHESIZE'}),access.user._id) : undefined);
     const latest = await ctx.db.query("projectResourceVersions").withIndex("by_resource_and_version", (q) => q.eq("resourceId", args.resourceId)).order("desc").first();
     if (!latest || latest.versionNumber !== args.expectedVersionNumber) throw new Error("This resource changed. Reload its current version before saving.");
     const timestamp = Date.now();
-    const resourceVersionId = await ctx.db.insert("projectResourceVersions", { projectId: args.projectId, resourceId: resource._id, versionNumber: latest.versionNumber + 1, profile: args.profile, assetIds: args.assetIds, voiceId: args.voiceId, createdByUserId: access.user._id, createdAt: timestamp });
+    const resourceVersionId = await ctx.db.insert("projectResourceVersions", { projectId: args.projectId, resourceId: resource._id, versionNumber: latest.versionNumber + 1, profile: args.profile, assetIds: args.assetIds, voiceId: args.voiceId, voiceVersionId, createdByUserId: access.user._id, createdAt: timestamp });
     await ensureResourceState(ctx, { projectId: args.projectId, resourceType: "projectResourceVersion", resourceId: resourceVersionId.toString() });
     await ctx.db.patch(resource._id, { updatedAt: timestamp });
     return { resourceId: resource._id, resourceVersionId, versionNumber: latest.versionNumber + 1 };
@@ -58,7 +62,7 @@ export const reviseResource = mutation({
 
 export const listResources = query({
   args: { projectId: v.id("projects"), kind: v.optional(projectResourceKind), limit: v.optional(v.number()) },
-  returns: v.array(v.object({ resourceId: v.id("projectResources"), name: v.string(), kind: projectResourceKind, resourceVersionId: v.union(v.id("projectResourceVersions"), v.null()), versionNumber: v.number(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.union(v.id("voices"), v.null()) })),
+  returns: v.array(v.object({ resourceId: v.id("projectResources"), name: v.string(), kind: projectResourceKind, resourceVersionId: v.union(v.id("projectResourceVersions"), v.null()), versionNumber: v.number(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.union(v.id("voices"), v.null()), voiceVersionId: v.union(v.id("voiceVersions"), v.null()) })),
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId);
     const limit = Math.max(1, Math.min(100, Math.floor(args.limit ?? 50)));
@@ -67,7 +71,7 @@ export const listResources = query({
       : await ctx.db.query("projectResources").withIndex("by_project", (q) => q.eq("projectId", args.projectId)).order("desc").take(limit);
     return Promise.all(resources.filter((resource) => !resource.archivedAt).map(async (resource) => {
       const latest = await ctx.db.query("projectResourceVersions").withIndex("by_resource_and_version", (q) => q.eq("resourceId", resource._id)).order("desc").first();
-      return { resourceId: resource._id, name: resource.name, kind: resource.kind, resourceVersionId: latest?._id ?? null, versionNumber: latest?.versionNumber ?? 0, profile: latest?.profile ?? {}, assetIds: latest?.assetIds ?? [], voiceId: latest?.voiceId ?? null };
+      return { resourceId: resource._id, name: resource.name, kind: resource.kind, resourceVersionId: latest?._id ?? null, versionNumber: latest?.versionNumber ?? 0, profile: latest?.profile ?? {}, assetIds: latest?.assetIds ?? [], voiceId: latest?.voiceId ?? null, voiceVersionId: latest?.voiceVersionId ?? null };
     }));
   },
 });
@@ -89,7 +93,7 @@ export const resourceVersionPage = query({
       if (!resource || resource.projectId !== args.projectId) throw new Error("Resource version does not belong to this project.");
       return { resourceId: resource._id, resourceVersionId: version._id, name: resource.name, kind: resource.kind,
         versionNumber: version.versionNumber, latestVersionNumber: latest?.versionNumber ?? version.versionNumber,
-        profile: version.profile, assetIds: version.assetIds, voiceId: version.voiceId ?? null,
+        profile: version.profile, assetIds: version.assetIds, voiceId: version.voiceId ?? null, voiceVersionId: version.voiceVersionId ?? null,
         archived: Boolean(resource.archivedAt), state: state?.state ?? "DRAFT", createdAt: version.createdAt };
     }));
     return { page: rows, isDone: page.isDone, continueCursor: page.continueCursor, projectRole: access.projectRole };
@@ -134,9 +138,9 @@ export const planningRequirements = query({
 });
 
 export const productionPlanningContext = query({
-  args: { projectId: v.id("projects"), productionId: v.optional(v.id("productions")), continuityBibleId: v.optional(v.id("continuityBibles")) },
+  args: { projectId: v.id("projects"), productionId: v.optional(v.id("productions")), continuityBibleId: v.optional(v.id("continuityBibles")), memoryQuery: v.optional(v.string()) },
   returns: v.any(),
-  handler: async (ctx, args) => resolvePlanningContinuity(ctx, args.projectId, args.productionId, args.continuityBibleId),
+  handler: async (ctx, args) => resolvePlanningContinuity(ctx, args.projectId, args.productionId, args.continuityBibleId,args.memoryQuery),
 });
 
 export const listBibles = query({
@@ -180,15 +184,33 @@ export const acceptStoryState = mutation({
     const predecessor = episode.predecessorEpisodeId ? await ctx.db.get(episode.predecessorEpisodeId) : null;
     if (predecessor && (predecessor.projectId !== args.projectId || predecessor.continuityStatus !== "CURRENT" || !predecessor.acceptedStoryStateId || episode.inputStoryStateId !== predecessor.acceptedStoryStateId)) throw new Error("Refresh continuity from the accepted preceding episode before accepting this episode.");
     const previous = episode.acceptedStoryStateId ? await ctx.db.get(episode.acceptedStoryStateId) : null;
-    if (previous && previous.productionVersionId === version._id && previous.continuityBibleId === args.continuityBibleId && previous.predecessorStoryStateId === predecessor?.acceptedStoryStateId && stable(previous.snapshot) === stable(args.snapshot)) return { storyStateId: previous._id, invalidatedEpisodeCount: 0, replayed: true };
+    if (previous && previous.productionVersionId === version._id && previous.continuityBibleId === args.continuityBibleId && previous.predecessorStoryStateId === predecessor?.acceptedStoryStateId && stable(previous.snapshot) === stable(args.snapshot)) {
+      await materializeAcceptedMemory(ctx,args.projectId,previous._id);
+      return { storyStateId: previous._id, invalidatedEpisodeCount: 0, replayed: true };
+    }
     if (episode.acceptedStoryStateId !== args.previousAcceptedStateId) throw new Error("Accepted story state changed. Reload before accepting a revision.");
     const timestamp = Date.now();
     const storyStateId = await ctx.db.insert("episodeStoryStates", { projectId: args.projectId, episodeId: episode._id, productionVersionId: version._id, timelineId: timeline._id, continuityBibleId: args.continuityBibleId, predecessorStoryStateId: predecessor?.acceptedStoryStateId, snapshot: args.snapshot, createdByUserId: access.user._id, createdAt: timestamp });
     for (const targetState of ["IN_REVIEW", "APPROVED", "LOCKED"] as const) await transitionResourceState(ctx, { projectId: args.projectId, productionId: production._id, resourceType: "episodeStoryState", resourceId: storyStateId.toString(), targetState, roles: ["OWNER", "EDITOR"], decision: `STORY_${targetState}`, note: `Accepted final timeline ${timeline._id.toString()}` });
     await ctx.db.patch(episode._id, { acceptedStoryStateId: storyStateId, continuityStatus: "CURRENT", updatedAt: timestamp });
+    await materializeAcceptedMemory(ctx,args.projectId,storyStateId);
     const downstream = await ctx.db.query("episodes").withIndex("by_project_and_number", (q) => q.eq("projectId", args.projectId).gt("episodeNumber", episode.episodeNumber)).take(500);
     for (const dependent of downstream) await ctx.db.patch(dependent._id, { continuityStatus: "STALE", updatedAt: timestamp });
     return { storyStateId, invalidatedEpisodeCount: downstream.length, replayed: false };
+  },
+});
+
+/** Explicit paginated backfill retains every source and never replaces facts. */
+export const syncMemory = mutation({
+  args:{projectId:v.id('projects'),paginationOpts:paginationOptsValidator},
+  returns:v.object({isDone:v.boolean(),continueCursor:v.string(),sources:v.number(),insertedFacts:v.number()}),
+  handler:async(ctx,args)=>{
+    await requireProjectRole(ctx,args.projectId,['OWNER','EDITOR']);
+    if(args.paginationOpts.numItems>20)throw new Error('Sync at most20 episodes per request.');
+    const page=await ctx.db.query('episodes').withIndex('by_project_and_number',q=>q.eq('projectId',args.projectId)).paginate(args.paginationOpts);
+    let insertedFacts=0,sources=0;
+    for(const episode of page.page){if(episode.continuityStatus==='CURRENT'&&episode.acceptedStoryStateId){insertedFacts+=await materializeAcceptedMemory(ctx,args.projectId,episode.acceptedStoryStateId);sources++;}}
+    return {isDone:page.isDone,continueCursor:page.continueCursor,sources,insertedFacts};
   },
 });
 

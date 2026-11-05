@@ -7,6 +7,7 @@ export type RenderSelectionScope = 'FULL_PROJECT' | 'TIMELINE' | 'SCENES' | 'SHO
 export type OutputCodec = 'h264' | 'vp9' | 'prores';
 
 export interface RenderOutputSpec {
+  presetId?: import('./output-presets.js').OutputPresetId;
   width: number;
   height: number;
   fps: number;
@@ -19,6 +20,7 @@ export interface RenderOutputSpec {
 }
 
 export interface RenderItemBase {
+  backgroundColor?: string;
   id: string;
   startFrame: number;
   durationInFrames: number;
@@ -35,6 +37,8 @@ export interface VideoRenderItem extends RenderItemBase {
   src: string;
   trimStartInFrames?: number;
   volume?: number;
+  fit?: 'cover' | 'contain';
+  position?: string;
 }
 
 export interface ImageRenderItem extends RenderItemBase {

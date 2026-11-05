@@ -11,6 +11,13 @@ import { ShareButton } from '@/components/review/share-button';
 import { EmergencyReset } from '@/components/project/emergency-reset';
 import type { RenderJobState } from '@/lib/render/contracts';
 import { captionTrackDownloadName } from '@/lib/production/caption-controls';
+import { getOutputPreset, normalizeOutputPresetId } from '../../../renderer/src/output-presets';
+
+function formatLabel(value: unknown) {
+  const output=value&&typeof value==='object'?value as Record<string,unknown>:{};
+  const presetId=normalizeOutputPresetId(output.presetId);
+  return `${presetId?getOutputPreset(presetId).label:'Output'} · ${output.width}×${output.height} · ${output.fps} fps`;
+}
 
 function rendererStateFor(status: string): RenderJobState | 'UNAVAILABLE' {
   if (status === 'QUEUED') return 'QUEUED';
@@ -75,7 +82,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
     <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
       <h2 className="text-lg font-semibold">Review and export an approved timeline</h2>
       {!currentManifest ? <div className="space-y-2 text-sm text-muted-foreground"><p>{manifestHistoryLimited?'No current assembly was found in the recent history. Check the saved versions before creating another timeline.':'The current production version needs finishing. Create and approve its timeline, then build an assembly in Edit.'}</p>{state?.projectExternalId ? <Link className="inline-flex min-h-11 items-center text-primary underline underline-offset-4" href={`/dashboard/projects/${encodeURIComponent(state.projectExternalId)}/workspace/edit?production=${encodeURIComponent(productionId)}`}>Open Edit for the current production</Link> : null}</div> : null}
-      {state?.manifests?.length ? <label className="block space-y-2 text-sm">Assembly version<select className="w-full rounded-lg border border-border bg-background p-3" value={manifest?._id??''} onChange={event => {setManifestChoice(event.target.value);setError(undefined);}}><option value="" disabled={Boolean(currentManifest)}>Choose a retained assembly to inspect</option>{state.manifests.map((item: any) => <option key={item._id} value={item._id}>{assemblyCategory(item)} · Assembly v{item.versionNumber} · {new Date(item.createdAt).toLocaleString()}</option>)}</select></label> : null}
+      {state?.manifests?.length ? <label className="block space-y-2 text-sm">Assembly version<select className="w-full rounded-lg border border-border bg-background p-3" value={manifest?._id??''} onChange={event => {setManifestChoice(event.target.value);setError(undefined);}}><option value="" disabled={Boolean(currentManifest)}>Choose a retained assembly to inspect</option>{state.manifests.map((item: any) => <option key={item._id} value={item._id}>{assemblyCategory(item)} · {formatLabel(item.manifest?.output)} · Assembly v{item.versionNumber} · {new Date(item.createdAt).toLocaleString()}</option>)}</select></label> : null}
       {manifest&&!isCurrent ? <p role="status" className="text-sm text-muted-foreground">Viewing a retained historical assembly. Its review and saved download belong to that exact version; it is read-only here.</p> : manifest&&!writableContract ? <p className="text-sm text-muted-foreground">This saved assembly is available for viewing and download. Create a new current timeline to make changes.</p> : null}
       {completedManifests.some((item: any) => item._id !== manifest?._id) && <div className="space-y-2 text-sm"><p className="text-muted-foreground">Completed exports are retained on their exact assembly versions.</p><div className="flex flex-wrap gap-2">{completedManifests.filter((item: any) => item._id !== manifest?._id).map((item: any) => <Button key={item._id} variant="secondary" onClick={() => setManifestChoice(item._id)}>View {belongsToCurrent(item)?'completed':'historical'} Assembly v{item.versionNumber}</Button>)}</div></div>}
       <div className="flex flex-wrap gap-3"><Button disabled={!canEdit || saving || !isCurrent || !writableContract || Boolean(review)} onClick={createReview}>Request version review</Button><Button variant="secondary" disabled={!canEdit || saving || !isCurrent || !writableContract || review?.status !== 'APPROVED' || Boolean(latestJob && !['FAILED', 'CANCELED'].includes(latestJob.status))} onClick={queueExport}>Queue asynchronous export</Button></div>
