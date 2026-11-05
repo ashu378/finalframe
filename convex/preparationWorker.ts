@@ -9,6 +9,7 @@ import {MUSIC_LIMITS,sameMusicQuote,musicQcError,assertMusicOutputProbe} from '.
 import { SFX_LIMITS, sameSfxQuote, assertSfxConsent, assertSfxOutputProbe, sfxError } from '../src/lib/ai/sfx';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { decodePreparedImage, IMAGE_RESPONSE_LIMITS } from '../src/lib/ai/image-response';
+import { transcriptRequestOptions } from '../src/lib/ai/transcription';
 const jobs = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 const voices = (internal as unknown as { voices: { resolveFrozenForSynthesis: FunctionReference<'query', 'internal', any, any> } }).voices;
 async function boundedAudio(url: string, expected: Record<string, unknown>) {
@@ -49,7 +50,8 @@ export async function runPreparation(ctx: ActionCtx, input: any, lease: { jobId:
     const data = await boundedAudio(source.url,object(request.transcriptSource));
     const format = typeof request.transcriptFormat==='string'&&['wav','mp3','m4a','flac','ogg','webm'].includes(request.transcriptFormat)?request.transcriptFormat:undefined;
     if (!format) throw new Error('This recording format is unsupported.');
-    const result = await transcribeAudio({ model: job.model, audio: { data, format } }, options);
+    const frozenOptions = transcriptRequestOptions(request.transcriptionOptions);
+    const result = await transcribeAudio({ model: job.model, audio: { data, format }, ...(frozenOptions ? { responseFormat: frozenOptions.responseFormat, timestampGranularities: frozenOptions.timestampGranularities } : {}) }, options);
     await ctx.runMutation(jobs.completePreparation, { ...lease, actualModel: result.modelUsed, text: result.text, segments: result.segments, providerRequestId: result.requestId, providerCostUsd: result.costUsd, usage: result.usage });
   } else {
     if (!request.voiceVersionId || !request.voiceConfigHash || !request.voiceConfigSnapshot) throw new Error('VOICE_FROZEN_CONFIG_REQUIRED');

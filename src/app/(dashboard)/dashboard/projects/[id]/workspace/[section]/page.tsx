@@ -1,6 +1,6 @@
 import { decodeProjectRouteId } from '@/lib/project/route-id';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { ArrowRight, Check, Film, Sparkles } from 'lucide-react';
 import { api } from '../../../../../../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
@@ -27,7 +27,7 @@ const steps = [
   { label: 'Download', description: 'Export the finished video.' },
 ];
 
-export default async function WorkspaceSectionPage({ params, searchParams }: { params: Promise<{ id: string; section: string }>; searchParams: Promise<{ production?: string }> }) {
+export default async function WorkspaceSectionPage({ params, searchParams }: { params: Promise<{ id: string; section: string }>; searchParams: Promise<{ production?: string; timeline?: string | string[] }> }) {
   await requireOnboardingComplete();
   const { id: routeId, section } = await params;
   const id = decodeProjectRouteId(routeId);
@@ -43,6 +43,20 @@ export default async function WorkspaceSectionPage({ params, searchParams }: { p
   const convex = await getAuthenticatedConvexClient();
   const graph = await convex.query(api.productionGraph.getByProject, { projectExternalId: id, productionId: selectedProductionId as Id<'productions'> | undefined });
   if (!graph) return <div className="space-y-6">{picker}<EmptyProject projectId={id} /></div>;
+  let selectedTimelineId: string | undefined;
+  if (active === 'edit' && query.timeline !== undefined) {
+    try {
+      if (typeof query.timeline !== 'string' || !query.timeline.trim()) throw new Error('Invalid edit selection');
+      const selected = await convex.query(api.timelineEditor.getDraft, { productionId: graph.production._id, timelineId: query.timeline as Id<'timelines'> });
+      if (!selected?.timeline || selected.timeline._id !== query.timeline || selected.timeline.productionId !== graph.production._id || selected.timeline.projectId && selected.timeline.projectId !== graph.production.projectId) throw new Error('Unavailable edit selection');
+      selectedTimelineId = String(selected.timeline._id);
+    } catch {
+      return <div className="space-y-6">{picker}<section role="alert" className="ff-card space-y-3 p-6"><h1 className="text-xl font-semibold">Selected edit unavailable</h1><p className="text-sm text-muted-foreground">This edit could not be opened for the selected project and episode. Check the link or deliberately open the latest available edit.</p><Link className="ff-link inline-flex min-h-11 items-center" href={`/dashboard/projects/${encodeURIComponent(id)}/workspace/edit?production=${encodeURIComponent(String(graph.production._id))}`}>Open latest available edit</Link></section></div>;
+    }
+  }
+  // A legacy link may omit production when this project has just one. Make
+  // the authorized association explicit before same-production navigation.
+  if (selectedTimelineId && !query.production) redirect(`/dashboard/projects/${encodeURIComponent(id)}/workspace/edit?${new URLSearchParams({ production: String(graph.production._id), timeline: selectedTimelineId })}`);
 
   const controls = ['media', 'storyboard', 'takes', 'review', 'edit'].includes(active) ? await loadWorkspaceControls(id, String(graph.production._id)) : null;
   const finishingUncertain=graph.summary.finishingHistoryLimited&&!graph.summary.hasExport;
@@ -55,7 +69,7 @@ export default async function WorkspaceSectionPage({ params, searchParams }: { p
     {/* Convex owns recipe rollout. RecipePanel reads the authorized project's
         enabled state; a second frontend flag hid enabled execution controls. */}
     {['storyboard','takes'].includes(active) ? <RecipePanel productionId={String(graph.production._id)} /> : null}
-    {active === 'media' && controls ? <ContinuityStudio key={`${controls.productionId}:${controls.resources.map((resource) => `${resource.id}-${resource.state}`).join(',')}`} data={controls} /> : (active === 'storyboard' || active === 'takes') && controls ? <ShotWorkspace data={controls} /> : active === 'overview' ? <GraphMap projectId={id} productionId={String(graph.production._id)} nodes={graph.nodes} edges={graph.edges} /> : active === 'canvas' ? <CanvasSurface nodes={graph.nodes} edges={graph.edges} /> : active === 'edit' ? <><TimelineComposer data={controls!} /><EditSurface productionId={String(graph.production._id)} nodes={graph.nodes} /></> : active === 'review' || active === 'export' ? <ReleaseSurface productionId={String(graph.production._id)} /> : <SectionView projectId={id} productionId={String(graph.production._id)} section={active} hasPlan={graph.summary.hasPlan} hasVersion={graph.summary.hasVersion} />}
+    {active === 'media' && controls ? <ContinuityStudio key={`${controls.productionId}:${controls.resources.map((resource) => `${resource.id}-${resource.state}`).join(',')}`} data={controls} /> : (active === 'storyboard' || active === 'takes') && controls ? <ShotWorkspace data={controls} /> : active === 'overview' ? <GraphMap projectId={id} productionId={String(graph.production._id)} nodes={graph.nodes} edges={graph.edges} /> : active === 'canvas' ? <CanvasSurface nodes={graph.nodes} edges={graph.edges} /> : active === 'edit' ? <><TimelineComposer data={controls!} /><EditSurface key={`${graph.production._id}:${selectedTimelineId ?? 'latest'}`} productionId={String(graph.production._id)} initialTimelineId={selectedTimelineId} nodes={graph.nodes} /></> : active === 'review' || active === 'export' ? <ReleaseSurface productionId={String(graph.production._id)} /> : <SectionView projectId={id} productionId={String(graph.production._id)} section={active} hasPlan={graph.summary.hasPlan} hasVersion={graph.summary.hasVersion} />}
     {active === 'review' && controls ? <StoryAcceptance data={controls} /> : null}
   </div>;
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { api } from '../../../../convex/_generated/api';
@@ -36,12 +35,11 @@ function makeImpact(value: any): ProductionEditImpact {
   return { direct: Array.isArray(value?.direct) ? value.direct.map(item) : [], affected: Array.isArray(value?.downstream) ? value.downstream.map(item) : [], summary: value?.affected?.length ? `${value.affected.length} connected production step${value.affected.length === 1 ? '' : 's'} may be affected.` : 'Only the selected step is expected to change.' };
 }
 
-export function EditSurface({ productionId, nodes }: { productionId: string; nodes: ProductionGraphNode[] }) {
-  const router = useRouter();
+export function EditSurface({ productionId, nodes, initialTimelineId }: { productionId: string; nodes: ProductionGraphNode[]; initialTimelineId?: string }) {
   const convexProductionId = asProductionId(productionId);
   const [selectedNode, setSelectedNode] = useState<ProductionGraphNode | null>(nodes.find((node) => ['videoTake', 'shot', 'image'].includes(node.kind)) ?? nodes[0] ?? null);
   const [impactRequested, setImpactRequested] = useState(false);
-  const [activeTimelineId, setActiveTimelineId] = useState<Id<'timelines'> | undefined>();
+  const [activeTimelineId, setActiveTimelineId] = useState<Id<'timelines'> | undefined>(initialTimelineId as Id<'timelines'> | undefined);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
   const [message, setMessage] = useState<string | null>(null);
   const [impactError, setImpactError] = useState<string | null>(null);
@@ -89,7 +87,15 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
 
   function showCreatedTimeline(id: Id<'timelines'>) {
     setActiveTimelineId(id);
-    router.refresh();
+    // Native history is integrated with Next search params. Persist the exact
+    // selection synchronously; an asynchronous refresh must not remount an
+    // older server response over a more recent local edit.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('production', productionId);
+      url.searchParams.set('timeline', id);
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
   }
 
   async function handleDuplicateTimeline() {
@@ -159,6 +165,7 @@ export function EditSurface({ productionId, nodes }: { productionId: string; nod
     }
   }
 
+  if (activeTimelineId && draft === null) return <section role="alert" className="ff-card space-y-3 p-6"><h2 className="text-xl font-semibold">Selected edit unavailable</h2><p className="text-sm text-muted-foreground">This exact timeline is no longer available. Check its project and episode link before choosing another edit.</p></section>;
   if (!selectedNode || nodes.length === 0) return <section className="ff-card p-8 text-center"><Film className="mx-auto size-8 text-muted-foreground" /><h2 className="ff-display mt-4 text-2xl font-semibold">Select a production step to edit.</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">Your prompt edits will stay attached to the exact part of the production they change.</p></section>;
 
   return <div className="space-y-8">

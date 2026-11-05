@@ -123,6 +123,7 @@ export function publicJob(job: Record<string, unknown>) {
     ...(request.preparationKind==='SFX'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds)}:{}),
     assetId: typeof object(job.response).assetId === 'string' ? String(object(job.response).assetId) : undefined,
     transcriptText: job.operation === 'PREPARATION' && request.preparationKind === 'TRANSCRIPT' && typeof object(job.response).text === 'string' ? String(object(job.response).text) : undefined,
+    ...(job.operation === 'PREPARATION' && request.preparationKind === 'TRANSCRIPT' && status === 'COMPLETED' ? { transcriptAlignmentStatus: ['TIMED_SEGMENTS','NO_SPEECH'].includes(String(object(object(job.response).transcriptAlignment).status)) ? String(object(object(job.response).transcriptAlignment).status) : 'TEXT_ONLY' } : {}),
     request: { operation: request.operation, preparationKind: request.preparationKind, videoType: request.videoType, task: request.task, qualityTier: request.qualityTier, routeReason: request.routeReason, path: request.path },
   };
 }

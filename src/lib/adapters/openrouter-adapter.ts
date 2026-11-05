@@ -1035,12 +1035,16 @@ export async function synthesizeSpeech(input: SpeechSynthesisRequest, options: O
 
 export function buildTranscriptionRequest(input: TranscriptionRequest, options: { allowDiscoveredModel?: boolean } = {}): Record<string, unknown> {
     if (!input.model?.trim() || !input.audio?.data || !input.audio.format) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Transcription model and base64 audio are required.', provider: 'openrouter', capability: 'TRANSCRIPTION', retryable: false });
+    if (input.responseFormat !== undefined && !['json', 'verbose_json'].includes(input.responseFormat)
+        || input.timestampGranularities !== undefined && (input.responseFormat !== 'verbose_json' || !Array.isArray(input.timestampGranularities) || input.timestampGranularities.length < 1 || input.timestampGranularities.length > 2 || new Set(input.timestampGranularities).size !== input.timestampGranularities.length || input.timestampGranularities.some(value => value !== 'segment' && value !== 'word'))) throw new AICapabilityError({ code: 'INVALID_REQUEST', message: 'Transcription timestamps require the supported verbose JSON format and granularity.', provider: 'openrouter', capability: 'TRANSCRIPTION', retryable: false });
     assertCapabilityRequest({ capability: 'TRANSCRIPTION', model: input.model, inputModality: 'audio', parameters: [
         ...(input.language ? ['language' as const] : []),
         ...(input.temperature === undefined ? [] : ['temperature' as const]),
         ...(input.providerOptions ? ['provider_options' as const] : []),
+        ...(input.responseFormat ? ['response_format' as const] : []),
+        ...(input.timestampGranularities ? ['timestamp_granularities' as const] : []),
     ], allowDiscoveredModel: options.allowDiscoveredModel });
-    return { model: input.model, input_audio: input.audio, ...(input.language ? { language: input.language } : {}), ...(input.temperature === undefined ? {} : { temperature: input.temperature }), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
+    return { model: input.model, input_audio: input.audio, ...(input.language ? { language: input.language } : {}), ...(input.temperature === undefined ? {} : { temperature: input.temperature }), ...(input.responseFormat ? { response_format: input.responseFormat } : {}), ...(input.timestampGranularities ? { timestamp_granularities: input.timestampGranularities } : {}), ...(input.providerOptions ? { provider: { options: input.providerOptions } } : {}) };
 }
 
 export async function transcribeAudio(input: TranscriptionRequest, options: OpenRouterTransportOptions = {}) {

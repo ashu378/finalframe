@@ -9,8 +9,13 @@ export function WorkspaceNav() {
   const pathname = usePathname();
   const params = useParams<{ id: string }>();
   const projectId = params.id;
-  const productionId = useSearchParams().get('production');
-  const suffix = productionId ? `?production=${encodeURIComponent(productionId)}` : '';
+  const selection = useSearchParams();
+  const productionId = selection.get('production');
+  const timelineId = selection.get('timeline');
+  const query = new URLSearchParams();
+  if (productionId) query.set('production', productionId);
+  if (productionId && timelineId) query.set('timeline', timelineId);
+  const suffix = query.size ? `?${query}` : '';
   return <div className="space-y-4">
     <Link href={`/dashboard/projects/${projectId}`} className="ff-link inline-flex items-center gap-2 text-sm"><ArrowLeft className="size-4" /> Back to video project</Link>
     <nav aria-label="Video project workspace" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">

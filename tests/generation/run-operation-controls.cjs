@@ -12,7 +12,7 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/character-reference-estimate'))return characterReference;if(name.endsWith('/ai/transcription')||name==='./transcription')return transcription;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
@@ -22,6 +22,8 @@ const imageResponse = compile('src/lib/ai/image-response.ts');
 const submissionDiagnostic = compile('src/lib/ai/submission-diagnostic.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
 const registry = compile('src/lib/ai/model-registry.ts');
+const transcription = compile('src/lib/ai/transcription.ts');
+const characterReference = compile('src/lib/ai/character-reference-estimate.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
 const sfx=compile('src/lib/ai/sfx.ts',{'./model-registry':registry});
 const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music });

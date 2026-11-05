@@ -16,6 +16,7 @@ import { SHOT_ESTIMATE_VERSION, SHOT_ESTIMATE_TTL_MS, shotEstimateHash, stableSh
 import { resolveGenerationContinuity } from './generationContinuity';
 import { resolveVoiceSynthesisInput, resolveFrozenVoiceSynthesisInput, freezeVoiceVersion } from './voices';
 import { preparationModel, assertReferenceVoiceQuote, type PreparationKind } from '../src/lib/ai/preparation';
+import { TRANSCRIPT_SEGMENT_REQUEST, transcriptRequestOptions, normalizeTranscriptSegments } from '../src/lib/ai/transcription';
 import { resolveAudioSourceCertificate, resolveTranscriptSourceCertificate, transcriptFormat, validReferenceVoiceSource } from './audioCertificates';
 import {freshSfxQuote,assertSfxQuote,sameSfxQuote,assertSfxConsent,validateSfxPrompt,SFX_LIMITS,assertSfxOutputProbe,retryableSfxQc,safeSfxQcCode,sfxError} from '../src/lib/ai/sfx';
 import {REVIEWED_OPERATION_CONTRACTS} from '../src/lib/ai/model-registry';
@@ -523,6 +524,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     const selected = preparationModel(request.preparationKind as PreparationKind, request.clone === true);
     if (selected.id !== job.model) throw new Error('Preparation model configuration changed.');
     if (request.preparationKind === 'TRANSCRIPT') {
+      if (request.transcriptionOptions && stable(transcriptRequestOptions(request.transcriptionOptions)) !== stable(object(args.livePreparationQuote).transcriptionOptions)) throw new Error('TRANSCRIPT_REQUEST_CHANGED');
       const source=await resolveTranscriptSourceCertificate(ctx,{projectId:project._id,assetId:request.sourceAssetId as Id<'assets'>});
       const live=object(args.livePreparationQuote);const frozen=object(request.quote);
       if(stable(source)!==stable(request.transcriptSource)||request.transcriptFormat!==transcriptFormat(source)||typeof live.checkedAt!=='number'||Date.now()-live.checkedAt>30000||live.checkedAt>Date.now()+1000||live.model!==job.model||live.inputDurationSeconds!==source.durationSeconds||live.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||live.billableInputSeconds!==Math.ceil(source.durationSeconds+1/16000)||live.estimatedProviderCostUsd!==job.estimatedProviderCostUsd||frozen.billableInputSeconds!==live.billableInputSeconds)throw new Error('Transcript source or billing certificate changed.');
@@ -747,18 +749,23 @@ export async function createCanonicalPreparationJob(ctx:MutationCtx,args:Prepara
     const sfxQuote=args.kind==='SFX'?freshSfxQuote(object(args.quote).sfxQuote):undefined;if(sfxQuote){validateSfxPrompt(args.text);assertSfxConsent(object(args.quote).sfxEstimateConsent,String(production._id),args.text,sfxQuote);if(sfxQuote.model!==args.model||args.capability!=='SFX_GENERATION'||sfxQuote.reservedProviderUsd!==videoBudgetReservationUsd(sfxQuote.baseProviderCeilingUsd)||sfxQuote.reservedProviderUsd!==args.estimatedProviderCostUsd||object(args.quote).estimatedProviderCostUsd!==args.estimatedProviderCostUsd)throw sfxError('SFX_QUOTE_INVALID');}
     const musicQuote=args.kind==='MUSIC'?freshMusicQuote(object(args.quote).musicQuote):undefined;if(musicQuote&&(musicQuote.model!==args.model||musicQuote.reservedProviderUsd!==args.estimatedProviderCostUsd||object(args.quote).estimatedProviderCostUsd!==args.estimatedProviderCostUsd))throw new Error('MUSIC_QUOTE_INVALID');
     let transcriptSource;
+    let transcriptionOptions;
     if (args.kind === 'TRANSCRIPT') {
       const source = args.sourceAssetId ? await ctx.db.get(args.sourceAssetId) : null;
       if (!source || source.projectId !== access.project._id || source.scope !== 'PROJECT' || source.deletedAt || !source.storageId || !source.mimeType?.startsWith('audio/')) throw new Error('Recording is unavailable.');
       transcriptSource=await resolveTranscriptSourceCertificate(ctx,{projectId:access.project._id,assetId:source._id});
       const quoted=object(args.quote);
+      // An old completed/uncertain key keeps its original text-only identity.
+      // New keys always freeze the reviewed segment request in quote and hash.
+      transcriptionOptions = previous ? transcriptRequestOptions(object(previous.request).transcriptionOptions) : transcriptRequestOptions(TRANSCRIPT_SEGMENT_REQUEST);
+      if (transcriptionOptions && stable(quoted.transcriptionOptions) !== stable(transcriptionOptions)) throw new Error('TRANSCRIPT_REQUEST_CHANGED');
       if(args.durationSeconds!==transcriptSource.durationSeconds||quoted.inputDurationSeconds!==transcriptSource.durationSeconds||quoted.durationMeasurement!=='DECODED_PCM_SAMPLES_V1'||quoted.billableInputSeconds!==Math.ceil(transcriptSource.durationSeconds+1/16000)||quoted.estimatedProviderCostUsd!==args.estimatedProviderCostUsd||quoted.model!==args.model||typeof quoted.checkedAt!=='number'||Date.now()-quoted.checkedAt>30000||quoted.checkedAt>Date.now()+1000)throw new Error('Obtain a fresh decoded transcription quote.');
     }
     const recipeMarker=execution?{recipeRunNodeId:execution.nodeId,recipeResolvedRequestHash:(await recipeExecutionScope(ctx,execution)).node.resolvedRequestHash}:{};
     const voiceVersionId = voice ? await freezeVoiceVersion(ctx,voice,access.user._id) : undefined;
     const frozenVoice = voice ? {voiceVersionId,voiceConfigSnapshot:voice.voiceConfigSnapshot,voiceConfigHash:voice.voiceConfigHash} : {};
-    const request = { ...recipeMarker, ...frozenVoice, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
-    const requestHash = stable({ ...recipeMarker, ...(voice?{voiceConfigHash:voice.voiceConfigHash}:{}), productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
+    const request = { ...recipeMarker, ...frozenVoice, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
+    const requestHash = stable({ ...recipeMarker, ...(voice?{voiceConfigHash:voice.voiceConfigHash}:{}), productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
     const idempotencyKey = key(args.idempotencyKey);
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
     if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id||(musicQuote||sfxQuote)&&existing.createdByUserId!==access.user._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }
@@ -800,6 +807,7 @@ export const completePreparation = internalMutation({
       if(owner)throw new Error('IMAGE_OUTPUT_ALREADY_BOUND');
     }
     let assetId: Id<'assets'> | undefined;let transcriptId:Id<'transcripts'>|undefined;
+    let transcriptAlignment;
     if (args.storageId) {
       const sfx=request.preparationKind==='SFX';const music=request.preparationKind==='MUSIC';const proof=object(sfx?args.sfxProbe:args.musicProbe);const saved=object(object(job.response).audioOutput);if(music){if(!hasStoredMusicOutput(job)||saved.storageId!==args.storageId)throw new Error('MUSIC_OUTPUT_INVALID');assertMusicOutputProbe(proof,saved);await mediaOutputBinding(ctx,job,args.storageId,saved.checksum,Number(saved.byteSize));if(await ctx.db.query('assets').withIndex('by_storage',q=>q.eq('storageId',args.storageId!)).first())throw new Error('PRIVATE_AUDIO_ALREADY_BOUND');}
       const stored = await ctx.db.system.get('_storage', args.storageId);
@@ -814,14 +822,18 @@ export const completePreparation = internalMutation({
       if (typeof args.text !== 'string' || args.text.length > 100_000 || typeof request.sourceAssetId !== 'string') throw new Error('Transcript output is invalid.');
       const source = await ctx.db.get(request.sourceAssetId as Id<'assets'>);
       if (!source || source.projectId !== job.projectId) throw new Error('Transcript source is unavailable.');
+      const certificate = await resolveTranscriptSourceCertificate(ctx, { projectId: job.projectId, assetId: source._id });
+      if (stable(certificate) !== stable(request.transcriptSource)) throw new Error('Transcript source changed before completion.');
+      const normalized = normalizeTranscriptSegments(args.text, args.segments, certificate.durationSeconds);
+      transcriptAlignment = normalized.alignment;
       let audio = await ctx.db.query('audio').withIndex('by_asset', q => q.eq('assetId', source._id)).first();
       if (!audio) { const id = await ctx.db.insert('audio', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, assetId: source._id, kind: 'RECORDING', metadata: {}, createdAt: Date.now() }); audio = await ctx.db.get(id); }
-      transcriptId=await ctx.db.insert('transcripts', { studioExternalId: job.studioExternalId, studioId: job.studioId, audioId: audio!._id, productionId: job.productionId, language: 'und', provider: job.provider, model: job.model, status: 'COMPLETED', segments: { text: args.text, segments: args.segments ?? [], generationJobId: job._id }, createdAt: Date.now() });
+      transcriptId=await ctx.db.insert('transcripts', { studioExternalId: job.studioExternalId, studioId: job.studioId, audioId: audio!._id, productionId: job.productionId, language: 'und', provider: job.provider, model: job.model, checksum:certificate.checksum,status: 'COMPLETED', segments: { text: args.text, segments: normalized.segments, alignment:normalized.alignment,source:certificate,providerRequestId:args.providerRequestId??null,generationJobId: job._id }, createdAt: Date.now() });
     } else throw new Error('Preparation output is missing.');
     const timestamp = Date.now();
     const attempt = await currentAttempt(ctx, job);
     if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', providerRequestId: args.providerRequestId, completedAt: timestamp, latencyMs: timestamp - (job.startedAt ?? job.createdAt) });
-    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, errorCode:undefined,errorMessage:undefined,nextAttemptAt:undefined, providerRequestId: args.providerRequestId, providerCostUsd: recordedCost, actualCost: job.estimatedCost, response: {...object(job.response), assetId,transcriptId, text: args.text, usage: boundedProviderUsage(args.usage??(request.preparationKind==='SFX'?object(job.response).usage:undefined)),...(request.preparationKind==='SFX'?{actualDurationSeconds:Number(object(args.sfxProbe).durationSeconds),maximumOriginalSeconds:120,outputPolicy:'SEED_SFX_VARIABLE_SECONDS_V1'}:{}),...(request.preparationKind==='MUSIC'?{actualDurationSeconds:Number(object(args.musicProbe).durationSeconds),nominalDurationSeconds:MUSIC_OUTPUT_POLICY.nominalSeconds,musicOutputPolicy:MUSIC_OUTPUT_POLICY.version}:{}), reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, errorCode:undefined,errorMessage:undefined,nextAttemptAt:undefined, providerRequestId: args.providerRequestId, providerCostUsd: recordedCost, actualCost: job.estimatedCost, response: {...object(job.response), assetId,transcriptId, text: args.text, ...(transcriptAlignment?{transcriptAlignment}:{}), usage: boundedProviderUsage(args.usage??(request.preparationKind==='SFX'?object(job.response).usage:undefined)),...(request.preparationKind==='SFX'?{actualDurationSeconds:Number(object(args.sfxProbe).durationSeconds),maximumOriginalSeconds:120,outputPolicy:'SEED_SFX_VARIABLE_SECONDS_V1'}:{}),...(request.preparationKind==='MUSIC'?{actualDurationSeconds:Number(object(args.musicProbe).durationSeconds),nominalDurationSeconds:MUSIC_OUTPUT_POLICY.nominalSeconds,musicOutputPolicy:MUSIC_OUTPUT_POLICY.version}:{}), reviewStatus: 'REQUIRES_HUMAN_REVIEW' }, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await settle(ctx, job, true, recordedCost);
     if (job.modality === 'AUDIO' && recordedCost === undefined && (['MUSIC','SFX'].includes(String(request.preparationKind))?/^gen-[A-Za-z0-9._-]{1,180}$/:/^gen-tts-\d+-[A-Za-z0-9]+$/).test(args.providerRequestId ?? '')) {
       const receipts = (internal as unknown as { providerReceipts: Record<string, FunctionReference<any, 'internal', any, any>> }).providerReceipts;

@@ -29,6 +29,7 @@ export type CapabilityId =
 export type Modality = 'text' | 'image' | 'video' | 'audio' | 'file' | 'transcription';
 
 export type CapabilityParameter =
+    | 'timestamp_granularities'
     | 'temperature'
     | 'top_p'
     | 'max_tokens'
@@ -527,6 +528,8 @@ export interface TranscriptionRequest {
     audio: { data: string; format: string };
     language?: string;
     temperature?: number;
+    responseFormat?: 'json' | 'verbose_json';
+    timestampGranularities?: Array<'segment' | 'word'>;
     providerOptions?: Record<string, unknown>;
 }
 

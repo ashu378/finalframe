@@ -76,7 +76,7 @@ export const CAPABILITY_REGISTRY: Record<CapabilityId, CapabilityDescriptor> = {
     }),
     SFX_GENERATION:descriptor('SFX_GENERATION',['text'],['audio'],['response_format'],{model:modelId('SFX_GENERATION')}),
     MUSIC_GENERATION:descriptor('MUSIC_GENERATION',['text'],['audio','text'],[],{model:modelId('MUSIC_GENERATION')}),
-    TRANSCRIPTION: descriptor('TRANSCRIPTION', ['audio'], ['transcription'], ['language', 'temperature', 'provider_options'], {
+    TRANSCRIPTION: descriptor('TRANSCRIPTION', ['audio'], ['transcription'], ['language', 'temperature', 'provider_options', 'response_format', 'timestamp_granularities'], {
         model: modelId('TRANSCRIPTION'),
     }),
 };

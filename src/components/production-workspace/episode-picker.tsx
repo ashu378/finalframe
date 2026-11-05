@@ -31,11 +31,12 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
         try {
             if (selectedProductionId) {
                 localStorage.setItem(storageKey, selectedProductionId);
-            } else {
+            } else if (!searchParams.has('timeline')) {
                 const saved = localStorage.getItem(storageKey);
                 if (saved && options.some((option) => option.productionId === saved)) {
                     const query = new URLSearchParams(searchParams.toString());
                     query.set('production', saved);
+                    query.delete('timeline');
                     router.replace(`${pathname}?${query.toString()}`);
                 }
             }
@@ -46,6 +47,7 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
         setRelationshipOpen(false);
         const query = new URLSearchParams(searchParams.toString());
         query.set('production', productionId);
+        if (productionId !== selectedProductionId) query.delete('timeline');
         router.push(`${pathname}?${query.toString()}`);
     }
 

@@ -1,6 +1,7 @@
 import {quoteSfx,validateSfxPrompt,type SfxQuoteCertificate} from './sfx';
 import {quoteMusic,type MusicQuoteCertificate} from './music';
 import { PREPARATION_MODELS, REVIEWED_OPERATION_CONTRACTS } from './model-registry';
+import { TRANSCRIPT_SEGMENT_REQUEST } from './transcription';
 
 export type PreparationKind = 'CHARACTER_REFERENCE' | 'NARRATION' | 'VOICE_PREVIEW' | 'TRANSCRIPT' | 'MUSIC' | 'SFX';
 export function preparationModel(kind: PreparationKind, clone = false) {
@@ -37,7 +38,7 @@ export function assertReferenceVoiceQuote(value: unknown): ReferenceVoiceQuoteCe
 }
 /** Only server actions call this public, no-cost catalog endpoint. Every
  * endpoint is priced conservatively; unknown billing units fail closed. */
-export interface PreparationQuote {model:string;capability:typeof PREPARATION_MODELS[keyof typeof PREPARATION_MODELS]['capability'];estimatedProviderCostUsd:number;checkedAt:number;billing:string;musicQuote?:MusicQuoteCertificate;sfxQuote?:SfxQuoteCertificate;referenceVoiceQuote?:ReferenceVoiceQuoteCertificate;billableInputSeconds?:number;durationMeasurement?:'DECODED_PCM_SAMPLES_V1';inputDurationSeconds?:number}
+export interface PreparationQuote {model:string;capability:typeof PREPARATION_MODELS[keyof typeof PREPARATION_MODELS]['capability'];estimatedProviderCostUsd:number;checkedAt:number;billing:string;musicQuote?:MusicQuoteCertificate;sfxQuote?:SfxQuoteCertificate;referenceVoiceQuote?:ReferenceVoiceQuoteCertificate;billableInputSeconds?:number;durationMeasurement?:'DECODED_PCM_SAMPLES_V1';inputDurationSeconds?:number;transcriptionOptions?:typeof TRANSCRIPT_SEGMENT_REQUEST}
 export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1' }, fetcher: typeof fetch = fetch):Promise<PreparationQuote> {
   if(input.kind==='SFX'&&process.env.FINALFRAME_SFX_PREPARATION_ENABLED!=='true')throw new Error('Sound effect generation is not enabled.');
   const config = preparationModel(input.kind, input.clone);
@@ -78,5 +79,5 @@ export async function quotePreparation(input: { kind: PreparationKind; text?: st
     usd = Math.max(...endpoints.map((endpoint: Record<string, any>) => positive(row(endpoint.pricing).prompt))) * (input.text || '').length;
   }
   if (!Number.isFinite(usd) || usd <= 0 || usd > 2) throw new Error('Preparation estimate is outside the controlled test limit.');
-  return { model: config.id, capability: config.capability, estimatedProviderCostUsd: Math.ceil(usd * 1_000_000) / 1_000_000, checkedAt: Date.now(), billing: config.billing, ...(referenceVoiceQuote ? { referenceVoiceQuote } : {}), ...(billableInputSeconds ? {billableInputSeconds, durationMeasurement:input.durationMeasurement,inputDurationSeconds:input.durationSeconds} : {}) };
+  return { model: config.id, capability: config.capability, estimatedProviderCostUsd: Math.ceil(usd * 1_000_000) / 1_000_000, checkedAt: Date.now(), billing: config.billing, ...(referenceVoiceQuote ? { referenceVoiceQuote } : {}), ...(billableInputSeconds ? {billableInputSeconds, durationMeasurement:input.durationMeasurement,inputDurationSeconds:input.durationSeconds,transcriptionOptions:TRANSCRIPT_SEGMENT_REQUEST} : {}) };
 }
