@@ -38,32 +38,36 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
     const [qualityTier, setQualityTier] = useState<QualityTier>('STANDARD');
     const [files, setFiles] = useState<File[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [planError, setPlanError] = useState('');
     const [plan, setPlan] = useState<SuccessfulPlan | null>(null);
     const [continuityChoice, setContinuityChoice] = useState('');
     const selectedBible = continuityOptions?.bibles.find((bible) => bible.id === continuityChoice);
+    function reportPlanError(message: string) { setPlanError(message); toast.error(message); }
 
     async function requestPlan(options?: { existingProjectId?: string; inputAssetIds?: string[]; revision?: string }) {
-        if (continuityOptions?.selectionError) { toast.error(continuityOptions.selectionError); return; }
-        if (continuityOptions?.requiresBible && !continuityChoice && !plan?.continuityBibleId) { toast.error('Choose an approved continuity bible or explicitly start blank for this episode.'); return; }
+        if (continuityOptions?.selectionError) { reportPlanError(continuityOptions.selectionError); return; }
+        if (continuityOptions?.requiresBible && !continuityChoice && !plan?.continuityBibleId) { reportPlanError('Choose an approved continuity bible or explicitly start blank for this episode.'); return; }
         const brief = prompt.trim();
         const hasMediaInput = files.length > 0;
         if (!options?.existingProjectId && brief.length < 10 && !hasMediaInput) {
-            toast.error(mode === 'VOICE' ? 'Add a voice recording or tell us a little about the video first.' : 'Add some detail or bring a piece of media to start the plan.');
+            reportPlanError(mode === 'VOICE' ? 'Add a voice recording or tell us a little about the video first.' : 'Add some detail or bring a piece of media to start the plan.');
             return;
         }
         if (files.length > 0 && !studioId && !options?.existingProjectId) {
-            toast.error('Your studio is still loading. Please try again in a moment.');
+            reportPlanError('Your studio is still loading. Please try again in a moment.');
             return;
         }
 
         setIsSubmitting(true);
+        setPlanError('');
+        let safeFailure: string | undefined;
         try {
             let projectId = options?.existingProjectId || existingProjectId;
             let inputAssetIds = options?.inputAssetIds || [];
             if (!projectId) {
                 const contentType: ProjectContentType = mode === 'AD' ? 'commercial' : mode === 'FOOTAGE' ? 'ugc' : mode === 'SCRIPT' ? 'explainer' : 'commercial';
                 const project = await createProject({ name: name.trim() || 'Untitled video', contentType, videoType, description: brief || 'A video shaped around the media you supplied.', outcomeGoal: mode === 'AD' ? 'convert_sales' : 'get_attention' });
-                if (!project.success || !project.projectId) throw new Error(project.error || 'Could not create your project');
+                if (!project.success || !project.projectId) { safeFailure = project.error || 'Could not create your project'; throw new Error('Project creation failed'); }
                 projectId = project.projectId;
             }
             if (files.length > 0 && studioId && !options?.inputAssetIds) {
@@ -71,7 +75,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
                         const formData = new FormData();
                         formData.append('file', file);
                         const upload = await uploadAsset(studioId, formData, `/productions/${projectId}`);
-                        if (!upload.success || !upload.asset) throw new Error(upload.error || `Could not upload ${file.name}`);
+                        if (!upload.success || !upload.asset) { safeFailure = upload.error || 'Could not upload the selected media'; throw new Error('Media upload failed'); }
                         inputAssetIds.push(upload.asset.id);
                     }
             }
@@ -93,13 +97,13 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
                 workflow: productionDefaults?.workflow ?? (mode === 'AD' ? 'BUSINESS_AD' : mode === 'FOOTAGE' ? 'FOOTAGE_TRANSFORM' : mode === 'VOICE' ? 'COMEDY' : 'SOCIAL'),
             };
             const result = options?.revision ? await reviseDirectorPlan(intent, options.revision) : await createDirectorPlan(intent);
-            if (!result.success) throw new Error(result.error || 'Could not create your plan');
+            if (!result.success) { safeFailure = result.error || 'Could not create your plan'; throw new Error('Planning failed'); }
             setPlan({ ...result, projectId, inputAssetIds });
             if (result.continuityBibleId) setContinuityChoice(result.continuityBibleId);
             toast.success(options?.revision ? 'Your revised plan is ready to review.' : 'Your plan is ready to review.');
             if (result.warning) toast.info(result.warning);
-        } catch (error) {
-            toast.error(error instanceof Error ? error.message : 'Something went wrong');
+        } catch {
+            reportPlanError(safeFailure || 'We could not prepare your plan. Your brief and selected references are still here. Check the connection and try again when ready.');
         } finally {
             setIsSubmitting(false);
         }
@@ -111,7 +115,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
         const result = await approveDirectorPlan(plan.planId);
         setIsSubmitting(false);
         if (!result.success) {
-            toast.error(result.error || 'Could not approve the plan');
+            reportPlanError(result.error || 'Could not approve the plan');
             return;
         }
         toast.success('Plan approved. Your video is ready for the making stage.');
@@ -119,7 +123,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
     }
 
     if (plan) {
-        return <PlanPreview preview={plan.planningPreview} balance={plan.balance} outputPreset={outputPreset} qualityTier={qualityTier} isSubmitting={isSubmitting} onBack={() => setPlan(null)} onRevise={(revision) => requestPlan({ existingProjectId: plan.projectId, inputAssetIds: plan.inputAssetIds, revision })} onApprove={handleApprove} />;
+        return <div className="space-y-4">{planError ? <p role="alert" className="rounded-xl border border-destructive/40 p-4 text-sm text-destructive">{planError}</p> : null}<PlanPreview preview={plan.planningPreview} balance={plan.balance} outputPreset={outputPreset} qualityTier={qualityTier} isSubmitting={isSubmitting} onBack={() => setPlan(null)} onRevise={(revision) => requestPlan({ existingProjectId: plan.projectId, inputAssetIds: plan.inputAssetIds, revision })} onApprove={handleApprove} /></div>;
     }
 
     return (
@@ -148,6 +152,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
                 <div className="grid gap-4 sm:grid-cols-3"><div><label htmlFor="production-duration" className="text-sm font-semibold">Length</label><select id="production-duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm">{![4, 8, 15, 30, 60].includes(duration) ? <option value={duration}>{duration} seconds</option> : null}<option value={4}>4 seconds · quick test</option><option value={8}>8 seconds · short clip</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option></select></div><div><label htmlFor="production-output" className="text-sm font-semibold">Where it will go</label><select id="production-output" value={outputPreset} onChange={(event) => setOutputPreset(event.target.value as OutputPreset)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm">{outputPreset === 'SOCIAL_VERTICAL' ? <option value="SOCIAL_VERTICAL">Vertical · 9:16 (saved format)</option> : null}{OUTPUT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label} · {preset.aspectRatio}</option>)}</select></div><div><label htmlFor="production-quality" className="text-sm font-semibold">Finish level</label><select id="production-quality" value={qualityTier} onChange={(event) => setQualityTier(event.target.value as QualityTier)} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="ECONOMY">Quick draft</option><option value="STANDARD">Standard</option><option value="PREMIUM">Polished</option></select></div></div>
                 <label className="flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 px-4 text-sm text-muted-foreground transition hover:border-primary hover:bg-secondary/60"><Upload className="size-5 shrink-0" aria-hidden="true" /><span>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} ready to use` : 'Add a logo, photo, clip, voice note, or reference (optional)'}</span><input type="file" multiple accept="image/*,video/*,audio/*" className="hidden" onChange={(event) => setFiles(Array.from(event.target.files || []))} /></label>
                 <button type="button" onClick={() => requestPlan()} disabled={isSubmitting} className="ff-button-primary min-h-12 w-full">{isSubmitting ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ArrowRight className="size-5" aria-hidden="true" />} Show me the plan</button>
+                {planError ? <p role="alert" className="rounded-xl border border-destructive/40 p-4 text-sm text-destructive">{planError}</p> : null}
             </div>
         </div>
     );
