@@ -20,6 +20,7 @@ import { assertTransferUrl, requestRenderUploadRenewal, transferOrigins, uploadR
 import { CompletionOutbox, FileRenderReceiptStore, type CompletionRequest } from './completion-outbox.js';
 import { LeaseHeartbeatMonitor } from './lease-heartbeat.js';
 import { HeavyMediaGate } from './media/heavy-media-gate.js';
+import { observeWorkerStorage } from './health-storage.js';
 import { analyzeCanonicalAudio } from './media/beat-analysis.js';
 import { probeCanonicalImage } from './media/image-probe.js';
 import { BEAT_ANALYSIS_VERSION } from './media/beat-detector.js';
@@ -129,7 +130,7 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,sourceAudioVersion:SOURCE_AUDIO_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer',storage:await observeWorkerStorage({outputRoot,stateRoot}), rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,sourceAudioVersion:SOURCE_AUDIO_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
     if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
