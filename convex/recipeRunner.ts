@@ -3,7 +3,7 @@ import type {MutationCtx} from './_generated/server';
 import type {Doc,Id} from './_generated/dataModel';
 import {internal} from './_generated/api';
 import type {FunctionReference} from 'convex/server';
-import {v} from 'convex/values';
+import {ConvexError,v} from 'convex/values';
 import {requireProjectRole} from './authorization';
 import {recipeErrorCode} from './recipeErrors';
 import {recipeHash} from '../src/lib/production/recipes/compiler';
@@ -58,6 +58,7 @@ export const dispatchNode=internalAction({args:{nodeId:v.id('recipeRunNodes'),le
  try{await ctx.runMutation(refs.execute,args);}catch(error){await ctx.runMutation(refs.nodeFailure,{...args,code:recipeErrorCode(error)});}return null;
 }});
 export const execute=internalMutation({args:{nodeId:v.id('recipeRunNodes'),leaseId:v.string()},returns:v.null(),handler:async(ctx,args)=>{
+ try{
  const {node,run,access}=await recipeExecutionScope(ctx,args);
  if(node.effect==='PAID'){
   const saved=recipeObject(recipeObject(node.resolvedBindings).createArgs);
@@ -65,4 +66,7 @@ export const execute=internalMutation({args:{nodeId:v.id('recipeRunNodes'),lease
   else{const estimate=run.reviewedEstimateId?await ctx.db.get(run.reviewedEstimateId):null;const quote=recipeObject(recipeObject(estimate?.quotes)[node.nodeId]);await createCanonicalPreparationJob(ctx,{...saved,productionId:run.productionId,idempotencyKey:node.idempotencyKey,quote:quote.preparationQuote,estimatedProviderCostUsd:Number(quote.baseProviderUsd)} as Parameters<typeof createCanonicalPreparationJob>[1],args);}
  }else if(node.effect==='HUMAN')await advanceRecipeApproval(ctx,node,run,access.user._id);else await executeRecipeLocal(ctx,node,run,access.user._id);
  const current=await ctx.db.get(node._id);if(current?.status==='WAITING_APPROVAL')await ctx.db.patch(run._id,{status:'WAITING_APPROVAL',updatedAt:Date.now()});else await ctx.scheduler.runAfter(0,refs.advance,{runId:run._id});return null;
+ // Throw again so every partial admission write rolls back. Structured data
+ // preserves the safe cause across runMutation even when messages are redacted.
+ }catch(error){throw new ConvexError({code:recipeErrorCode(error)});}
 }});
