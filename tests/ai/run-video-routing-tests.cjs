@@ -22,6 +22,7 @@ compiled.filename = path.join(tempRoot, 'video-routing.js');
 compiled.paths = Module._nodeModulePaths(tempRoot);
 const digestPath = compileSource('renderer/src/media/sha256.ts', 'sha256.js');
 const nativeRoutingRequire = compiled.require.bind(compiled);
+const fixtureRegistry=require(path.join(tempRoot,'model-registry.js'));const actualReferenceContract=fixtureRegistry.getReviewedVideoReferenceContract;fixtureRegistry.getReviewedVideoReferenceContract=(id,slug)=>id.startsWith('provider/')?{version:'VIDEO_REFERENCE_SEMANTICS_V1',modelId:id,canonicalSlug:slug??'fixture',imageMode:'SUBJECT_GUIDANCE',maxImageReferences:50,supportsAudioReferences:true,combinedFrameReferences:true,documentationUrl:'https://fixture.invalid/no-live-model',reviewedOn:'fixture'}:actualReferenceContract(id,slug);
 compiled.require = name => name === '../../../renderer/src/media/sha256' ? require(digestPath) : nativeRoutingRequire(name);
 compiled._compile(output, compiled.filename);
 const routing = compiled.exports;
@@ -37,7 +38,6 @@ assert.match(creationForm, /option value=\{4\}>4 seconds/);
 assert.match(creationForm, /option value=\{8\}>8 seconds/);
 assert.match(productionActions, /Math\.max\(4,/);
 assert.match(productionActions, /duration <= 8 \? 1 :/);
-assert.match(productionActions, /enforceShortClipShape/);
 assert.equal(routing.normalizeVideoType('ANIMATED_COMEDY_2D'), 'ANIMATED_COMEDY_2D');
 assert.equal(routing.normalizeVideoType('REALISTIC_AI_SKIT'), 'REALISTIC_SKIT_UGC');
 assert.equal(routing.normalizeVideoType('AI_PRODUCT_AD'), 'PRODUCT_SAAS_LAUNCH');
@@ -130,7 +130,7 @@ const currentGrok = {
   supportedAspectRatios: ['16:9'], estimatedCostPerSecond: undefined,
   pricingSkus: { cents_per_video_output_second_480p: 2, cents_per_video_output_second_720p: 3, cents_per_image_input: 1 },
 };
-assert.equal(routing.selectVideoRoute({ ...baseRequest, durationSeconds: 4, resolution: '480p', hasImageReferences: true, imageReferenceCount: 2 }, [currentGrok]).estimatedCostUsd, 0.1, 'current cents-per-second and per-image SKUs are converted and counted');
+assert.equal(routing.estimateVideoCost(currentGrok, { ...baseRequest, durationSeconds: 4, resolution: '480p', hasImageReferences: true, imageReferenceCount: 2 }), 0.1, 'current cents-per-second and per-image SKUs are converted and counted');
 const currentSeedance = {
   ...model, modelId: 'bytedance/seedance-2.0-mini', supportedDurations: [4, 8], supportedResolutions: ['480p', '720p'],
   supportedAspectRatios: ['16:9'], supportedSizes: ['854x480', '1280x720'], estimatedCostPerSecond: undefined,

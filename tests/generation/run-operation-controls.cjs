@@ -24,6 +24,8 @@ const imageResponse = compile('src/lib/ai/image-response.ts');
 const submissionDiagnostic = compile('src/lib/ai/submission-diagnostic.ts');
 const controls = compile('src/lib/production/workspace-controls.ts');
 const registry = compile('src/lib/ai/model-registry.ts');
+const actualReferenceContract = registry.getReviewedVideoReferenceContract;
+registry.getReviewedVideoReferenceContract = (id,slug) => id.startsWith('test/') ? {version:'VIDEO_REFERENCE_SEMANTICS_V1',modelId:id,canonicalSlug:slug??'fixture',imageMode:'SUBJECT_GUIDANCE',maxImageReferences:50,supportsAudioReferences:true,combinedFrameReferences:true,documentationUrl:'https://fixture.invalid/no-live-model',reviewedOn:'fixture'} : actualReferenceContract(id,slug);
 const transcription = compile('src/lib/ai/transcription.ts');
 const characterReference = compile('src/lib/ai/character-reference-estimate.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
@@ -287,7 +289,7 @@ async function main() {
   await check('seven project formats reach routing without silent landscape conversion', async () => {
     for (const preset of outputPresets.OUTPUT_PRESETS) {
       const fixture = publicActionFixture({}); fixture.outputPreset = preset.id;
-      fixture.model = { ...fixture.model, supportedAspectRatios: [preset.aspectRatio], supportedSizes: [`${preset.width}x${preset.height}`] };
+      fixture.model = { ...fixture.model, supportedAspectRatios: [preset.aspectRatio], supportedResolutions: [`${Math.min(preset.width,preset.height)}p`], supportedSizes: [`${preset.width}x${preset.height}`] };
       const result = await fixture.run();
       assert.equal(result.success, true, preset.id);
       assert.equal(fixture.mutations.find(call => call.ref === 'generationJobs.previewShotEstimate').args.request.ratio, preset.aspectRatio);

@@ -1,5 +1,5 @@
 import type { QualityTier } from '../types/database';
-import { REVIEWED_OPERATION_CONTRACTS } from './model-registry';
+import { REVIEWED_OPERATION_CONTRACTS, getReviewedVideoReferenceContract, getReviewedVideoOutputGrid, type VideoReferenceContract } from './model-registry';
 import { normalizeSha256 } from '../../../renderer/src/media/sha256';
 
 export const VIDEO_TYPES = [
@@ -110,6 +110,7 @@ export interface VideoRouteSelection {
     estimatedCostUsd?: number;
     resolution?: string;
     policyVersion?: number;
+    referenceContract?: VideoReferenceContract;
     upscaleQuote?: UpscaleQuoteCertificate;
     editQuote?: VideoEditQuoteCertificate;
     continuationQuote?: ContinuationQuoteCertificate;
@@ -129,6 +130,7 @@ export function buildVideoRouteMetadata(
         provider: selection.provider,
         model: selection.modelId,
         policyVersion: selection.policyVersion,
+        ...(selection.referenceContract ? {referenceContract:selection.referenceContract} : {}),
         modelVersion: options.modelVersion,
         estimatedProviderCostUsd: selection.estimatedCostUsd,
         ...(selection.upscaleQuote ? { upscaleQuote: selection.upscaleQuote } : {}),
@@ -343,8 +345,14 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     if (request.hasAudioReference && !model.supportsAudioReferences) return false;
     if (request.requiresSourceAudioPreservation && !model.supportsSourceAudioPreservation) return false;
     // Several endpoints give frame_images precedence and ignore all references.
-    if ((request.requiresFirstFrame || request.requiresLastFrame) && (request.hasImageReferences || request.hasVideoReference || request.hasAudioReference) && !model.supportsCombinedFrameReferences) return false;
+    if ((request.requiresFirstFrame || request.requiresLastFrame) && (request.hasImageReferences || request.hasVideoReference || request.hasAudioReference) && (!model.supportsCombinedFrameReferences || !getReviewedVideoReferenceContract(model.modelId,model.canonicalSlug)?.combinedFrameReferences)) return false;
     if (request.hasImageReferences && !model.supportsImageReferences) return false;
+    if ((request.hasImageReferences || request.hasAudioReference) && operation !== 'LIP_SYNC') {
+        const contract = getReviewedVideoReferenceContract(model.modelId, model.canonicalSlug);
+        if (!contract || contract.referenceDurations && !contract.referenceDurations.includes(request.durationSeconds)) return false;
+        if (request.hasImageReferences && (contract.imageMode !== 'SUBJECT_GUIDANCE' || !Number.isSafeInteger(request.imageReferenceCount ?? 1) || (request.imageReferenceCount ?? 1) < 1 || (request.imageReferenceCount ?? 1) > contract.maxImageReferences)) return false;
+        if (request.hasAudioReference && !contract.supportsAudioReferences) return false;
+    }
     if (request.hasVideoReference && !model.supportsVideoReferences) return false;
     if (request.requiresFirstFrame && !model.supportsFirstFrame) return false;
     if (request.requiresLastFrame && !model.supportsLastFrame) return false;
@@ -361,11 +369,45 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
         if (!supportedVideoOperationDurations(model, operation).includes(request.durationSeconds)) return false;
         if (request.resolution && !model.supportedResolutions.includes(request.resolution)) return false;
         if (!model.supportedAspectRatios.includes(request.aspectRatio)) return false;
+        const durationGrid=getReviewedVideoOutputGrid(model.modelId,model.canonicalSlug)?.durationsByResolution;
+        if(durationGrid){const resolution=request.resolution??defaultResolution(model,request.aspectRatio);if(!resolution||!durationGrid[resolution]?.includes(request.durationSeconds))return false;}
     }
     const estimatedCostUsd = estimateVideoCost(model, request);
     if (estimatedCostUsd === undefined) return false;
     if (request.maximumCostUsd !== undefined && estimatedCostUsd > request.maximumCostUsd) return false;
     return true;
+}
+
+/** Use a reviewed published grid, or an unambiguous exact nominal short edge.
+ * Never choose a neighboring HEIGHT, or assume array order proves a label. */
+export function resolveVideoOutputSize(model: Pick<VideoModelCapabilities, 'modelId' | 'canonicalSlug' | 'supportedSizes' | 'supportedResolutions' | 'supportedAspectRatios'>, aspectRatio: string, resolution?: string) {
+    if (!model.supportedAspectRatios.includes(aspectRatio)) return undefined;
+    const ratio = aspectRatio.split(':').map(Number);
+    if (ratio.length !== 2 || ratio.some(value => !Number.isFinite(value) || value <= 0)) return undefined;
+    const labels = model.supportedResolutions.map(label => {
+        const match = /^(\d+)(p|k)$/i.exec(label);
+        return match ? { label, rank: Number(match[1]) * (match[2].toLowerCase() === 'k' ? 1000 : 1) } : null;
+    });
+    if (!labels.length || labels.some(label => !label) || new Set(labels.map(label => label!.rank)).size !== labels.length) return undefined;
+    const ordered = labels.filter((label): label is {label: string; rank: number} => label !== null).sort((a,b) => a.rank-b.rank);
+    const selected = resolution === undefined ? ordered[0] : ordered.find(item => item.label.toLowerCase() === resolution.toLowerCase());
+    if (!selected) return undefined;
+    const reviewed = getReviewedVideoOutputGrid(model.modelId, model.canonicalSlug);
+    if (reviewed) {
+        const label=reviewed.sizes[selected.label]?.[reviewed.aspectRatios.indexOf(aspectRatio)];
+        if (!label || !model.supportedSizes?.includes(label)) return undefined;
+        const [width,height]=label.split('x').map(Number);
+        return {width,height,resolution:selected.label};
+    }
+    const sizes = [...new Set(model.supportedSizes ?? [])].map(label => {
+        const match = /^(\d+)x(\d+)$/i.exec(label);
+        return match && Number(match[1]) > 0 && Number(match[2]) > 0 ? {width:Number(match[1]),height:Number(match[2])} : null;
+    }).filter((size): size is {width:number;height:number} => size !== null)
+        .filter(size => Math.abs(size.width / size.height - ratio[0] / ratio[1]) < .02)
+        .sort((a,b) => a.width*a.height-b.width*b.height);
+    const exact = sizes.filter(size => /^\d+p$/i.test(selected.label) && Math.min(size.width,size.height) === selected.rank);
+    if (exact.length !== 1) return undefined;
+    return {...exact[0],resolution:selected.label};
 }
 
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
@@ -379,6 +421,10 @@ export function estimateVideoCost(model: VideoModelCapabilities, request: VideoR
     // minimum-token floor. Only the measured source contracts above bound it;
     // a catalog video-input SKU or an output-only estimate is insufficient.
     if (request.hasVideoReference) return undefined;
+    if (!model.supportedAspectRatios.includes(request.aspectRatio) || request.resolution && !model.supportedResolutions.some(resolution => resolution.toLowerCase() === request.resolution!.toLowerCase())) return undefined;
+    const durationGrid=getReviewedVideoOutputGrid(model.modelId,model.canonicalSlug)?.durationsByResolution;
+    if(durationGrid){const resolution=request.resolution??defaultResolution(model,request.aspectRatio);if(!resolution||!durationGrid[resolution]?.includes(request.durationSeconds))return undefined;}
+    if (model.supportedSizes?.length && !resolveVideoOutputSize(model, request.aspectRatio, request.resolution)) return undefined;
     const skus = Object.entries(model.pricingSkus || {}).filter(([, value]) => Number.isFinite(value) && value >= 0);
     const resolution = request.resolution?.toLowerCase();
     const taskPrefix = request.task === 'FRAME_TO_VIDEO' ? 'image_to_video_' : request.task === 'GENERATE' ? 'text_to_video_' : '';
@@ -426,19 +472,8 @@ export function estimateVideoCost(model: VideoModelCapabilities, request: VideoR
             ? ['video_tokens', 'video_tokens_with_audio', 'per-video-token']
             : ['video_tokens_without_audio', 'video_tokens', 'per-video-token']);
         if (tokenPrice && model.supportedSizes?.length) {
-            const ratios = request.aspectRatio.split(':').map(Number);
-            if (ratios.length !== 2 || ratios.some((value) => !Number.isFinite(value) || value <= 0)) return undefined;
-            const matchingSizes = model.supportedSizes.map((size) => {
-                const match = /^(\d+)x(\d+)$/i.exec(size);
-                return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
-            }).filter((size): size is { width: number; height: number } => size !== null)
-                // Catalog dimensions are rounded (e.g. 854x480 for 16:9).
-                .filter((size) => Math.abs(size.width / size.height - ratios[0] / ratios[1]) < 0.02);
-            if (!matchingSizes.length) return undefined;
-            const requestedHeight = request.resolution ? Number.parseInt(request.resolution, 10) : undefined;
-            const selectedSize = matchingSizes.sort((a, b) => requestedHeight
-                ? Math.abs(a.height - requestedHeight) - Math.abs(b.height - requestedHeight)
-                : a.width * a.height - b.width * b.height)[0];
+            const selectedSize = resolveVideoOutputSize(model, request.aspectRatio, request.resolution);
+            if (!selectedSize) return undefined;
             const videoTokens = (selectedSize.width * selectedSize.height * request.durationSeconds * 24) / 1024;
             videoCost = tokenPrice.value * videoTokens;
         } else {
@@ -448,14 +483,19 @@ export function estimateVideoCost(model: VideoModelCapabilities, request: VideoR
     if (videoCost === undefined) return undefined;
 
     const referenceCount = Math.max(0, Math.floor(request.imageReferenceCount ?? (request.hasImageReferences ? 1 : 0)));
-    const perImageCents = find(['cents_per_image_input']);
-    const perImageDollars = find(['reference_images', 'image_input']);
-    if (referenceCount && perImageCents) videoCost += (perImageCents.value / 100) * referenceCount;
-    else if (referenceCount && perImageDollars) videoCost += perImageDollars.value * referenceCount;
+    const imageKeys = ['cents_per_image_input', 'reference_images', 'image_input'];
+    // Unknown reference-input units cannot be bounded from an output-only
+    // duration. Audio duration/token billing needs a separate measured route.
+    if (referenceCount && skus.some(([key, value]) => value > 0 && /image/i.test(key) && !imageKeys.includes(key.toLowerCase()) && !/^image_to_video_duration_seconds(?:_(?:\d+p|\d+k|with_audio|without_audio))?$/i.test(key))) return undefined;
+    const knownOutputAudioUnit=/^(?:video_tokens_(?:with|without)_audio|(?:(?:text|image)_to_video_)?duration_seconds_(?:(?:with|without)_audio(?:_(?:\d+p|\d+k))?|(?:\d+p|\d+k)_(?:with|without)_audio))$/i;
+    if ((request.hasAudioReference || request.requiresAudio) && skus.some(([key,value]) => value > 0 && /audio/i.test(key) && !knownOutputAudioUnit.test(key))) return undefined;
+    const imageRates = skus.filter(([key]) => imageKeys.includes(key.toLowerCase())).map(([key,value]) => value/(key.toLowerCase().startsWith('cents_')?100:1));
+    if (referenceCount && imageRates.length) videoCost += imageRates.reduce((sum,rate)=>sum+rate,0) * referenceCount;
     return videoCost;
 }
 
 function defaultResolution(model: VideoModelCapabilities, aspectRatio: string): string | undefined {
+    if (model.supportedSizes?.length) return resolveVideoOutputSize(model, aspectRatio)?.resolution;
     const requestedRatio = aspectRatio.split(':').map(Number);
     if (requestedRatio.length !== 2 || requestedRatio.some((value) => !Number.isFinite(value) || value <= 0)) return undefined;
     const sizes = (model.supportedSizes || []).map((label) => {
@@ -516,6 +556,7 @@ export function selectVideoRoute(
         estimatedCostUsd: estimateVideoCost(selected, selectedRequest),
         resolution: selectedRequest.resolution,
         policyVersion: policy?.updatedAt,
+        ...(selectedRequest.hasImageReferences || selectedRequest.hasAudioReference ? {referenceContract:getReviewedVideoReferenceContract(selected.modelId,selected.canonicalSlug)} : {}),
         ...(selectedRequest.operation === 'UPSCALE' ? { upscaleQuote: quoteVideoUpscale(selected, selectedRequest) } : {}),
         ...(selected.modelId === 'black-forest-labs/flux-video-edit' ? { editQuote: quoteVideoEdit(selected, selectedRequest) } : {}),
         ...((selectedRequest.operation || selectedRequest.task) === 'EXTEND' ? { continuationQuote: quoteVideoContinuation(selected, selectedRequest) } : {}),

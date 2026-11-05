@@ -54,6 +54,45 @@ export interface AIModelConfig {
     selectFromCatalog?: boolean;
 }
 
+/** Endpoint semantics reviewed against primary documentation, independently
+ * of a catalog saying only that a model accepts images. Admin preferences
+ * cannot turn an initial-frame input into subject/identity conditioning. */
+export interface VideoReferenceContract {
+    version: 'VIDEO_REFERENCE_SEMANTICS_V1';
+    modelId: string;
+    canonicalSlug: string;
+    imageMode: 'SUBJECT_GUIDANCE' | 'FRAME_ONLY';
+    maxImageReferences: number;
+    referenceDurations?: readonly number[];
+    supportsAudioReferences: boolean;
+    combinedFrameReferences: boolean;
+    documentationUrl: string;
+    reviewedOn: string;
+}
+const VIDEO_REFERENCE_CONTRACTS: readonly VideoReferenceContract[] = [
+    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'bytedance/seedance-2.5', canonicalSlug: 'bytedance/seedance-2.5-20260807', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 30, supportsAudioReferences: true, combinedFrameReferences: false, documentationUrl: 'https://openrouter.ai/blog/insights/seedance-2-5-review/', reviewedOn: '2026-11-05' },
+    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1', canonicalSlug: 'google/veo-3.1-20260320', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 3, referenceDurations: [8], supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },
+    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1-lite', canonicalSlug: 'google/veo-3.1-lite-20260331', imageMode: 'FRAME_ONLY', maxImageReferences: 0, supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },
+];
+export function getReviewedVideoReferenceContract(modelId: string, canonicalSlug?: string): VideoReferenceContract | undefined {
+    return VIDEO_REFERENCE_CONTRACTS.find(contract => contract.modelId === modelId && contract.canonicalSlug === canonicalSlug);
+}
+
+/** Exact published resolution groups. These are not inferred by nearest size:
+ * e.g. Seedance's nominal720p square is960x960, not720x720. */
+const VIDEO_OUTPUT_GRIDS: Readonly<Record<string, {canonicalSlug: string; aspectRatios: readonly string[]; sizes: Readonly<Record<string, readonly string[]>>; durationsByResolution?: Readonly<Record<string, readonly number[]>>}>> = {
+    'bytedance/seedance-2.5': { canonicalSlug:'bytedance/seedance-2.5-20260807', aspectRatios:['16:9','4:3','1:1','3:4','9:16','21:9'], sizes:{
+        '480p':['854x480','752x560','640x640','560x752','480x854','992x432'],
+        '720p':['1280x720','1112x834','960x960','834x1112','720x1280','1470x630'],
+    } },
+    'google/veo-3.1-lite': {canonicalSlug:'google/veo-3.1-lite-20260331',aspectRatios:['16:9','9:16'],durationsByResolution:{'720p':[4,6,8],'1080p':[8]},sizes:{'720p':['1280x720','720x1280'],'1080p':['1920x1080','1080x1920']}},
+    'google/veo-3.1': {canonicalSlug:'google/veo-3.1-20260320',aspectRatios:['16:9','9:16'],durationsByResolution:{'720p':[4,6,8],'1080p':[8],'4K':[8]},sizes:{'720p':['1280x720','720x1280'],'1080p':['1920x1080','1080x1920'],'4K':['3840x2160','2160x3840']}},
+};
+export function getReviewedVideoOutputGrid(modelId: string, canonicalSlug?: string) {
+    const grid=VIDEO_OUTPUT_GRIDS[modelId];
+    return grid?.canonicalSlug===canonicalSlug ? grid : undefined;
+}
+
 // These IDs were the previous deployment defaults. Keep them here so an old
 // Vercel/Coolify environment variable cannot silently put production back on
 // the retired routing set after this registry is updated.
