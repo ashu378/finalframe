@@ -4,6 +4,7 @@ import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
+import { generationFinish, generationResolution, type GenerationResolution } from './finish-options';
 import type { QualityTier } from '@/lib/types/database';
 import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
@@ -34,6 +35,7 @@ function routingFailure(error: unknown): string {
 function userSafeGenerationError(error: unknown): string {
     const castCode=(error as {data?:{code?:string}})?.data?.code;
     if(['RECIPE_CAST_REFERENCES_REQUIRED','RECIPE_CAST_RESOURCE_UNAVAILABLE','RECIPE_CAST_BINDING_CHANGED'].includes(castCode??''))return 'Approve project character references and a bible, then explicitly bind them to the draft shots before buying a new video take. Existing paid results remain retained.';
+    if (error instanceof Error && /GENERATION_(FINISH|RESOLUTION)_/.test(error.message)) return 'Choose a supported finish level and generation resolution. Resolution overrides apply only to new footage or frame animation; source operations retain their certified dimensions.';
     if (error instanceof Error && /OUTPUT_PRESET_INVALID/.test(error.message)) return 'Choose a supported video format before reviewing generation costs.';
     if (error instanceof Error && /SHOT_ESTIMATE_(EXPIRED|CHANGED|REVIEW_REQUIRED)/.test(error.message)) return 'This estimate is no longer valid. Review a fresh estimate before making the take.';
     if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';
@@ -46,7 +48,7 @@ function userSafeGenerationError(error: unknown): string {
     return 'We could not complete this video generation. Please try again.';
 }
 
-export async function previewShotGeneration(input: { productionId: string; shotId: string; qualityTier?: QualityTier; requestId: string }) {
+export async function previewShotGeneration(input: { productionId: string; shotId: string; qualityTier?: QualityTier; generationResolution?: GenerationResolution; requestId: string }) {
     try {
         const convex = await getAuthenticatedConvexClient();
         const account = await convex.query(api.account.current, {});
@@ -57,10 +59,10 @@ export async function previewShotGeneration(input: { productionId: string; shotI
             shotId: input.shotId as any,
         });
         const { production, shot } = shotContext;
-        const executionProfile = input.qualityTier === 'PREMIUM' ? 'PREMIUM' : input.qualityTier === 'STANDARD' ? 'COMMERCIAL' : 'FAST_SOCIAL';
+        const tier = generationFinish(input.qualityTier);
+        const executionProfile = tier === 'PREMIUM' ? 'PREMIUM' : tier === 'STANDARD' ? 'COMMERCIAL' : 'FAST_SOCIAL';
         const capabilityId = executionProfile === 'FAST_SOCIAL' ? 'VIDEO_PREVIEW' : 'VIDEO_FINAL';
         const capability = assertCapability(capabilityId);
-        const tier = input.qualityTier || 'STANDARD';
         const shotMetadata = object(shot.metadata);
         const operation: VideoOperation = (VIDEO_OPERATIONS as readonly unknown[]).includes(shotMetadata.operation) ? shotMetadata.operation as VideoOperation : generationTask(shotMetadata.videoTask);
         const requestedTask = videoTaskForOperation(operation);
@@ -70,7 +72,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
         const typeRoutingEnabled = isFeatureEnabled('videoTypeRouting');
         let aspectRatio = safeRatio(typeof shotMetadata.aspectRatio === 'string' ? shotMetadata.aspectRatio : getOutputPreset(outputPreset).aspectRatio);
         let durationSeconds = Number(shot.durationSeconds);
-        const requestedResolution = typeof shotMetadata.resolution === 'string' ? shotMetadata.resolution : undefined;
+        const requestedResolution = generationResolution(input.generationResolution,operation,shotMetadata.resolution);
         const firstFrameAssetId = typeof shotMetadata.firstFrameAssetId === 'string' ? shotMetadata.firstFrameAssetId : undefined;
         const lastFrameAssetId = typeof shotMetadata.lastFrameAssetId === 'string' ? shotMetadata.lastFrameAssetId : undefined;
         const requiresFirstFrame = shotMetadata.requiresFirstFrame === true || requestedTask === 'FRAME_TO_VIDEO' || Boolean(firstFrameAssetId);
@@ -223,7 +225,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
             provider,
             model,
             modelVersion,
-            request: { ...operationControls, prompt: shot.prompt, duration: durationSeconds, ratio: aspectRatio, qualityTier: tier, executionProfile, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, ...route },
+            request: { ...operationControls, ...(input.generationResolution?{generationResolution:input.generationResolution}:{}), prompt: shot.prompt, duration: durationSeconds, ratio: aspectRatio, qualityTier: tier, executionProfile, previousJobId: typeof shotMetadata.previousJobId === 'string' ? shotMetadata.previousJobId : undefined, ...route },
             estimatedCost: estimate.totalCredits,
             estimatedProviderCostUsd,
             idempotencyKey,
@@ -246,7 +248,8 @@ export async function confirmShotGeneration(input: { estimateId: string; quoteHa
         });
         return { success: true as const, jobId: typeof job?._id === 'string' ? job._id : undefined };
     } catch (error) {
-        return { success: false as const, error: userSafeGenerationError(error) };
+        const safeToRefresh=error instanceof Error && /\bSHOT_ESTIMATE_(?:EXPIRED|CHANGED|REVIEW_REQUIRED)\b/.test(error.message);
+        return { success: false as const, error: userSafeGenerationError(error),safeToRefresh };
     }
 }
 

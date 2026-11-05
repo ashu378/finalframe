@@ -5,6 +5,8 @@ export interface ShotEstimateConsent { estimateId: string; quoteHash: string }
 export interface ShotGenerationEstimate extends ShotEstimateConsent {
     model: string;
     operation: string;
+    qualityTier?: 'ECONOMY' | 'STANDARD' | 'PREMIUM';
+    generationResolution?: string;
     baseProviderUsd: number;
     providerHoldMicros: number;
     totalCredits: number;

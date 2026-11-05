@@ -1,3 +1,4 @@
+import { generationFinish, generationResolution } from '../src/lib/generation/finish-options';
 import { internal } from './_generated/api';
 import { proposedCast, requireCastReadiness } from './castReadiness';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
@@ -119,6 +120,7 @@ export const previewShotEstimate = mutation({
     returns: v.object({
         estimateId: v.id('estimates'), quoteHash: v.string(), model: v.string(), operation: v.string(),
         baseProviderUsd: v.number(), providerHoldMicros: v.number(), totalCredits: v.number(), expiresAt: v.number(),
+        qualityTier:v.optional(v.union(v.literal('ECONOMY'),v.literal('STANDARD'),v.literal('PREMIUM'))), generationResolution:v.optional(v.string()),
     }),
     handler: async (ctx, args) => {
         const intent = await resolveGenerationIntent(ctx, args);
@@ -150,7 +152,7 @@ export const previewShotEstimate = mutation({
         return {
             estimateId, quoteHash, model: args.model, operation: quote.operation,
             baseProviderUsd: quote.estimatedProviderCostUsd, providerHoldMicros: quote.providerHoldMicros,
-            totalCredits: quote.estimatedCost, expiresAt,
+            totalCredits: quote.estimatedCost, expiresAt,qualityTier:intent.qualityTier,...(typeof quote.normalizedRequest.resolution==='string'?{generationResolution:quote.normalizedRequest.resolution}:{}),
         };
     },
 });
@@ -193,7 +195,7 @@ async function resolveGenerationIntent(ctx: ReadCtx, args: GenerationCreateArgs,
     const recipeMarkers = recipeNode ? {recipeRunNodeId:recipeNode._id,recipeResolvedRequestHash:recipeNode.resolvedRequestHash} : {};
     const metadata = object(shot.metadata);
     const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)],shotMetadata:metadata,durationSeconds:shot.durationSeconds });
-    const qualityTier: 'ECONOMY' | 'STANDARD' | 'PREMIUM' = requested.qualityTier === 'ECONOMY' || requested.qualityTier === 'PREMIUM' ? requested.qualityTier : 'STANDARD';
+    const qualityTier = generationFinish(requested.qualityTier);
     const request = { ...requested, ...recipeMarkers, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
     const requestHash = stable({ productionId: production._id, versionId: version._id, shotId: shot._id, model: args.model, provider: args.provider, request, shotMetadata: metadata });
     return {production,access,shot,scene,version,requested,metadata,continuity,qualityTier,recipeMarkers,idempotencyKey,requestHash};
@@ -242,6 +244,8 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       durationSeconds: shot.durationSeconds, qualityTier, videoType,
       ratio, aspectRatio:ratio,
       operation, task: videoTaskForOperation(operation),
+      resolution:generationResolution(requested.generationResolution,operation,requested.resolution??object(requested.constraints).resolution??metadata.resolution),
+      generationResolution:requested.generationResolution,
       previousJobId: operation === 'EXTEND' && typeof metadata.previousJobId === 'string' ? metadata.previousJobId : undefined,
       previousModelId: undefined,
       audioPolicy: typeof metadata.audioPolicy === 'string' ? metadata.audioPolicy : 'SILENT',
