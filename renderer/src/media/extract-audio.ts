@@ -30,24 +30,34 @@ export async function extractCanonicalAudio(value: unknown, options: { allowedHo
     const metadata = await ffprobe.probe(input,{timeoutMs:remaining(15_000)});
     const video = metadata.streams.find(stream=>stream.codec_type==='video'), audio = metadata.streams.find(stream=>stream.codec_type==='audio');
     if (!['mov,mp4,m4a,3gp,3g2,mj2','matroska,webm'].includes(String(metadata.format?.format_name)) || !video || !audio || !['h264','hevc','vp8','vp9','av1','prores','mpeg4'].includes(String(video.codec_name)) || !['aac','mp3','opus','vorbis','pcm_s16le','pcm_s24le'].includes(String(audio.codec_name))) throw extractionError('EXTRACTION_AUDIO_UNAVAILABLE');
-    // Bound both first streams from complete packet responses, never container
-    // duration alone. A short video can otherwise hide hours of source audio.
+    // Video packet timestamps bound picture coverage. Audio must use decoded
+    // frames: AAC packet duration may already reflect discard_padding, so
+    // subtracting packet side data again rejects valid short recordings.
     let metadataBytes=0,packetCount=0;
     const runner=options.runner ?? new ChildProcessCommandRunner();
-    async function packetSpan(kind:'v:0'|'a:0') {
+    async function measurement(args:string[]) {
       const budget=L.maxProbeBytes-metadataBytes;if(budget<1)throw extractionError('EXTRACTION_SOURCE_LIMIT');
-      const result=await runner.run(ffprobe.command,['-v','error','-protocol_whitelist','file,pipe','-select_streams',kind,'-show_packets','-show_entries','packet=pts_time,duration_time:packet_side_data=skip_samples,discard_padding','-of','json',input],{timeoutMs:remaining(20_000),maxOutputBytes:budget});
+      const result=await runner.run(ffprobe.command,['-v','error','-protocol_whitelist','file,pipe',...args,'-of','json',input],{timeoutMs:remaining(20000),maxOutputBytes:budget});
       metadataBytes+=Buffer.byteLength(result.stdout);if(metadataBytes>=L.maxProbeBytes)throw extractionError('EXTRACTION_SOURCE_LIMIT');
-      let parsed:{packets?:Array<{pts_time?:string;duration_time?:string;side_data_list?:Array<{skip_samples?:number;discard_padding?:number}>}>};try{parsed=JSON.parse(result.stdout);}catch{throw extractionError('EXTRACTION_SOURCE_LIMIT');}
-      if(!Array.isArray(parsed.packets)||parsed.packets.length<1||(packetCount+=parsed.packets.length)>L.maxVideoPackets)throw extractionError('EXTRACTION_SOURCE_LIMIT');
-      let first=Infinity,last=-Infinity;const rate=Number(audio!.sample_rate);if(kind==='a:0'&&(!Number.isSafeInteger(rate)||rate<=0))throw extractionError('EXTRACTION_SOURCE_LIMIT');
-      for(const packet of parsed.packets){const pts=Number(packet.pts_time),duration=Number(packet.duration_time);if(!Number.isFinite(pts)||!Number.isFinite(duration)||duration<=0||duration>60)throw extractionError('EXTRACTION_SOURCE_LIMIT');let start=pts,end=pts+duration;
-        if(kind==='a:0'){for(const side of packet.side_data_list??[]){const skip=Number(side.skip_samples??0),discard=Number(side.discard_padding??0);if(!Number.isSafeInteger(skip)||!Number.isSafeInteger(discard)||skip<0||discard<0||skip+discard>Math.ceil(duration*rate)+1)throw extractionError('EXTRACTION_SOURCE_LIMIT');start+=skip/rate;end-=discard/rate;}if(end-start<=1/rate)continue;}
-        first=Math.min(first,start);last=Math.max(last,end);
-      }
-      if(!Number.isFinite(first)||!Number.isFinite(last)||last<=first)throw extractionError('EXTRACTION_SOURCE_LIMIT');return{first,last};
+      try{return JSON.parse(result.stdout);}catch{throw extractionError('EXTRACTION_SOURCE_LIMIT');}
     }
-    const visual=await packetSpan('v:0'),sound=await packetSpan('a:0'),first=visual.first;
+    const packets=(await measurement(['-select_streams','v:0','-show_packets','-show_entries','packet=pts_time,duration_time'])).packets as Array<{pts_time?:string;duration_time?:string}>;
+    if(!Array.isArray(packets)||packets.length<1||(packetCount+=packets.length)>L.maxVideoPackets)throw extractionError('EXTRACTION_SOURCE_LIMIT');
+    const visual={first:Infinity,last:-Infinity};
+    for(const packet of packets){const pts=Number(packet.pts_time),duration=Number(packet.duration_time);if(!Number.isFinite(pts)||!Number.isFinite(duration)||duration<=0||duration>60)throw extractionError('EXTRACTION_SOURCE_LIMIT');visual.first=Math.min(visual.first,pts);visual.last=Math.max(visual.last,pts+duration);}
+    const frames=(await measurement(['-select_streams','a:0','-show_frames','-show_entries','frame=best_effort_timestamp_time,pts_time,nb_samples'])).frames as Array<{best_effort_timestamp_time?:string;pts_time?:string;nb_samples?:number}>;
+    const rate=Number(audio.sample_rate);
+    if(!Number.isSafeInteger(rate)||rate<=0||!Array.isArray(frames)||frames.length<1||(packetCount+=frames.length)>L.maxVideoPackets)throw extractionError('EXTRACTION_SOURCE_LIMIT');
+    const sound={first:Infinity,last:-Infinity};let decodedSamples=0;
+    for(const frame of frames){
+      const pts=Number(frame.best_effort_timestamp_time??frame.pts_time),samples=Number(frame.nb_samples);
+      if(!Number.isFinite(pts)||!Number.isSafeInteger(samples)||samples<1||(decodedSamples+=samples)>60*rate)throw extractionError('EXTRACTION_SOURCE_LIMIT');
+      // Printed timestamps have microsecond precision. Any actual gap or
+      // overlap beyond one source sample must be reviewed, never filled.
+      if(Number.isFinite(sound.last)&&Math.abs(pts-sound.last)>1/rate)throw extractionError('EXTRACTION_AUDIO_WINDOW_SHORT');
+      sound.first=Math.min(sound.first,pts);sound.last=pts+samples/rate;
+    }
+    const first=visual.first;
     const sourceDurationSeconds=Math.max(visual.last,sound.last)-Math.min(first,sound.first);
     if (!Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 || sourceDurationSeconds > 60.000001 || !Number.isFinite(Number(video.start_time)) || Math.abs(Number(video.start_time)-first) > 0.000001 || (request.startSample+request.sampleCount)/48000 > visual.last-first+0.000001) throw extractionError('EXTRACTION_SOURCE_LIMIT');
     const start = request.startSample/48000, end = (request.startSample+request.sampleCount)/48000;

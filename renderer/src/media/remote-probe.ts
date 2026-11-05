@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { FFprobeAdapter, FFmpegAdapter } from './ffmpeg.js';
 import { normalizeSha256, sha256Equal } from './sha256.js';
+import { ChildProcessCommandRunner, type CommandRunner } from './command-runner.js';
+import { decodedVideoTiming, type DecodedVideoTiming } from './source-audio-contract.js';
 
 export function assertProbeUrl(source: unknown, allowedHosts: readonly string[]): URL {
   if (typeof source !== 'string' || source.length > 2048) throw new Error('A bounded Convex Storage URL is required.');
@@ -21,6 +23,7 @@ export async function probeRemoteMedia(source: unknown, options: {
   kind?: 'video' | 'audio';
   expectedChecksum?: string; expectedByteSize?: number;
   verifyAudioDuration?: boolean; maxAudioDurationSeconds?: number; ffmpeg?: FFmpegAdapter;
+  verifyVideoTiming?: boolean; runner?: CommandRunner;
 }) {
   const url = assertProbeUrl(source, options.allowedHosts);
   const audioCap=options.maxAudioDurationSeconds??600;
@@ -80,6 +83,23 @@ export async function probeRemoteMedia(source: unknown, options: {
     if (!video || !Number.isFinite(durationSeconds) || durationSeconds <= 0 || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width > 7680 || height > 7680 || typeof video.codec_name !== 'string') {
       throw new Error('Media has no valid video stream.');
     }
-    return { durationSeconds, width, height, hasVideo: true, checksum:options.expectedChecksum??checksum, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize };
+    let videoTiming: DecodedVideoTiming | undefined;
+    if(options.verifyVideoTiming){
+      if(!options.expectedChecksum||!Number.isSafeInteger(options.expectedByteSize)||byteSize>50_000_000||durationSeconds>60.000001)throw new Error('SOURCE_AUDIO_VIDEO_TIMING_REQUIRED');
+      const [numerator,denominator]=String(video.avg_frame_rate??'').split('/').map(Number);
+      const result=await (options.runner??new ChildProcessCommandRunner()).run(options.ffprobe.command,['-v','error','-protocol_whitelist','file,pipe','-select_streams','v:0','-show_frames','-show_entries','frame=best_effort_timestamp_time,pkt_duration_time,duration_time','-of','json',path],{timeoutMs:remaining(45000),maxOutputBytes:2_000_000});
+      if(Buffer.byteLength(result.stdout)>=2_000_000)throw new Error('SOURCE_AUDIO_VIDEO_TIMING_REQUIRED');
+      const frames=JSON.parse(result.stdout).frames as Array<{best_effort_timestamp_time?:string;pkt_duration_time?:string;duration_time?:string}>;
+      if(!Array.isArray(frames)||frames.length<1||frames.length>3600)throw new Error('SOURCE_AUDIO_VIDEO_TIMING_REQUIRED');
+      const first=Number(frames[0].best_effort_timestamp_time),step=denominator/numerator;
+      for(const [i,frame]of frames.entries()){
+        const stamp=Number(frame.best_effort_timestamp_time),span=Number(frame.duration_time??frame.pkt_duration_time??step);
+        // Ten microseconds only accommodates decimal timestamp printing, not
+        // an editorial mismatch or an inferred identity/audio guarantee.
+        if(!Number.isFinite(stamp)||!Number.isFinite(span)||Math.abs(stamp-first-i*step)>0.00001||Math.abs(span-step)>0.00001)throw new Error('SOURCE_AUDIO_VIDEO_TIMING_REQUIRED');
+      }
+      videoTiming=decodedVideoTiming({version:'DECODED_VIDEO_FRAMES_V1',frameCount:frames.length,fpsNumerator:numerator,fpsDenominator:denominator,firstFrameSeconds:first,durationSeconds:frames.length*step});
+    }
+    return { durationSeconds, width, height, hasVideo: true, checksum:options.expectedChecksum??checksum, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize,...(videoTiming?{videoTiming}:{}) };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

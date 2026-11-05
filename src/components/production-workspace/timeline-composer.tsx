@@ -11,7 +11,7 @@ import {GraphicDesigner,emptyGraphicDraft} from './graphic-designer';
 import {parseGraphicsV2Authoring} from '../../../renderer/src/templates/graphics-v2-contract';
 import { SoundtrackEditor, type SoundtrackEntry } from './soundtrack-editor';
 import type { CompositionClip, WorkspaceControlData } from '@/lib/production/workspace-controls';
-import { OUTPUT_PRESETS, OUTPUT_FPS, getOutputPreset, normalizeOutputPresetId } from '../../../renderer/src/output-presets';
+import { OUTPUT_PRESETS, OUTPUT_FPS, outputFormatLabel } from '../../../renderer/src/output-presets';
 
 type ClipEntry = { id: string; label: string; durationSeconds: number; clip: CompositionClip };
 const approved = (state: string) => state === 'APPROVED' || state === 'LOCKED';
@@ -21,8 +21,7 @@ const outputPresets = [
     ...OUTPUT_PRESETS.map(preset=>({...preset,label:`${preset.label} · ${preset.aspectRatio} · ${preset.width} × ${preset.height}`})),
 ];
 function timelineFormat(timeline: WorkspaceControlData['timelines'][number]) {
-    const id=normalizeOutputPresetId(timeline.outputPreset);
-    return `${id?getOutputPreset(id).label:'Custom format'}${timeline.width&&timeline.height?` · ${timeline.width}×${timeline.height}`:''}`;
+    return `${outputFormatLabel(timeline.outputPreset,timeline.width,timeline.height)}${timeline.width&&timeline.height?` · ${timeline.width}×${timeline.height}`:''}`;
 }
 
 export function TimelineComposer({ data }: { data: WorkspaceControlData }) {

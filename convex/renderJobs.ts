@@ -14,6 +14,8 @@ import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../rende
 import { authorizeMovieRenderContext, movieActor, movieEnabled, movieWorkerEnabled, requiredMovieMediaAbi } from './movieAuthority';
 import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
 import { finishingRetryEligibility } from '../src/lib/render/recovery';
+import { validateSourceAudioManifest } from './sourceAudioContracts';
+import { sourceAudioRequirements } from '../renderer/src/media/source-audio-contract';
 
 type RenderStatus = "QUEUED" | "PROCESSING" | "SUBMITTED" | "COMPLETED" | "RETRYING" | "FAILED" | "CANCELED";
 
@@ -129,6 +131,15 @@ async function authorizedManifest(ctx: MutationCtx, job: RenderJob) {
   } else {
     const production = await ctx.db.get(job.productionId);
     if (!production?.currentVersionId || raw.productionVersionId !== production.currentVersionId) throw new Error('Standalone rendering requires the current approved production version.');
+  }
+  // New work must retain the original source's authority and exact storage,
+  // derivation and decoded timing proofs, even though only picture/WAV are
+  // rendered. Existing handoffs and accepted callbacks keep their own receipt
+  // reconciliation path; never reinterpret them from a mutable timeline.
+  if(!job.dispatchPayload&&job.acceptedAt===undefined&&sourceAudioRequirements(raw)){
+    const versionId=typeof raw.productionVersionId==='string'?ctx.db.normalizeId('productionVersions',raw.productionVersionId):null;
+    if(!versionId||!job.createdByUserId)throw new Error('Render source version or actor is unavailable.');
+    await validateSourceAudioManifest(ctx,project._id,raw,job.createdByUserId,versionId);
   }
   const timelineId = typeof raw.timelineId === "string" ? ctx.db.normalizeId("timelines", raw.timelineId) : null;
   const timeline = timelineId ? await ctx.db.get(timelineId) : null;

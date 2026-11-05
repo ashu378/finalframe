@@ -66,9 +66,13 @@ const store = {
   const manifestPath = compile('renderer/src/manifest.ts', 'renderer-manifest.js');
   const outputFormatPath = compile('renderer/src/output-format.ts', 'output-format.js');
   compile('renderer/src/types.ts', 'types.js');
+  compile('renderer/src/output-presets.ts', 'output-presets.js');
+  compile('renderer/src/output-variants.ts', 'output-variants.js');
+  compile('renderer/src/media/source-audio-contract.ts', 'media/source-audio-contract.js');
   compile('renderer/src/templates/contract.ts', 'templates/contract.js');
   compile('renderer/src/templates/graphics-v2-contract.ts', 'templates/graphics-v2-contract.js');
   const graphicsCertificatePath = compile('renderer/src/templates/graphics-v2-certificate.ts', 'templates/graphics-v2-certificate.js');
+  const recoveryPath = compile('src/lib/render/recovery.ts', 'recovery.js');
   const workerPolicyPath = compile('convex/renderWorkerContracts.ts', 'renderWorkerContracts.js');
   const Module = require('node:module');
   const originalLoad = Module._load;
@@ -98,9 +102,12 @@ const store = {
     if (request === '../renderer/src/manifest') return originalLoad.call(this, manifestPath, parent, isMain);
     if (request === '../renderer/src/output-format') return originalLoad.call(this, outputFormatPath, parent, isMain);
     if (request === '../renderer/src/templates/graphics-v2-certificate') return originalLoad.call(this, graphicsCertificatePath, parent, isMain);
+    if (request === './sourceAudioContracts') return { validateSourceAudioManifest: async () => { throw new Error('New source-audio dispatch is outside this accepted-callback fixture.'); } };
+    if (request === '../renderer/src/media/source-audio-contract') return originalLoad.call(this, path.join(temp, 'media/source-audio-contract.js'), parent, isMain);
     if (request === './graphicsAssets') return { resolveGraphicImage: async () => { throw new Error('Poster dispatch is outside this accepted-callback fixture.'); } };
     if (request === '../renderer/src/media/sha256') return require(compile('renderer/src/media/sha256.ts', 'sha256.js'));
     if (request === './movieAuthority') return { authorizeMovieRenderContext: async () => { throw new Error('Ordinary callback fixture cannot authorize movie rendering.'); } };
+    if (request === '../src/lib/render/recovery') return originalLoad.call(this, recoveryPath, parent, isMain);
     if (request === './renderWorkerContracts') return originalLoad.call(this, workerPolicyPath, parent, isMain);
     if (request === './_generated/api') return { internal: { renderJobs: {} } };
     if (request === './authorization') return { requireMember: async () => ({ studio: { externalId: 'studio-1', _id: 'studio-1' } }), requireProjectRole: async () => ({}) };

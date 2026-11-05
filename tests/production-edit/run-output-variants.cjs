@@ -6,7 +6,7 @@ const file=path.join(__dirname,'run-finishing-v5.cjs');
 const harness=new Module(file,module);harness.filename=file;harness.paths=Module._nodeModulePaths(path.dirname(file));
 harness._compile(fs.readFileSync(file,'utf8').split('const originalFlag =')[0]+'\nmodule.exports={fixture,editor,timeline,assembly};',file);
 const {fixture,editor,timeline,assembly}=harness.exports;
-const {OUTPUT_PRESETS,OUTPUT_FPS,getOutputPreset}=require('../../renderer/src/output-presets.ts');
+const {OUTPUT_PRESETS,OUTPUT_FPS,getOutputPreset,outputFormatLabel}=require('../../renderer/src/output-presets.ts');
 const {graphicsWorkerSupports}=require('../../convex/renderGraphicsHandshake.ts');
 const {validateManifest}=require('../../renderer/src/manifest.ts');
 process.env.FINALFRAME_MANIFEST_V5_ENABLED='true';
@@ -25,7 +25,7 @@ async function check(name,fn){await fn();checks++;console.log('PASS '+name);}
 (async()=>{
  await check('seven registry presets and aliases are exact, with supported independent fps values',async()=>{
   assert.deepEqual(OUTPUT_PRESETS.map(p=>[p.aspectRatio,p.width,p.height]),[['9:16',1080,1920],['16:9',1920,1080],['1:1',1080,1080],['4:5',1080,1350],['4:3',1440,1080],['3:4',1080,1440],['21:9',1680,720]]);
-  assert.deepEqual(OUTPUT_FPS,[24,25,30,50,60]);assert.equal(getOutputPreset('SOCIAL_VERTICAL').id,'VERTICAL');assert.throws(()=>getOutputPreset('unsupported'));
+  assert.deepEqual(OUTPUT_FPS,[24,25,30,50,60]);assert.equal(getOutputPreset('SOCIAL_VERTICAL').id,'VERTICAL');assert.throws(()=>getOutputPreset('unsupported'));assert.equal(outputFormatLabel('SOCIAL_VERTICAL',1280,720),'Landscape');assert.equal(outputFormatLabel('LANDSCAPE',1080,1350),'Portrait feed');assert.equal(outputFormatLabel('VERTICAL',1000,400),'Custom format');
  });
  await check('all formats create independently editable drafts while source audio/captions/timing and media identities remain intact',async()=>{
   const ctx=context();const source=await ctx.draft('timeline_1');const original=structuredClone(ctx.rows.get('timeline_1'));

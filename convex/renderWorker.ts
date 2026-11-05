@@ -6,6 +6,7 @@ import { record, renderWorkerEnabled } from './renderWorkerContracts';
 import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
 import { graphicsWorkerSupports, readGraphicsHandshake } from './renderGraphicsHandshake';
 import { formatVariantRequirements } from '../renderer/src/output-variants';
+import { sourceAudioRequirements } from '../renderer/src/media/source-audio-contract';
 
 const jobs = (internal as unknown as { renderJobs: Record<string, FunctionReference<'mutation', 'internal', any, any>> }).renderJobs;
 
@@ -31,7 +32,7 @@ export const run = internalAction({
     if (!prepared) return null;
     const lease = { jobId: args.jobId, leaseId: prepared.leaseId, dispatchLeaseId: prepared.dispatchLeaseId };
     const graphicsCertificate = expectedGraphicsCertificate({ jobId: args.jobId, leaseId: prepared.leaseId, attempt: prepared.attempt, manifest: record(prepared.payload).manifest });
-    if (graphicsCertificate || formatVariantRequirements(record(prepared.payload).manifest)) {
+    if (graphicsCertificate || formatVariantRequirements(record(prepared.payload).manifest) || sourceAudioRequirements(record(prepared.payload).manifest)) {
       try {
         const health = await fetch(new URL('/health', rendererUrl), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(5_000) });
         if (!health.ok) throw new Error('RENDER_GRAPHICS_CAPABILITY_UNAVAILABLE');

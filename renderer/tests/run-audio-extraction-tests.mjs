@@ -11,6 +11,13 @@ async function source(extra=[],name='original.mp4'){const path=join(directory,na
 try{
  const bytes=await source(),input={url:'https://fixture.convex.cloud/api/storage/video',checksum:createHash('sha256').update(bytes).digest('base64'),byteSize:bytes.length,profile:AUDIO_EXTRACTION_PROFILE,startSample:48000,sampleCount:96000};const options={allowedHosts:['fixture.convex.cloud'],ffmpeg,ffprobe,fetch:async(_url,init)=>{assert.equal(init.redirect,'error');return new Response(bytes);}};
  const result=await extractCanonicalAudio(input,options);assert.equal(assertExtractedWav(result.bytes).sampleCount,96000);assert.equal(result.proof.durationSeconds,2);assert.equal(result.proof.channels,2);assert.ok(Math.abs(result.proof.sourceDurationSeconds-4)<.001);checks++;
+ // AAC tail packet duration can already include its edit-list discard. Decode
+ // actual nb_samples rather than subtracting discard_padding a second time.
+ for(const seconds of [1.2,8.2]){
+  const path=join(directory,`aac-tail-${seconds}.mp4`);await ffmpeg.execute(['-v','error','-y','-f','lavfi','-i',`color=c=blue:s=64x48:r=30:d=${seconds}`,'-f','lavfi','-i',`sine=frequency=440:sample_rate=48000:duration=${seconds}`,'-c:v','libx264','-preset','ultrafast','-threads','1','-pix_fmt','yuv420p','-c:a','aac',path],{timeoutMs:15000});
+  const tailBytes=await readFile(path),samples=Math.round(seconds*48000);const tail=await extractCanonicalAudio({...input,startSample:0,sampleCount:samples,byteSize:tailBytes.length,checksum:createHash('sha256').update(tailBytes).digest('hex')},{...options,fetch:async()=>new Response(tailBytes)});
+  assert.equal(assertExtractedWav(tail.bytes).sampleCount,samples);assert.equal(tail.proof.durationSeconds,seconds);checks++;
+ }
  await assert.rejects(extractCanonicalAudio({...input,checksum:'0'.repeat(64)},options),/SOURCE_CHANGED/);await assert.rejects(extractCanonicalAudio({...input,byteSize:bytes.length-1},options),/SOURCE_LIMIT/);await assert.rejects(extractCanonicalAudio({...input,url:'https://foreign.convex.cloud/api/storage/video'},options),/allowed/);checks++;
  const silent=await source(['-an'],'silent.mp4');await assert.rejects(extractCanonicalAudio({...input,byteSize:silent.length,checksum:createHash('sha256').update(silent).digest('hex')},{...options,fetch:async()=>new Response(silent)}),/AUDIO_UNAVAILABLE/);checks++;
  const shortAudio=await source(['-af','atrim=end=1'],'short-audio.mp4');await assert.rejects(extractCanonicalAudio({...input,startSample:0,byteSize:shortAudio.length,checksum:createHash('sha256').update(shortAudio).digest('hex')},{...options,fetch:async()=>new Response(shortAudio)}),/AUDIO_WINDOW_SHORT/);checks++;

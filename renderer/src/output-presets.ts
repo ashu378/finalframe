@@ -15,6 +15,12 @@ export const DEFAULT_OUTPUT_PRESET_ID: OutputPresetId = 'LANDSCAPE';
 export const DEFAULT_OUTPUT_FPS = 30;
 export const FORMAT_SAFE_INSET = .08;
 
+/** Stored dimensions take precedence over a legacy project preset label. */
+export function outputFormatLabel(value:unknown,width?:number,height?:number):string {
+  if(typeof width==='number'&&Number.isFinite(width)&&width>0&&typeof height==='number'&&Number.isFinite(height)&&height>0)return OUTPUT_PRESETS.find(preset=>preset.width*height===preset.height*width)?.label??'Custom format';
+  const id=normalizeOutputPresetId(value);return id?getOutputPreset(id).label:'Custom format';
+}
+
 /** Compatibility names only resolve at an explicit format boundary. */
 export function normalizeOutputPresetId(value: unknown): OutputPresetId | null {
   if (typeof value !== 'string') return null;

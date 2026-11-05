@@ -39,6 +39,8 @@ export interface VideoRenderItem extends RenderItemBase {
   volume?: number;
   fit?: 'cover' | 'contain';
   position?: string;
+  holdAfterFrame?: number;
+  sourceAudioRestoration?: import('./media/source-audio-contract.js').SourceAudioRestoration;
 }
 
 export interface ImageRenderItem extends RenderItemBase {
@@ -67,6 +69,7 @@ export interface AudioTrack {
   fadeInFrames?: number;
   fadeOutFrames?: number;
   role?: 'dialogue' | 'voiceover' | 'music' | 'ambience' | 'sfx';
+  sourceAudioRestoration?: import('./media/source-audio-contract.js').SourceAudioRestoration;
 }
 
 export interface CaptionCue {

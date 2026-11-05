@@ -16,6 +16,8 @@ import type { CaptionTrack } from '../renderer/src/types';
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { validateAuthoringOutputSettings } from '../renderer/src/output-settings';
 import { getOutputPreset, normalizeOutputPresetId, type OutputPresetId } from '../renderer/src/output-presets';
+import { validateSourceAudioPairs } from './sourceAudioContracts';
+import { sourceAudioReceipt, type SourceAudioRestoration } from '../renderer/src/media/source-audio-contract';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Production = Doc<"productions">;
@@ -51,6 +53,7 @@ type SourceItem = {
   graphicTemplateId?: string;
   graphicProps?: Record<string, unknown>;
   renderItem?: Record<string, unknown>;
+  sourceAudioRestoration?: SourceAudioRestoration;
   rendererTiming?: Record<string, unknown>;
   captionTracks?: CaptionTrack[];
   captionFps?: number;
@@ -231,6 +234,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
   }
 
   const timelineMeta = timelineMetadata(timeline);
+  await validateSourceAudioPairs(ctx,production.projectId!,clips,preset.fps,actorId);
   const approvedTakeIds = new Set((Array.isArray(timelineMeta.approvedShotVersionIds) ? timelineMeta.approvedShotVersionIds : []).map(String));
   const sourceIds = new Set<string>([timeline._id.toString(), production.currentVersionId?.toString() ?? ""]);
   const sources: SourceItem[] = [];
@@ -268,6 +272,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       graphicTemplateId: stringValue(clipMeta.motionTemplateId ?? clipMeta.templateId),
       graphicProps: record(clipMeta.templateProps ?? clipMeta.props),
       renderItem: record(clipMeta.renderItem), rendererTiming: record(clipMeta.rendererTiming),
+      ...(clipMeta.sourceAudioRestoration!==undefined?{sourceAudioRestoration:sourceAudioReceipt(clipMeta.sourceAudioRestoration)}:{}),
       transitionOut: record(record(clip.transition).out), transitionToClipId: transitionTargets.get(clip._id),
     };
     const inlineCaption = record(clipMeta.captionTrack);
@@ -374,7 +379,7 @@ function rendererItems(sources: SourceItem[], fps: number, version = 4) {
     }
     if (!source.sourceUrl) throw new Error("Assembly is blocked because a media source has no canonical URL.");
     if (source.trackKind.toUpperCase() === "IMAGE") return { ...base, kind: "image" as const, src: source.sourceUrl, ...(source.renderItem?.fit ? { fit: String(source.renderItem.fit) } : {}), ...(source.renderItem?.position ? { position: String(source.renderItem.position) } : {}) };
-    return { ...base, kind: "video" as const, src: source.sourceUrl, trimStartInFrames: Math.max(0, sourceFrame(source, 'trimStartInFrames', source.trimStartSeconds ?? 0, fps, version === 5 ? 'round' : 'floor')), volume: source.volume ?? 1, ...(version===5&&source.renderItem?.fit?{fit:String(source.renderItem.fit)}:{}),...(version===5&&source.renderItem?.position?{position:String(source.renderItem.position)}:{}) };
+    return { ...base, kind: "video" as const, src: source.sourceUrl, trimStartInFrames: Math.max(0, sourceFrame(source, 'trimStartInFrames', source.trimStartSeconds ?? 0, fps, version === 5 ? 'round' : 'floor')), volume: source.volume ?? 1, ...(version===5&&source.renderItem?.fit?{fit:String(source.renderItem.fit)}:{}),...(version===5&&source.renderItem?.position?{position:String(source.renderItem.position)}:{}),...(version===5&&source.renderItem?.holdAfterFrame!==undefined?{holdAfterFrame:Number(source.renderItem.holdAfterFrame)}:{}),...(version===5&&source.sourceAudioRestoration?{sourceAudioRestoration:source.sourceAudioRestoration}:{}) };
   });
 }
 
@@ -384,12 +389,13 @@ function rendererAudioTracks(sources: SourceItem[], fps: number, version = 4) {
     ...(version === 5 ? { trackId: source.trackId } : {}),
     src: source.sourceUrl as string,
     startFrame: Math.max(0, version === 5 || source.rendererTiming ? sourceFrame(source, "startFrame", source.startSeconds, fps, version === 5 ? "round" : "floor") : Math.floor(source.startSeconds * fps)),
-    durationInFrames: Math.max(1, version === 5 || source.rendererTiming ? sourceFrame(source, "durationInFrames", source.durationSeconds, fps, version === 5 ? "round" : "ceil") : Math.ceil(source.durationSeconds * fps)),
+    durationInFrames: Math.max(1, source.sourceAudioRestoration ? Math.ceil(source.durationSeconds*fps) : version === 5 || source.rendererTiming ? sourceFrame(source, "durationInFrames", source.durationSeconds, fps, version === 5 ? "round" : "ceil") : Math.ceil(source.durationSeconds * fps)),
     trimStartInFrames: Math.max(0, version === 5 || source.rendererTiming ? sourceFrame(source, "trimStartInFrames", source.trimStartSeconds ?? 0, fps, version === 5 ? "round" : "floor") : Math.floor((source.trimStartSeconds ?? 0) * fps)),
     volume: source.volume ?? 1,
     fadeInFrames: Math.max(0, Math[version === 5 ? 'round' : 'floor']((source.fadeInSeconds ?? 0) * fps)),
     fadeOutFrames: Math.max(0, Math[version === 5 ? 'round' : 'floor']((source.fadeOutSeconds ?? 0) * fps)),
     role: source.audioRole ?? 'music',
+    ...(version===5&&source.sourceAudioRestoration?{sourceAudioRestoration:source.sourceAudioRestoration}:{}),
   }));
 }
 

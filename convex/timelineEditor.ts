@@ -16,6 +16,8 @@ import { planBeatCuts } from './beatCutContracts';
 import { timelineMatchesCurrentVersion } from '../src/lib/production/timeline-lineage';
 import { getOutputPreset } from '../renderer/src/output-presets';
 import { FORMAT_VARIANT_VERSION, framingRenderProps, variantFraming, variantGraphic } from '../renderer/src/output-variants';
+import { editedSourceContext, sourceAudioBinding, sourceAudioEnabled, validateSourceAudioPairs } from './sourceAudioContracts';
+import { SOURCE_AUDIO_RATE, SOURCE_AUDIO_TIMING_CHOICES, decodedVideoTiming, sourceAudioPlan, type SourceAudioTimingChoice } from '../renderer/src/media/source-audio-contract';
 
 type ReadCtx = QueryCtx | MutationCtx;
 type Timeline = Doc<"timelines">;
@@ -66,6 +68,7 @@ const editKind = v.union(
   v.literal("adjustAudio"),
   v.literal("addTransition"),
   v.literal('adjustFraming'),
+  v.literal('restoreSourceAudio'),
 );
 
 function record(value: unknown): JsonRecord {
@@ -250,7 +253,9 @@ async function replacementAsset(ctx: ReadCtx, projectId: Id<'projects'>, studioE
   if (!asset || asset.projectId !== projectId || asset.studioExternalId !== studioExternalId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith(prefix) || [asset.rights,asset.provenance,asset.moderation].some(denied)) throw new Error('Choose an active approved replacement from this project with current media rights.');
   const storage = await ctx.db.system.get('_storage', asset.storageId);
   if (!storage || storage.size < 1 || storage.contentType !== asset.mimeType || !sha256Equal(asset.checksum, storage.sha256)) throw new Error('The replacement media bytes or type changed.');
-  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + clip.durationSeconds > asset.durationSeconds! + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
+  const restoration=record(clip.metadata.sourceAudioRestoration),hold=record(clip.metadata.renderItem).holdAfterFrame;
+  const playbackDuration=asset._id===clip.assetId&&typeof hold==='number'&&typeof restoration.fps==='number'?(hold-1)/restoration.fps:clip.durationSeconds;
+  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + playbackDuration > asset.durationSeconds! + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
   await requireApprovedResource(ctx, projectId, 'asset', asset._id);
   return asset;
 }
@@ -532,6 +537,32 @@ function operationInput(operation: Operation): JsonRecord {
   return record(operation.input);
 }
 
+function sourceAudioPictureLimit(state:TimelineState,clip:ClipState,fps:number){
+  const frames=Math.round(clip.durationSeconds*fps);
+  const following=state.tracks.flatMap(track=>track.clips).filter(other=>other.id!==clip.id&&!['AUDIO','CAPTIONS'].includes(other.kind)&&other.startSeconds>=clip.startSeconds+clip.durationSeconds-0.000001).map(other=>other.startSeconds);
+  const end=Math.min(60,...following);
+  return record(record(clip.transition).out).kind&&record(record(clip.transition).out).kind!=='CUT'?frames:Math.max(frames,Math.floor((end-clip.startSeconds)*fps+0.000001));
+}
+
+async function restoreSourceAudio(ctx:MutationCtx,state:TimelineState,projectId:Id<'projects'>,rawInput:unknown,key:string){
+  if(!sourceAudioEnabled())throw new Error('SOURCE_AUDIO_DISABLED');
+  const input=record(rawInput),{clip}=findClip(state,stringValue(input.clipId,'Picture clip'));
+  if(clip.kind!=='VIDEO'||!clip.shotVersionId||record(clip.metadata).sourceAudioRestoration!==undefined)throw new Error('SOURCE_AUDIO_EDITED_TAKE_REQUIRED');
+  const fps=finishingFps(state.metadata),frames=Math.round(clip.durationSeconds*fps);
+  if(Math.abs(clip.durationSeconds*fps-frames)>0.000001||Math.abs(clip.startSeconds*fps-Math.round(clip.startSeconds*fps))>0.000001||Math.abs((clip.trimStartSeconds??0)*fps-Math.round((clip.trimStartSeconds??0)*fps))>0.000001)throw new Error('SOURCE_AUDIO_TIMING_REVIEW_REQUIRED');
+  const jobId=typeof input.derivationJobId==='string'?ctx.db.normalizeId('mediaDerivationJobs',input.derivationJobId):null;
+  if(!jobId||!SOURCE_AUDIO_TIMING_CHOICES.includes(input.timingChoice as SourceAudioTimingChoice)||typeof input.confirmedDeltaSamples!=='number'||!Number.isSafeInteger(input.confirmedPlaybackFrames))throw new Error('SOURCE_AUDIO_TIMING_REVIEW_REQUIRED');
+  const bound=await sourceAudioBinding(ctx,{projectId,takeId:clip.shotVersionId as Id<'shotVersions'>,derivationJobId:jobId,trimStartSeconds:clip.trimStartSeconds??0,pictureFrames:frames,fps,timingChoice:input.timingChoice as SourceAudioTimingChoice,confirmedDeltaSamples:input.confirmedDeltaSamples,maximumPictureFrames:sourceAudioPictureLimit(state,clip,fps),key});
+  if(clip.assetId!==bound.edited.asset._id)throw new Error('SOURCE_AUDIO_EDITED_TAKE_REQUIRED');
+  if(input.confirmedPlaybackFrames!==bound.receipt.playbackFrames)throw new Error('SOURCE_AUDIO_TIMING_REVIEW_REQUIRED');
+  if(state.tracks.filter(track=>track.kind==='AUDIO').length>=16)throw new Error('SOURCE_AUDIO_LANE_LIMIT');
+  const receipt=bound.receipt;
+  clip.volume=0;clip.durationSeconds=receipt.outputFrames/fps;
+  clip.metadata={...clip.metadata,sourceAudioRestoration:receipt,renderItem:{...record(clip.metadata.renderItem),...(receipt.holdAfterFrame!==undefined?{holdAfterFrame:receipt.holdAfterFrame}:{})},rendererTiming:{...record(clip.metadata.rendererTiming),fps,startFrame:Math.round(clip.startSeconds*fps),durationInFrames:receipt.outputFrames,trimStartInFrames:Math.round((clip.trimStartSeconds??0)*fps)}};
+  const trackId=`source-audio:${key}`;
+  state.tracks.push({id:trackId,kind:'AUDIO',name:'Original source recording',orderIndex:state.tracks.length,metadata:{},clips:[{id:trackId+':clip',trackId,kind:'AUDIO',assetId:bound.audio.asset._id,startSeconds:clip.startSeconds,durationSeconds:receipt.placedSamples/SOURCE_AUDIO_RATE,trimStartSeconds:0,volume:1,metadata:{clipKind:'AUDIO',audioRole:'dialogue',sourceAudioRestoration:receipt,rendererTiming:{fps,startFrame:Math.round(clip.startSeconds*fps),durationInFrames:Math.ceil(receipt.placedSamples*fps/SOURCE_AUDIO_RATE),trimStartInFrames:0}}}]});
+}
+
 async function persistDraft(
   ctx: MutationCtx,
   source: Timeline,
@@ -545,6 +576,16 @@ async function persistDraft(
   if (!production || production.projectId !== projectId) throw new Error('Timeline project ownership is invalid.');
   const productionVersionId = await requireCurrentTimeline(ctx, source, production);
   state.metadata = { ...state.metadata, productionVersionId };
+  for(const track of state.tracks)for(const clip of track.clips){
+      if (finishingV5Enabled() && !options.preserveTiming && clip.metadata.sourceAudioRestoration===undefined && !(clip.kind === 'AUDIO' && options.preserveAudioTiming)) {
+        const fps = finishingFps(state.metadata);
+        clip.startSeconds = Math.round(clip.startSeconds * fps) / fps;
+        clip.durationSeconds = Math.round(clip.durationSeconds * fps) / fps;
+        if (clip.trimStartSeconds !== undefined) clip.trimStartSeconds = Math.round(clip.trimStartSeconds * fps) / fps;
+        if (clip.trimEndSeconds !== undefined) clip.trimEndSeconds = (clip.trimStartSeconds ?? 0) + clip.durationSeconds;
+      }
+  }
+  await validateSourceAudioPairs(ctx,projectId,state.tracks.flatMap(track=>track.clips),finishingFps(state.metadata));
   const latest = await ctx.db.query("timelines").withIndex("by_production_version", q => q.eq('productionId', source.productionId)).order('desc').first();
   const timestamp = now();
   const versionNumber = (latest?.versionNumber ?? 0) + 1;
@@ -588,22 +629,17 @@ async function persistDraft(
     const nextClips: ClipState[] = [];
 
     for (const [clipIndex, clip] of track.clips.entries()) {
-      if (finishingV5Enabled() && !options.preserveTiming && !(options.preserveAudioTiming && clip.kind === 'AUDIO')) {
-        const fps = finishingFps(state.metadata);
-        clip.startSeconds = Math.round(clip.startSeconds * fps) / fps;
-        clip.durationSeconds = Math.round(clip.durationSeconds * fps) / fps;
-        if (clip.trimStartSeconds !== undefined) clip.trimStartSeconds = Math.round(clip.trimStartSeconds * fps) / fps;
-        if (clip.trimEndSeconds !== undefined) clip.trimEndSeconds = (clip.trimStartSeconds ?? 0) + clip.durationSeconds;
-      }
       const trimStart = clip.trimStartSeconds ?? 0;
-      if (!Number.isFinite(clip.startSeconds) || clip.startSeconds < 0 || !Number.isFinite(clip.durationSeconds) || clip.durationSeconds <= 0 || clip.startSeconds + clip.durationSeconds > 60 || !Number.isFinite(trimStart) || trimStart < 0 || (clip.trimEndSeconds !== undefined && (!Number.isFinite(clip.trimEndSeconds) || clip.trimEndSeconds < trimStart + clip.durationSeconds - 0.000001))) throw new Error("Edited clip timing exceeds the supported source or 60-second composition.");
+      const heldFrame=record(clip.metadata.renderItem).holdAfterFrame;
+      const playbackDuration=typeof heldFrame==='number'?heldFrame/finishingFps(state.metadata):clip.durationSeconds;
+      if (!Number.isFinite(clip.startSeconds) || clip.startSeconds < 0 || !Number.isFinite(clip.durationSeconds) || clip.durationSeconds <= 0 || clip.startSeconds + clip.durationSeconds > 60 || !Number.isFinite(trimStart) || trimStart < 0 || (clip.trimEndSeconds !== undefined && (!Number.isFinite(clip.trimEndSeconds) || clip.trimEndSeconds < trimStart + playbackDuration - 0.000001))) throw new Error("Edited clip timing exceeds the supported source or 60-second composition.");
       const assetId = clip.assetId ? clip.assetId as Id<"assets"> : undefined;
       if (assetId) {
         const asset = await ctx.db.get(assetId);
         if (!asset || asset.studioExternalId !== member.studio.externalId || asset.projectId !== projectId || asset.scope === "GLOBAL" || asset.deletedAt) throw new Error("An edited clip references media outside this project.");
         const expectedMedia = ({ VIDEO: 'video/', IMAGE: 'image/', AUDIO: 'audio/' } as Record<string, string>)[clip.kind];
         if (expectedMedia && !asset.mimeType?.startsWith(expectedMedia)) throw new Error("Replacement media must match the clip's media type.");
-        if (asset.durationSeconds !== undefined && (asset.mimeType?.startsWith("video/") || asset.mimeType?.startsWith("audio/")) && trimStart + clip.durationSeconds > asset.durationSeconds + 0.05) throw new Error("Edited clip extends beyond its source media.");
+        if (asset.durationSeconds !== undefined && (asset.mimeType?.startsWith("video/") || asset.mimeType?.startsWith("audio/")) && trimStart + playbackDuration > asset.durationSeconds + 0.05) throw new Error("Edited clip extends beyond its source media.");
       }
       const shotVersionId = clip.shotVersionId ? clip.shotVersionId as Id<"shotVersions"> : undefined;
       if (shotVersionId) {
@@ -633,6 +669,7 @@ async function persistDraft(
     normalizedTracks.push({ ...track, id: trackId.toString(), clips: nextClips });
   }
 
+  await validateSourceAudioPairs(ctx,projectId,normalizedTracks.flatMap(track=>track.clips),finishingFps(state.metadata));
   const encoded = encodeState({ ...state, tracks: normalizedTracks }, timelineKey(sourceTimelineId), source.versionNumber, { tracks: trackMap, clips: clipMap });
   if (new TextEncoder().encode(JSON.stringify(encoded)).length > 512 * 1024) throw new Error('This edit is too large for one timeline. Split it into shorter components.');
   await ctx.db.patch(provisional, { durationSeconds, tracks: encoded, updatedAt: timestamp });
@@ -808,6 +845,34 @@ export const formatPreview = query({
   },
 });
 
+export const sourceAudioOptions=query({args:{timelineId:v.id('timelines'),clipId:v.string()},returns:v.any(),handler:async(ctx,args)=>{
+  const {timeline,production}=await getTimelineForMember(ctx,args.timelineId);
+  if(!sourceAudioEnabled())return {enabled:false,options:[]};
+  const state=await getTimelineState(ctx,timeline),{clip}=findClip(state,args.clipId),fps=finishingFps(state.metadata),pictureFrames=Math.round(clip.durationSeconds*fps);
+  if(clip.kind!=='VIDEO'||!clip.shotVersionId||clip.metadata.sourceAudioRestoration!==undefined)return {enabled:true,eligible:false,options:[]};
+  let context;
+  try{context=await editedSourceContext(ctx,production.projectId!,clip.shotVersionId as Id<'shotVersions'>);}catch{return {enabled:true,eligible:false,options:[]};}
+  const probe=await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',context.edited.asset._id)).unique();
+  let timing:ReturnType<typeof decodedVideoTiming>|null=null;
+  try{if(probe&&probe.storageId===context.edited.asset.storageId&&probe.videoTimingSourceStorageId===context.edited.asset.storageId&&sha256Equal(probe.videoTimingSourceChecksum,context.edited.stored.sha256)&&sha256Equal(probe.checksum,context.edited.stored.sha256)&&probe.byteSize===context.edited.stored.size)timing=decodedVideoTiming(probe.videoTiming);}catch{/* Explicit measurement is required; container duration is insufficient. */}
+  const maximumPictureFrames=sourceAudioPictureLimit(state,clip,fps),options=[];
+  const availablePictureFrames=timing?Math.ceil((timing.durationSeconds-(clip.trimStartSeconds??0))*fps-0.000001):undefined;
+  const jobs=await ctx.db.query('mediaDerivationJobs').withIndex('by_project',q=>q.eq('projectId',production.projectId!)).order('desc').take(51);
+  for(const job of jobs.slice(0,50)){
+    if(job.sourceAssetId!==context.original.asset._id||job.status!=='COMPLETED'||!job.resultAssetId)continue;
+    const deltaSamples=job.sampleCount-pictureFrames*SOURCE_AUDIO_RATE/fps;
+    const choices=SOURCE_AUDIO_TIMING_CHOICES.filter(timingChoice=>{try{sourceAudioPlan({fps,pictureFrames,availablePictureFrames,audioSamples:job.sampleCount,timingChoice,confirmedDeltaSamples:deltaSamples,maximumPictureFrames});return true;}catch{return false;}});
+    if(!choices.length)continue;
+    try{
+      const bound=await sourceAudioBinding(ctx,{projectId:production.projectId!,takeId:clip.shotVersionId as Id<'shotVersions'>,derivationJobId:job._id,trimStartSeconds:clip.trimStartSeconds??0,pictureFrames,fps,timingChoice:choices[0],confirmedDeltaSamples:deltaSamples,maximumPictureFrames,key:'source-audio-options-preview',skipVideoTiming:true});
+      options.push({derivationJobId:job._id,audioAssetId:bound.audio.asset._id,name:bound.audio.asset.name??'Original source recording',audioSeconds:job.sampleCount/SOURCE_AUDIO_RATE,deltaSamples,deltaSeconds:deltaSamples/SOURCE_AUDIO_RATE,choices,url:await ctx.storage.getUrl(bound.audio.asset.storageId!)});
+    }catch{/* Unapproved, revoked or nonmatching extractions are never offered. */}
+  }
+  const unaligned=Math.abs(clip.startSeconds*fps-Math.round(clip.startSeconds*fps))>0.000001||Math.abs((clip.trimStartSeconds??0)*fps-Math.round((clip.trimStartSeconds??0)*fps))>0.000001||Math.abs(clip.durationSeconds*fps-pictureFrames)>0.000001;
+  const timingIssue=unaligned?'This edit needs frame-aligned picture and source timing. Save an explicit frame-aligned trim first, then choose its matching approved audio extraction.':timing&&(timing.firstFrameSeconds!==0||(clip.trimStartSeconds??0)>=timing.durationSeconds)?'The measured picture does not cover this exact source range from a zero start. Choose an explicit in-bounds edit before restoring audio.':null;
+  return {enabled:true,eligible:true,takeId:clip.shotVersionId,projectId:production.projectId!,pictureSeconds:clip.durationSeconds,decodedPictureSeconds:timing?.durationSeconds??null,playbackFrames:availablePictureFrames===undefined?null:Math.min(pictureFrames,availablePictureFrames),shortPictureFrames:availablePictureFrames===undefined?null:Math.max(0,pictureFrames-availablePictureFrames),needsMeasurement:!timing,timingIssue,originalSourceName:context.original.asset.name??'Original approved video',options,hasMoreExtractions:jobs.length>50};
+}});
+
 export const apply = mutation({
   args: { timelineId: v.id("timelines"), kind: editKind, input: v.any(), idempotencyKey: v.string(), correlationId: v.optional(v.string()) },
   returns: v.object({ timelineId: v.id("timelines"), operationId: v.id("productionOperations"), replayed: v.boolean() }),
@@ -831,7 +896,8 @@ export const apply = mutation({
     const state = await getTimelineState(ctx, timeline);
     const before = JSON.stringify(state);
     const next = structuredClone(state);
-    applyEdit(next, args.kind, args.input);
+    if(args.kind==='restoreSourceAudio')await restoreSourceAudio(ctx,next,production.projectId!,args.input,key);
+    else applyEdit(next, args.kind, args.input);
     if (args.kind === 'replace') {
       const edited = findClip(next, String(record(args.input).clipId)).clip;
       await replacementAsset(ctx, production.projectId!, member.studio.externalId, edited, edited.assetId!);
@@ -867,7 +933,7 @@ export const undo = mutation({
     await requireCurrentTimeline(ctx, timeline, production);
     await requireEditable(ctx, production.projectId!, "timeline", timeline._id.toString());
     assertEditable(timeline);
-    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADJUSTFRAMING", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
+    const original = await lastOperationForTimeline(ctx, timeline, ["TRIM", "SPLIT", "REORDER", "REPLACE", "UPDATETEXT", "UPDATEGRAPHIC", "UPDATECAPTIONS", "ADJUSTAUDIO", "ADJUSTFRAMING", "RESTORESOURCEAUDIO", "ADDTRANSITION", "APPLY_BEAT_CUTS", "UNDO", "REDO"]);
     if (!original) throw new Error("There is no completed edit to undo for this timeline.");
     const sourceTimelineId = optionalString(operationInput(original).sourceTimelineId, "Source timeline ID");
     if (!sourceTimelineId) throw new Error("The previous edit does not contain a recoverable source version.");

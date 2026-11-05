@@ -11,6 +11,7 @@ import { sendRendererCallback } from './contracts/callback.js';
 import type { RenderManifest, RenderMode } from './types.js';
 import { probeRemoteMedia } from './media/remote-probe.js';
 import { extractCanonicalAudio } from './media/extract-audio.js';
+import { SOURCE_AUDIO_VERSION } from './media/source-audio-contract.js';
 import { safeExtractionError } from './media/audio-extraction-contracts.js';
 import { assertValidManifest, validateManifest } from './manifest.js';
 import { outputFormatForManifest, outputFormatForMimeType } from './output-format.js';
@@ -128,7 +129,7 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer', rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,sourceAudioVersion:SOURCE_AUDIO_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
     if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
@@ -165,6 +166,7 @@ createServer(async (request, response) => {
           expectedChecksum: typeof payload.checksum === 'string' ? payload.checksum : undefined,
           expectedByteSize: typeof payload.byteSize === 'number' ? payload.byteSize : undefined,
           verifyAudioDuration: payload.verifyAudioDuration === true,
+          verifyVideoTiming: payload.verifyVideoTiming === true,
           maxAudioDurationSeconds: payload.maxAudioDurationSeconds===undefined?undefined:typeof payload.maxAudioDurationSeconds==='number'?payload.maxAudioDurationSeconds:NaN,
           ffmpeg: new InjectableFFmpegAdapter(),
         });

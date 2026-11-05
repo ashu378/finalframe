@@ -1,6 +1,6 @@
-import { AbsoluteFill, Audio, Img, Sequence, Video, interpolate, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, Audio, Freeze, Img, Sequence, Video, interpolate, useCurrentFrame } from 'remotion';
 import { createAssemblyPlan } from '../assembly/plan.js';
-import type { RenderManifest } from '../types.js';
+import type { RenderManifest, VideoRenderItem } from '../types.js';
 import { renderMotionTemplate } from '../templates/renderer.js';
 import { useMemo } from 'react';
 import { nativeVideoVolume, visualPresentation } from '../assembly/transitions.js';
@@ -8,6 +8,12 @@ import { CaptionLayer } from './caption-layer.js';
 
 export interface FinalFrameCompositionProps extends Record<string, unknown> {
   manifest: RenderManifest;
+}
+
+function SourceVideo({item,version,volume}:{item:VideoRenderItem;version:number;volume:number|((frame:number)=>number)}){
+  const frame=useCurrentFrame();
+  const video=<Video src={item.src} startFrom={item.trimStartInFrames??0} volume={volume} style={{width:'100%',height:'100%',objectFit:version===5?item.fit??'cover':'cover',objectPosition:version===5?item.position??'center':'center'}}/>;
+  return version===5&&item.holdAfterFrame!==undefined&&frame>=item.holdAfterFrame?<Freeze frame={item.holdAfterFrame-1}>{video}</Freeze>:video;
 }
 
 export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) {
@@ -25,12 +31,7 @@ export function FinalFrameComposition({ manifest }: FinalFrameCompositionProps) 
         <Sequence key={item.id} from={item.startFrame} durationInFrames={item.durationInFrames} layout="none">
           <AbsoluteFill style={{...visualPresentation(item, frame, incoming, outgoing),...(plan.version===5&&item.backgroundColor?{backgroundColor:item.backgroundColor}:{})}}>
           {item.kind === 'video' ? (
-            <Video
-              src={item.src}
-              startFrom={item.trimStartInFrames ?? 0}
-              volume={crossfade ? localFrame => nativeVideoVolume(item.volume ?? 1, item.startFrame + localFrame, incoming, outgoing) : item.volume ?? 1}
-              style={{ width: '100%', height: '100%', objectFit: plan.version===5 ? item.fit ?? 'cover' : 'cover', objectPosition: plan.version===5 ? item.position ?? 'center' : 'center' }}
-            />
+            <SourceVideo item={item} version={plan.version} volume={crossfade ? localFrame => nativeVideoVolume(item.volume ?? 1, item.startFrame + localFrame, incoming, outgoing) : item.volume ?? 1}/>
           ) : item.kind === 'image' ? (
             <Img
               src={item.src}

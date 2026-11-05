@@ -21,6 +21,7 @@ import { parseGraphicsV2Render } from './templates/graphics-v2-contract.js';
 import { SUPPORTED_MOTION_TEMPLATE_IDS } from './templates/contract.js';
 import { getOutputPreset, OUTPUT_FPS } from './output-presets.js';
 import { FORMAT_VARIANT_VERSION, variantFraming } from './output-variants.js';
+import { sourceAudioReceipt, SOURCE_AUDIO_RATE } from './media/source-audio-contract.js';
 
 export const RENDER_LIMITS = {
   maxWidth: 7680,
@@ -455,6 +456,20 @@ export function validateManifest(input: unknown): ValidationResult {
   if (input.poster !== undefined) issues.push(...validatePoster(input.poster).issues);
   if (input.metadata !== undefined && !isRecord(input.metadata)) issues.push({ path: '$.metadata', message: 'must be a JSON object' });
   if (input.version === 5) issues.push(...validateV5Composition(input));
+  const restored=new Map<string,Array<{item:Record<string,unknown>;audio:boolean;receipt:ReturnType<typeof sourceAudioReceipt>}>>();
+  for(const [audio,values]of [[false,input.items],[true,input.audioTracks]]as const){
+    if(!Array.isArray(values))continue;
+    for(const item of values){
+      if(!isRecord(item))continue;
+      if(item.holdAfterFrame!==undefined&&(input.version!==5||item.kind!=='video'||item.volume!==0||!isFiniteInteger(item.holdAfterFrame)||item.holdAfterFrame<1||item.holdAfterFrame>=Number(item.durationInFrames)||item.sourceAudioRestoration===undefined))issues.push({path:'$.items.holdAfterFrame',message:'requires a muted v5 source-audio restoration with a bounded last-frame hold'});
+      if(item.sourceAudioRestoration===undefined)continue;
+      try{if(input.version!==5)throw new Error();const receipt=sourceAudioReceipt(item.sourceAudioRestoration),rows=restored.get(receipt.key)??[];rows.push({item,audio,receipt});restored.set(receipt.key,rows);}catch{issues.push({path:'$.sourceAudioRestoration',message:'requires an exact v5 original-audio receipt'});}
+    }
+  }
+  for(const rows of restored.values()){
+    const pictures=rows.filter(row=>!row.audio),sounds=rows.filter(row=>row.audio),p=pictures[0],a=sounds[0];
+    if(rows.length!==2||pictures.length!==1||sounds.length!==1||JSON.stringify(p.receipt)!==JSON.stringify(a.receipt)||p.item.kind!=='video'||p.item.volume!==0||typeof a.item.volume!=='number'||!Number.isFinite(a.item.volume)||a.item.volume<0||a.item.volume>2||p.item.assetId!==p.receipt.editedAssetId||p.item.shotVersionId!==p.receipt.editedTakeId||p.item.startFrame!==a.item.startFrame||p.item.durationInFrames!==p.receipt.outputFrames||a.item.durationInFrames!==Math.ceil(p.receipt.placedSamples*p.receipt.fps/SOURCE_AUDIO_RATE)||(a.item.trimStartInFrames??0)!==0||p.item.holdAfterFrame!==p.receipt.holdAfterFrame||isRecord(input.output)&&input.output.fps!==p.receipt.fps)issues.push({path:'$.sourceAudioRestoration',message:'original recording must resolve to one muted take and one synchronized audio lane'});
+  }
 
   return { ok: issues.length === 0, issues };
 }
