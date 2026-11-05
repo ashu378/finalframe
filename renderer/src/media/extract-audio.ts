@@ -59,8 +59,14 @@ export async function extractCanonicalAudio(value: unknown, options: { allowedHo
     }
     const first=visual.first;
     const sourceDurationSeconds=Math.max(visual.last,sound.last)-Math.min(first,sound.first);
-    if (!Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 || sourceDurationSeconds > 60.000001 || !Number.isFinite(Number(video.start_time)) || Math.abs(Number(video.start_time)-first) > 0.000001 || (request.startSample+request.sampleCount)/48000 > visual.last-first+0.000001) throw extractionError('EXTRACTION_SOURCE_LIMIT');
+    if (!Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 || sourceDurationSeconds > 60.000001 || !Number.isFinite(Number(video.start_time)) || Math.abs(Number(video.start_time)-first) > 0.000001) throw extractionError('EXTRACTION_SOURCE_LIMIT');
     const start = request.startSample/48000, end = (request.startSample+request.sampleCount)/48000;
+    // The original recording may genuinely outlast its last video packet.
+    // Allow only the measured contiguous decoded sound range, not invented
+    // silence or a container duration. Microsecond slack reflects ffprobe's
+    // printed timestamp precision; exact decoded WAV sample count is checked
+    // again after extraction. A downstream picture hold is explicit authoring.
+    if(first+start<sound.first-0.000001||first+end>sound.last+0.000001)throw extractionError('EXTRACTION_AUDIO_WINDOW_SHORT');
     await ffmpeg.execute(['-hide_banner','-loglevel','error','-y','-threads','1','-protocol_whitelist','file,pipe','-copyts','-t','60','-i',input,'-map','0:a:0','-vn','-af',`asetpts=PTS-(${first})/TB,aresample=48000,atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS`,'-ac','2','-ar','48000','-c:a','pcm_s16le','-t','60','-fs',String(L.maxOutputBytes),output],{timeoutMs:remaining(45_000),maxOutputBytes:8192});
     if ((await stat(output)).size > L.maxOutputBytes) throw extractionError('EXTRACTION_OUTPUT_INVALID');
     const bytes = await readFile(output), proof = assertExtractedWav(bytes,request.sampleCount);

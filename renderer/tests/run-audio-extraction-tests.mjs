@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { extractCanonicalAudio } from '../dist/media/extract-audio.js';
 import { AUDIO_EXTRACTION_PROFILE,assertExtractedWav } from '../dist/media/audio-extraction-contracts.js';
+import { spawnSync } from 'node:child_process';
 import { InjectableFFmpegAdapter,InjectableFFprobeAdapter } from '../dist/media/ffmpeg.js';
 const directory=await mkdtemp(join(tmpdir(),'ff-audio-extract-real-')),ffmpeg=new InjectableFFmpegAdapter(),ffprobe=new InjectableFFprobeAdapter();let checks=0;
 async function source(extra=[],name='original.mp4'){const path=join(directory,name);await ffmpeg.execute(['-v','error','-y','-f','lavfi','-i','color=c=blue:s=64x48:r=24:d=4','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=4',...extra,'-c:v','libx264','-preset','ultrafast','-threads','1','-pix_fmt','yuv420p','-c:a','aac',path],{timeoutMs:15000});return readFile(path);}
@@ -17,6 +18,20 @@ try{
   const path=join(directory,`aac-tail-${seconds}.mp4`);await ffmpeg.execute(['-v','error','-y','-f','lavfi','-i',`color=c=blue:s=64x48:r=30:d=${seconds}`,'-f','lavfi','-i',`sine=frequency=440:sample_rate=48000:duration=${seconds}`,'-c:v','libx264','-preset','ultrafast','-threads','1','-pix_fmt','yuv420p','-c:a','aac',path],{timeoutMs:15000});
   const tailBytes=await readFile(path),samples=Math.round(seconds*48000);const tail=await extractCanonicalAudio({...input,startSample:0,sampleCount:samples,byteSize:tailBytes.length,checksum:createHash('sha256').update(tailBytes).digest('hex')},{...options,fetch:async()=>new Response(tailBytes)});
   assert.equal(assertExtractedWav(tail.bytes).sampleCount,samples);assert.equal(tail.proof.durationSeconds,seconds);checks++;
+ }
+ // Genuine decoded AAC sound may outlast the last picture. The late tone
+ // lies entirely beyond the1s video; compare every PCM sample with an
+ // independent whole-audio decode and reject even one absent tail sample.
+ {
+ const tailPath=join(directory,'audio-beyond-picture.mp4');
+ await ffmpeg.execute(['-v','error','-y','-f','lavfi','-i','color=c=blue:s=64x48:r=30:d=1','-f','lavfi','-i','sine=frequency=2000:sample_rate=48000:duration=1.2','-c:v','libx264','-preset','ultrafast','-threads','1','-pix_fmt','yuv420p','-c:a','aac',tailPath],{timeoutMs:15000});
+ const tailBytes=await readFile(tailPath),decoded=spawnSync('ffmpeg',['-v','error','-i',tailPath,'-map','0:a:0','-vn','-ac','2','-ar','48000','-c:a','pcm_s16le','-f','s16le','pipe:1'],{timeout:15000,maxBuffer:1_000_000});
+ assert.equal(decoded.status,0,decoded.stderr?.toString());const reference=decoded.stdout,tailSamples=reference.length/4;assert(tailSamples>48000);assert(Number.isSafeInteger(tailSamples));
+ const late=await extractCanonicalAudio({...input,startSample:0,sampleCount:tailSamples,byteSize:tailBytes.length,checksum:createHash('sha256').update(tailBytes).digest('hex')},{...options,fetch:async()=>new Response(tailBytes)});
+ assert.equal(assertExtractedWav(late.bytes).sampleCount,tailSamples);
+ let pcm;for(let at=12;at<late.bytes.length;){const size=late.bytes.readUInt32LE(at+4);if(late.bytes.toString('ascii',at,at+4)==='data'){pcm=late.bytes.subarray(at+8,at+8+size);break;}at+=8+size+(size%2);}
+ assert(pcm);assert.deepEqual(pcm,reference);const audibleTail=pcm.subarray(48000*4,Math.min(tailSamples,57000)*4);let energy=0;for(let i=0;i<audibleTail.length;i+=2)energy+=audibleTail.readInt16LE(i)**2;assert(Math.sqrt(energy/(audibleTail.length/2))>1000,'The sound beyond picture must be audible, not padded silence');
+ await assert.rejects(extractCanonicalAudio({...input,startSample:0,sampleCount:tailSamples+1,byteSize:tailBytes.length,checksum:createHash('sha256').update(tailBytes).digest('hex')},{...options,fetch:async()=>new Response(tailBytes)}),/AUDIO_WINDOW_SHORT/);checks++;
  }
  await assert.rejects(extractCanonicalAudio({...input,checksum:'0'.repeat(64)},options),/SOURCE_CHANGED/);await assert.rejects(extractCanonicalAudio({...input,byteSize:bytes.length-1},options),/SOURCE_LIMIT/);await assert.rejects(extractCanonicalAudio({...input,url:'https://foreign.convex.cloud/api/storage/video'},options),/allowed/);checks++;
  const silent=await source(['-an'],'silent.mp4');await assert.rejects(extractCanonicalAudio({...input,byteSize:silent.length,checksum:createHash('sha256').update(silent).digest('hex')},{...options,fetch:async()=>new Response(silent)}),/AUDIO_UNAVAILABLE/);checks++;
