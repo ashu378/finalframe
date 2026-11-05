@@ -23,7 +23,8 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   assert(Boolean(recipe.binding.continuityBibleId) === Boolean(recipe.binding.continuityHash), 'Continuity identity and hash must be paired.');
   assert(!recipe.binding.continuityBibleId || context.continuityApproved, 'Approve the exact continuity bible first.');
   assert(context.assets.length <= RECIPE_LIMITS.maxAssets && context.shots.length <= 200 && context.voices.length <= 100, 'Canonical recipe context exceeds its bounds.');
-  for (const rows of [context.assets, context.shots, context.voices]) assert(new Set(rows.map(row => row.id)).size === rows.length, 'Canonical context identities must be unique.');
+  for (const rows of [context.assets, context.shots]) assert(new Set(rows.map(row => row.id)).size === rows.length, 'Canonical context identities must be unique.');
+  assert(new Set(context.voices.map(voice => `${voice.id}/${voice.voiceVersionId ?? ''}`)).size === context.voices.length, 'Canonical voice versions must be unique.');
   const steps = new Map(recipe.steps.map(step => [step.key, step]));
   assert(steps.size === recipe.steps.length, 'Recipe step keys must be unique.');
   assert(new Set(recipe.visualOrder).size === recipe.visualOrder.length && recipe.visualOrder.every(key => steps.has(key) && visual(steps.get(key)!)), 'Visual order must contain exact unique visual steps.');
@@ -62,11 +63,11 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
     }
     if (step.operation === 'NARRATION' && step.mode === 'GENERATE') {
       assert(step.text.trim(), 'Narration needs explicit script text.');
-      const voice = context.voices.find(value => value.id === step.voiceId);
+      const voice = context.voices.find(value => value.id === step.voiceId && (step.voiceVersionId ? value.voiceVersionId === step.voiceVersionId : value.voiceVersionId === undefined));
       assert(voice && voice.projectId === recipe.binding.projectId && voice.approved && voice.kind !== 'RECORDED', 'Narration needs a current approved stock or consented reference voice.');
       if (voice.kind === 'CLONED') { assert(voice.consentCurrent && step.primaryVoiceSampleAssetId && voice.sampleAssetIds.includes(step.primaryVoiceSampleAssetId) && step.text.length <= 3000, 'Reference narration needs explicit approved primary sample and current consent.'); asset(step.primaryVoiceSampleAssetId, 'audio'); }
       else assert(!step.primaryVoiceSampleAssetId, 'Stock narration cannot silently become reference cloning.');
-      request = { ...request, voice: { id: voice.id, projectId: voice.projectId, kind: voice.kind } };
+      request = { ...request, voice: { id: voice.id, projectId: voice.projectId, kind: voice.kind, ...(step.voiceVersionId ? {voiceVersionId:step.voiceVersionId} : {}) } };
     }
     if (step.operation === 'GENERATION') {
       const shot = context.shots.find(value => value.id === step.shotId);
@@ -86,6 +87,21 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   }
   const durationFrames = recipe.visualOrder.reduce((sum, key) => sum + durations.get(key)!, 0);
   assert(durationFrames > 0 && durationFrames <= RECIPE_LIMITS.maxSeconds * recipe.fps, 'Recipe timeline remains within the sixty-second production bound.');
+  const dialogueTracks: Array<{stepKey:string;shotId:string;segmentIndex:number;speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string}> = [];
+  const dialogueSteps = new Set<string>(), dialogueSegments = new Set<string>();
+  for (const track of recipe.dialogueTracks ?? []) {
+    const narration = steps.get(track.stepKey);
+    const visualKeys = recipe.visualOrder.filter(key => { const step=steps.get(key)!; return step.operation==='GENERATION'&&step.shotId===track.shotId; });
+    const shot=context.shots.find(value=>value.id===track.shotId), segment=shot?.dialogueSegments?.[track.segmentIndex];
+    assert(narration?.operation==='NARRATION'&&narration.mode==='GENERATE'&&segment&&visualKeys.length===1, 'Dialogue needs one exact canonical shot and a generated speech step.');
+    assert(!dialogueSteps.has(track.stepKey)&&track.stepKey!==recipe.narrationStepKey&&!dialogueSegments.has(`${track.shotId}/${track.segmentIndex}`), 'Each dialogue segment and speech output may occur only once.');
+    assert(shot!.nativeAudioPolicy==='SILENT', 'Exact planned dialogue requires explicitly SILENT picture audio; revise and approve the shot instead of replacing native sound.');
+    assert(narration.voiceVersionId===segment.voiceVersionId&&narration.text===segment.text, 'Dialogue speech must use the exact approved words and immutable speaker voice.');
+    assert(Number.isFinite(segment.startSeconds)&&Number.isFinite(segment.durationSeconds)&&segment.startSeconds>=0&&segment.durationSeconds>0&&(segment.startSeconds+segment.durationSeconds)*recipe.fps<=shot!.durationFrames+0.000001, 'Dialogue timing must stay inside its approved shot.');
+    const before=recipe.visualOrder.slice(0,recipe.visualOrder.indexOf(visualKeys[0])).reduce((sum,key)=>sum+durations.get(key)!,0);
+    dialogueTracks.push({...track,speakerResourceVersionId:segment.speakerResourceVersionId,voiceVersionId:segment.voiceVersionId,startSeconds:before/recipe.fps+segment.startSeconds,durationSeconds:segment.durationSeconds,text:segment.text});
+    dialogueSteps.add(track.stepKey);dialogueSegments.add(`${track.shotId}/${track.segmentIndex}`);
+  }
   if (recipe.narrationStepKey) { const narration = steps.get(recipe.narrationStepKey)!; if (narration.operation === 'NARRATION' && narration.mode === 'RECORDING') assert(narration.durationFrames <= durationFrames, 'Recorded narration cannot overrun the proposed picture; revise the timeline.'); }
   if (recipe.musicStepKey) { const music = steps.get(recipe.musicStepKey)!; assert(music.operation === 'MUSIC_ANALYSIS' && music.durationFrames === durationFrames, 'Soundtrack window must exactly cover the proposed timeline.'); }
   const targets = new Map<string, CompiledRecipeNode['approvalTarget']>();
@@ -93,8 +109,8 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   const raw: Array<Omit<CompiledRecipeNode, 'requestHash' | 'idempotencyKey'>> = [];
   for (const step of recipe.steps) { raw.push({ id: step.key, operation: step.operation, dependencies: dependencies.get(step.key)!, request: requests.get(step.key)!, effect: paid(step) ? 'PAID' : 'LOCAL' }); const target = targets.get(step.key); if (target) raw.push({ id: approvalId(step.key), operation: 'APPROVAL', dependencies: [step.key], request: { sourceNodeId: step.key, decisionPolicy: 'EXPLICIT_OWNER_APPROVAL_OF_EXACT_RESULT' }, approvalTarget: target, effect: 'HUMAN' }); }
   const terminal = (key: string) => targets.has(key) ? approvalId(key) : key;
-  const roots = [...recipe.visualOrder, recipe.narrationStepKey, recipe.musicStepKey, recipe.captionStepKey].filter((key): key is string => !!key);
-  raw.push({ id: 'timeline', operation: 'TIMELINE', dependencies: roots.map(terminal), request: { visualOrder: recipe.visualOrder, narrationStepKey: recipe.narrationStepKey ?? null, musicStepKey: recipe.musicStepKey ?? null, captionStepKey: recipe.captionStepKey ?? null, durationFrames, fps: recipe.fps, narrationTiming: 'MEASURE_BEFORE_PLACEMENT_REVISE_IF_OVERFLOW', preserveApprovedSources: true }, effect: 'LOCAL' });
+  const roots = [...recipe.visualOrder, ...dialogueTracks.map(track=>track.stepKey), recipe.narrationStepKey, recipe.musicStepKey, recipe.captionStepKey].filter((key): key is string => !!key);
+  raw.push({ id: 'timeline', operation: 'TIMELINE', dependencies: roots.map(terminal), request: { visualOrder: recipe.visualOrder, narrationStepKey: recipe.narrationStepKey ?? null, ...(dialogueTracks.length?{dialogueTracks}:{}), musicStepKey: recipe.musicStepKey ?? null, captionStepKey: recipe.captionStepKey ?? null, durationFrames, fps: recipe.fps, narrationTiming: 'MEASURE_BEFORE_PLACEMENT_REVISE_IF_OVERFLOW', preserveApprovedSources: true }, effect: 'LOCAL' });
   raw.push({ id: 'approve:timeline', operation: 'APPROVAL', dependencies: ['timeline'], request: { sourceNodeId: 'timeline', decisionPolicy: 'EXPLICIT_OWNER_APPROVAL_AND_LOCK_OF_EXACT_VERSION' }, approvalTarget: 'TIMELINE', effect: 'HUMAN' });
   raw.push({ id: 'manifest', operation: 'MANIFEST', dependencies: ['approve:timeline'], request: { contractVersion: 5, timelineNodeId: 'timeline' }, effect: 'LOCAL' });
   raw.push({ id: 'export', operation: 'EXPORT', dependencies: ['manifest'], request: { manifestNodeId: 'manifest', completionPolicy: 'SIGNED_CALLBACK_STORED_SHA_VERIFIED_DOWNLOAD', reviewPolicy: 'CANONICAL_REVIEW_REQUIREMENTS_NO_AUTO_APPROVAL' }, effect: 'LOCAL' });

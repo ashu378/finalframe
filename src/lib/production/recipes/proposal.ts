@@ -2,17 +2,18 @@ import type { RecipeBinding, RecipeDocument, RecipeStep } from './contract';
 import { parseRecipeDocument } from './schema';
 import { recipeHash } from './compiler';
 export interface LogicalRecipeShot { key: string; sequenceOrderIndex: number; sceneOrderIndex: number; shotOrderIndex: number; descriptorHash: string }
-export interface RecipeProposalDocument extends Omit<RecipeDocument, 'kind' | 'binding' | 'steps'> { kind: 'finalframe.recipe-proposal'; steps: Array<Exclude<RecipeStep, { operation: 'GENERATION' }> | { key: string; operation: 'GENERATION'; logicalShotKey: string; references: Array<{ assetId: string } | { stepKey: string }> }> }
+export interface RecipeProposalDocument extends Omit<RecipeDocument, 'kind' | 'binding' | 'steps' | 'dialogueTracks'> { kind: 'finalframe.recipe-proposal'; dialogueTracks?:Array<{stepKey:string;logicalShotKey:string;segmentIndex:number}>; steps: Array<Exclude<RecipeStep, { operation: 'GENERATION' }> | { key: string; operation: 'GENERATION'; logicalShotKey: string; references: Array<{ assetId: string } | { stepKey: string }> }> }
 export interface MaterializedRecipeShot { shotId: string; sequenceOrderIndex: number; sceneOrderIndex: number; shotOrderIndex: number; descriptorHash: string }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const placeholderBinding: RecipeBinding = { projectId: 'proposal-project', productionId: 'proposal-production', productionVersionId: 'proposal-version', snapshotHash: '0'.repeat(64) };
 export function parseRecipeProposal(value: unknown): RecipeProposalDocument {
   const raw = JSON.stringify(value); if (typeof raw !== 'string' || new TextEncoder().encode(raw).length > 128 * 1024) throw new Error('Recipe proposal exceeds its JSON bound.');
   const snapshot = object(JSON.parse(raw));
-  const allowed = new Set(['kind', 'version', 'videoType', 'fps', 'steps', 'visualOrder', 'narrationStepKey', 'musicStepKey', 'captionStepKey']);
+  const allowed = new Set(['kind', 'version', 'videoType', 'fps', 'steps', 'visualOrder', 'narrationStepKey', 'dialogueTracks', 'musicStepKey', 'captionStepKey']);
   if (snapshot.kind !== 'finalframe.recipe-proposal' || Object.keys(snapshot).some(key => !allowed.has(key)) || !Array.isArray(snapshot.steps)) throw new Error('Choose a versioned logical recipe proposal without invented canonical IDs.');
   const steps = snapshot.steps.map(value => { const step = object(value); if (step.operation !== 'GENERATION') return step; if (Object.prototype.hasOwnProperty.call(step, 'shotId') || typeof step.logicalShotKey !== 'string') throw new Error('Proposal generation uses logical shot keys, not canonical IDs.'); const { logicalShotKey, ...rest } = step; return { ...rest, shotId: logicalShotKey }; });
-  parseRecipeDocument({ ...snapshot, kind: 'finalframe.recipe', binding: placeholderBinding, steps });
+    const dialogueTracks=Array.isArray(snapshot.dialogueTracks)?snapshot.dialogueTracks.map(value=>{const track=object(value);if(Object.prototype.hasOwnProperty.call(track,'shotId')||typeof track.logicalShotKey!=='string')throw new Error('Dialogue proposals use logical shot keys.');const {logicalShotKey,...rest}=track;return {...rest,shotId:logicalShotKey};}):snapshot.dialogueTracks;
+  parseRecipeDocument({ ...snapshot, kind: 'finalframe.recipe', binding: placeholderBinding, steps,...(dialogueTracks!==undefined?{dialogueTracks}:{}) });
   return snapshot as unknown as RecipeProposalDocument;
 }
 export function logicalShotKey(sequence: number, scene: number, shot: number) { return `sequence_${sequence}_scene_${scene}_shot_${shot}`; }
@@ -40,5 +41,6 @@ export async function bindRecipeProposal(input: unknown, saved: { sourceDraftHas
     if (!proof || !frozen || proof.descriptorHash !== frozen.descriptorHash || actual.length !== 1 || actual[0].descriptorHash !== proof.descriptorHash) throw new Error('Canonical shot binding is missing, ambiguous or changed.');
     const { logicalShotKey: _logicalKey, ...rest } = step; void _logicalKey; return { ...rest, shotId: actual[0].shotId };
   });
-  return parseRecipeDocument({ ...proposal, kind: 'finalframe.recipe', binding: approved.binding, steps });
+  const dialogueTracks=proposal.dialogueTracks?.map(track=>{const visual=proposal.steps.find(step=>step.operation==='GENERATION'&&step.logicalShotKey===track.logicalShotKey);const bound=visual?steps.find(step=>step.key===visual.key):undefined;if(!bound||bound.operation!=='GENERATION')throw new Error('Dialogue needs its exact visual shot.');return {stepKey:track.stepKey,shotId:bound.shotId,segmentIndex:track.segmentIndex};});
+  return parseRecipeDocument({ ...proposal, kind: 'finalframe.recipe', binding: approved.binding, steps,...(dialogueTracks?{dialogueTracks}:{}) });
 }

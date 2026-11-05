@@ -101,6 +101,7 @@ const ctx = { db: {
   assert.equal(rows.projectMembers.length, 2);
 
   const { CreateProductionForm } = load('src/components/production/create-production-form.tsx', {
+    '../../../renderer/src/output-presets': load('renderer/src/output-presets.ts'),
     'next/navigation': { useRouter: () => ({}) }, '@/lib/project/actions': {}, '@/lib/production/actions': {}, '@/lib/assets/actions': {}, '@/components/production/planning': {},
     '@/lib/ai/video-routing': { VIDEO_TYPES: catalog.STARTER_TEMPLATES.map((entry) => entry.videoType), VIDEO_TYPE_LABELS: {} },
   });

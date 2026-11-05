@@ -17,6 +17,7 @@ function load(file, imports) {
   return instance.exports;
 }
 const catalog = load('src/lib/templates/catalog.ts', {});
+const outputPresets = load('renderer/src/output-presets.ts', {});
 const project = { _id: 'project-one', externalId: 'project-one-external', studioExternalId: 'studio-one', projectType: 'ANIMATED_COMEDY_2D' };
 const recent = { _id: 'production-recent', projectId: project._id, externalProjectId: project.externalId, studioExternalId: project.studioExternalId, requestedDurationSeconds: 15, workflow: 'COMEDY', inputMode: 'SCRIPT', language: 'pcm', outputPreset: 'SQUARE' };
 const oldest = { ...recent, _id: 'production-oldest', requestedDurationSeconds: 60, workflow: 'FOOTAGE_TRANSFORM', inputMode: 'FOOTAGE', language: 'fr', outputPreset: 'LANDSCAPE' };
@@ -53,6 +54,7 @@ const actions = load('src/lib/production/episode-actions.ts', {
   'next/cache': { revalidatePath() {} }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client },
   '../../../convex/_generated/api': { api: { projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
   '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value },
+  '../../../renderer/src/output-presets': outputPresets,
 });
 function all(element) {
   if (!element || typeof element !== 'object') return [];
@@ -78,6 +80,29 @@ function all(element) {
   await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Next', durationSeconds: 30 });
   assert.equal(calls.find(call => call.reference === 'createEpisode').args.workflow, 'COMEDY');
   console.log('PASS newest-first inheritance, exact selected source, project mismatch denial, and canonical defaults');
+  for (const preset of outputPresets.OUTPUT_PRESETS) {
+    recent.outputPreset = preset.id;
+    assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).outputPreset, preset.id);
+  }
+  recent.outputPreset = 'SOCIAL_VERTICAL';
+  assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).outputPreset, 'SOCIAL_VERTICAL');
+  recent.outputPreset = 'SQUARE'; recent.workflow = 'FIXTURE'; calls = [];
+  const unsupported = await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Legacy next', durationSeconds: 8, sourceProductionId: recent._id });
+  assert.equal(unsupported.success, false); assert.equal(unsupported.requiresSettings, true);
+  assert(!calls.some(call => call.reference === 'createEpisode'));
+  const explicit = { mode: 'IDEA', workflow: 'COMEDY', outputPreset: 'CINEMA', language: 'pcm' };
+  const recovered = await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Legacy next', durationSeconds: 8, sourceProductionId: recent._id, settings: explicit });
+  assert.equal(recovered.success, true);
+  assert.deepEqual(calls.find(call => call.reference === 'createEpisode').args, { projectId: project._id, episodeNumber: 3, title: 'Legacy next', durationSeconds: 8, inputMode: 'IDEA', workflow: 'COMEDY', outputPreset: 'CINEMA', language: 'pcm' });
+  for (const invalid of [{ mode: 'AUTO' }, { workflow: 'FIXTURE' }, { outputPreset: 'BOGUS' }, { language: '' }, { language: 'not a code' }]) {
+    calls = []; assert.equal((await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Legacy next', durationSeconds: 8, sourceProductionId: recent._id, settings: { ...explicit, ...invalid } })).success, false);
+    assert(!calls.some(call => call.reference === 'createEpisode'));
+  }
+  foreign = true; calls = [];
+  assert.equal((await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Legacy next', durationSeconds: 8, sourceProductionId: recent._id, settings: explicit })).success, false);
+  assert(!calls.some(call => call.reference === 'createEpisode'));
+  foreign = false; recent.workflow = 'COMEDY';
+  console.log('PASS all seven presets, preserved legacy vertical, explicit legacy recovery, invalid choices and foreign-project override denial');
   const continuity = await actions.getPlanningContinuityOptions(project.externalId, recent._id);
   assert.equal(continuity.bibles.length, 1); assert.equal(continuity.bibles[0].id, 'approved-bible');
   assert.equal(continuity.bibles[0].referenceCount, 1); assert.equal(continuity.bibles[0].ruleCount, 4);
@@ -92,12 +117,14 @@ function all(element) {
     '@/lib/project/actions': {}, '@/lib/assets/actions': {}, '@/components/production/planning': {},
     '@/lib/production/actions': { createDirectorPlan: async intent => { captured = intent; return { success: false, error: 'Captured fixture intent.' }; } },
     '@/lib/ai/video-routing': { VIDEO_TYPES: ['ANIMATED_COMEDY_2D'], VIDEO_TYPE_LABELS: { ANIMATED_COMEDY_2D: 'Comedy' } },
+    '../../../renderer/src/output-presets': outputPresets,
   }).CreateProductionForm;
   const props = { studioId: 'studio-one', existingProjectId: project.externalId, productionId: recent._id, productionDefaults: defaults, initialMode: 'AD', templateDefaults: catalog.getStarterTemplate('music-montage') };
   const render = () => { cell = 0; return form(props); };
   let elements = all(render());
   assert.equal(elements.find(element => element.props?.id === 'production-duration').props.value, 15);
   assert.equal(elements.find(element => element.props?.id === 'production-output').props.value, 'SQUARE');
+  assert.deepEqual(React.Children.toArray(elements.find(element => element.props?.id === 'production-output').props.children).filter(element => element.type === 'option').map(element => element.props.value), outputPresets.OUTPUT_PRESETS.map(preset => preset.id));
   assert.equal(elements.find(element => element.props?.id === 'production-video-type').props.value, 'ANIMATED_COMEDY_2D');
   assert.equal(elements.find(element => element.type === 'button' && element.props['aria-pressed']).props.children[1].props.children, 'Paste a script');
   elements.find(element => element.props?.id === 'production-brief').props.onChange({ target: { value: 'The new episode continues the approved story.' } });
@@ -128,6 +155,29 @@ function all(element) {
   await elements.find(element => element.type === 'button' && React.Children.toArray(element.props.children).includes(' Show me the plan')).props.onClick();
   assert.equal(captured.continuityBibleId, undefined); assert.equal(captured.continuityMode, 'NEW_BLANK_BIBLE');
   console.log('PASS explicit approved-reference selection, exact summary/navigation, and deliberate blank selection without identity defaults');
+
+  const pickerCells = []; let pickerCell = 0; let submittedEpisode; let pendingEpisode;
+  const Picker = load('src/components/production-workspace/episode-picker.tsx', {
+    react: { ...React, useEffect() {}, useState(initial) { const index = pickerCell++; if (!(index in pickerCells)) pickerCells[index] = initial; return [pickerCells[index], value => { pickerCells[index] = typeof value === 'function' ? value(pickerCells[index]) : value; }]; }, useTransition: () => [false, fn => { pendingEpisode = fn(); }] },
+    'next/navigation': { useRouter: () => ({ push() {} }), usePathname: () => '/workspace', useSearchParams: () => new URLSearchParams() },
+    '@/components/ui/button': { Button: () => null },
+    '@/lib/production/episode-actions': { createProjectEpisode: async value => { submittedEpisode = value; return { success: true, productionId: 'new-production' }; } },
+    '../../../renderer/src/output-presets': outputPresets,
+  }).EpisodePicker;
+  const renderPicker = () => { pickerCell = 0; return all(Picker({ projectExternalId: project.externalId, options: [{ productionId: recent._id, title: 'Older source', settingsSupported: false }], selectedProductionId: recent._id, nextEpisodeNumber: 3 })); };
+  let picker = renderPicker();
+  picker.find(element => element.props?.children === 'New episode').props.onClick();
+  picker = renderPicker();
+  assert.equal(picker.find(element => element.props?.type === 'submit').props.disabled, true);
+  for (const label of ['New episode starting mode', 'New episode workflow', 'New episode output format', 'New episode language']) assert.equal(picker.find(element => element.props?.['aria-label'] === label).props.value, '');
+  picker.find(element => element.props?.id === 'episode-title').props.onChange({ target: { value: 'Deliberate continuation' } });
+  for (const [label, value] of [['New episode starting mode', 'SCRIPT'], ['New episode workflow', 'COMEDY'], ['New episode output format', 'TALL_FRAME'], ['New episode language', 'pcm']]) picker.find(element => element.props?.['aria-label'] === label).props.onChange({ target: { value } });
+  picker = renderPicker();
+  assert.equal(picker.find(element => element.props?.type === 'submit').props.disabled, false);
+  picker.find(element => element.type === 'form').props.onSubmit({ preventDefault() {} }); await pendingEpisode;
+  assert.equal(submittedEpisode.sourceProductionId, recent._id);
+  assert.deepEqual(submittedEpisode.settings, { mode: 'SCRIPT', workflow: 'COMEDY', outputPreset: 'TALL_FRAME', language: 'pcm' });
+  console.log('PASS older-source picker requires deliberate empty-to-selected settings and submits source identity unchanged');
 
   function FormStub() { return null; }
   let implicitProductionId;

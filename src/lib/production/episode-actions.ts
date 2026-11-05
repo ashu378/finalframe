@@ -7,6 +7,20 @@ import type { Doc, Id } from '../../../convex/_generated/dataModel';
 import { normalizeVideoType, type VideoType } from '@/lib/ai/video-routing';
 import { parseStartingMode } from '@/lib/templates/catalog';
 import type { OutputPreset, ProductionInputMode, ProductionWorkflow } from '@/lib/types/database';
+import { normalizeOutputPresetId } from '../../../renderer/src/output-presets';
+
+export interface EpisodeSettings {
+    mode: ProductionInputMode;
+    workflow: ProductionWorkflow;
+    outputPreset: OutputPreset;
+    language: string;
+}
+
+function supportedSettings(value: { inputMode: string; workflow: string; outputPreset: string; language: string }) {
+    return Boolean(parseStartingMode(value.inputMode) && ['SOCIAL', 'COMEDY', 'BUSINESS_AD', 'FOOTAGE_TRANSFORM'].includes(value.workflow) && normalizeOutputPresetId(value.outputPreset) && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value.language) && value.language.length <= 35);
+}
+
+class UnsupportedSettingsError extends Error {}
 
 export interface SelectedProductionDefaults {
     projectExternalId: string;
@@ -21,7 +35,7 @@ export interface SelectedProductionDefaults {
     brief: string;
 }
 
-export async function getSelectedProductionDefaults(projectExternalId: string, productionId: string): Promise<SelectedProductionDefaults | null> {
+async function selectedProductionWorkspace(projectExternalId: string, productionId: string) {
     const convex = await getAuthenticatedConvexClient();
     const selected = await Promise.all([
         convex.query(api.projects.getByExternalId, { externalId: projectExternalId }),
@@ -35,10 +49,17 @@ export async function getSelectedProductionDefaults(projectExternalId: string, p
     const [project, workspace] = selected;
     const production = workspace.production;
     if (!project || !production || String(production._id) !== productionId || production.externalProjectId !== project.externalId || production.studioExternalId !== project.studioExternalId || production.projectId && production.projectId !== project._id) return null;
+    return { project, workspace, production };
+}
+
+export async function getSelectedProductionDefaults(projectExternalId: string, productionId: string): Promise<SelectedProductionDefaults | null> {
+    const selected = await selectedProductionWorkspace(projectExternalId, productionId);
+    if (!selected) return null;
+    const { project, workspace, production } = selected;
     const mode = parseStartingMode(production.inputMode);
     const workflow = production.workflow as ProductionWorkflow;
-    const outputPreset = production.outputPreset as OutputPreset;
-    if (!mode || !['SOCIAL', 'COMEDY', 'BUSINESS_AD', 'FOOTAGE_TRANSFORM'].includes(workflow) || !['SOCIAL_VERTICAL', 'SQUARE', 'LANDSCAPE'].includes(outputPreset) || !Number.isFinite(production.requestedDurationSeconds) || production.requestedDurationSeconds < 4 || production.requestedDurationSeconds > 60) throw new Error('The selected production needs supported planning settings.');
+    const outputPreset = production.outputPreset === 'SOCIAL_VERTICAL' ? 'SOCIAL_VERTICAL' : normalizeOutputPresetId(production.outputPreset)!;
+    if (!mode || !supportedSettings(production) || !Number.isFinite(production.requestedDurationSeconds) || production.requestedDurationSeconds < 4 || production.requestedDurationSeconds > 60) throw new UnsupportedSettingsError('This older production needs explicit settings. Return to its workspace, choose New episode, then choose its mode, workflow, format, and language.');
     const input = workspace.plan?.input;
     const savedInput = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
     const brief = mode === 'SCRIPT' ? savedInput.script : savedInput.prompt;
@@ -55,6 +76,7 @@ export interface EpisodeOption {
     episodeNumber?: number;
     title: string;
     continuityStatus?: 'CURRENT' | 'STALE';
+    settingsSupported?: boolean;
 }
 
 export interface PlanningContinuityOptions {
@@ -98,6 +120,7 @@ export async function getEpisodeNavigation(projectExternalId: string) {
             productionId: production._id.toString(), episodeId: episode?._id.toString(), episodeNumber: episode?.episodeNumber,
             title: episode ? `Episode ${episode.episodeNumber}: ${episode.title}` : `Production · ${production.workflow.replaceAll('_', ' ').toLowerCase()}`,
             continuityStatus: episode?.continuityStatus,
+            settingsSupported: supportedSettings(production),
         };
     }).sort((left, right) => (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0));
     const latest = productionRows[0];
@@ -109,12 +132,23 @@ export async function getEpisodeNavigation(projectExternalId: string) {
     };
 }
 
-export async function createProjectEpisode(input: { projectExternalId: string; episodeNumber: number; title: string; durationSeconds: number; sourceProductionId?: string }) {
+export async function createProjectEpisode(input: { projectExternalId: string; episodeNumber: number; title: string; durationSeconds: number; sourceProductionId?: string; settings?: EpisodeSettings }) {
     try {
+        if (!Number.isInteger(input.episodeNumber) || input.episodeNumber < 1 || input.episodeNumber > 500 || !Number.isFinite(input.durationSeconds) || input.durationSeconds < 4 || input.durationSeconds > 60 || typeof input.title !== 'string' || !input.title.trim() || input.title.trim().length > 160) return { success: false as const, error: 'Enter a title, episode number from 1–500, and a duration from 4–60 seconds.' };
         const navigation = await getEpisodeNavigation(input.projectExternalId);
         if (!navigation) return { success: false as const, error: 'Project not found.' };
-        const source = input.sourceProductionId ? await getSelectedProductionDefaults(input.projectExternalId, input.sourceProductionId) : null;
-        if (input.sourceProductionId && !source) return { success: false as const, error: 'Choose a source episode from this project.' };
+        const sourceId = input.sourceProductionId;
+        const selected = sourceId ? await selectedProductionWorkspace(input.projectExternalId, sourceId) : null;
+        if (sourceId && !selected) return { success: false as const, error: 'Choose a source episode from this project.' };
+        let settings: EpisodeSettings;
+        if (input.settings) {
+            if (!['IDEA', 'SCRIPT', 'VOICE', 'IMAGES', 'FOOTAGE', 'AD'].includes(input.settings.mode) || !supportedSettings({ ...input.settings, inputMode: input.settings.mode }) || !input.settings.outputPreset || input.settings.outputPreset !== 'SOCIAL_VERTICAL' && input.settings.outputPreset !== normalizeOutputPresetId(input.settings.outputPreset)) return { success: false as const, requiresSettings: true, error: 'Choose a supported mode, workflow, format, and language code (for example en, pcm, or fr) for this episode.' };
+            settings = input.settings;
+        } else {
+            const saved = selected?.production ?? { inputMode: navigation.inputMode, workflow: navigation.workflow, outputPreset: navigation.outputPreset, language: navigation.language };
+            if (!supportedSettings(saved)) throw new UnsupportedSettingsError();
+            settings = { mode: parseStartingMode(saved.inputMode)!, workflow: saved.workflow as ProductionWorkflow, language: saved.language, outputPreset: saved.outputPreset === 'SOCIAL_VERTICAL' ? 'SOCIAL_VERTICAL' : normalizeOutputPresetId(saved.outputPreset)! };
+        }
         const convex = await getAuthenticatedConvexClient();
         const unlinked = navigation.options.filter((option) => !option.episodeId);
         if (unlinked.length === 1 && navigation.options.length === 1) {
@@ -124,12 +158,13 @@ export async function createProjectEpisode(input: { projectExternalId: string; e
         } else if (unlinked.length) return { success: false as const, error: 'Existing productions need an explicit episode mapping before a new episode can be added.' };
         const result = await convex.mutation(api.episodes.create, {
             projectId: navigation.projectId as Id<'projects'>, episodeNumber: input.episodeNumber, title: input.title,
-            durationSeconds: input.durationSeconds, workflow: source?.workflow ?? navigation.workflow, inputMode: source?.mode ?? navigation.inputMode, language: source?.language ?? navigation.language,
-            outputPreset: source?.outputPreset ?? (navigation.outputPreset === 'SQUARE' ? 'SQUARE' : navigation.outputPreset === 'LANDSCAPE' ? 'LANDSCAPE' : 'SOCIAL_VERTICAL'),
+            durationSeconds: input.durationSeconds, workflow: settings.workflow, inputMode: settings.mode, language: settings.language,
+            outputPreset: settings.outputPreset,
         });
         revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
         return { success: true as const, episodeId: result.episodeId.toString(), productionId: result.productionId.toString() };
-    } catch {
+    } catch (error) {
+        if (error instanceof UnsupportedSettingsError) return { success: false as const, requiresSettings: true, error: 'This source has older settings. Enable explicit episode settings and choose its mode, workflow, format, and language. Existing project references and approved episodes stay unchanged.' };
         return { success: false as const, error: 'The episode could not be created. Check its title, episode number, and 4–60 second duration, then try again.' };
     }
 }

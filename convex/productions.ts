@@ -13,7 +13,7 @@ import {validateShotBindings} from './continuityContracts';
 
 function canonicalShotMetadata(shot:Record<string,unknown>){
   const metadata={...record(shot.metadata)};
-  for(const field of ['resourceBindings','dialogueSegments'])if(shot[field]!==undefined){
+  for(const field of ['resourceBindings','dialogueSegments','audioPolicy'])if(shot[field]!==undefined){
     if(metadata[field]!==undefined&&stableSerialize(metadata[field])!==stableSerialize(shot[field]))throw new Error('Shot continuity fields conflict with their metadata.');
     metadata[field]=shot[field];
   }

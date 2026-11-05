@@ -43,4 +43,3 @@ export function formatVariantRequirements(manifest: unknown): boolean {
     return item.backgroundColor!==undefined||item.kind==='video'&&(item.fit!==undefined||item.position!==undefined);
   });
 }
-

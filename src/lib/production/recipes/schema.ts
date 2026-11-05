@@ -12,14 +12,14 @@ export const RECIPE_DOCUMENT_SCHEMA = {
   ...object({ kind: { const: 'finalframe.recipe' }, version: { const: 1 }, videoType: { enum: RECIPE_VIDEO_TYPES }, binding: object({ projectId: id, productionId: id, productionVersionId: id, snapshotHash: hash, continuityBibleId: id, continuityHash: hash }, ['continuityBibleId', 'continuityHash']), fps: { enum: [24, 25, 30, 50, 60] },
     steps: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: { oneOf: [
       step('PREPARATION', { kind: { enum: ['CHARACTER_REFERENCE', 'TRANSCRIPT'] }, text: { type: 'string', maxLength: 4000 }, sourceAssetId: id, sourceStepKey: key }, ['sourceAssetId', 'sourceStepKey']),
-      step('NARRATION', { mode: { const: 'GENERATE' }, text: text(), voiceId: id, primaryVoiceSampleAssetId: id }, ['primaryVoiceSampleAssetId']),
+      step('NARRATION', { mode: { const: 'GENERATE' }, text: text(), voiceId: id, voiceVersionId: id, primaryVoiceSampleAssetId: id }, ['voiceVersionId','primaryVoiceSampleAssetId']),
       step('NARRATION', { mode: { const: 'RECORDING' }, sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1) }),
       step('GENERATION', { shotId: id, references: { type: 'array', maxItems: 20, items: { oneOf: [object({ assetId: id }), object({ stepKey: key })] } } }),
       step('GRAPHIC', { templateId: { enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] }, durationFrames: integer(1), title: text(200), subtitle: { type: 'string', maxLength: 500 }, brandName: { type: 'string', maxLength: 160 }, eyebrow:text(500),feature:text(2000),detail:text(2000),index:text(100),callToAction:text(500),url:text(500),accentColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},backgroundColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},textColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'}, logoAssetId: id }, ['logoAssetId','eyebrow','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor']),
       step('SOURCE_RANGE', { sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1), audioPolicy: { enum: ['KEEP_SOURCE', 'MUTE'] }, fit: { enum: ['contain', 'cover'] } }, ['fit']),
       step('MUSIC_ANALYSIS', { sourceAssetId: id, trimStartFrame: frameOffset, durationFrames: integer(1) }),
       step('CAPTIONS', { transcriptStepKey: key, language: text(35) }),
-    ] } }, visualOrder: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: key }, narrationStepKey: key, musicStepKey: key, captionStepKey: key }, ['narrationStepKey', 'musicStepKey', 'captionStepKey']),
+    ] } }, visualOrder: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: key }, narrationStepKey: key, dialogueTracks: { type: 'array', minItems:1, maxItems:32, items:object({stepKey:key,shotId:id,segmentIndex:{type:'integer',minimum:0,maximum:31}}) }, musicStepKey: key, captionStepKey: key }, ['narrationStepKey', 'dialogueTracks', 'musicStepKey', 'captionStepKey']),
 } satisfies Schema;
 function matches(value: unknown, schema: Schema): boolean {
   if (schema.oneOf) return schema.oneOf.filter(candidate => matches(value, candidate)).length === 1;

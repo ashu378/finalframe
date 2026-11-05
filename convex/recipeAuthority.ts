@@ -67,9 +67,10 @@ export async function canonicalRecipeContext(ctx: RecipeReadCtx, recipe: RecipeD
     if (step.operation === 'GRAPHIC' && step.logoAssetId) await addAsset(step.logoAssetId);
     if (step.operation === 'NARRATION' && step.mode === 'GENERATE') {
       const voiceId = ctx.db.normalizeId('voices', step.voiceId); if (!voiceId) throw new Error('RECIPE_VOICE_UNAVAILABLE');
+      if(step.voiceVersionId&&!ctx.db.normalizeId('voiceVersions',step.voiceVersionId))throw new Error('RECIPE_VOICE_UNAVAILABLE');
       const primary = step.primaryVoiceSampleAssetId ? ctx.db.normalizeId('assets', step.primaryVoiceSampleAssetId) : undefined;
-      const resolved = await resolveVoiceSynthesisInput(ctx, { projectId: production.projectId, voiceId, use:'SYNTHESIZE', primaryVoiceSampleAssetId: primary ?? undefined }); const voice = await ctx.db.get(voiceId); if (!voice) throw new Error('RECIPE_VOICE_UNAVAILABLE');
-      if (!voices.some(value => value.id === voiceId)) voices.push({ id: voiceId, projectId: production.projectId, kind: voice.kind, approved: true, consentCurrent: resolved.mode === 'REFERENCE_CLONE' ? !!resolved.consentId : false, sampleAssetIds: voice.sampleAssetIds });
+      const resolved = await resolveVoiceSynthesisInput(ctx, { projectId: production.projectId, voiceId, voiceVersionId:step.voiceVersionId?ctx.db.normalizeId('voiceVersions',step.voiceVersionId)??undefined:undefined, use:'SYNTHESIZE', primaryVoiceSampleAssetId: primary ?? undefined }); const voice = await ctx.db.get(voiceId); if (!voice) throw new Error('RECIPE_VOICE_UNAVAILABLE');
+      if (!voices.some(value => value.id === voiceId && value.voiceVersionId === step.voiceVersionId)) voices.push({ id: voiceId, ...(step.voiceVersionId?{voiceVersionId:step.voiceVersionId}:{}), projectId: production.projectId, kind: resolved.voiceConfigSnapshot.kind, approved: true, consentCurrent: resolved.mode === 'REFERENCE_CLONE' ? !!resolved.consentId : false, sampleAssetIds: resolved.voiceConfigSnapshot.sampleAssetIds });
       if (step.primaryVoiceSampleAssetId) await addAsset(step.primaryVoiceSampleAssetId);
     }
     if (step.operation === 'GENERATION') {
@@ -77,9 +78,9 @@ export async function canonicalRecipeContext(ctx: RecipeReadCtx, recipe: RecipeD
       if (!shot || shot.productionId !== production._id || shot.productionVersionId !== version._id || shot.projectId !== production.projectId) throw new Error('RECIPE_SHOT_UNAVAILABLE');
       const metadata = recipeObject(shot.metadata); const slots = metadata.recipeReferenceSlots ?? [];
       if (!Array.isArray(slots) || slots.length > 12 || slots.some(value => typeof value !== 'string')) throw new Error('RECIPE_REFERENCE_SLOTS_INVALID');
-      const continuity = await resolveGenerationContinuity(ctx, { projectId: production.projectId, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: shot.requiredAssetIds ?? [] });
+      const continuity = await resolveGenerationContinuity(ctx, { projectId: production.projectId, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: shot.requiredAssetIds ?? [], shotMetadata:metadata,durationSeconds:shot.durationSeconds });
       for (const assetId of continuity.referenceAssetIds) await addAsset(assetId);
-      if (!shots.some(value => value.id === shot._id)) shots.push({ id: shot._id, productionVersionId: version._id, prompt: shot.prompt, durationFrames: Math.round(shot.durationSeconds * recipe.fps), referenceAssetIds: continuity.referenceAssetIds, approvedRecipeReferenceSlots: slots });
+      if (!shots.some(value => value.id === shot._id)) shots.push({ id: shot._id, productionVersionId: version._id, prompt: shot.prompt, durationFrames: Math.round(shot.durationSeconds * recipe.fps), referenceAssetIds: continuity.referenceAssetIds, approvedRecipeReferenceSlots: slots, ...(continuity.dialogueSegments.length?{dialogueSegments:continuity.dialogueSegments,nativeAudioPolicy:metadata.audioPolicy??null}:{}) });
     }
   }
   const context = { binding: recipe.binding, fps: recipe.fps, productionVersionState: 'APPROVED' as const, continuityApproved: true, assets: [...assets.values()], shots, voices, quotes: {}, rawSourceBindings: [...raw.values()] };

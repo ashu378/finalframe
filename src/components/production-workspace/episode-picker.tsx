@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { createProjectEpisode, refreshProjectEpisodeContinuity, type EpisodeOption } from '@/lib/production/episode-actions';
+import { createProjectEpisode, refreshProjectEpisodeContinuity, type EpisodeOption, type EpisodeSettings } from '@/lib/production/episode-actions';
+import { OUTPUT_PRESETS } from '../../../renderer/src/output-presets';
 
 export function EpisodePicker({ projectExternalId, options, selectedProductionId, nextEpisodeNumber }: {
     projectExternalId: string; options: EpisodeOption[]; selectedProductionId?: string; nextEpisodeNumber: number;
@@ -16,8 +17,12 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
     const [duration, setDuration] = useState(30);
     const [error, setError] = useState<string | null>(null);
     const [pending, startTransition] = useTransition();
+    const [useSettings, setUseSettings] = useState(false);
+    const [settings, setSettings] = useState({ mode: '', workflow: '', outputPreset: '', language: '' });
     const storageKey = `finalframe:project:${projectExternalId}:production`;
     const selected = options.find((option) => option.productionId === selectedProductionId);
+    const explicitSettings = useSettings || selected?.settingsSupported === false;
+    const settingsComplete = settings.mode && settings.workflow && settings.outputPreset && settings.language.trim();
 
     useEffect(() => {
         try {
@@ -60,15 +65,24 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
             event.preventDefault();
             setError(null);
             startTransition(async () => {
-                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration, sourceProductionId: selectedProductionId });
-                if (!result.success) { setError(result.error); return; }
+                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration, sourceProductionId: selectedProductionId, ...(explicitSettings ? { settings: { ...settings, language: settings.language.trim() } as EpisodeSettings } : {}) });
+                if (!result.success) { setError(result.error); if ('requiresSettings' in result && result.requiresSettings) setUseSettings(true); return; }
                 setShowCreate(false);
                 router.push(`/dashboard/create?project=${encodeURIComponent(projectExternalId)}&production=${encodeURIComponent(result.productionId)}`);
             });
         }} className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
             <div><label htmlFor="episode-title" className="text-sm font-medium">Episode {nextEpisodeNumber} title</label><input id="episode-title" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={160} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm" /></div>
             <div><label htmlFor="episode-duration" className="text-sm font-medium">Length</label><select id="episode-duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm">{[4, 8, 15, 30, 60].map((value) => <option key={value} value={value}>{value} seconds</option>)}</select></div>
-            <Button type="submit" disabled={pending || !title.trim()}>{pending ? 'Creating…' : 'Create episode'}</Button>
+            <Button type="submit" disabled={pending || !title.trim() || explicitSettings && !settingsComplete}>{pending ? 'Creating…' : 'Create episode'}</Button>
+            <div className="space-y-3 sm:col-span-3">
+                {selected?.settingsSupported === false ? <p role="status" className="text-sm text-amber-300">This source uses older settings. Choose supported settings for the new episode. Its project references and earlier approved episodes stay unchanged.</p> : <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={useSettings} onChange={(event) => setUseSettings(event.target.checked)} />Choose different settings for this episode</label>}
+                {explicitSettings ? <fieldset className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">Explicit new episode settings</legend>
+                    <label className="text-sm">Starting mode<select aria-label="New episode starting mode" required value={settings.mode} onChange={(event) => setSettings((old) => ({ ...old, mode: event.target.value }))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3"><option value="">Choose a mode</option>{['IDEA', 'SCRIPT', 'VOICE', 'IMAGES', 'FOOTAGE', 'AD'].map((value) => <option key={value} value={value}>{value.toLowerCase()}</option>)}</select></label>
+                    <label className="text-sm">Workflow<select aria-label="New episode workflow" required value={settings.workflow} onChange={(event) => setSettings((old) => ({ ...old, workflow: event.target.value }))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3"><option value="">Choose a workflow</option>{[['SOCIAL', 'Social / story'], ['COMEDY', 'Comedy'], ['BUSINESS_AD', 'Business advertisement'], ['FOOTAGE_TRANSFORM', 'Edit supplied footage']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                    <label className="text-sm">Output format<select aria-label="New episode output format" required value={settings.outputPreset} onChange={(event) => setSettings((old) => ({ ...old, outputPreset: event.target.value }))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3"><option value="">Choose a format</option>{OUTPUT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label} · {preset.aspectRatio}</option>)}</select></label>
+                    <label className="text-sm">Language code<input aria-label="New episode language" required maxLength={35} pattern="[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*" placeholder="en, pcm, or fr" value={settings.language} onChange={(event) => setSettings((old) => ({ ...old, language: event.target.value }))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3" /></label>
+                </fieldset> : null}
+            </div>
         </form> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </section>;
