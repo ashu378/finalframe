@@ -1,4 +1,5 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
+import type { MutationCtx } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server";
 import { requireProjectAccess, requireProjectRole } from "./authorization";
@@ -20,10 +21,8 @@ function stable(value: unknown): string {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable((value as Record<string, unknown>)[key])}`).join(",")}}`;
 }
 
-export const createResource = mutation({
-  args: { projectId: v.id("projects"), kind: projectResourceKind, name: v.string(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), voiceVersionId: v.optional(v.id('voiceVersions')) },
-  returns: v.object({ resourceId: v.id("projectResources"), resourceVersionId: v.id("projectResourceVersions"), versionNumber: v.number() }),
-  handler: async (ctx, args) => {
+const createResourceArgs = { projectId: v.id("projects"), kind: projectResourceKind, name: v.string(), profile: v.any(), assetIds: v.array(v.id("assets")), voiceId: v.optional(v.id("voices")), voiceVersionId: v.optional(v.id('voiceVersions')) };
+export async function createProjectResource(ctx: MutationCtx, args: Infer<ReturnType<typeof createResourceValidator>>) {
     const access = await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
     const name = boundedText(args.name, "Resource name", 160);
     boundedSnapshot(args.profile);
@@ -35,7 +34,12 @@ export const createResource = mutation({
     const resourceVersionId = await ctx.db.insert("projectResourceVersions", { projectId: args.projectId, resourceId, versionNumber: 1, profile: args.profile, assetIds: args.assetIds, voiceId: args.voiceId, voiceVersionId, createdByUserId: access.user._id, createdAt: timestamp });
     await ensureResourceState(ctx, { projectId: args.projectId, resourceType: "projectResourceVersion", resourceId: resourceVersionId.toString() });
     return { resourceId, resourceVersionId, versionNumber: 1 };
-  },
+}
+function createResourceValidator() { return v.object(createResourceArgs); }
+export const createResource = mutation({
+  args: createResourceArgs,
+  returns: v.object({ resourceId: v.id("projectResources"), resourceVersionId: v.id("projectResourceVersions"), versionNumber: v.number() }),
+  handler: createProjectResource,
 });
 
 /** Revising creates a separate snapshot even if a previous version is approved or locked. */
@@ -100,10 +104,8 @@ export const resourceVersionPage = query({
   },
 });
 
-export const createBible = mutation({
-  args: { projectId: v.id("projects"), sourceBibleId: v.optional(v.id("continuityBibles")), snapshot: bibleSnapshot, idempotencyKey: v.optional(v.string()) },
-  returns: v.object({ bibleId: v.id("continuityBibles"), versionNumber: v.number() }),
-  handler: async (ctx, args) => {
+const createBibleArgs = { projectId: v.id("projects"), sourceBibleId: v.optional(v.id("continuityBibles")), snapshot: bibleSnapshot, idempotencyKey: v.optional(v.string()) };
+export async function createContinuityBible(ctx: MutationCtx, args: Infer<ReturnType<typeof createBibleValidator>>) {
     const access = await requireProjectRole(ctx, args.projectId, ["OWNER", "EDITOR"]);
     const idempotencyKey = args.idempotencyKey?.trim();
     if (idempotencyKey && idempotencyKey.length > 200) throw new Error("Continuity request key is too long.");
@@ -125,7 +127,12 @@ export const createBible = mutation({
     const bibleId = await ctx.db.insert("continuityBibles", { projectId: args.projectId, versionNumber, snapshot: args.snapshot, state: "DRAFT", sourceBibleId: args.sourceBibleId, idempotencyKey, createdByUserId: access.user._id, createdAt: timestamp, updatedAt: timestamp });
     await ensureResourceState(ctx, { projectId: args.projectId, resourceType: "continuityBible", resourceId: bibleId.toString() });
     return { bibleId, versionNumber };
-  },
+}
+function createBibleValidator() { return v.object(createBibleArgs); }
+export const createBible = mutation({
+  args: createBibleArgs,
+  returns: v.object({ bibleId: v.id("continuityBibles"), versionNumber: v.number() }),
+  handler: createContinuityBible,
 });
 
 export const planningRequirements = query({
@@ -195,8 +202,9 @@ export const acceptStoryState = mutation({
     await ctx.db.patch(episode._id, { acceptedStoryStateId: storyStateId, continuityStatus: "CURRENT", updatedAt: timestamp });
     await materializeAcceptedMemory(ctx,args.projectId,storyStateId);
     const downstream = await ctx.db.query("episodes").withIndex("by_project_and_number", (q) => q.eq("projectId", args.projectId).gt("episodeNumber", episode.episodeNumber)).take(500);
-    for (const dependent of downstream) await ctx.db.patch(dependent._id, { continuityStatus: "STALE", updatedAt: timestamp });
-    return { storyStateId, invalidatedEpisodeCount: downstream.length, replayed: false };
+    const storyDependents = downstream.filter(dependent => dependent.continuityMode !== 'PROJECT_IDENTITY');
+    for (const dependent of storyDependents) await ctx.db.patch(dependent._id, { continuityStatus: "STALE", updatedAt: timestamp });
+    return { storyStateId, invalidatedEpisodeCount: storyDependents.length, replayed: false };
   },
 });
 

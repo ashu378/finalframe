@@ -224,6 +224,7 @@ export default defineSchema({
 
   episodes: defineTable({
     projectId: v.id("projects"), productionId: v.id("productions"), episodeNumber: v.number(), title: v.string(),
+    continuityMode: v.optional(v.union(v.literal('STORY_CONTINUATION'), v.literal('PROJECT_IDENTITY'))),
     predecessorEpisodeId: v.optional(v.id("episodes")), inputStoryStateId: v.optional(v.id("episodeStoryStates")),
     acceptedStoryStateId: v.optional(v.id("episodeStoryStates")),
     continuityStatus: v.union(v.literal("CURRENT"), v.literal("STALE")),

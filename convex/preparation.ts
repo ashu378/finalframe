@@ -3,15 +3,18 @@ import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import type { FunctionReference } from 'convex/server';
 import { quotePreparation, type PreparationKind } from '../src/lib/ai/preparation';
+import { characterReferenceRequestHash, assertCharacterReferenceConsent } from '../src/lib/ai/character-reference-estimate';
 import {assertSfxConsent,sfxRequestHash,validateSfxPrompt} from '../src/lib/ai/sfx';
+const imageConsentValidator=v.object({requestHash:v.string(),model:v.string(),maximumProviderCostUsd:v.number(),expiresAt:v.number()});
 const sfxConsentValidator=v.object({requestHash:v.string(),quoteFingerprint:v.string(),maximumProviderHoldUsd:v.number()});
 const jobs: Record<string, FunctionReference<any, 'internal', any, any>> = (internal as unknown as { generationJobs: Record<string, FunctionReference<any, 'internal', any, any>> }).generationJobs;
 
 export const create = action({
-  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')),voiceVersionId:v.optional(v.id('voiceVersions')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string(), sfxEstimateConsent:v.optional(sfxConsentValidator) },
+  args: { productionId: v.id('productions'), kind: v.union(v.literal('CHARACTER_REFERENCE'), v.literal('NARRATION'), v.literal('VOICE_PREVIEW'), v.literal('TRANSCRIPT'),v.literal('MUSIC'),v.literal('SFX')), text: v.optional(v.string()), voiceId: v.optional(v.id('voices')),voiceVersionId:v.optional(v.id('voiceVersions')), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), idempotencyKey: v.string(), sfxEstimateConsent:v.optional(sfxConsentValidator), imageEstimateConsent:v.optional(imageConsentValidator) },
   returns: v.any(),
   handler: async (ctx, args): Promise<any> => {
     if(args.kind==='SFX'&&process.env.FINALFRAME_SFX_PREPARATION_ENABLED!=='true')throw new Error('Sound effect generation is not enabled.');
+    if(args.kind!=='CHARACTER_REFERENCE'&&args.imageEstimateConsent)throw new Error('CHARACTER_REFERENCE_ESTIMATE_REVIEW_REQUIRED');
     if(args.kind!=='SFX'&&args.sfxEstimateConsent)throw new Error('SFX_ESTIMATE_REVIEW_REQUIRED');
     if(args.kind==='MUSIC'&&process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true')throw new Error('Music generation is not enabled.');
     if (process.env.FINALFRAME_PREPARATION_ENABLED !== 'true') throw new Error('Preparation is not configured yet.');
@@ -42,6 +45,7 @@ export const create = action({
     }
     if(args.kind==='SFX')validateSfxPrompt(args.text);
     const quote = await quotePreparation({ kind: args.kind as PreparationKind, text, clone, durationSeconds,durationMeasurement });
+    if(args.imageEstimateConsent)await assertCharacterReferenceConsent(args.imageEstimateConsent,String(args.productionId),text,quote);
     if(args.kind==='SFX'){const consent=assertSfxConsent(args.sfxEstimateConsent,String(args.productionId),text,quote.sfxQuote);Object.assign(quote,{sfxEstimateConsent:consent});}
     return ctx.runMutation(jobs.createPreparation, { productionId: args.productionId, kind: args.kind, text, targetVoiceId: args.voiceId,
       ...(context.voice?{voiceVersionId:context.voice.voiceVersionId,voiceConfigSnapshot:context.voice.voiceConfigSnapshot,voiceConfigHash:context.voice.voiceConfigHash}:{}),
@@ -61,5 +65,18 @@ export const previewSfx=action({
     await ctx.runQuery(jobs.preparationContext,{productionId:args.productionId});
     const prepared=await quotePreparation({kind:'SFX',text}),quote=prepared.sfxQuote!;
     return {requestHash:sfxRequestHash(String(args.productionId),text,quote),quoteFingerprint:quote.endpointFingerprint,expiresAt:quote.checkedAt+30000,maximumOriginalSeconds:120 as const,baseProviderCeilingUsd:quote.baseProviderCeilingUsd,providerHoldUsd:quote.reservedProviderUsd};
+  }
+});
+
+/** Explicit no-cost catalog review; no provider inference, writes or scheduling. */
+export const previewCharacterReference = action({
+  args:{productionId:v.id('productions'),text:v.string()},
+  returns:v.object({requestHash:v.string(),model:v.string(),maximumProviderCostUsd:v.number(),expiresAt:v.number()}),
+  handler:async(ctx,args)=>{
+    if(process.env.FINALFRAME_PREPARATION_ENABLED!=='true'||process.env.FINALFRAME_GENERATION_WORKER_ENABLED!=='true')throw new Error('CHARACTER_REFERENCE_UNAVAILABLE');
+    const text=args.text.trim();if(!text||text.length>4000)throw new Error('CHARACTER_REFERENCE_PROMPT_INVALID');
+    await ctx.runQuery(jobs.preparationContext,{productionId:args.productionId});
+    const quote=await quotePreparation({kind:'CHARACTER_REFERENCE',text});
+    return {requestHash:await characterReferenceRequestHash(String(args.productionId),text,quote.model),model:quote.model,maximumProviderCostUsd:quote.estimatedProviderCostUsd,expiresAt:quote.checkedAt+30000};
   }
 });

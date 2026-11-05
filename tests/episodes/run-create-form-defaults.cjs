@@ -24,6 +24,8 @@ const oldest = { ...recent, _id: 'production-oldest', requestedDurationSeconds: 
 const pages = [{ _id: 'episode-one', productionId: oldest._id, episodeNumber: 1, title: 'First' }, { _id: 'episode-two', productionId: recent._id, episodeNumber: 2, title: 'Second' }];
 let foreign = false;
 let transportFailure = false;
+let savedPlan = null;
+let savedVersion = null;
 let calls = [];
 const client = {
   query: async (reference, args) => {
@@ -40,20 +42,21 @@ const client = {
     if (reference === 'workspace') {
       assert.equal(args.projectExternalId, project.externalId);
       const production = args.productionId === recent._id ? recent : args.productionId === oldest._id ? oldest : null;
-      return { production: production && foreign ? { ...production, projectId: 'foreign-project' } : production, plan: null };
+      return { production: production && foreign ? { ...production, projectId: 'foreign-project' } : production, plan: savedPlan, version: savedVersion };
     }
     throw new Error(`Unexpected query ${reference}`);
   },
   mutation: async (reference, args) => {
     calls.push({ reference, args });
+    if (reference === 'changeRelationship') return { replayed: false, requiresNewPlan: true };
     assert.equal(reference, 'createEpisode');
     return { episodeId: 'episode-three', productionId: 'production-new' };
   },
 };
 const actions = load('src/lib/production/episode-actions.ts', {
   'next/cache': { revalidatePath() {} }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client },
-  '../../../convex/_generated/api': { api: { projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
-  '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value },
+  '../../../convex/_generated/api': { api: { projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode', changeContinuityMode: 'changeRelationship' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
+  '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value, VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'CINEMATIC_FILM', 'MOTION_GRAPHICS', 'PRODUCT_SAAS_LAUNCH'] },
   '../../../renderer/src/output-presets': outputPresets,
 });
 function all(element) {
@@ -68,6 +71,22 @@ function all(element) {
   assert.equal(navigation.nextEpisodeNumber, 3);
   const defaults = await actions.getSelectedProductionDefaults(project.externalId, recent._id);
   assert.equal(defaults.durationSeconds, 15); assert.equal(defaults.mode, 'SCRIPT'); assert.equal(defaults.brief, '');
+  recent.projectType = 'CINEMATIC_FILM';
+  savedPlan = { productionId: recent._id, input: { videoType: 'MOTION_GRAPHICS', script: 'The exact current draft script.' } };
+  savedVersion = { status: 'DRAFT' };
+  const revisited = await actions.getSelectedProductionDefaults(project.externalId, recent._id);
+  assert.equal(revisited.videoType, 'MOTION_GRAPHICS'); assert.equal(revisited.brief, 'The exact current draft script.');
+  assert.equal(recent.projectType, 'CINEMATIC_FILM'); assert.equal(project.projectType, 'ANIMATED_COMEDY_2D');
+  savedVersion.status = 'APPROVED';
+  assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).videoType, 'CINEMATIC_FILM');
+  savedVersion.status = 'DRAFT'; savedPlan.input.videoType = 'invented-recipe';
+  assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).videoType, 'CINEMATIC_FILM');
+  savedPlan = { productionId: 'foreign-production', input: { videoType: 'MOTION_GRAPHICS', script: 'Foreign script must never prefill.' } };
+  const mismatchedPlan = await actions.getSelectedProductionDefaults(project.externalId, recent._id);
+  assert.equal(mismatchedPlan.videoType, 'CINEMATIC_FILM'); assert.equal(mismatchedPlan.brief, '');
+  savedPlan = null; savedVersion = null; delete recent.projectType;
+  assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).videoType, project.projectType);
+  console.log('PASS draft revisit retains selected type, approved production type remains authoritative, invalid and foreign-plan inputs cannot override it');
   foreign = true;
   assert.equal(await actions.getSelectedProductionDefaults(project.externalId, recent._id), null);
   const denied = await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Next', durationSeconds: 15, sourceProductionId: recent._id });
@@ -103,6 +122,13 @@ function all(element) {
   assert(!calls.some(call => call.reference === 'createEpisode'));
   foreign = false; recent.workflow = 'COMEDY';
   console.log('PASS all seven presets, preserved legacy vertical, explicit legacy recovery, invalid choices and foreign-project override denial');
+  calls = [];
+  await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Independent post', durationSeconds: 8, sourceProductionId: recent._id, continuityMode: 'PROJECT_IDENTITY' });
+  assert.equal(calls.find(call => call.reference === 'createEpisode').args.continuityMode, 'PROJECT_IDENTITY');
+  const changed = await actions.changeProjectEpisodeRelationship({ projectExternalId: project.externalId, episodeId: 'episode-two', continuityMode: 'PROJECT_IDENTITY', expectedUpdatedAt: 123 });
+  assert.equal(changed.success, true); assert.equal(changed.requiresNewPlan, true);
+  assert.deepEqual(calls.find(call => call.reference === 'changeRelationship').args, { projectId: project._id, episodeId: 'episode-two', continuityMode: 'PROJECT_IDENTITY', expectedUpdatedAt: 123 });
+  console.log('PASS explicit relationship creation and scoped optimistic relationship change reach canonical episode mutations');
   const continuity = await actions.getPlanningContinuityOptions(project.externalId, recent._id);
   assert.equal(continuity.bibles.length, 1); assert.equal(continuity.bibles[0].id, 'approved-bible');
   assert.equal(continuity.bibles[0].referenceCount, 1); assert.equal(continuity.bibles[0].ruleCount, 4);
@@ -116,7 +142,7 @@ function all(element) {
     'next/link': () => null, 'next/navigation': { useRouter: () => ({}) }, sonner: { toast: { error() {}, success() {}, info() {} } },
     '@/lib/project/actions': {}, '@/lib/assets/actions': {}, '@/components/production/planning': {},
     '@/lib/production/actions': { createDirectorPlan: async intent => { captured = intent; return { success: false, error: 'Captured fixture intent.' }; } },
-    '@/lib/ai/video-routing': { VIDEO_TYPES: ['ANIMATED_COMEDY_2D'], VIDEO_TYPE_LABELS: { ANIMATED_COMEDY_2D: 'Comedy' } },
+    '@/lib/ai/video-routing': { VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'MOTION_GRAPHICS'], VIDEO_TYPE_LABELS: { ANIMATED_COMEDY_2D: 'Comedy', MOTION_GRAPHICS: 'Motion graphics' } },
     '../../../renderer/src/output-presets': outputPresets,
   }).CreateProductionForm;
   const props = { studioId: 'studio-one', existingProjectId: project.externalId, productionId: recent._id, productionDefaults: defaults, initialMode: 'AD', templateDefaults: catalog.getStarterTemplate('music-montage') };
@@ -155,16 +181,23 @@ function all(element) {
   await elements.find(element => element.type === 'button' && React.Children.toArray(element.props.children).includes(' Show me the plan')).props.onClick();
   assert.equal(captured.continuityBibleId, undefined); assert.equal(captured.continuityMode, 'NEW_BLANK_BIBLE');
   console.log('PASS explicit approved-reference selection, exact summary/navigation, and deliberate blank selection without identity defaults');
+  cells.length = 0; props.productionDefaults = revisited; delete props.continuityOptions;
+  elements = all(render());
+  assert.equal(elements.find(element => element.props?.id === 'production-video-type').props.value, 'MOTION_GRAPHICS');
+  await elements.find(element => element.type === 'button' && React.Children.toArray(element.props.children).includes(' Show me the plan')).props.onClick();
+  assert.equal(captured.videoType, 'MOTION_GRAPHICS'); assert.equal(captured.productionId, recent._id);
+  console.log('PASS revisited draft selection reaches the actual form and its next canonical planning intent');
 
-  const pickerCells = []; let pickerCell = 0; let submittedEpisode; let pendingEpisode;
+  const pickerCells = []; let pickerCell = 0; let submittedEpisode; let pendingEpisode; let submittedRelationship;
   const Picker = load('src/components/production-workspace/episode-picker.tsx', {
     react: { ...React, useEffect() {}, useState(initial) { const index = pickerCell++; if (!(index in pickerCells)) pickerCells[index] = initial; return [pickerCells[index], value => { pickerCells[index] = typeof value === 'function' ? value(pickerCells[index]) : value; }]; }, useTransition: () => [false, fn => { pendingEpisode = fn(); }] },
-    'next/navigation': { useRouter: () => ({ push() {} }), usePathname: () => '/workspace', useSearchParams: () => new URLSearchParams() },
+    'next/navigation': { useRouter: () => ({ push() {}, refresh() {} }), usePathname: () => '/workspace', useSearchParams: () => new URLSearchParams() },
     '@/components/ui/button': { Button: () => null },
-    '@/lib/production/episode-actions': { createProjectEpisode: async value => { submittedEpisode = value; return { success: true, productionId: 'new-production' }; } },
+    '@/lib/production/episode-actions': { createProjectEpisode: async value => { submittedEpisode = value; return { success: true, productionId: 'new-production' }; }, changeProjectEpisodeRelationship: async value => { submittedRelationship = value; return { success: true, requiresNewPlan: true }; } },
     '../../../renderer/src/output-presets': outputPresets,
   }).EpisodePicker;
-  const renderPicker = () => { pickerCell = 0; return all(Picker({ projectExternalId: project.externalId, options: [{ productionId: recent._id, title: 'Older source', settingsSupported: false }], selectedProductionId: recent._id, nextEpisodeNumber: 3 })); };
+  const pickerOption = { productionId: recent._id, title: 'Older source', settingsSupported: false };
+  const renderPicker = () => { pickerCell = 0; return all(Picker({ projectExternalId: project.externalId, options: [pickerOption], selectedProductionId: recent._id, nextEpisodeNumber: 3 })); };
   let picker = renderPicker();
   picker.find(element => element.props?.children === 'New episode').props.onClick();
   picker = renderPicker();
@@ -176,8 +209,21 @@ function all(element) {
   assert.equal(picker.find(element => element.props?.type === 'submit').props.disabled, false);
   picker.find(element => element.type === 'form').props.onSubmit({ preventDefault() {} }); await pendingEpisode;
   assert.equal(submittedEpisode.sourceProductionId, recent._id);
+  assert.equal(submittedEpisode.continuityMode, 'STORY_CONTINUATION');
   assert.deepEqual(submittedEpisode.settings, { mode: 'SCRIPT', workflow: 'COMEDY', outputPreset: 'TALL_FRAME', language: 'pcm' });
   console.log('PASS older-source picker requires deliberate empty-to-selected settings and submits source identity unchanged');
+  picker = renderPicker(); picker.find(element => element.props?.children === 'New episode').props.onClick();
+  picker = renderPicker();
+  const relationshipControl = picker.find(element => element.props?.label === 'New episode relationship');
+  assert.equal(relationshipControl.props.value, 'STORY_CONTINUATION'); relationshipControl.props.onChange('PROJECT_IDENTITY');
+  picker = renderPicker(); picker.find(element => element.type === 'form').props.onSubmit({ preventDefault() {} }); await pendingEpisode;
+  assert.equal(submittedEpisode.continuityMode, 'PROJECT_IDENTITY');
+  Object.assign(pickerOption, { episodeId: 'episode-two', updatedAt: 123, continuityMode: 'STORY_CONTINUATION', continuityStatus: 'STALE' });
+  picker = renderPicker(); picker.find(element => element.props?.children === 'Change relationship before approval').props.onClick();
+  picker = renderPicker(); picker.find(element => element.props?.label === 'Existing episode relationship').props.onChange('PROJECT_IDENTITY');
+  picker = renderPicker(); picker.find(element => element.type === 'form').props.onSubmit({ preventDefault() {} }); await pendingEpisode;
+  assert.deepEqual(submittedRelationship, { projectExternalId: project.externalId, episodeId: 'episode-two', continuityMode: 'PROJECT_IDENTITY', expectedUpdatedAt: 123 });
+  console.log('PASS new and existing episode relationship choices remain explicit and preserve optimistic current episode identity');
 
   function FormStub() { return null; }
   let implicitProductionId;

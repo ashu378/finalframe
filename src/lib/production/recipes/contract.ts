@@ -14,7 +14,7 @@ export type RecipeStep =
   | Step & { operation: 'GRAPHIC'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationFrames: number; title: string; subtitle: string; brandName: string; eyebrow?:string; feature?:string; detail?:string; index?:string; callToAction?:string; url?:string; accentColor?:string; backgroundColor?:string; textColor?:string; logoAssetId?: string }
   | Step & { operation: 'SOURCE_RANGE'; sourceAssetId: string; startFrame: number; durationFrames: number; audioPolicy: 'KEEP_SOURCE' | 'MUTE'; fit?: 'contain' | 'cover' }
   | Step & { operation: 'MUSIC_ANALYSIS'; sourceAssetId: string; trimStartFrame: number; durationFrames: number }
-  | Step & { operation: 'CAPTIONS'; transcriptStepKey: string; language: string };
+  | Step & { operation: 'CAPTIONS'; language: string } & ({ mode?: 'TRANSCRIPT'; transcriptStepKey: string } | { mode: 'PLANNED_DIALOGUE' });
 export interface RecipeDialogueTrack { stepKey: string; shotId: string; segmentIndex: number }
 export interface RecipeDocument { kind: 'finalframe.recipe'; version: 1; videoType: RecipeVideoType; binding: RecipeBinding; fps: 24 | 25 | 30 | 50 | 60; steps: RecipeStep[]; visualOrder: string[]; narrationStepKey?: string; dialogueTracks?: RecipeDialogueTrack[]; musicStepKey?: string; captionStepKey?: string }
 export interface CanonicalRecipeAsset { id: string; projectId: string; storageId: string; checksum: string; byteSize: number; mimeType: string; state: 'APPROVED' | 'LOCKED' | 'DRAFT' | 'REVOKED'; rightsApproved: boolean; durationSeconds?: number }

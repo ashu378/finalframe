@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { createProjectEpisode, refreshProjectEpisodeContinuity, type EpisodeOption, type EpisodeSettings } from '@/lib/production/episode-actions';
+import { createProjectEpisode, changeProjectEpisodeRelationship, refreshProjectEpisodeContinuity, type EpisodeOption, type EpisodeSettings } from '@/lib/production/episode-actions';
 import { OUTPUT_PRESETS } from '../../../renderer/src/output-presets';
 
 export function EpisodePicker({ projectExternalId, options, selectedProductionId, nextEpisodeNumber }: {
@@ -19,6 +19,9 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
     const [pending, startTransition] = useTransition();
     const [useSettings, setUseSettings] = useState(false);
     const [settings, setSettings] = useState({ mode: '', workflow: '', outputPreset: '', language: '' });
+    const [continuityMode, setContinuityMode] = useState<'STORY_CONTINUATION' | 'PROJECT_IDENTITY'>('STORY_CONTINUATION');
+    const [relationshipOpen, setRelationshipOpen] = useState(false);
+    const [existingMode, setExistingMode] = useState<'STORY_CONTINUATION' | 'PROJECT_IDENTITY'>('STORY_CONTINUATION');
     const storageKey = `finalframe:project:${projectExternalId}:production`;
     const selected = options.find((option) => option.productionId === selectedProductionId);
     const explicitSettings = useSettings || selected?.settingsSupported === false;
@@ -40,6 +43,7 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
     }, [options, pathname, router, searchParams, selectedProductionId, storageKey]);
 
     function select(productionId: string) {
+        setRelationshipOpen(false);
         const query = new URLSearchParams(searchParams.toString());
         query.set('production', productionId);
         router.push(`${pathname}?${query.toString()}`);
@@ -55,7 +59,14 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
             </div>
             <Button variant="secondary" onClick={() => setShowCreate((value) => !value)} disabled={pending || nextEpisodeNumber > 500}>New episode</Button>
         </div>
-        {selected?.continuityStatus === 'STALE' ? <div className="space-y-3"><p role="status" className="text-sm text-amber-300">Earlier story decisions changed or have not been approved. Refresh and review continuity before approving this episode.</p>{selected.episodeId ? <Button variant="secondary" disabled={pending} onClick={() => startTransition(async () => {
+        {selected?.episodeId && Number.isFinite(selected.updatedAt) ? <div className="space-y-3"><p className="text-xs text-muted-foreground">Relationship: {selected.continuityMode === 'PROJECT_IDENTITY' ? 'independent post using project identity' : 'continuation of the previous story'}.</p><Button variant="ghost" disabled={pending} onClick={() => { setExistingMode(selected.continuityMode ?? 'STORY_CONTINUATION'); setRelationshipOpen(value => !value); }}>Change relationship before approval</Button>{relationshipOpen ? <form className="space-y-3 rounded-xl border border-border p-4" onSubmit={event => { event.preventDefault(); setError(null); startTransition(async () => {
+            const result = await changeProjectEpisodeRelationship({ projectExternalId, episodeId: selected.episodeId!, continuityMode: existingMode, expectedUpdatedAt: selected.updatedAt! });
+            if (!result.success) { setError(result.error); return; }
+            setRelationshipOpen(false);
+            if (result.requiresNewPlan) router.push(`/dashboard/create?project=${encodeURIComponent(projectExternalId)}&production=${encodeURIComponent(selected.productionId)}`);
+            else router.refresh();
+        }); }}><label className="text-sm">Episode relationship<RelationshipSelect value={existingMode} onChange={setExistingMode} label="Existing episode relationship" /></label><p className="text-xs leading-5 text-muted-foreground">Only episodes without approved versions or timelines can change. An unapproved draft plan is retained as superseded and must be planned and reviewed again. This does not generate or approve anything.</p><Button type="submit" disabled={pending || existingMode === (selected.continuityMode ?? 'STORY_CONTINUATION')}>Save relationship and reopen planning</Button></form> : null}</div> : null}
+        {selected?.continuityStatus === 'STALE' && selected.continuityMode !== 'PROJECT_IDENTITY' ? <div className="space-y-3"><p role="status" className="text-sm text-amber-300">Earlier story decisions changed or have not been approved. Refresh continuity for a continuing story, or explicitly change an unapproved episode to an independent post.</p>{selected.episodeId ? <Button variant="secondary" disabled={pending} onClick={() => startTransition(async () => {
             setError(null);
             const result = await refreshProjectEpisodeContinuity(projectExternalId, selected.episodeId!);
             if (!result.success) setError(result.error);
@@ -65,7 +76,7 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
             event.preventDefault();
             setError(null);
             startTransition(async () => {
-                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration, sourceProductionId: selectedProductionId, ...(explicitSettings ? { settings: { ...settings, language: settings.language.trim() } as EpisodeSettings } : {}) });
+                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration, sourceProductionId: selectedProductionId, continuityMode, ...(explicitSettings ? { settings: { ...settings, language: settings.language.trim() } as EpisodeSettings } : {}) });
                 if (!result.success) { setError(result.error); if ('requiresSettings' in result && result.requiresSettings) setUseSettings(true); return; }
                 setShowCreate(false);
                 router.push(`/dashboard/create?project=${encodeURIComponent(projectExternalId)}&production=${encodeURIComponent(result.productionId)}`);
@@ -75,6 +86,7 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
             <div><label htmlFor="episode-duration" className="text-sm font-medium">Length</label><select id="episode-duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm">{[4, 8, 15, 30, 60].map((value) => <option key={value} value={value}>{value} seconds</option>)}</select></div>
             <Button type="submit" disabled={pending || !title.trim() || explicitSettings && !settingsComplete}>{pending ? 'Creating…' : 'Create episode'}</Button>
             <div className="space-y-3 sm:col-span-3">
+                <label className="block text-sm font-medium">How does this video relate to the project?<RelationshipSelect value={continuityMode} onChange={setContinuityMode} label="New episode relationship" /></label><p className="text-xs leading-5 text-muted-foreground">Story continuation uses the preceding episode’s accepted story. An independent post uses your explicitly chosen approved project identity and references without waiting for earlier drafts to finish.</p>
                 {selected?.settingsSupported === false ? <p role="status" className="text-sm text-amber-300">This source uses older settings. Choose supported settings for the new episode. Its project references and earlier approved episodes stay unchanged.</p> : <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={useSettings} onChange={(event) => setUseSettings(event.target.checked)} />Choose different settings for this episode</label>}
                 {explicitSettings ? <fieldset className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">Explicit new episode settings</legend>
                     <label className="text-sm">Starting mode<select aria-label="New episode starting mode" required value={settings.mode} onChange={(event) => setSettings((old) => ({ ...old, mode: event.target.value }))} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3"><option value="">Choose a mode</option>{['IDEA', 'SCRIPT', 'VOICE', 'IMAGES', 'FOOTAGE', 'AD'].map((value) => <option key={value} value={value}>{value.toLowerCase()}</option>)}</select></label>
@@ -86,4 +98,8 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
         </form> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </section>;
+}
+
+function RelationshipSelect({ value, onChange, label }: { value: 'STORY_CONTINUATION' | 'PROJECT_IDENTITY'; onChange: (value: 'STORY_CONTINUATION' | 'PROJECT_IDENTITY') => void; label: string }) {
+    return <select aria-label={label} value={value} onChange={event => onChange(event.target.value as typeof value)} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"><option value="STORY_CONTINUATION">Continue the previous story</option><option value="PROJECT_IDENTITY">Independent post using project identity</option></select>;
 }

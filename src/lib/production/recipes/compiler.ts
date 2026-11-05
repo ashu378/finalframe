@@ -82,12 +82,12 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
     if (step.operation === 'GRAPHIC') { assert(step.title.trim(), 'Graphics need an explicit readable title.'); if (step.logoAssetId) { asset(step.logoAssetId, 'image'); assert(step.templateId !== 'kinetic-title', 'This template has no logo slot.'); } durations.set(step.key, step.durationFrames); }
     if (step.operation === 'SOURCE_RANGE') { const source = asset(step.sourceAssetId, 'visual'); if (source.mimeType.startsWith('video/')) { assert(step.fit === undefined, 'Still-image fit cannot be applied to video.'); assert(Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && (step.startFrame + step.durationFrames) / recipe.fps <= source.durationSeconds! + 0.000001, 'Source range must fit the measured canonical video.'); } else assert(step.startFrame === 0 && step.audioPolicy === 'MUTE', 'Still images have no source-audio or media trim.'); durations.set(step.key, step.durationFrames); request = { ...request, source }; }
     if (step.operation === 'MUSIC_ANALYSIS') { const source = asset(step.sourceAssetId, 'audio'); assert(Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && (step.trimStartFrame + step.durationFrames) / recipe.fps <= source.durationSeconds! + 0.000001, 'Soundtrack must fit measured canonical audio.'); request = { ...request, source }; }
-    if (step.operation === 'CAPTIONS') { const transcript = steps.get(step.transcriptStepKey); assert(transcript?.operation === 'PREPARATION' && transcript.kind === 'TRANSCRIPT', 'Caption timing must come from reviewed transcript evidence, never invented timestamps.'); deps.push(approvalId(transcript.key)); request = { ...request, timingPolicy: 'VALIDATED_TIMED_SEGMENTS_OR_REVIEWED_CUES' }; }
+    if (step.operation === 'CAPTIONS' && step.mode !== 'PLANNED_DIALOGUE') { const transcript = steps.get(step.transcriptStepKey); assert(transcript?.operation === 'PREPARATION' && transcript.kind === 'TRANSCRIPT', 'Caption timing must come from reviewed transcript evidence, never invented timestamps.'); deps.push(approvalId(transcript.key)); request = { ...request, timingPolicy: 'VALIDATED_TIMED_SEGMENTS_OR_REVIEWED_CUES' }; }
     dependencies.set(step.key, deps); requests.set(step.key, request);
   }
   const durationFrames = recipe.visualOrder.reduce((sum, key) => sum + durations.get(key)!, 0);
   assert(durationFrames > 0 && durationFrames <= RECIPE_LIMITS.maxSeconds * recipe.fps, 'Recipe timeline remains within the sixty-second production bound.');
-  const dialogueTracks: Array<{stepKey:string;shotId:string;segmentIndex:number;speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string}> = [];
+  const dialogueTracks: Array<{stepKey:string;visualStepKey:string;shotId:string;segmentIndex:number;speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string}> = [];
   const dialogueSteps = new Set<string>(), dialogueSegments = new Set<string>();
   for (const track of recipe.dialogueTracks ?? []) {
     const narration = steps.get(track.stepKey);
@@ -99,8 +99,22 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
     assert(narration.voiceVersionId===segment.voiceVersionId&&narration.text===segment.text, 'Dialogue speech must use the exact approved words and immutable speaker voice.');
     assert(Number.isFinite(segment.startSeconds)&&Number.isFinite(segment.durationSeconds)&&segment.startSeconds>=0&&segment.durationSeconds>0&&(segment.startSeconds+segment.durationSeconds)*recipe.fps<=shot!.durationFrames+0.000001, 'Dialogue timing must stay inside its approved shot.');
     const before=recipe.visualOrder.slice(0,recipe.visualOrder.indexOf(visualKeys[0])).reduce((sum,key)=>sum+durations.get(key)!,0);
-    dialogueTracks.push({...track,speakerResourceVersionId:segment.speakerResourceVersionId,voiceVersionId:segment.voiceVersionId,startSeconds:before/recipe.fps+segment.startSeconds,durationSeconds:segment.durationSeconds,text:segment.text});
+    dialogueTracks.push({...track,visualStepKey:visualKeys[0],speakerResourceVersionId:segment.speakerResourceVersionId,voiceVersionId:segment.voiceVersionId,startSeconds:before/recipe.fps+segment.startSeconds,durationSeconds:segment.durationSeconds,text:segment.text});
     dialogueSteps.add(track.stepKey);dialogueSegments.add(`${track.shotId}/${track.segmentIndex}`);
+  }
+  for (const step of recipe.steps) if (step.operation === 'CAPTIONS' && step.mode === 'PLANNED_DIALOGUE') {
+    assert(recipe.captionStepKey === step.key && dialogueTracks.length > 0, 'Planned dialogue captions need the exact selected speaker dialogue tracks.');
+    assert(!recipe.narrationStepKey, 'Choose planned dialogue captions or separate narration captions; combine them only after an explicit caption edit.');
+    assert(step.language.length <= 32 && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(step.language), 'Choose a valid dialogue caption language.');
+    const ordered = [...dialogueTracks].sort((a, b) => a.startSeconds - b.startSeconds);
+    for (const [index, track] of ordered.entries()) {
+      // Purchase preflight mirrors the canonical caption text boundary; the
+      // local handler validates it again against the actual measured result.
+      assert(track.text.length <= 1024 && track.text.trim() && !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(track.text) && !/\r(?!\n)/.test(track.text) && track.text.replace(/\r\n/g, '\n').split('\n').every(line => line.trim()), 'Keep each complete dialogue caption line as plain text within 1024 characters.');
+      assert(!index || ordered[index - 1].startSeconds + ordered[index - 1].durationSeconds <= track.startSeconds + 0.000001, 'Planned dialogue captions need nonoverlapping approved line windows. Revise overlapping dialogue before purchase.');
+    }
+    dependencies.set(step.key, [...new Set([...ordered.map(track => approvalId(track.stepKey)), ...recipe.visualOrder.map(key => steps.get(key)!.operation === 'GENERATION' ? approvalId(key) : key)])]);
+    requests.set(step.key, { ...requests.get(step.key), dialogueTracks: ordered, visualOrder: recipe.visualOrder, durationFrames, fps: recipe.fps, timingPolicy: 'APPROVED_LINE_TEXT_MEASURED_COMPLETE_AUDIO_ONE_CUE_PER_LINE' });
   }
   if (recipe.narrationStepKey) { const narration = steps.get(recipe.narrationStepKey)!; if (narration.operation === 'NARRATION' && narration.mode === 'RECORDING') assert(narration.durationFrames <= durationFrames, 'Recorded narration cannot overrun the proposed picture; revise the timeline.'); }
   if (recipe.musicStepKey) { const music = steps.get(recipe.musicStepKey)!; assert(music.operation === 'MUSIC_ANALYSIS' && music.durationFrames === durationFrames, 'Soundtrack window must exactly cover the proposed timeline.'); }

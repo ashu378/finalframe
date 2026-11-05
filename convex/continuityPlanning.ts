@@ -27,10 +27,11 @@ export async function resolvePlanningContinuity(ctx: ReadCtx, projectId: Id<"pro
   if (!bible || bible.projectId !== projectId || bible.state !== "APPROVED") throw new Error("Choose an approved continuity bible from this project.");
   await requireApprovedResource(ctx, projectId, "continuityBible", bibleId.toString());
   await validateBibleBindings(ctx, projectId, bible.snapshot, true);
-  const predecessor = episode?.predecessorEpisodeId ? await ctx.db.get(episode.predecessorEpisodeId) : null;
-  if (episode && episode.continuityStatus !== "CURRENT") throw new Error("Refresh and review this episode's continuity before creating its plan.");
+  const followsStory = episode?.continuityMode !== 'PROJECT_IDENTITY';
+  const predecessor = followsStory && episode?.predecessorEpisodeId ? await ctx.db.get(episode.predecessorEpisodeId) : null;
+  if (followsStory && episode && episode.continuityStatus !== "CURRENT") throw new Error("Refresh and review this episode's continuity before creating its plan.");
   if (predecessor && (predecessor.projectId !== projectId || predecessor.continuityStatus !== "CURRENT" || !predecessor.acceptedStoryStateId || episode?.inputStoryStateId !== predecessor.acceptedStoryStateId)) throw new Error("Approve the preceding episode and explicitly refresh continuity before planning the next episode.");
-  const inputStory = episode?.inputStoryStateId ? await ctx.db.get(episode.inputStoryStateId) : null;
+  const inputStory = followsStory && episode?.inputStoryStateId ? await ctx.db.get(episode.inputStoryStateId) : null;
   if (inputStory && (inputStory.projectId !== projectId || (predecessor && inputStory.episodeId !== predecessor._id))) throw new Error("The accepted story state does not belong to this episode's predecessor.");
   const bindings = (bible.snapshot as { resourceBindings: Array<{ resourceId: Id<"projectResources">; resourceVersionId: Id<"projectResourceVersions"> }> }).resourceBindings;
   const resources = await Promise.all(bindings.map(async (binding) => {
@@ -50,6 +51,7 @@ export async function resolvePlanningContinuity(ctx: ReadCtx, projectId: Id<"pro
   }));
   return {
     projectId, productionId: production?._id ?? null, episodeId: episode?._id ?? null,
+    ...(episode?.continuityMode ? { continuityMode: episode.continuityMode } : {}),
     continuityBibleId: bible._id, continuityBibleVersion: bible.versionNumber,
     inputStoryStateId: inputStory?._id ?? null, acceptedPredecessorStory: inputStory?.snapshot ?? null,
     approvedEpisodeMemory: await retrieveApprovedMemory(ctx,projectId,episode?.episodeNumber,memoryQuery),
