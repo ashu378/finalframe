@@ -370,6 +370,7 @@ export interface DirectorShotPlan {
     requiredAssetIds: string[];
     camera?: CameraConfig;
     resourceBindings?: Array<{role:string;resourceVersionId:string;voiceVersionId?:string|null;characterResourceVersionId?:string|null}>;
+    aspectRatio?: string;
     audioPolicy?: 'SILENT' | 'GENERATE' | 'KEEP_SOURCE';
   dialogueSegments?: Array<{speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string;delivery?:string}>;
 }

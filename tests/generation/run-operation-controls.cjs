@@ -66,7 +66,7 @@ function publicActionFixture(metadata, references = []) {
     },
     query: async ref => {
       if (ref === 'account.current') return { user: { id: 'user' } };
-      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: fixture.outputPreset || 'LANDSCAPE' }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
+      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: fixture.outputPreset || 'LANDSCAPE', projectType: fixture.productionVideoType }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
       if (ref === 'videoRouting.forGeneration') return { catalog: [{ lastSeenAt: Date.now(), ...fixture.model }], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
       throw new Error('Unexpected query ' + ref);
     },
@@ -290,6 +290,11 @@ async function main() {
     }
     const invalid = publicActionFixture({ aspectRatio: 'arbitrary' });
     assert.equal((await invalid.run()).success, false); assert.equal(invalid.mutations.length, 0);
+  });
+  await check('approved production recipe takes precedence over its project default', async () => {
+    const fixture = publicActionFixture({}); fixture.productionVideoType = 'CINEMATIC_FILM';
+    assert.equal((await fixture.run()).success, true);
+    assert.equal(fixture.mutations.find(call => call.ref === 'generationJobs.previewShotEstimate').args.request.videoType, 'CINEMATIC_FILM');
   });
   await check('portrait plus recording passes input validation without source video but uncertified lip-sync cannot queue', async () => {
     const fixture = publicActionFixture({ operation: 'LIP_SYNC', videoTask: 'EDIT', audioPolicy: 'USE_RECORDING' }, ['image', 'audio']);

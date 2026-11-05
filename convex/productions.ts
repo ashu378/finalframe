@@ -10,15 +10,9 @@ import { paginationOptsValidator } from "convex/server";
 import { resolveGenerationContinuity } from "./generationContinuity";
 import {getOutputPreset} from '../renderer/src/output-presets';
 import {validateShotBindings} from './continuityContracts';
+import {automaticPlanningReceipt,validateAutomaticVideoPlan,plannedShotMetadata,planningVideoType} from './planningVideo';
 
-function canonicalShotMetadata(shot:Record<string,unknown>){
-  const metadata={...record(shot.metadata)};
-  for(const field of ['resourceBindings','dialogueSegments','audioPolicy'])if(shot[field]!==undefined){
-    if(metadata[field]!==undefined&&stableSerialize(metadata[field])!==stableSerialize(shot[field]))throw new Error('Shot continuity fields conflict with their metadata.');
-    metadata[field]=shot[field];
-  }
-  return metadata;
-}
+const canonicalShotMetadata=plannedShotMetadata;
 
 type ReadCtx = QueryCtx | MutationCtx;
 type PlanRecord = Doc<"directorPlans">;
@@ -110,10 +104,10 @@ async function validatePlanGraph(ctx: ReadCtx, projectId: Id<"projects">, plan: 
 }
 
 async function ensureDraftVersion(ctx: MutationCtx, production: Doc<"productions">, plan: PlanRecord, key: string, timestamp: number) {
-  const versions = await ctx.db.query("productionVersions").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect();
-  const existing = versions.find((version) => version.sourcePlanId === plan._id);
+  const existing = await ctx.db.query("productionVersions").withIndex("by_source_plan", (q) => q.eq("sourcePlanId", plan._id)).first();
   if (existing) return existing;
-  const versionNumber = Math.max(0, ...versions.map((version) => version.versionNumber)) + 1;
+  const latest = await ctx.db.query("productionVersions").withIndex("by_production_version", (q) => q.eq("productionId", production._id)).order("desc").first();
+  const versionNumber = Math.max(0, latest?.versionNumber ?? 0) + 1;
   const versionId = await ctx.db.insert("productionVersions", {
     productionId: production._id,
     versionNumber,
@@ -248,13 +242,15 @@ export const createPlan = mutation({
     const access = await requireProjectRole(ctx, project._id, ["OWNER", "EDITOR"]);
     await validatePlanGraph(ctx, project._id, args.plan);
 
+    const sourceInput = {...record(args.input)};
     let production = await selectProjectProduction(ctx, project, args.productionId);
+    const requestedVideoType=planningVideoType(sourceInput,production?.projectType??project.projectType);
     if (production && production.studioExternalId !== member.studio.externalId) throw new Error("Project not found");
     if (!production) {
       const productionId = await ctx.db.insert("productions", {
         externalProjectId: args.projectExternalId,
         projectId: project._id,
-        projectType: project.projectType,
+        projectType: requestedVideoType,
         plannedDurationSeconds: args.durationSeconds,
         studioExternalId: member.studio.externalId,
         studioId: member.studio._id,
@@ -283,7 +279,7 @@ export const createPlan = mutation({
     }
     if (!production) throw new Error("Unable to create production");
 
-    const sourceInput = record(args.input);
+    sourceInput.videoType=requestedVideoType;
     const requestedBible = typeof sourceInput.continuityBibleId === "string" ? sourceInput.continuityBibleId : undefined;
     const bibleId = requestedBible ? ctx.db.normalizeId("continuityBibles", requestedBible) : undefined;
     if (requestedBible && !bibleId) throw new Error("Choose a valid approved project continuity bible.");
@@ -297,12 +293,16 @@ export const createPlan = mutation({
       ? { ...continuityContext, productionId: null }
       : continuityContext;
     if (sourceInput.continuityContext && stableSerialize(sourceInput.continuityContext) !== stableSerialize(comparisonContext)) throw new Error("Continuity changed while the plan was being prepared. Refresh its references and create a revised plan.");
-    const canonicalInput = continuityContext ? { ...sourceInput, continuityContext } : sourceInput;
+    let canonicalInput = continuityContext ? { ...sourceInput, continuityContext } : sourceInput;
+    const automaticReceipt=await automaticPlanningReceipt(ctx,project._id,sourceInput,access.user._id);
+    if(automaticReceipt){const planningVideoContract=await validateAutomaticVideoPlan(ctx,project,sourceInput,args.outputPreset,args.durationSeconds,args.plan,production._id,continuityContext);canonicalInput={...canonicalInput,planningVideoContract};}
+    else {const {planningVideoContract:_untrusted,...manualInput}=canonicalInput;canonicalInput=manualInput;}
     for(const sequence of record(args.plan).sequences as Array<{scenes:Array<{shots:Record<string,unknown>[]}>}>){
       for(const scene of sequence.scenes)for(const shot of scene.shots)await validateShotBindings(ctx,project._id,continuityContext,canonicalShotMetadata(shot),Number(shot.durationSeconds));
     }
 
-    const idempotencyKey = requireIdempotencyKey(args.idempotencyKey?.trim() || `canonical-plan:${args.projectExternalId}:${fingerprint({ input: canonicalInput, plan: args.plan, estimate: args.estimate })}`);
+    const {planningVideoContract:_routingEvidence,...identityInput}=canonicalInput;
+    const idempotencyKey = requireIdempotencyKey(args.idempotencyKey?.trim() || `canonical-plan:${args.projectExternalId}:${fingerprint({ input: identityInput, plan: args.plan, estimate: args.estimate })}`);
     const existingPlan = await findPlanByKey(ctx, production._id, idempotencyKey);
     if (existingPlan) {
       const timestamp = now();
@@ -312,11 +312,11 @@ export const createPlan = mutation({
       return { productionId: production._id, planId: existingPlan._id, versionId: version?._id, estimate: existingPlan.estimate };
     }
 
-    const previousPlans = await ctx.db.query("directorPlans").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect();
+    const previousPlan = await ctx.db.query("directorPlans").withIndex("by_production_version", (q) => q.eq("productionId", production._id)).order("desc").first();
     const timestamp = now();
     const planId = await ctx.db.insert("directorPlans", {
       productionId: production._id,
-      versionNumber: Math.max(0, ...previousPlans.map((plan) => plan.versionNumber ?? 0)) + 1,
+      versionNumber: Math.max(0, previousPlan?.versionNumber ?? 0) + 1,
       idempotencyKey,
       input: canonicalInput,
       plan: args.plan,
@@ -359,6 +359,7 @@ export const approvePlan = mutation({
     const snapshot = await draftSnapshot(ctx, version, planRecord.plan);
     await validatePlanGraph(ctx, production.projectId, snapshot);
     const planningInput = record(planRecord.input);
+    if(await automaticPlanningReceipt(ctx,production.projectId,planningInput,planRecord.createdByUserId)){await validateAutomaticVideoPlan(ctx,access.project,planningInput,production.outputPreset,production.requestedDurationSeconds,snapshot,production._id,version.planningContextSnapshot);}
     const bibleId = typeof planningInput.continuityBibleId === "string" ? ctx.db.normalizeId("continuityBibles", planningInput.continuityBibleId) : null;
     const currentContinuity = await resolvePlanningContinuity(ctx, production.projectId, production._id, bibleId ?? undefined,String(planningInput.prompt??planningInput.script??'').slice(0,256));
     if (fingerprint(currentContinuity) !== fingerprint(version.planningContextSnapshot ?? null)) throw new Error("Continuity changed. Create a new draft before approving this plan.");
@@ -374,7 +375,7 @@ export const approvePlan = mutation({
     });
     await materializeApprovedPlan(ctx, production, { ...version, status: "APPROVED", approvedAt: timestamp }, { ...planRecord, plan: snapshot });
     await ctx.db.patch(planRecord._id, { status: "APPROVED", plan: snapshot, approval: { ...record(planRecord.approval), state: "APPROVED", idempotencyKey: key, approvedAt: timestamp }, approvedAt: timestamp, updatedAt: timestamp });
-    await ctx.db.patch(production._id, { status: "APPROVED", currentPlanId: planRecord._id, currentVersionId: version._id, updatedAt: timestamp });
+    await ctx.db.patch(production._id, { projectType:planningVideoType(planningInput,production.projectType), status: "APPROVED", currentPlanId: planRecord._id, currentVersionId: version._id, updatedAt: timestamp });
     return { productionId: production._id, versionId: version._id };
   },
 });

@@ -10,7 +10,7 @@ import { ensureResourceState, getEffectiveResourceState } from './resourceStates
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
 import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, validateReviewedVideoJob } from './videoRouting';
-import { isSourceVideoEdit, videoCatalogFingerprint } from '../src/lib/ai/video-routing';
+import { isSourceVideoEdit, videoCatalogFingerprint, normalizeVideoType } from '../src/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
 import { SHOT_ESTIMATE_VERSION, SHOT_ESTIMATE_TTL_MS, shotEstimateHash, stableShotEstimate, assertShotEstimateTime } from '../src/lib/generation/shot-estimate';
 import { resolveGenerationContinuity } from './generationContinuity';
@@ -200,6 +200,9 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     const {production,access,shot,version,requested,metadata,continuity,qualityTier,recipeMarkers}=intent;
     if (!workerEnabled()) throw new Error('Video generation is not configured yet.');
     if (args.provider !== 'openrouter') throw new Error('This provider is not enabled.');
+    const sourcePlan=version.sourcePlanId?await ctx.db.get(version.sourcePlanId):null;
+    if(version.sourcePlanId&&(!sourcePlan||sourcePlan.productionId!==production._id))throw new Error('The approved production plan is unavailable.');
+    const videoType=normalizeVideoType(object(sourcePlan?.input).videoType??production.projectType??access.project.projectType);
     // Derive reference requirements from canonical project assets, not browser flags.
     const sourceAssets = [];
     const mediaProofs = [];
@@ -227,7 +230,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       prompt: continuity.promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(continuity.promptContext)}` : references.prompt, duration: shot.durationSeconds,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,voiceVersionIds:continuity.voiceVersionIds,
       resourceBindings:continuity.resourceBindings,dialogueSegments:continuity.dialogueSegments,
-      durationSeconds: shot.durationSeconds, qualityTier,
+      durationSeconds: shot.durationSeconds, qualityTier, videoType,
       ratio, aspectRatio:ratio,
       operation, task: videoTaskForOperation(operation),
       previousJobId: operation === 'EXTEND' && typeof metadata.previousJobId === 'string' ? metadata.previousJobId : undefined,

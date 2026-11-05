@@ -335,7 +335,7 @@ export default defineSchema({
     versionNumber: v.optional(v.number()), idempotencyKey: v.optional(v.string()), input: json, plan: json, estimate: json, status,
     approval: v.optional(json), createdByExternalId: v.optional(v.string()), createdByUserId: v.optional(v.id("users")),
     createdAt: timestamp, updatedAt: v.optional(timestamp), approvedAt: v.optional(timestamp),
-  }).index("by_production", ["productionId"]).index("by_idempotency", ["idempotencyKey"])
+  }).index("by_production", ["productionId"]).index("by_production_version", ["productionId", "versionNumber"]).index("by_idempotency", ["idempotencyKey"])
     .index("by_studio", ["studioExternalId"]).index("by_status", ["status"]),
 
   productionBibles: defineTable({
@@ -552,6 +552,10 @@ export default defineSchema({
   }).index("by_timeline", ["timelineId"]).index("by_track", ["trackId"]).index("by_studio", ["studioExternalId"]),
 
   verifiedMediaProbes: defineTable({
+    videoTiming: v.optional(v.object({ version: v.literal('DECODED_VIDEO_FRAMES_V1'), frameCount: v.number(), fpsNumerator: v.number(), fpsDenominator: v.number(), firstFrameSeconds: v.number(), durationSeconds: v.number() })),
+    videoTimingSourceChecksum: v.optional(v.string()),
+    videoTimingSourceStorageId: v.optional(v.id('_storage')),
+
     projectId: v.id('projects'), assetId: v.id('assets'), storageId: v.id('_storage'), checksum: v.string(), byteSize: v.number(),
     width: v.number(), height: v.number(), durationSeconds: v.number(), videoCodec: v.string(), hasAudio: v.boolean(), audioCodec: v.optional(v.string()), probedAt: timestamp,
   }).index('by_asset', ['assetId']),
@@ -858,7 +862,7 @@ export default defineSchema({
     productionId: v.id("productions"), versionNumber: v.number(), status, sourcePlanId: v.id("directorPlans"),
     idempotencyKey: v.optional(v.string()), snapshot: v.optional(json), planningContextSnapshot: v.optional(json), approvedByUserId: v.optional(v.id("users")),
     approvedAt: v.optional(timestamp), createdAt: timestamp, updatedAt: v.optional(timestamp),
-  }).index("by_production", ["productionId"]).index("by_source_plan", ["sourcePlanId"])
+  }).index("by_production", ["productionId"]).index("by_production_version", ["productionId", "versionNumber"]).index("by_source_plan", ["sourcePlanId"])
     .index("by_idempotency", ["idempotencyKey"]),
   priceRules: defineTable({ operation: v.string(), qualityTier: v.string(), unit: v.string(), creditsPerUnit: v.number(), enabled: v.boolean() }).index("by_operation", ["operation", "qualityTier"]),
   creditReservations: defineTable({

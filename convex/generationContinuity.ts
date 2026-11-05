@@ -11,7 +11,7 @@ type ReadCtx = QueryCtx | MutationCtx;
  * silently sent as media references or substituted for missing assets. */
 export async function resolveGenerationContinuity(ctx: ReadCtx, args: {
   projectId: Id<'projects'>;
-  productionId: Id<'productions'>;
+  productionId?: Id<'productions'>;
   snapshot: unknown;
   explicitResourceVersionIds?: unknown;
   referenceAssetIds: string[];
