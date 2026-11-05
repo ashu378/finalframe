@@ -1,9 +1,10 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { requireAuth } from '@/lib/guards';
 import { CreateProductionForm } from '@/components/production/create-production-form';
 import { getStudioContext } from '@/lib/project/actions';
-import { getPlanningContinuityOptions } from '@/lib/production/episode-actions';
+import { getPlanningContinuityOptions, getSelectedProductionDefaults } from '@/lib/production/episode-actions';
 import { getTemplateDefaultsForProject } from '@/lib/templates/actions';
 import { parseStartingMode } from '@/lib/templates/catalog';
 
@@ -12,6 +13,13 @@ export const metadata = { title: 'Create | FinalFrame', description: 'Create a v
 export default async function CreatePage({ searchParams }: { searchParams: Promise<{ project?: string; production?: string; mode?: string }> }) {
     await requireAuth();
     const selection = await searchParams;
+    if (selection.production && !selection.project) notFound();
     const [studio, continuityOptions, templateDefaults] = await Promise.all([getStudioContext(), selection.project ? getPlanningContinuityOptions(selection.project, selection.production) : Promise.resolve(undefined), selection.project ? getTemplateDefaultsForProject(selection.project) : Promise.resolve(undefined)]);
-    return <div className="mx-auto max-w-5xl space-y-10 py-5 sm:py-8"><div><Link href="/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"><ArrowLeft className="size-4" /> Back to projects</Link><p className="ff-eyebrow mt-10">Create a video</p><h1 className="public-heading-section mt-4">What do you want to make?</h1><p className="public-body-text mt-5 max-w-2xl">Describe it, paste it, upload it, or bring your own media. We will prepare the plan and show the credit cost before anything expensive starts.</p></div><CreateProductionForm key={`${selection.project ?? 'new'}:${selection.mode ?? ''}`} initialMode={parseStartingMode(selection.mode)} templateDefaults={templateDefaults} studioId={studio.studioId} existingProjectId={selection.project} productionId={selection.production} continuityOptions={continuityOptions} /></div>;
+    const selectedProductionId = selection.production ?? continuityOptions?.productionId;
+    let productionDefaults;
+    if (selection.project && selectedProductionId) {
+        productionDefaults = await getSelectedProductionDefaults(selection.project, selectedProductionId);
+        if (!productionDefaults) notFound();
+    }
+    return <div className="mx-auto max-w-5xl space-y-10 py-5 sm:py-8"><div><Link href="/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"><ArrowLeft className="size-4" /> Back to projects</Link><p className="ff-eyebrow mt-10">Create a video</p><h1 className="public-heading-section mt-4">What do you want to make?</h1><p className="public-body-text mt-5 max-w-2xl">Describe it, paste it, upload it, or bring your own media. We will prepare the plan and show the credit cost before anything expensive starts.</p></div><CreateProductionForm key={`${selection.project ?? 'new'}:${selectedProductionId ?? 'new'}:${selection.mode ?? ''}`} initialMode={parseStartingMode(selection.mode)} templateDefaults={templateDefaults} productionDefaults={productionDefaults} studioId={productionDefaults?.studioExternalId ?? studio.studioId} existingProjectId={selection.project} productionId={selectedProductionId} continuityOptions={continuityOptions} /></div>;
 }

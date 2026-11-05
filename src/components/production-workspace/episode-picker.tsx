@@ -60,7 +60,7 @@ export function EpisodePicker({ projectExternalId, options, selectedProductionId
             event.preventDefault();
             setError(null);
             startTransition(async () => {
-                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration });
+                const result = await createProjectEpisode({ projectExternalId, episodeNumber: nextEpisodeNumber, title, durationSeconds: duration, sourceProductionId: selectedProductionId });
                 if (!result.success) { setError(result.error); return; }
                 setShowCreate(false);
                 router.push(`/dashboard/create?project=${encodeURIComponent(projectExternalId)}&production=${encodeURIComponent(result.productionId)}`);
