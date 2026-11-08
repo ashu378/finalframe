@@ -13,6 +13,14 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
 async function main() {
+  await check('provider feedback becomes fixed categories without leaking messages, URLs, prompts or granting retry authority', async()=>{
+    const cases=[['Reference images may contain a real person and are not supported','REFERENCE_PERSON_RESTRICTED'],['InputImageSensitiveContentDetected','REFERENCE_CONTENT_REJECTED'],['Prompt is too long: secret example','PROMPT_TOO_LONG'],['Reference image could not download https://secret.invalid/file','REFERENCE_MEDIA_UNAVAILABLE'],['Reference image dimensions invalid','REFERENCE_DIMENSIONS_UNSUPPORTED'],['Resolution not supported','CONTROL_NOT_SUPPORTED'],['Model not found','MODEL_UNAVAILABLE']];
+    for(const[message,category]of cases){assert.equal(d.classifySubmissionRejection({error:{code:400,message}}),category);const result=await d.buildSubmissionDiagnostic({error:{status:400,details:{rejectionCategory:category}},controls});assert.equal(result.rejectionCategory,category);for(const token of['secret','http://','https://','message','retry'])assert(!JSON.stringify(result).includes(token));assert.equal(d.sanitizeSubmissionDiagnostic({...result,raw:message}).rejectionCategory,category);}
+    assert.equal(d.classifySubmissionRejection({error:{message:'Generic invalid request'}}),undefined);assert.equal(d.classifySubmissionRejection({error:{message:'a'.repeat(4097)+' prompt too long'}}),undefined);
+    assert.equal(d.classifySubmissionRejection({error:{metadata:{raw:'Reference image may contain a real person; request rejected'}}}),'REFERENCE_PERSON_RESTRICTED');
+    assert.equal(d.sanitizeSubmissionDiagnostic({version:1,controlFingerprint:'a'.repeat(64),rejectionCategory:'SECRET'}).rejectionCategory,undefined);
+    const poison={};Object.defineProperty(poison,'error',{get(){throw Error('unsafe getter');}});assert.equal(d.classifySubmissionRejection(poison),undefined);
+  });
   await check('bounded diagnostic keeps only allowlisted provider/status/parameter and header correlation', async () => {
     const bytes = new TextEncoder().encode('{"error":"fixture"}');
     const result = await d.buildSubmissionDiagnostic({ error: { status: 400, requestId: 'req_fixture123456', message: 'PRIVATE_PROMPT https://private.invalid/asset', details: { providerCode: 'invalid_request', providerParam: 'previous_job_id', providerMessage: 'PRIVATE_TOKEN', raw: 'BASE64_MEDIA' } }, controls, responseBodyBytes: bytes });

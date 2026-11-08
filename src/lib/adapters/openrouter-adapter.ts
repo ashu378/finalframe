@@ -13,7 +13,7 @@ import {
 } from '../ai/types';
 import type { CameraConfig, MotionConfig } from '../types/database';
 import { IMAGE_RESPONSE_LIMITS, readImageResponse, type ImageResponseBody } from '../ai/image-response';
-import { buildSubmissionDiagnostic, sanitizeSubmissionDiagnostic, SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES } from '../ai/submission-diagnostic';
+import { buildSubmissionDiagnostic, sanitizeSubmissionDiagnostic, classifySubmissionRejection, SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES } from '../ai/submission-diagnostic';
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -398,6 +398,7 @@ async function requestJson<T>(path: string, init: RequestInit, options: OpenRout
                     error: { status: response.status, requestId: response.headers.get('x-request-id'), details: {
                         providerCode: typeof providerCode === 'number' && Number.isInteger(providerCode) ? String(providerCode) : providerCode,
                         providerParam: record.param ?? nested.param ?? record.parameter ?? nested.parameter,
+                        rejectionCategory: classifySubmissionRejection(body),
                     } }, controls: diagnosticControls, responseBodyBytes: rejectedBody?.bytes,
                 }); } catch { /* Preserve the original HTTP outcome even if hashing is unavailable. */ }
             }

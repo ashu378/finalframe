@@ -4,6 +4,8 @@ export const SUBMISSION_DIAGNOSTIC_VERSION = 1 as const;
 export const SUBMISSION_DIAGNOSTIC_MAX_BODY_BYTES = 64 * 1024;
 const codes = ['invalid_request', 'invalid_request_error', 'validation_error', 'invalid_parameter', 'unsupported_parameter', 'unsupported_value', 'model_not_found', 'rate_limit_exceeded', 'insufficient_credits', 'provider_error', 'server_error', 'upstream_error', 'content_policy_violation', 'request_timeout', '400', '401', '402', '403', '404', '408', '422', '429', '500', '502', '503', '504'] as const;
 const params = ['model', 'duration', 'aspect_ratio', 'resolution', 'generate_audio', 'previous_job_id', 'frame_images', 'input_references', 'upscale_factor', 'creativity'] as const;
+const rejectionCategories = ['REFERENCE_PERSON_RESTRICTED', 'REFERENCE_CONTENT_REJECTED', 'REFERENCE_MEDIA_UNAVAILABLE', 'REFERENCE_DIMENSIONS_UNSUPPORTED', 'PROMPT_TOO_LONG', 'CONTROL_NOT_SUPPORTED', 'MODEL_UNAVAILABLE'] as const;
+type RejectionCategory = typeof rejectionCategories[number];
 type ProviderCode = typeof codes[number];
 type ProviderParam = typeof params[number];
 export type SubmissionDiagnostic = {
@@ -14,6 +16,7 @@ export type SubmissionDiagnostic = {
   providerCode?: ProviderCode;
   providerParam?: ProviderParam;
   responseDigest?: string;
+  rejectionCategory?: RejectionCategory;
 };
 
 // Read data properties only; accidental getters/toJSON must never expose a body.
@@ -21,6 +24,22 @@ function own(value: unknown, key: string): unknown {
   if (!value || typeof value !== 'object') return undefined;
   const property = Object.getOwnPropertyDescriptor(value, key);
   return property && 'value' in property ? property.value : undefined;
+}
+/** Reduce bounded provider feedback to fixed categories. Raw messages, source
+ * URLs and echoed prompts never cross the persistence boundary. Classification
+ * is diagnostic evidence only: it cannot authorize a retry or weaken a policy. */
+export function classifySubmissionRejection(body: unknown): RejectionCategory | undefined {
+  const error=own(body,'error'),metadata=own(error,'metadata')??own(body,'metadata');
+  const messages=[own(body,'message'),own(error,'message'),own(metadata,'raw')].filter((value):value is string=>typeof value==='string'&&value.length<=4096).join(' ').slice(0,12288);
+  const code=own(error,'code')??own(body,'code');
+  if(/(?:reference|input|image|video).{0,120}(?:real[- ]person|real human|human face|likeness of real people)/i.test(messages)&&/(?:reject|restrict|not support|not allow|may contain|sensitive)/i.test(messages))return 'REFERENCE_PERSON_RESTRICTED';
+  if(/Input(?:Image|Video)SensitiveContentDetected/i.test(String(typeof code==='string'?code:''))||/Input(?:Image|Video)SensitiveContentDetected/.test(messages))return 'REFERENCE_CONTENT_REJECTED';
+  if(/prompt.{0,120}(?:too long|exceeds? (?:the )?(?:maximum|limit)|maximum.{0,30}characters)/i.test(messages))return 'PROMPT_TOO_LONG';
+  if(/(?:reference|image|video|audio).{0,100}(?:could not (?:download|fetch)|download failed|url is not accessible|inaccessible url)/i.test(messages))return 'REFERENCE_MEDIA_UNAVAILABLE';
+  if(/(?:reference|image|video).{0,80}(?:dimensions|width|height|aspect ratio).{0,60}(?:invalid|unsupported|not supported|out of range)/i.test(messages))return 'REFERENCE_DIMENSIONS_UNSUPPORTED';
+  if(/(?:parameter|resolution|duration|aspect_ratio|generate_audio).{0,60}(?:unsupported|not supported|not allowed)/i.test(messages))return 'CONTROL_NOT_SUPPORTED';
+  if(/model.{0,80}(?:not found|unavailable|not available)/i.test(messages))return 'MODEL_UNAVAILABLE';
+  return undefined;
 }
 function member<T extends string>(value: unknown, choices: readonly T[]): T | undefined {
   return typeof value === 'string' && choices.includes(value as T) ? value as T : undefined;
@@ -64,10 +83,11 @@ export function sanitizeSubmissionDiagnostic(value: unknown): SubmissionDiagnost
   const providerCode = member(own(value, 'providerCode'), codes);
   const providerParam = member(own(value, 'providerParam'), params);
   const responseDigest = digest(own(value, 'responseDigest'));
+  const rejectionCategory=member(own(value,'rejectionCategory'),rejectionCategories);
   return { version: 1, controlFingerprint,
     ...(httpStatus !== undefined ? { httpStatus } : {}), ...(correlation ? { requestId: correlation } : {}),
     ...(providerCode ? { providerCode } : {}), ...(providerParam ? { providerParam } : {}),
-    ...(responseDigest ? { responseDigest } : {}),
+    ...(responseDigest ? { responseDigest } : {}), ...(rejectionCategory?{rejectionCategory}:{}),
   };
 }
 
@@ -80,6 +100,7 @@ export async function buildSubmissionDiagnostic(input: { error: unknown; control
   const httpStatus = status(own(input.error, 'status'));
   const correlation = requestId(own(input.error, 'requestId'));
   const bytes = input.responseBodyBytes;
+  const rejectionCategory=member(own(details,'rejectionCategory'),rejectionCategories);
   // Both sha256 calls copy their byte input before yielding, binding this call's
   // snapshot even when the caller later reuses its transport buffer.
   const [controlFingerprint, responseDigest] = await Promise.all([
@@ -88,7 +109,7 @@ export async function buildSubmissionDiagnostic(input: { error: unknown; control
   ]);
   return sanitizeSubmissionDiagnostic({ version: 1,
     controlFingerprint,
-    httpStatus, requestId: correlation, providerCode, providerParam,
+    httpStatus, requestId: correlation, providerCode, providerParam, rejectionCategory,
     ...(responseDigest ? { responseDigest } : {}),
   })!;
 }

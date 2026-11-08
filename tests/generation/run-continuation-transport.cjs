@@ -97,6 +97,13 @@ async function main() {
       assert.equal(state.providerSettlements.length, 0);
     });
   });
+  await check('real provider rejection categorization stays private through worker persistence and releases only the rejected purchase',async()=>{
+    await withTransport(()=>new Response(JSON.stringify({error:{code:400,message:'Reference images may contain a real person and are not supported. PRIVATE_PROMPT https://private.invalid/media'}}),{status:400}),async requests=>{
+      const state=await fixture();await worker.run.handler(state.workerCtx,{jobId:state.jobId});const job=state.rows.get(state.jobId);assert.equal(job.response.submissionDiagnostic.rejectionCategory,'REFERENCE_PERSON_RESTRICTED');assert.equal(job.status,'FAILED');assert.equal(job.providerJobId,undefined);assert.deepEqual(state.creditSettlements.map(row=>row.outcome),['RELEASE']);
+      for(const token of['PRIVATE_PROMPT','https://private.invalid','message'])assert(!JSON.stringify(job.response.submissionDiagnostic).includes(token));
+      const view=await state.jobs.get.handler(state.ctx,{jobId:state.jobId});assert(!JSON.stringify(view).includes('REFERENCE_PERSON_RESTRICTED'));await worker.run.handler(state.workerCtx,{jobId:state.jobId});assert.equal(requests.length,1);
+    });
+  });
   await check('actual 400 rejection invokes financial RELEASE and cannot automatically POST again', async () => {
     await withTransport(400, async requests => {
       const state = await fixture();
