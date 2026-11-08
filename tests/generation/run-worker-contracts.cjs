@@ -44,6 +44,11 @@ try {
     assert.equal(result.request.videoType, 'CINEMATIC_FILM');
     for (const secret of ['private-key', 'private prompt', 'https://private', 'secret-lease', 'private-hash', 'private-budget']) assert.ok(!JSON.stringify(result).includes(secret));
   });
+  check('a confirmed reference-policy rejection shows fixed safe guidance without exposing the private diagnostic or altering history',()=>{
+    const job={_id:'rejected',status:'FAILED',operation:'SHOT_GENERATION',errorCode:'INVALID_REQUEST',response:{submissionDiagnostic:{version:1,httpStatus:400,rejectionCategory:'REFERENCE_PERSON_RESTRICTED',requestId:'req_private123456',raw:'SECRET'},private:'SECRET'}};
+    const view=policy.publicJob(job);assert.match(view.errorMessage,/rejected a face/);assert.match(view.errorMessage,/fictional/);assert.equal(view.errorCode,'INVALID_REQUEST');assert(!JSON.stringify(view).includes('req_private'));assert(!JSON.stringify(view).includes('SECRET'));assert(!JSON.stringify(view).includes('REFERENCE_PERSON_RESTRICTED'));assert.equal(job.response.submissionDiagnostic.raw,'SECRET');
+    assert.equal(policy.publicJob({...job,status:'COMPLETED'}).errorMessage,undefined);assert.doesNotMatch(policy.publicJob({...job,status:'PROCESSING'}).errorMessage,/rejected a face/);assert.doesNotMatch(policy.publicJob({...job,providerJobId:'accepted',errorCode:'RECONCILIATION_REQUIRED'}).errorMessage,/rejected a face/);
+  });
   check('a completed job from an earlier revision does not surface its old transient probe failure', () => {
     const result = policy.publicJob({ _id: 'job', status: 'COMPLETED', errorCode: 'MEDIA_PROBE_UNAVAILABLE', response: { assetId: 'asset' } });
     assert.equal(result.assetId, 'asset');

@@ -59,6 +59,7 @@ export function safeGenerationError(code: string, preparation = false, active = 
       ? 'Your video is saved. FinalFrame will check it when the renderer is free.'
       : 'Your video is saved. FinalFrame will retry its technical checks shortly.';
   }
+  if (code === 'REFERENCE_POLICY_REJECTED') return 'The video provider rejected a face in this reference image. This can also affect fictional characters. Your image and plan are saved; this route will not retry automatically. A compatible reference route needs review.';
   if (code === 'INVALID_REQUEST') return 'This take’s media or settings could not be submitted. Review the inputs before creating another take.';
   return 'This take could not finish. Your project and approved takes are safe.';
 }
@@ -119,6 +120,8 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
 export function publicJob(job: Record<string, unknown>) {
   const request = object(job.request);
   const status = String(job.status || 'QUEUED');
+  const diagnostic=object(object(job.response).submissionDiagnostic);
+  const referencePolicyRejected=status==='FAILED'&&job.operation==='SHOT_GENERATION'&&job.errorCode==='INVALID_REQUEST'&&diagnostic.version===1&&[400,422].includes(Number(diagnostic.httpStatus))&&diagnostic.rejectionCategory==='REFERENCE_PERSON_RESTRICTED';
   const keys = ['_id', 'shotId', 'shotVersionId', 'productionId', 'projectId', 'status', 'executionStage', 'progress', 'provider', 'model', 'modelVersion', 'estimatedCost', 'estimatedProviderCostUsd', 'providerCostUsd', 'attemptCount', 'createdAt', 'updatedAt', 'completedAt', 'correlationId', 'providerJobId', 'providerRequestId', 'latencyMs', 'operation', 'capability', 'modality'];
   return {
     _id: job._id,
@@ -130,7 +133,7 @@ export function publicJob(job: Record<string, unknown>) {
     progress: typeof job.progress === 'number' ? job.progress : 0,
     model: typeof job.model === 'string' ? job.model : '',
     errorCode: status !== 'COMPLETED' && typeof job.errorCode === 'string' ? job.errorCode : undefined,
-    errorMessage: status !== 'COMPLETED' && typeof job.errorCode === 'string' ? safeGenerationError(job.errorCode, job.operation === 'PREPARATION', !GENERATION_TERMINAL.has(status)) : undefined,
+    errorMessage: status !== 'COMPLETED' && typeof job.errorCode === 'string' ? safeGenerationError(referencePolicyRejected?'REFERENCE_POLICY_REJECTED':job.errorCode, job.operation === 'PREPARATION', !GENERATION_TERMINAL.has(status)) : undefined,
     ...(request.preparationKind==='MUSIC'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds),nominalDurationSeconds:30}:{}),
     ...(request.preparationKind==='SFX'&&typeof object(job.response).actualDurationSeconds==='number'?{actualDurationSeconds:Number(object(job.response).actualDurationSeconds)}:{}),
     assetId: typeof object(job.response).assetId === 'string' ? String(object(job.response).assetId) : undefined,
