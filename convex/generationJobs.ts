@@ -306,6 +306,9 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
     const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
     normalizedRequest.referenceContract = validated.selection.referenceContract;
+    // Never accept a browser-authored output certificate. Canonical routing
+    // derives the exact native grid before hashing the reviewed estimate.
+    normalizedRequest.expectedNativeOutput = validated.selection.expectedNativeOutput;
     if (operation === 'UPSCALE') {
       if (!validated.selection.upscaleQuote) throw new Error('Upscale pricing certification is unavailable.');
       normalizedRequest.upscaleQuote = validated.selection.upscaleQuote;
@@ -577,6 +580,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
         if (stable(source) !== stable(request.editSource) || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Edit source or catalog certification changed.');
       }
       const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
+      if (request.expectedNativeOutput !== undefined && stable(current.selection.expectedNativeOutput) !== stable(request.expectedNativeOutput)) throw new Error('The frozen native output certificate changed.');
       if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
       if (isSourceVideoEdit(request.operation) && stable(current.selection.editQuote) !== stable(request.editQuote)) throw new Error('The frozen video edit pricing certificate changed.');
       if (request.operation === 'LIP_SYNC' && stable(current.selection.lipSyncQuote) !== stable(request.lipSyncQuote)) throw new Error('The frozen lip-sync pricing certificate changed.');

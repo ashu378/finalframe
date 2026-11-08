@@ -111,10 +111,24 @@ export interface VideoRouteSelection {
     resolution?: string;
     policyVersion?: number;
     referenceContract?: VideoReferenceContract;
+    expectedNativeOutput?: NativeVideoOutputCertificate;
     upscaleQuote?: UpscaleQuoteCertificate;
     editQuote?: VideoEditQuoteCertificate;
     continuationQuote?: ContinuationQuoteCertificate;
     lipSyncQuote?: LipSyncQuoteCertificate;
+}
+
+/** Frozen before purchase. Nominal resolution labels are not pixel dimensions:
+ * a provider's square 480p output can legitimately be 640x640. */
+export interface NativeVideoOutputCertificate {
+    version: 'NATIVE_VIDEO_OUTPUT_V1';
+    modelId: string;
+    canonicalSlug: string;
+    catalogQuoteFingerprint: string;
+    requestedAspectRatio: string;
+    resolution: string;
+    width: number;
+    height: number;
 }
 
 export function buildVideoRouteMetadata(
@@ -131,6 +145,7 @@ export function buildVideoRouteMetadata(
         model: selection.modelId,
         policyVersion: selection.policyVersion,
         ...(selection.referenceContract ? {referenceContract:selection.referenceContract} : {}),
+        ...(selection.expectedNativeOutput ? {expectedNativeOutput:selection.expectedNativeOutput} : {}),
         modelVersion: options.modelVersion,
         estimatedProviderCostUsd: selection.estimatedCostUsd,
         ...(selection.upscaleQuote ? { upscaleQuote: selection.upscaleQuote } : {}),
@@ -410,6 +425,15 @@ export function resolveVideoOutputSize(model: Pick<VideoModelCapabilities, 'mode
     return {...exact[0],resolution:selected.label};
 }
 
+export function certifyNativeVideoOutput(model: VideoModelCapabilities, request: VideoRoutingRequest): NativeVideoOutputCertificate | undefined {
+    const operation = request.operation || request.task;
+    if (!['GENERATE', 'FRAME_TO_VIDEO'].includes(operation) || !model.canonicalSlug) return undefined;
+    const size = resolveVideoOutputSize(model, request.aspectRatio, request.resolution);
+    if (!size) return undefined;
+    return { version: 'NATIVE_VIDEO_OUTPUT_V1', modelId: model.modelId, canonicalSlug: model.canonicalSlug,
+        catalogQuoteFingerprint: videoCatalogQuoteFingerprint(model), requestedAspectRatio: request.aspectRatio, ...size };
+}
+
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
     if ((request.operation || request.task) === 'LIP_SYNC') return quoteSuppliedAudioAvatar(model, request)?.costUsd;
     if ((request.operation || request.task) === 'UPSCALE') return quoteVideoUpscale(model, request)?.costUsd;
@@ -548,6 +572,7 @@ export function selectVideoRoute(
     });
     const { model: selected, request: selectedRequest } = ordered[0];
     const preference = preferred.includes(selected.modelId) ? 'administrator preference' : request.qualityTier === 'PREMIUM' ? 'highest quality tier among eligible models' : 'lowest-cost eligible model';
+    const expectedNativeOutput = certifyNativeVideoOutput(selected, selectedRequest);
     return {
         provider: selected.provider,
         modelId: selected.modelId,
@@ -557,6 +582,7 @@ export function selectVideoRoute(
         resolution: selectedRequest.resolution,
         policyVersion: policy?.updatedAt,
         ...(selectedRequest.hasImageReferences || selectedRequest.hasAudioReference ? {referenceContract:getReviewedVideoReferenceContract(selected.modelId,selected.canonicalSlug)} : {}),
+        ...(expectedNativeOutput ? {expectedNativeOutput} : {}),
         ...(selectedRequest.operation === 'UPSCALE' ? { upscaleQuote: quoteVideoUpscale(selected, selectedRequest) } : {}),
         ...(selected.modelId === 'black-forest-labs/flux-video-edit' ? { editQuote: quoteVideoEdit(selected, selectedRequest) } : {}),
         ...((selectedRequest.operation || selectedRequest.task) === 'EXTEND' ? { continuationQuote: quoteVideoContinuation(selected, selectedRequest) } : {}),

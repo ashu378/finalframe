@@ -22,7 +22,7 @@ export function safeRenderError(code?: string) {
 export function publicRenderJob<T extends Record<string, unknown>>(job: T) {
   const { leaseId: _lease, leaseExpiresAt: _leaseExpiry, dispatchLeaseId: _dispatchLease, dispatchLeaseExpiresAt: _dispatchExpiry, dispatchPayload: _payload, callbackIdempotencyKey: _callbackKey, ...safe } = job;
   void _lease; void _leaseExpiry; void _dispatchLease; void _dispatchExpiry; void _payload; void _callbackKey;
-  return { ...safe, errorMessage: safeRenderError(typeof job.errorCode === 'string' ? job.errorCode : undefined) };
+  return { ...safe, errorCode: job.status === 'COMPLETED' ? undefined : job.errorCode, errorMessage: job.status === 'COMPLETED' ? undefined : safeRenderError(typeof job.errorCode === 'string' ? job.errorCode : undefined) };
 }
 export function dispatchCanRun(job: { status: string; executionStage?: string; acceptedAt?: number; nextDispatchAt?: number; dispatchLeaseExpiresAt?: number }, timestamp: number) {
   if (RENDER_TERMINAL.has(job.status) || job.acceptedAt !== undefined || ['AWAITING_CALLBACK', 'RECONCILIATION_REQUIRED', 'NEEDS_ATTENTION'].includes(job.executionStage || '')) return false;

@@ -58,6 +58,7 @@ const actions = load('src/lib/production/episode-actions.ts', {
   '../../../convex/_generated/api': { api: { projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode', changeContinuityMode: 'changeRelationship' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
   '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value, VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'CINEMATIC_FILM', 'MOTION_GRAPHICS', 'PRODUCT_SAAS_LAUNCH'] },
   '../../../renderer/src/output-presets': outputPresets,
+  './plan-settings': load('src/lib/production/plan-settings.ts',{'../../../renderer/src/output-presets':outputPresets}),
 });
 function all(element) {
   if (!element || typeof element !== 'object') return [];
@@ -87,6 +88,14 @@ function all(element) {
   savedPlan = null; savedVersion = null; delete recent.projectType;
   assert.equal((await actions.getSelectedProductionDefaults(project.externalId, recent._id)).videoType, project.projectType);
   console.log('PASS draft revisit retains selected type, approved production type remains authoritative, invalid and foreign-plan inputs cannot override it');
+  const originalSettings={...recent};Object.assign(recent,{requestedDurationSeconds:8,outputPreset:'CINEMA',inputMode:'SCRIPT',language:'en'});
+  savedPlan={_id:'selected-draft',productionId:recent._id,input:{requestedDurationSeconds:30,outputPreset:'VERTICAL',mode:'IDEA',workflow:'COMEDY',language:'pcm',prompt:'Exact thirty-second retained idea.',videoType:'CINEMATIC_FILM'}};savedVersion={status:'DRAFT',sourcePlanId:'selected-draft'};
+  const thirty=await actions.getSelectedProductionDefaults(project.externalId,recent._id);assert.deepEqual([thirty.durationSeconds,thirty.outputPreset,thirty.mode,thirty.language,thirty.brief],[30,'VERTICAL','IDEA','pcm','Exact thirty-second retained idea.']);assert.equal(recent.requestedDurationSeconds,8);assert.equal(recent.outputPreset,'CINEMA');calls=[];
+  const next=await actions.createProjectEpisode({projectExternalId:project.externalId,episodeNumber:3,title:'Explicit next',durationSeconds:8,sourceProductionId:recent._id});assert.equal(next.success,true);const created=calls.find(c=>c.reference==='createEpisode').args;assert.equal(created.outputPreset,'VERTICAL');assert.equal(created.inputMode,'IDEA');assert.equal(created.language,'pcm');
+  savedVersion.status='APPROVED';const approvedSettings=await actions.getSelectedProductionDefaults(project.externalId,recent._id);assert.equal(approvedSettings.durationSeconds,8);assert.equal(approvedSettings.outputPreset,'CINEMA');savedVersion.status='DRAFT';savedVersion.sourcePlanId='different-plan';assert.equal((await actions.getSelectedProductionDefaults(project.externalId,recent._id)).durationSeconds,8);savedVersion.sourcePlanId='selected-draft';savedPlan.input.outputPreset='invalid';await assert.rejects(actions.getSelectedProductionDefaults(project.externalId,recent._id),/conflicting|unsupported/);
+  Object.assign(recent,originalSettings);savedPlan=null;savedVersion=null;calls=[];
+  console.log('PASS selected draft retains30-second vertical intent over legacy8-second cinema defaults, New episode inherits it, and mismatched/invalid draft settings cannot override approved defaults');
+
   foreign = true;
   assert.equal(await actions.getSelectedProductionDefaults(project.externalId, recent._id), null);
   const denied = await actions.createProjectEpisode({ projectExternalId: project.externalId, episodeNumber: 3, title: 'Next', durationSeconds: 15, sourceProductionId: recent._id });
@@ -144,6 +153,7 @@ function all(element) {
     '@/lib/production/actions': { createDirectorPlan: async intent => { captured = intent; return { success: false, error: 'Captured fixture intent.' }; } },
     '@/lib/ai/video-routing': { VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'MOTION_GRAPHICS'], VIDEO_TYPE_LABELS: { ANIMATED_COMEDY_2D: 'Comedy', MOTION_GRAPHICS: 'Motion graphics' } },
     '../../../renderer/src/output-presets': outputPresets,
+  './plan-settings': load('src/lib/production/plan-settings.ts',{'../../../renderer/src/output-presets':outputPresets}),
   }).CreateProductionForm;
   const props = { studioId: 'studio-one', existingProjectId: project.externalId, productionId: recent._id, productionDefaults: defaults, initialMode: 'AD', templateDefaults: catalog.getStarterTemplate('music-montage') };
   const render = () => { cell = 0; return form(props); };
@@ -195,6 +205,7 @@ function all(element) {
     '@/components/ui/button': { Button: () => null },
     '@/lib/production/episode-actions': { createProjectEpisode: async value => { submittedEpisode = value; return { success: true, productionId: 'new-production' }; }, changeProjectEpisodeRelationship: async value => { submittedRelationship = value; return { success: true, requiresNewPlan: true }; } },
     '../../../renderer/src/output-presets': outputPresets,
+  './plan-settings': load('src/lib/production/plan-settings.ts',{'../../../renderer/src/output-presets':outputPresets}),
   }).EpisodePicker;
   const pickerOption = { productionId: recent._id, title: 'Older source', settingsSupported: false };
   const renderPicker = () => { pickerCell = 0; return all(Picker({ projectExternalId: project.externalId, options: [pickerOption], selectedProductionId: recent._id, nextEpisodeNumber: 3 })); };

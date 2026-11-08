@@ -63,7 +63,7 @@ export function safeGenerationError(code: string, preparation = false, active = 
   return 'This take could not finish. Your project and approved takes are safe.';
 }
 
-export function validateMediaProbe(value: unknown, request: Record<string, unknown>) {
+export function validateMediaProbe(value: unknown, request: Record<string, unknown>, expectedModelId?: string) {
   const probe = object(value);
   const duration = Number(probe.durationSeconds);
   const width = Number(probe.width);
@@ -81,7 +81,18 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   const resolution = typeof constraints.resolution === 'string' ? constraints.resolution.toLowerCase() : '';
   const dimensions = /^(\d+)x(\d+)$/.exec(resolution);
   const expectedShortEdge = dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : ({ '4k': 2160, '2k': 1440 } as Record<string, number>)[resolution] || (/^\d+p$/.test(resolution) ? Number.parseInt(resolution, 10) : 0);
-  if (expectedShortEdge && Math.abs(Math.min(width, height) - expectedShortEdge) > Math.max(8, expectedShortEdge * 0.05)) throw new Error('MEDIA_VALIDATION_FAILED');
+  const nativeOutput = object(request.expectedNativeOutput);
+  if (request.expectedNativeOutput !== undefined) {
+    // The certificate is persisted by the canonical quote, never reconstructed
+    // from today's catalog after a provider has already accepted a job.
+    if (!['GENERATE','FRAME_TO_VIDEO'].includes(String(request.operation || request.task)) ||
+      nativeOutput.version !== 'NATIVE_VIDEO_OUTPUT_V1' || !expectedModelId || nativeOutput.modelId !== expectedModelId ||
+      typeof nativeOutput.canonicalSlug !== 'string' || !nativeOutput.canonicalSlug ||
+      typeof nativeOutput.catalogQuoteFingerprint !== 'string' || !nativeOutput.catalogQuoteFingerprint ||
+      nativeOutput.requestedAspectRatio !== request.ratio || nativeOutput.resolution !== request.resolution ||
+      !Number.isInteger(nativeOutput.width) || !Number.isInteger(nativeOutput.height) ||
+      nativeOutput.width !== width || nativeOutput.height !== height) throw new Error('MEDIA_VALIDATION_FAILED');
+  } else if (expectedShortEdge && Math.abs(Math.min(width, height) - expectedShortEdge) > Math.max(8, expectedShortEdge * 0.05)) throw new Error('MEDIA_VALIDATION_FAILED');
   if (request.operation === 'UPSCALE') {
     const source = object(request.upscaleSource);
     const quote = object(request.upscaleQuote);

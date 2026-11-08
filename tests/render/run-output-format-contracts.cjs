@@ -70,6 +70,24 @@ function fixture(codec = 'h264', format = 'MP4', mimeType = 'video/mp4', version
 let checks = 0;
 async function check(name, work) { await work(); checks++; console.log(`PASS ${name}`); }
 (async () => {
+  await check('successful bounded retry clears current failure while preserving attempt receipts and completed legacy projections stay truthful', async () => {
+    const state = fixture();
+    await state.call(state.jobs.applyRendererCallback, {...state.args, event:'FAILED',eventType:'render.failed',eventId:'first-failure',retryable:true,errorCode:'RENDER_HANDOFF_REJECTED'});
+    assert.equal(state.rows.get('job').status,'RETRYING');
+    assert.equal(state.rows.get('job').errorCode,'RENDER_HANDOFF_REJECTED');
+    // Isolate the next accepted worker transport; exercise the real callback,
+    // completion and query handlers rather than purchasing or rendering media.
+    Object.assign(state.rows.get('job'),{status:'SUBMITTED',leaseId:'second-lease',leaseExpiresAt:state.time+300000,dispatchAttempt:2,callbackIdempotencyKey:'second-attempt-callback'});
+    const completed={...state.args,eventId:'second-completion',attempt:2,leaseId:'second-lease',idempotencyKey:'second-attempt-callback'};
+    await state.call(state.jobs.applyRendererCallback,completed);
+    const job=state.rows.get('job');assert.equal(job.status,'COMPLETED');assert.equal(job.errorCode,undefined);assert.equal(job.errorMessage,undefined);
+    const receipts=[...state.rows.values()].filter(r=>r.table==='renderCallbackReceipts');assert.equal(receipts.length,2);assert(receipts.every(r=>r.status==='APPLIED'));assert(receipts.some(r=>r.eventType==='render.failed'&&r.attempt===1));
+    assert.equal((await state.call(state.jobs.getStatus,{jobId:'job'})).export.downloadUrl,'https://local.invalid/original-export');
+    Object.assign(job,{errorCode:'RENDER_HANDOFF_REJECTED',errorMessage:'legacy private failure'});
+    const status=await state.call(state.jobs.getStatus,{jobId:'job'});assert.equal(status.job.errorCode,undefined);assert.equal(status.job.errorMessage,undefined);
+    assert.equal((await state.call(state.jobs.applyRendererCallback,completed)).duplicate,true);assert.equal(state.rows.get('job').errorCode,'RENDER_HANDOFF_REJECTED','receipt replay does not rewrite historical rows');
+    await assert.rejects(state.call(state.jobs.applyRendererCallback,{...state.args,eventId:'late-failure',event:'FAILED',eventType:'render.failed'}));assert.equal(state.rows.get('job').status,'COMPLETED');
+  });
   await check('actual completion and download handlers accept all three canonical formats in v4/v5', async () => {
     for (const version of [4, 5]) for (const [codec, format, mimeType] of [['h264', 'MP4', 'video/mp4'], ['vp9', 'WEBM', 'video/webm'], ['prores', 'MOV', 'video/quicktime']]) {
       const state = fixture(codec, format, mimeType, version);

@@ -119,7 +119,7 @@ export const run = internalAction({
         throw Object.assign(new Error('Media validation service failed.'), { code });
       }
       let technicalProbe;
-      try { technicalProbe = validateMediaProbe(await probeResponse.json(), request); }
+      try { technicalProbe = validateMediaProbe(await probeResponse.json(), request, job.model); }
       catch { throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' }); }
       await ctx.runMutation(jobs.succeed, { ...lease, assetId, technicalProbe });
     } catch (error) {

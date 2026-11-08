@@ -1,3 +1,4 @@
+import { freezePlanSettings, readPlanSettings, requirePlanDuration } from '../src/lib/production/plan-settings';
 import { mutation, query } from "./_generated/server";
 import { v, type Infer } from "convex/values";
 import { requireCastReadiness, proposedCast, castPlanShots } from "./castReadiness";
@@ -243,7 +244,7 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
     const access = await requireProjectRole(ctx, project._id, ["OWNER", "EDITOR"]);
     await validatePlanGraph(ctx, project._id, args.plan);
 
-    const sourceInput = {...record(args.input)};
+    const sourceInput = freezePlanSettings(args.input,args);
     if (sourceInput.castBindingReview && !privateBinding) throw new Error("RECIPE_CAST_BINDING_CHANGED");
     let production = await selectProjectProduction(ctx, project, args.productionId);
     const requestedVideoType=planningVideoType(sourceInput,production?.projectType??project.projectType);
@@ -271,13 +272,9 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
     } else if (production.projectId && production.projectId !== project._id) {
       throw new Error("Production does not belong to this project");
     } else {
-      await ctx.db.patch(production._id, {
-        projectId: project._id,
-        projectType: production.projectType ?? project.projectType,
-        plannedDurationSeconds: args.durationSeconds,
-        updatedAt: now(),
-      });
-      production = await ctx.db.get(production._id);
+      // Identity backfill is additive; draft/replay must not rewrite the
+      // settings still used by an earlier approved current version.
+      if(!production.projectId||!production.projectType){await ctx.db.patch(production._id, {projectId:project._id,projectType:production.projectType??project.projectType});production=await ctx.db.get(production._id);}
     }
     if (!production) throw new Error("Unable to create production");
 
@@ -334,7 +331,7 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
     if (!createdPlan) throw new Error("Unable to create production plan");
     const version = await ensureDraftVersion(ctx, production, createdPlan, idempotencyKey, timestamp);
     if (version) await materializeApprovedPlan(ctx, production, version, createdPlan);
-    await ctx.db.patch(production._id, { currentPlanId: planId, status: "PLANNING", updatedAt: timestamp });
+    await ctx.db.patch(production._id, { plannedDurationSeconds:args.durationSeconds,currentPlanId: planId, status: "PLANNING", updatedAt: timestamp });
     return { productionId: production._id, planId, versionId: version?._id, estimate: args.estimate };
 }
 export const createPlan = mutation({ args: createPlanArgs, returns: v.any(), handler: (ctx, args) => createCanonicalPlan(ctx, args) });
@@ -362,7 +359,8 @@ export const approvePlan = mutation({
     await validatePlanGraph(ctx, production.projectId, snapshot);
     await requireCastReadiness(ctx, production.projectId, snapshot, version.planningContextSnapshot);
     const planningInput = record(planRecord.input);
-    if(await automaticPlanningReceipt(ctx,production.projectId,planningInput,await castReceiptAuthor(ctx,planRecord))){await validateAutomaticVideoPlan(ctx,access.project,planningInput,production.outputPreset,production.requestedDurationSeconds,snapshot,production._id,version.planningContextSnapshot);}
+    const settings=readPlanSettings(planningInput,production);requirePlanDuration(snapshot,settings);
+    if(await automaticPlanningReceipt(ctx,production.projectId,planningInput,await castReceiptAuthor(ctx,planRecord))){await validateAutomaticVideoPlan(ctx,access.project,planningInput,settings.outputPreset,settings.requestedDurationSeconds,snapshot,production._id,version.planningContextSnapshot);}
     const bibleId = typeof planningInput.continuityBibleId === "string" ? ctx.db.normalizeId("continuityBibles", planningInput.continuityBibleId) : null;
     const currentContinuity = await resolvePlanningContinuity(ctx, production.projectId, production._id, bibleId ?? undefined,String(planningInput.prompt??planningInput.script??'').slice(0,256));
     if (fingerprint(currentContinuity) !== fingerprint(version.planningContextSnapshot ?? null)) throw new Error("Continuity changed. Create a new draft before approving this plan.");
@@ -378,7 +376,7 @@ export const approvePlan = mutation({
     });
     await materializeApprovedPlan(ctx, production, { ...version, status: "APPROVED", approvedAt: timestamp }, { ...planRecord, plan: snapshot });
     await ctx.db.patch(planRecord._id, { status: "APPROVED", plan: snapshot, approval: { ...record(planRecord.approval), state: "APPROVED", idempotencyKey: key, approvedAt: timestamp }, approvedAt: timestamp, updatedAt: timestamp });
-    await ctx.db.patch(production._id, { projectType:planningVideoType(planningInput,production.projectType), status: "APPROVED", currentPlanId: planRecord._id, currentVersionId: version._id, updatedAt: timestamp });
+    await ctx.db.patch(production._id, { requestedDurationSeconds:settings.requestedDurationSeconds,plannedDurationSeconds:settings.requestedDurationSeconds,workflow:settings.workflow,inputMode:settings.mode,language:settings.language,outputPreset:settings.outputPreset,projectType:planningVideoType(planningInput,production.projectType), status: "APPROVED", currentPlanId: planRecord._id, currentVersionId: version._id, updatedAt: timestamp });
     return { productionId: production._id, versionId: version._id };
   },
 });
@@ -497,6 +495,7 @@ export const rebindDraftContinuity = mutation({
     if(!cast.length||mapping.size!==cast.length||args.castAssignments.length!==cast.length||cast.some(item=>!mapping.has(item.key)))throw new Error('RECIPE_CAST_REFERENCES_REQUIRED');
     const selections=new Map(args.shotAssignments.map(item=>[String(item.shotId),item]));
     if(selections.size!==scope.shots.length||args.shotAssignments.length!==scope.shots.length||scope.shots.some(shot=>!selections.has(String(shot._id))))throw new Error('RECIPE_CAST_REFERENCES_REQUIRED');
+    const settings=readPlanSettings(scope.plan.input,scope.production);requirePlanDuration(scope.snapshot,settings);
     const context=await resolvePlanningContinuity(ctx,args.projectId,args.productionId,args.continuityBibleId,String(record(scope.plan.input).prompt??record(scope.plan.input).script??'').slice(0,256));
     const snapshot=JSON.parse(JSON.stringify(scope.snapshot));const planned=castPlanShots(snapshot);
     if(planned.length!==scope.shots.length)throw new Error('RECIPE_CAST_BINDING_CHANGED');
@@ -517,7 +516,7 @@ export const rebindDraftContinuity = mutation({
     const input={...record(scope.plan.input)};const originalCreator=await castReceiptAuthor(ctx,scope.plan);
     const receipt=await automaticPlanningReceipt(ctx,args.projectId,input,originalCreator);
     const timestamp=now();input.continuityBibleId=args.continuityBibleId;input.continuityContext=context;input.castBindingReview={version:1,requestHash,sourcePlanId:scope.plan._id,sourceVersionId:scope.version._id,sourceSnapshotHash:args.expectedSnapshotHash,sourceBibleId:record(scope.plan.input).continuityBibleId??null,selectedBibleId:args.continuityBibleId,actorUserId:access.user._id,createdAt:timestamp};
-    const made=await createCanonicalPlan(ctx,{studioExternalId:access.project.studioExternalId,projectExternalId:access.project.externalId,productionId:args.productionId,workflow:scope.production.workflow,inputMode:scope.production.inputMode,durationSeconds:scope.production.requestedDurationSeconds,language:scope.production.language,outputPreset:scope.production.outputPreset,input,plan:snapshot,estimate:scope.plan.estimate,idempotencyKey:key},{receiptCreatorUserId:receipt?.createdByUserId??originalCreator});
+    const made=await createCanonicalPlan(ctx,{studioExternalId:access.project.studioExternalId,projectExternalId:access.project.externalId,productionId:args.productionId,workflow:settings.workflow,inputMode:settings.mode,durationSeconds:settings.requestedDurationSeconds,language:settings.language,outputPreset:settings.outputPreset,input,plan:snapshot,estimate:scope.plan.estimate,idempotencyKey:key},{receiptCreatorUserId:receipt?.createdByUserId??originalCreator});
     await ctx.db.insert('audit',{studioExternalId:access.project.studioExternalId,studioId:access.project.studioId,actorUserId:access.user._id,action:'PRODUCTION_CAST_BOUND',entityType:'directorPlan',entityId:made.planId,correlationId:`cast-binding:${made.planId}`,metadata:{projectId:args.projectId,productionId:args.productionId,sourcePlanId:scope.plan._id,sourceVersionId:scope.version._id,requestHash,receiptId:record(input.planningReceipt).requestId??null,receiptCreatorUserId:receipt?.createdByUserId??null,castAssignments:args.castAssignments,shotAssignments:args.shotAssignments},createdAt:timestamp});
     await ctx.db.patch(scope.plan._id,{status:'SUPERSEDED',updatedAt:timestamp});await ctx.db.patch(scope.version._id,{status:'SUPERSEDED',updatedAt:timestamp});
     return{...made,replayed:false};

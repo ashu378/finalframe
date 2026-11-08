@@ -38,7 +38,7 @@ function plan(){return {summary:'An original thirty-second test story.',workflow
   ctx.rows.delete('catalog');assert.equal((await ctx.call('planningVideo','constraints',args)).mode,'RENDERER');
   await assert.rejects(ctx.call('planningVideo','constraints',{...args,asOf:Date.now()-31000}),/expired/);
   await assert.rejects(ctx.call('planningVideo','constraints',{...args,input:{...args.input,videoType:'invented-recipe'}}),/supported video recipe/);
-  const made=await ctx.call('productions','createPlan',{studioExternalId:'studio',projectExternalId:'external-project',productionId:'production',workflow:'SHORT_FILM',inputMode:'SCRIPT',durationSeconds:30,language:'en',outputPreset:'LANDSCAPE',input:args.input,plan:plan(),estimate:{},idempotencyKey:'changed-production-type'});
+  const made=await ctx.call('productions','createPlan',{studioExternalId:'studio',projectExternalId:'external-project',productionId:'production',workflow:'SHORT_FILM',inputMode:'SCRIPT',durationSeconds:30,language:'en',outputPreset:'LANDSCAPE',input:{...args.input,mode:'SCRIPT'},plan:plan(),estimate:{},idempotencyKey:'changed-production-type'});
   assert.equal(ctx.rows.get(made.planId).input.videoType,'MOTION_GRAPHICS');assert.notEqual(ctx.rows.get('production').projectType,'MOTION_GRAPHICS','Draft must not rewrite the earlier approved production type');
   process.env.FINALFRAME_RECIPE_ENABLED='true';assert.equal((await ctx.call('recipeWorkspace','get',{productionId:'production'})).videoType,'MOTION_GRAPHICS');
   await ctx.call('productions','approvePlan',{planId:made.planId});assert.equal(ctx.rows.get('production').projectType,'MOTION_GRAPHICS');assert.equal(ctx.rows.get('project').projectType,'CINEMATIC_FILM');

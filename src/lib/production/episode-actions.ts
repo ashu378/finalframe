@@ -7,6 +7,7 @@ import type { Doc, Id } from '../../../convex/_generated/dataModel';
 import { normalizeVideoType, VIDEO_TYPES, type VideoType } from '@/lib/ai/video-routing';
 import { parseStartingMode } from '@/lib/templates/catalog';
 import type { OutputPreset, ProductionInputMode, ProductionWorkflow } from '@/lib/types/database';
+import { readPlanSettings } from './plan-settings';
 import { normalizeOutputPresetId } from '../../../renderer/src/output-presets';
 
 export interface EpisodeSettings {
@@ -56,18 +57,21 @@ export async function getSelectedProductionDefaults(projectExternalId: string, p
     const selected = await selectedProductionWorkspace(projectExternalId, productionId);
     if (!selected) return null;
     const { project, workspace, production } = selected;
-    const mode = parseStartingMode(production.inputMode);
-    const workflow = production.workflow as ProductionWorkflow;
-    const outputPreset = production.outputPreset === 'SOCIAL_VERTICAL' ? 'SOCIAL_VERTICAL' : normalizeOutputPresetId(production.outputPreset)!;
-    if (!mode || !supportedSettings(production) || !Number.isFinite(production.requestedDurationSeconds) || production.requestedDurationSeconds < 4 || production.requestedDurationSeconds > 60) throw new UnsupportedSettingsError('This older production needs explicit settings. Return to its workspace, choose New episode, then choose its mode, workflow, format, and language.');
-    const selectedPlan = workspace.plan?.productionId === production._id ? workspace.plan : null;
+    const candidatePlan = workspace.plan?.productionId === production._id ? workspace.plan : null;
+    const selectedPlan=candidatePlan&&(!workspace.version?.sourcePlanId||workspace.version.sourcePlanId===candidatePlan._id)?candidatePlan:null;
     const input = selectedPlan?.input;
     const savedInput = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+    const isDraft=workspace.version?.status==='DRAFT'&&selectedPlan&&(!workspace.version.sourcePlanId||workspace.version.sourcePlanId===selectedPlan._id);
+    let settings;try{settings=isDraft?readPlanSettings(savedInput,production):readPlanSettings({},production);}catch{throw new UnsupportedSettingsError('This draft has conflicting or unsupported settings. Review its selected duration, mode, workflow, format and language.');}
+    const mode = parseStartingMode(settings.mode);
+    const workflow = settings.workflow as ProductionWorkflow;
+    const outputPreset = settings.outputPreset === 'SOCIAL_VERTICAL' ? 'SOCIAL_VERTICAL' : normalizeOutputPresetId(settings.outputPreset)!;
+    if (!mode || !supportedSettings({...settings,inputMode:settings.mode}) || settings.requestedDurationSeconds < 4) throw new UnsupportedSettingsError('This older production needs explicit settings. Return to its workspace, choose New episode, then choose its mode, workflow, format, and language.');
     const brief = mode === 'SCRIPT' ? savedInput.script : savedInput.prompt;
-    const draftVideoType = workspace.version?.status === 'DRAFT' && typeof savedInput.videoType === 'string' && (VIDEO_TYPES as readonly string[]).includes(savedInput.videoType) ? savedInput.videoType as VideoType : undefined;
+    const draftVideoType = isDraft && typeof savedInput.videoType === 'string' && (VIDEO_TYPES as readonly string[]).includes(savedInput.videoType) ? savedInput.videoType as VideoType : undefined;
     return {
         projectExternalId: project.externalId, productionId, studioExternalId: production.studioExternalId,
-        durationSeconds: production.requestedDurationSeconds, mode, workflow, language: production.language,
+        durationSeconds: settings.requestedDurationSeconds, mode, workflow, language: settings.language,
         outputPreset, videoType: draftVideoType ?? normalizeVideoType(production.projectType ?? project.projectType), brief: typeof brief === 'string' ? brief : '',
     };
 }
@@ -151,7 +155,8 @@ export async function createProjectEpisode(input: { projectExternalId: string; e
             if (!['IDEA', 'SCRIPT', 'VOICE', 'IMAGES', 'FOOTAGE', 'AD'].includes(input.settings.mode) || !supportedSettings({ ...input.settings, inputMode: input.settings.mode }) || !input.settings.outputPreset || input.settings.outputPreset !== 'SOCIAL_VERTICAL' && input.settings.outputPreset !== normalizeOutputPresetId(input.settings.outputPreset)) return { success: false as const, requiresSettings: true, error: 'Choose a supported mode, workflow, format, and language code (for example en, pcm, or fr) for this episode.' };
             settings = input.settings;
         } else {
-            const saved = selected?.production ?? { inputMode: navigation.inputMode, workflow: navigation.workflow, outputPreset: navigation.outputPreset, language: navigation.language };
+            const draftDefaults=selected?await getSelectedProductionDefaults(input.projectExternalId,selected.production._id):null;
+            const saved = draftDefaults?{inputMode:draftDefaults.mode,workflow:draftDefaults.workflow,outputPreset:draftDefaults.outputPreset,language:draftDefaults.language}:selected?.production ?? { inputMode: navigation.inputMode, workflow: navigation.workflow, outputPreset: navigation.outputPreset, language: navigation.language };
             if (!supportedSettings(saved)) throw new UnsupportedSettingsError();
             settings = { mode: parseStartingMode(saved.inputMode)!, workflow: saved.workflow as ProductionWorkflow, language: saved.language, outputPreset: saved.outputPreset === 'SOCIAL_VERTICAL' ? 'SOCIAL_VERTICAL' : normalizeOutputPresetId(saved.outputPreset)! };
         }

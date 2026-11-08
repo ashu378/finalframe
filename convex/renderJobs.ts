@@ -374,7 +374,7 @@ export const getStatus = query({
     const { job } = await authorizedJob(ctx, args.jobId);
     const exportRecord = (await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100)).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
     const downloadUrl = exportRecord?.storageId && exportRecord.status === "COMPLETED" ? await ctx.storage.getUrl(exportRecord.storageId) : undefined;
-    return { job: { _id: job._id, status: job.status, progress: job.progress, errorCode: job.errorCode, errorMessage: safeRenderError(job.errorCode), completedAt: job.completedAt, projectId: job.projectId, selectionScope: job.selectionScope, exportScope: job.exportScope }, export: exportRecord ? { ...exportRecord, downloadUrl } : null };
+    return { job: { _id: job._id, status: job.status, progress: job.progress, errorCode: job.status === "COMPLETED" ? undefined : job.errorCode, errorMessage: job.status === "COMPLETED" ? undefined : safeRenderError(job.errorCode), completedAt: job.completedAt, projectId: job.projectId, selectionScope: job.selectionScope, exportScope: job.exportScope }, export: exportRecord ? { ...exportRecord, downloadUrl } : null };
   },
 });
 
@@ -472,7 +472,7 @@ export const callback = internalMutation({
       const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100);
       if (!existing.length) await ctx.db.insert("exports", { studioExternalId: member.studio.externalId, studioId: member.studio._id, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: args.checksum ?? storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
       else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: args.checksum ?? storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });
-      await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+      await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", errorCode: undefined, errorMessage: undefined, dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     }
     return await ctx.db.get(job._id);
   },
@@ -572,7 +572,7 @@ export const applyRendererCallback = internalMutation({
     const existing = await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100);
     if (!existing.length) await ctx.db.insert("exports", { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, renderJobId: job._id, manifestId: job.manifestId, selectionScope: job.selectionScope, exportScope: job.exportScope, preset: job.preset, status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, createdAt: timestamp, completedAt: timestamp, downloadReadyAt: timestamp });
     else for (const exportRecord of existing) await ctx.db.patch(exportRecord._id, { status: "COMPLETED", progress: 100, storageId: args.storageId, checksum: storage.sha256, mimeType: args.mimeType ?? storage.contentType, completedAt: timestamp, downloadReadyAt: timestamp, errorMessage: undefined });
-    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", ...(requiredGraphics ? { errorCode: undefined, errorMessage: undefined } : {}), dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+    await ctx.db.patch(job._id, { status: "COMPLETED", progress: 100, providerJobId: args.rendererJobId ?? job.providerJobId, actualCost: args.actualCost, executionStage: "COMPLETED", errorCode: undefined, errorMessage: undefined, dispatchPayload: undefined, dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
     await ctx.db.patch(receiptId, { status: "APPLIED" });
     return { job: await ctx.db.get(job._id), duplicate: false };
   },
