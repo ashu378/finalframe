@@ -232,3 +232,16 @@ Last reconciled provider spending on 5 November was $8.950237512, with $0.188902
 - **Current blockers:** connected browser still reports local browser use disabled even after the owner's setting change and a connection refresh; ordinary creator/mobile/browser acceptance cannot be certified. Native Pidgin needs a fluent reviewer. A verified compatible realistic-face route or a separately approved preparation workflow is still required. No further reference purchase is authorized automatically by the rejection. All remaining release entries retain their prior open state.
 
 The provider usage recheck before the second rejection remained $8.950237512; earlier uncertainty of $0.188902 stays reserved. The first rejected hold was released and the application spend was unchanged. Refresh both ledgers before any later purchase. Redesign, email and payments remain deferred.
+
+### 10 November presenter take and ordinary review
+
+| Acceptance | Result | Evidence |
+|---|---|---|
+| Recurring blueprint readback | Pass for saved plan | Preview reopened the approved “A Clear Little Win” blueprint with five six-second vertical shots after reload. This plan retains the locked presenter and still needs creative generation and delivery. |
+| Realistic presenter reference | Technical pass; creative revision required | The separately authored eight-second compatibility episode used the same locked presenter reference. Full Veo 3.1 returned a silent 720×1280 H.264 clip at 24 fps for $1.584. The saved clip retained the presenter’s recognizable face, curls, glasses and teal shirt. The required closed notebook was open. The clip remains downloadable and is excluded from approved assembly. [Video probe](/home/ashuboris/.codex/artifacts/finalframe/functional-resume-2026-11-08/VEO-PROBE.json) |
+| Ordinary take review and provider feedback | Pass | Preview submitted the saved take for review and requested a revision with the exact prop issue. Online Convex confirmed `REVISION_REQUESTED`, an immutable approval event, and the original asset retained. The earlier failed Seedance take exposes safe face-policy feedback while keeping the provider category private. [Online readback](/home/ashuboris/.codex/artifacts/finalframe/functional-resume-2026-11-08/TAKE-REVIEW-20261110.json) |
+| Legacy production navigation | Fixed | “Make this episode” and older production links now open the canonical Takes workspace with the selected episode retained. That workspace provides real approval, revision, generation, and saved-media controls. The old screen used generation completion as its assembly-readiness signal. |
+
+Provider usage reconciled on 10 November at $10.534237512 across both keys, with $0.188902 held and $4.276860488 remaining under the $15 cumulative ceiling. The browser review and readback added zero paid requests. Four eight-second full Veo shots for a 30-second cut exceed the remaining authority at the verified $1.60 estimate per shot.
+
+Open acceptance includes authentic Pidgin review, cartoon lip sync, exact masked editing and performance transfer, the finished recurring presenter workflow, and the remaining fresh browser and creative matrix. The browser was available for the review above, then disconnected. Email, payments and visual redesign are separate phases.
