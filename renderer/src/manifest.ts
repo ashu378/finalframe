@@ -87,7 +87,10 @@ function baseValue(input: unknown): RenderManifest {
 function validateTemplateProps(value: unknown, path: string, depth = 0): ValidationIssue[] {
   if (depth > RENDER_LIMITS.maxPropsDepth) return [{ path, message: `must not exceed ${RENDER_LIMITS.maxPropsDepth} nested levels` }];
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return [];
-  if (typeof value === 'string') return isBoundedString(value) ? [] : [{ path, message: `string must be at most ${RENDER_LIMITS.maxStringLength} characters` }];
+  // Optional authored copy may deliberately be blank (for example an omitted
+  // end-card URL or a suppressed legacy eyebrow). Required title/feature and
+  // actual media URLs are validated separately; do not invent their defaults.
+  if (typeof value === 'string') return value.length <= RENDER_LIMITS.maxStringLength ? [] : [{ path, message: `string must be at most ${RENDER_LIMITS.maxStringLength} characters` }];
   if (Array.isArray(value)) {
     if (value.length > RENDER_LIMITS.maxPropsArrayLength) return [{ path, message: `array must contain at most ${RENDER_LIMITS.maxPropsArrayLength} values` }];
     return value.flatMap((item, index) => validateTemplateProps(item, `${path}[${index}]`, depth + 1));
