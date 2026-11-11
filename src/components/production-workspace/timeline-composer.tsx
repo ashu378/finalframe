@@ -26,7 +26,7 @@ function timelineFormat(timeline: WorkspaceControlData['timelines'][number]) {
 
 export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     const router = useRouter(); const [pending, start] = useTransition(); const [error, setError] = useState(''); const [message, setMessage] = useState('');
-    const [entries, setEntries] = useState<ClipEntry[]>([]); const [takeId, setTakeId] = useState(''); const [assetId, setAssetId] = useState(''); const [assetDuration, setAssetDuration] = useState(4);
+    const [entries, setEntries] = useState<ClipEntry[]>([]); const [takeId, setTakeId] = useState(''); const [takeDuration, setTakeDuration] = useState(4); const [assetId, setAssetId] = useState(''); const [assetDuration, setAssetDuration] = useState(4);
     const [template, setTemplate] = useState<'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'>('brand-card'); const [title, setTitle] = useState(''); const [subtitle, setSubtitle] = useState(''); const [brand, setBrand] = useState(''); const [logo, setLogo] = useState(''); const [graphicDuration, setGraphicDuration] = useState(4);
     const [graphic,setGraphic]=useState(emptyGraphicDraft);
     const [soundtrack, setSoundtrack] = useState<SoundtrackEntry[]>([]);
@@ -35,6 +35,9 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     const takes = data.scenes.flatMap((scene) => scene.shots.flatMap((shot) => shot.takes.filter((take) => approved(take.state) && take.assetId).map((take) => ({ id: take.id, assetId: take.assetId, label: `${scene.title} / ${shot.title} · take ${take.versionNumber}`, durationSeconds: shot.durationSeconds }))));
     const selectedTake = takes.find((take) => take.id === takeId);
     const selectedTakeAsset = selectedTake && data.assets.find((asset) => asset.id === selectedTake.assetId);
+    const availableTakeDuration = selectedTake ? Math.min(selectedTake.durationSeconds, selectedTakeAsset?.mimeType.startsWith('video/') && selectedTakeAsset.durationSeconds !== undefined ? selectedTakeAsset.durationSeconds : selectedTake.durationSeconds) : 0;
+    const takeFrameLimit = Math.floor((availableTakeDuration + 0.000000001) * outputFps) / outputFps;
+    const takeDurationValid = Number.isFinite(takeDuration) && takeDuration > 0 && takeDuration <= takeFrameLimit + 0.000000001 && Math.abs(takeDuration * outputFps - Math.round(takeDuration * outputFps)) <= 0.000001 && !(selectedTakeAsset?.mimeType.startsWith('video/') && selectedTakeAsset.durationSeconds === undefined);
     const takeNeedsMediaApproval = Boolean(selectedTakeAsset && !approved(selectedTakeAsset.state));
     const mediaHref = `/dashboard/projects/${encodeURIComponent(data.projectExternalId)}/workspace/media?production=${encodeURIComponent(data.productionId)}`;
     const assets = data.assets.filter((asset) => approved(asset.state)); const total = entries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
@@ -53,16 +56,17 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
                 <div className="space-y-3 rounded-xl border border-border p-4">
                     <label className="block text-sm font-medium">
                         Approved shot take
-                        <select aria-label="Approved shot take" className={controlInput} value={takeId} onChange={(event) => setTakeId(event.target.value)}>
+                        <select aria-label="Approved shot take" className={controlInput} value={takeId} onChange={(event) => { const take = takes.find(item => item.id === event.target.value); setTakeId(event.target.value); setTakeDuration(take?.durationSeconds ?? 4); }}>
                             <option value="">Choose one take</option>
                             {takes.map((take) => <option key={take.id} value={take.id}>{take.label}</option>)}
                         </select>
                     </label>
+                    {selectedTake && <><label className="block text-sm font-medium">Take length in seconds<input aria-label="Take length in seconds" type="number" min={1 / outputFps} max={takeFrameLimit} step={1 / outputFps} className={controlInput} value={takeDuration} onChange={event => setTakeDuration(Number(event.target.value))} /></label><p className="text-sm text-muted-foreground">Approved shot: {selectedTake.durationSeconds} s. {selectedTakeAsset?.mimeType.startsWith('video/') ? selectedTakeAsset.durationSeconds !== undefined ? `Actual source: ${selectedTakeAsset.durationSeconds} s.` : 'Actual source duration is unavailable.' : 'Still-image take.'} Choose at most {Number(takeFrameLimit.toFixed(6))} s at {outputFps} fps. This trims only the new timeline, without extending or changing the approved take.</p>{!takeDurationValid && <p role="status" className="text-sm text-amber-300">Choose an available positive length in {outputFps} fps frame steps before adding this take.</p>}</>}
                     {takeNeedsMediaApproval && <p role="status" className="text-sm text-amber-300">
                         Approve this take’s source asset before adding it to the timeline. <Link className="underline" href={mediaHref}>Review source in Media</Link>
                     </p>}
-                    <Button variant="secondary" size="sm" disabled={!selectedTake || takeNeedsMediaApproval || pending} onClick={() => {
-                        if (selectedTake && !takeNeedsMediaApproval) add(selectedTake.label, selectedTake.durationSeconds, { kind: 'TAKE', shotVersionId: selectedTake.id });
+                    <Button variant="secondary" size="sm" disabled={!selectedTake || takeNeedsMediaApproval || !takeDurationValid || pending} onClick={() => {
+                        if (selectedTake && !takeNeedsMediaApproval && takeDurationValid) add(selectedTake.label, takeDuration, { kind: 'TAKE', shotVersionId: selectedTake.id, durationSeconds: takeDuration });
                     }}>Add selected take</Button>
                 </div>
                 <div className="space-y-3 rounded-xl border border-border p-4"><label className="block text-sm font-medium">Approved project footage or image<select aria-label="Approved project footage or image" className={controlInput} value={assetId} onChange={(event) => setAssetId(event.target.value)}><option value="">Choose project media</option>{assets.filter((asset) => /^(video|image)\//.test(asset.mimeType)).map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select></label><label className="block text-sm font-medium">Clip length in seconds<input type="number" min={0.1} max={60} step={0.1} className={controlInput} value={assetDuration} onChange={(event) => setAssetDuration(Number(event.target.value))} /></label><Button variant="secondary" size="sm" disabled={!assetId || pending} onClick={() => { const asset = assets.find((entry) => entry.id === assetId); if (asset) add(asset.name, assetDuration, { kind: 'ASSET', assetId, durationSeconds: assetDuration }); }}>Add project clip</Button></div></div>

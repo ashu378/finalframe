@@ -161,7 +161,7 @@ export const list = query({
 });
 
 const draftClip = v.union(
-  v.object({ kind: v.literal('TAKE'), shotVersionId: v.id('shotVersions') }),
+  v.object({ kind: v.literal('TAKE'), shotVersionId: v.id('shotVersions'), durationSeconds: v.optional(v.number()) }),
   v.object({ kind: v.literal('ASSET'), assetId: v.id('assets'), durationSeconds: v.number(), trimStartSeconds:v.optional(v.number()), volume:v.optional(v.number()), fit:v.optional(v.union(v.literal('contain'),v.literal('cover'))) }),
   v.object({ kind: v.literal('GRAPHIC'), templateId: v.union(v.literal('kinetic-title'), v.literal('brand-card'), v.literal('feature-callout'), v.literal('end-card'),v.literal('product-ui'),v.literal('bar-chart'),v.literal('explainer-steps')), durationSeconds: v.number(), props: v.any(), logoAssetId: v.optional(v.id('assets')),screenAssetId:v.optional(v.id('assets')) }),
 );
@@ -215,7 +215,14 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
         if (!take || !shot || take.productionId !== production._id || take.productionVersionId !== version._id || shot.productionId !== production._id || !take.assetId || take.status !== 'COMPLETED') throw new Error('Choose completed takes from this approved production version.');
         await requireApprovedResource(ctx, projectId, 'shotVersion', take._id, production._id,actorId);
         asset = await assetFor(take.assetId);
-        duration = shot.durationSeconds;
+        duration = input.durationSeconds ?? shot.durationSeconds;
+        // An explicit source-bounded trim belongs to this new timeline only.
+        // Preserve the approved shot/take and legacy omitted-duration behavior.
+        if (input.durationSeconds !== undefined) {
+          const fps = args.fps ?? 30;
+          if (!Number.isFinite(duration) || duration <= 0 || duration > shot.durationSeconds || Math.abs(duration * fps - Math.round(duration * fps)) > 0.000001) throw new Error('Choose a positive take length on the output frame grid, no longer than the approved shot.');
+          if (asset.mimeType?.startsWith('video/') && (!Number.isFinite(asset.durationSeconds) || duration > asset.durationSeconds! + 0.000001)) throw new Error('Choose a take length within the actual source video duration.');
+        }
         takeId = take._id;
         kind = asset.mimeType?.startsWith('image/') ? 'IMAGE' : 'VIDEO';
         if (!asset.mimeType?.startsWith('image/') && !asset.mimeType?.startsWith('video/')) throw new Error('A visual take requires an image or video.');

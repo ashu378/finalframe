@@ -44,6 +44,7 @@ export interface WorkspaceAssetView {
     id: string;
     name: string;
     mimeType: string;
+    durationSeconds?: number;
     url: string | null;
     state: WorkspaceResourceState;
 }
@@ -251,7 +252,7 @@ export function validateShotOperationControls(controls: ShotOperationControls, a
     return [...new Set([...controls.referenceAssetIds, controls.firstFrameAssetId, controls.lastFrameAssetId].filter(Boolean))];
 }
 
-export type CompositionClip = { kind: 'TAKE'; shotVersionId: string }
+export type CompositionClip = { kind: 'TAKE'; shotVersionId: string; durationSeconds?: number }
     | { kind: 'ASSET'; assetId: string; durationSeconds: number }
     | { kind: 'GRAPHIC'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationSeconds: number; props: { title: string } & Record<string, string>; logoAssetId?: string }
     | {kind:'GRAPHIC';templateId:GraphicsV2TemplateId;durationSeconds:number;props:GraphicsV2Props;logoAssetId?:string;screenAssetId?:string};
