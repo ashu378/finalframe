@@ -18,8 +18,8 @@ export function TestCreditGrantForm() {
             try {
                 const granted = await grantDevelopmentTestCredits({ amount, reason, idempotencyKey });
                 setResult(`${granted.amount.toLocaleString()} test credits granted. New balance: ${granted.balance.toLocaleString()}.`);
-            } catch (cause) {
-                setError(cause instanceof Error ? cause.message : 'Test credits could not be granted.');
+            } catch {
+                setError('Test credits were not confirmed. Check your administrator access, the development flag, and the current balance before retrying with the same idempotency key.');
             }
         });
     }

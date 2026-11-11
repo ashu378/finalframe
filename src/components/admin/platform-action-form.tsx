@@ -18,9 +18,14 @@ export function PlatformActionForm({ action, targetId, label }: { action: Action
     keys.current[fingerprint] ||= crypto.randomUUID();
     start(async () => {
       setFeedback('');
-      const result = await changePlatformRecord({ ...input, requestId: keys.current[fingerprint] });
-      setFailed(!result.success); setFeedback(result.success ? 'Change recorded.' : result.error || 'The change could not be confirmed.');
-      if (result.success) router.refresh();
+      try {
+        const result = await changePlatformRecord({ ...input, requestId: keys.current[fingerprint] });
+        setFailed(!result.success); setFeedback(result.success ? 'Change recorded.' : result.error || 'The change could not be confirmed.');
+        if (result.success) router.refresh();
+      } catch {
+        setFailed(true);
+        setFeedback('This change was not confirmed. Check the current record before retrying the same decision.');
+      }
     });
   }
   return <details className="rounded-xl border border-border p-3"><summary className="min-h-8 cursor-pointer text-sm font-semibold">{label}</summary><form action={submit} className="mt-3 grid gap-3">

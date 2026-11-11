@@ -17,7 +17,7 @@ const authorization = load('convex/authorization.ts', { './studioMemberships': m
 const team = load('convex/teamLifecycle.ts', { './_generated/server': registered, './studioMemberships': membership, './authorization': authorization });
 const account = load('convex/account.ts', { './_generated/server': registered, './studioMemberships': membership, './identity': identity });
 const actualAuth = load('convex/auth.ts', { './_generated/server': registered, './studioMemberships': membership, '@convex-dev/auth/providers/Password': { Password: () => ({}) }, '@convex-dev/auth/providers/Email': { Email: () => ({}) }, '@convex-dev/auth/server': { convexAuth: () => ({}), getAuthUserId: async () => signedIn ? actor : null } });
-const app = load('convex/app.ts', { './_generated/server': registered, './authorization': authorization, './auth': errors });
+const app = load('convex/app.ts', { './_generated/server': registered, './authorization': authorization, './auth': errors, './generationWorkerContracts': load('convex/generationWorkerContracts.ts') });
 const tables = Object.fromEntries(['users', 'studios', 'members', 'studioMembers', 'studioInvitations', 'projectMembers', 'projects', 'audit'].map(name => [name, []]));
 const indexReads = new Set();
 function add(table, fields) { const row = { _creationTime: ++sequence, createdAt: sequence, updatedAt: sequence, ...fields }; tables[table].push(row); return row; }

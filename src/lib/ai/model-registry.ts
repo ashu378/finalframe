@@ -72,6 +72,7 @@ export interface VideoReferenceContract {
 const VIDEO_REFERENCE_CONTRACTS: readonly VideoReferenceContract[] = [
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'bytedance/seedance-2.5', canonicalSlug: 'bytedance/seedance-2.5-20260807', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 30, supportsAudioReferences: true, combinedFrameReferences: false, documentationUrl: 'https://openrouter.ai/blog/insights/seedance-2-5-review/', reviewedOn: '2026-11-05' },
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1', canonicalSlug: 'google/veo-3.1-20260320', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 3, referenceDurations: [8], supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },
+    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1-fast', canonicalSlug: 'google/veo-3.1-fast-20260320', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 3, referenceDurations: [8], supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/generate-videos-from-references', reviewedOn: '2026-11-11' },
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1-lite', canonicalSlug: 'google/veo-3.1-lite-20260331', imageMode: 'FRAME_ONLY', maxImageReferences: 0, supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },
 ];
 export function getReviewedVideoReferenceContract(modelId: string, canonicalSlug?: string): VideoReferenceContract | undefined {
@@ -87,6 +88,10 @@ const VIDEO_OUTPUT_GRIDS: Readonly<Record<string, {canonicalSlug: string; aspect
     } },
     'google/veo-3.1-lite': {canonicalSlug:'google/veo-3.1-lite-20260331',aspectRatios:['16:9','9:16'],durationsByResolution:{'720p':[4,6,8],'1080p':[8]},sizes:{'720p':['1280x720','720x1280'],'1080p':['1920x1080','1080x1920']}},
     'google/veo-3.1': {canonicalSlug:'google/veo-3.1-20260320',aspectRatios:['16:9','9:16'],durationsByResolution:{'720p':[4,6,8],'1080p':[8],'4K':[8]},sizes:{'720p':['1280x720','720x1280'],'1080p':['1920x1080','1080x1920'],'4K':['3840x2160','2160x3840']}},
+    // Vertex's exact reference contract includes Fast at720p/1080p. Its4K
+    // reference option is explicitly full Veo only; an aggregate catalog list
+    // or administrator flag cannot widen that reviewed capability.
+    'google/veo-3.1-fast': {canonicalSlug:'google/veo-3.1-fast-20260320',aspectRatios:['16:9','9:16'],durationsByResolution:{'720p':[4,6,8],'1080p':[8]},sizes:{'720p':['1280x720','720x1280'],'1080p':['1920x1080','1080x1920']}},
 };
 export function getReviewedVideoOutputGrid(modelId: string, canonicalSlug?: string) {
     const grid=VIDEO_OUTPUT_GRIDS[modelId];

@@ -3,6 +3,39 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAdmin, requireCurrentMember, requireMember, requireProjectAccess, requireProjectRole } from "./authorization";
 import { ConvexAuthorizationError } from "./auth";
+import { publicJob } from "./generationWorkerContracts";
+
+const STUDIO_JOB_ERROR_CODES = new Set([
+  'MISSING_API_KEY','WORKER_DISABLED','PROVIDER_RATE_LIMIT','PROVIDER_PAYMENT_REQUIRED','PROVIDER_GENERATION_FAILED',
+  'REQUEST_TIMEOUT','NETWORK_ERROR','INVALID_REQUEST','UNSUPPORTED_MODEL','UNSUPPORTED_CAPABILITY','GENERATION_WORKER_ERROR',
+  'RECONCILIATION_REQUIRED','MEDIA_VALIDATION_FAILED','MEDIA_PROBE_BUSY','MEDIA_PROBE_UNAVAILABLE',
+  'RECIPE_CAST_REFERENCES_REQUIRED','RECIPE_CAST_BINDING_CHANGED','RECIPE_CAST_RESOURCE_UNAVAILABLE',
+  'SFX_OUTPUT_INVALID','SFX_OUTPUT_CHANGED','SFX_QC_INVALID_RESPONSE','SFX_QC_AUTHORITY_DENIED','SFX_OUTPUT_REVIEW_REQUIRED','SFX_QC_PENDING','SFX_QC_UNAVAILABLE',
+  'MUSIC_OUTPUT_INVALID','MUSIC_OUTPUT_CHANGED','MUSIC_DURATION_REVIEW_REQUIRED','MUSIC_QC_INVALID_RESPONSE','MUSIC_QC_AUTHORITY_DENIED','MUSIC_OUTPUT_REVIEW_REQUIRED','MUSIC_QC_PENDING','MUSIC_QC_UNAVAILABLE',
+  'IMAGE_FINALIZE_PENDING','IMAGE_OUTPUT_CHANGED','IMAGE_OUTPUT_INVALID',
+]);
+function studioJobDiagnostic(job: Record<string, unknown>) {
+  const recorded = typeof job.errorCode === 'string' && STUDIO_JOB_ERROR_CODES.has(job.errorCode) ? job.errorCode : undefined;
+  const needsFallback = Boolean(job.errorCode || job.errorMessage || job.status === 'FAILED');
+  const code = job.status === 'COMPLETED'
+    ? undefined
+    : recorded ?? (job.executionStage === 'RECONCILIATION_REQUIRED'
+      ? 'RECONCILIATION_REQUIRED'
+      : needsFallback ? 'GENERATION_FAILED' : undefined);
+  // Legacy error strings may contain provider payloads. Reuse the public worker
+  // guidance, but only after replacing any unrecognized recorded code.
+  const projected = publicJob({ ...job, errorCode: code });
+  return { errorCode: code, errorMessage: projected.errorMessage };
+}
+function studioRouteReason(request: unknown) {
+  const path = request && typeof request === 'object' && !Array.isArray(request)
+    ? (request as Record<string, unknown>).path
+    : undefined;
+  if (path === 'AI_VIDEO') return 'A compatible video-model route was selected under the reviewed studio policy.';
+  if (path === 'COMPOSITED') return 'A reviewed composition route combines approved project media.';
+  if (path === 'MOTION_GRAPHICS') return 'Deterministic graphics use the project composition route.';
+  return undefined;
+}
 
 const now = () => Date.now();
 
@@ -198,10 +231,11 @@ export const adminOperations = query({
         model: job.model,
         estimatedProviderCostUsd: job.estimatedProviderCostUsd,
         providerCostUsd: job.providerCostUsd,
-        routeReason: typeof job.request === "object" && job.request !== null && !Array.isArray(job.request) && typeof (job.request as Record<string, unknown>).routeReason === "string" ? (job.request as Record<string, unknown>).routeReason as string : undefined,
+        routeReason: studioRouteReason(job.request),
+        correlationId:job.correlationId,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
-        errorMessage: job.errorMessage,
+        ...studioJobDiagnostic(job),
       })),
       payments: payments.map((payment) => ({
         id: payment._id,
