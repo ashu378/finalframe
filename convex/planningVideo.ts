@@ -44,10 +44,21 @@ async function routeContext(ctx:ReadCtx,project:Doc<'projects'>,input:unknown,ou
     ]);
     const rendererReason=videoType==='MOTION_GRAPHICS'||policy?.path==='MOTION_GRAPHICS'?'GRAPHIC':'UPLOADED_MEDIA';
     if(policy?.path==='MOTION_GRAPHICS')mode='RENDERER';
-    const request:PlanningVideoRequest={videoType,task:'GENERATE',operation:'GENERATE',qualityTier:tier,aspectRatio:getOutputPreset(outputPreset).aspectRatio,audioPolicy:'SILENT',requiresAudio:false,
+    const audioPolicy=source.audioPolicy??'SILENT';
+    if(!['SILENT','GENERATE','KEEP_SOURCE','USE_RECORDING'].includes(audioPolicy))throw new Error('Choose a supported planning audio policy.');
+    const subjectImages=source.mode==='IMAGES'&&assets.length>0&&assets.every(asset=>asset.mimeType?.startsWith('image/'));
+    const request:PlanningVideoRequest={videoType,task:'GENERATE',operation:'GENERATE',qualityTier:tier,aspectRatio:getOutputPreset(outputPreset).aspectRatio,audioPolicy,requiresAudio:audioPolicy==='GENERATE'||source.generateAudio===true||source.requiresAudio===true,
+        // These are conditional edit-length suggestions, never an approval of
+        // an unseen shot. Actual validation requires an explicit SILENT policy.
+        durationBridgeAllowed:subjectImages&&[undefined,'GENERATE'].includes(source.operation)&&[undefined,'GENERATE'].includes(source.videoTask),
+        hasPlannedDialogue:Array.isArray(source.dialogueSegments)&&source.dialogueSegments.length>0,
+        requiresFirstFrame:!!source.firstFrameAssetId||source.requiresFirstFrame===true,requiresLastFrame:!!source.lastFrameAssetId||source.requiresLastFrame===true,
+        requiresMask:source.requiresMask===true,requiresSourceAudioPreservation:audioPolicy==='KEEP_SOURCE'||source.requiresSourceAudioPreservation===true,
+        previousJobId:typeof source.previousJobId==='string'?source.previousJobId:undefined,previousModelId:typeof source.previousModelId==='string'?source.previousModelId:undefined,
+        upscaleFactor:source.upscaleFactor,creativity:source.creativity,
         // Image/performance references remain explicit shot choices. Their exact
         // modalities and pricing are revalidated after the actual plan exists.
-        hasImageReferences:source.mode==='IMAGES'&&assets.some(asset=>asset.mimeType?.startsWith('image/')),hasVideoReference:false,hasAudioReference:false,imageReferenceCount:source.mode==='IMAGES'?assets.filter(asset=>asset.mimeType?.startsWith('image/')).length:0};
+        hasImageReferences:source.mode==='IMAGES'&&assets.some(asset=>asset.mimeType?.startsWith('image/')),hasVideoReference:source.mode==='IMAGES'&&assets.some(asset=>asset.mimeType?.startsWith('video/')),hasAudioReference:source.mode==='IMAGES'&&assets.some(asset=>asset.mimeType?.startsWith('audio/')),imageReferenceCount:source.mode==='IMAGES'?assets.filter(asset=>asset.mimeType?.startsWith('image/')).length:0};
     return {source,assets,mode,rendererReason,request,catalog:catalog as ReviewedPlanningModel[],policy:policy as VideoRoutePolicy|undefined};
 }
 async function planningVideoConstraintsImpl(ctx:ReadCtx,project:Doc<'projects'>,input:unknown,outputPreset:string,totalSeconds:number,productionId?:Id<'productions'>,asOf=Date.now()){
@@ -57,7 +68,7 @@ async function planningVideoConstraintsImpl(ctx:ReadCtx,project:Doc<'projects'>,
     const options=[];for(const aspectRatio of ratios){const allowedShotSeconds=eligibleShotDurations({...scope.request,aspectRatio},scope.catalog,scope.policy,asOf);if(!allowedShotSeconds.length)continue;
         try{options.push({aspectRatio,allowedShotSeconds,suggestedShotSeconds:exactShotSchedule(totalSeconds,allowedShotSeconds)});}catch{/* Another supported aspect ratio may offer an exact decomposition. */}}
     if(!options.length){const allowed=eligibleShotDurations(scope.request,scope.catalog,scope.policy,asOf);exactShotSchedule(totalSeconds,allowed);throw new Error('No compatible video plan is available.');}
-    return {version:SHOT_DURATION_PLANNING_VERSION,mode:scope.mode,finalAspectRatio:scope.request.aspectRatio,options,note:'Write actual shot coverage using these lengths. Never split an existing spoken line. If generation framing differs from final framing, state it explicitly for approval; final composition uses a separately reviewed fit.'};
+    return {version:SHOT_DURATION_PLANNING_VERSION,mode:scope.mode,finalAspectRatio:scope.request.aspectRatio,options,note:'Write actual shot coverage using these lengths. Never split an existing spoken line. If generation framing differs from final framing, state it explicitly for approval; final composition uses a separately reviewed fit.'+(scope.request.durationBridgeAllowed?' Conditional image-reference lengths are planned EDIT lengths, not native purchase lengths. A compatible provider clip may be longer and its full generation duration is priced. Actual shots must explicitly declare SILENT, have no dialogue, audio/video references, frame pins, masks or source-preservation controls; otherwise only exact native durations apply. Review the take before using its planned first portion.':'')};
 }
 async function validateAutomaticVideoPlanImpl(ctx:ReadCtx,project:Doc<'projects'>,input:unknown,outputPreset:string,totalSeconds:number,plan:unknown,productionId?:Id<'productions'>,continuitySnapshot?:unknown,asOf=Date.now()){
     const scope=await routeContext(ctx,project,input,outputPreset,productionId),shots=[];
@@ -72,19 +83,24 @@ async function validateAutomaticVideoPlanImpl(ctx:ReadCtx,project:Doc<'projects'
         if(scope.mode==='RENDERER'){if(scope.rendererReason!=='GRAPHIC'&&!assets.some(asset=>/^(image|video)\//.test(asset.mimeType??'')))throw new Error('Each uploaded-media composition shot needs an explicit project visual asset.');shots.push({durationSeconds:Number(shot.durationSeconds),request:{...scope.request,aspectRatio}});continue;}
         const first=metadata.firstFrameAssetId,last=metadata.lastFrameAssetId;
         for(const frame of [first,last])if(frame&&!assets.some(asset=>asset._id===frame&&asset.mimeType?.startsWith('image/')))throw new Error('First and last frames must be selected project images.');
+        if((metadata.requiresFirstFrame===true||scope.request.requiresFirstFrame)&&!first||(metadata.requiresLastFrame===true||scope.request.requiresLastFrame)&&!last)throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED','Select each required project frame before approving its shot.');
         const referenceAssets=assets.filter(asset=>asset._id!==first&&asset._id!==last);
         const audioPolicy=metadata.audioPolicy??(metadata.generateAudio===true?'GENERATE':'SILENT');
         if(![undefined,'GENERATE','FRAME_TO_VIDEO'].includes(metadata.operation)||![undefined,'GENERATE','FRAME_TO_VIDEO'].includes(metadata.videoTask))throw new Error('Plan source edits or continuation through their certified operation workflow.');
         if(audioPolicy==='KEEP_SOURCE'&&!referenceAssets.some(asset=>asset.mimeType?.startsWith('video/')))throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED','Preserving source audio requires an explicit project video. Revise the shot source before approval.');
         const request:PlanningVideoRequest={...scope.request,aspectRatio,resolution:metadata.resolution,operation:metadata.operation??'GENERATE',task:metadata.videoTask??'GENERATE',
+            // Never trust provisional or caller-authored bridge permission.
+            durationBridgeAllowed:metadata.audioPolicy==='SILENT'&&resolved.dialogueSegments.length===0,hasPlannedDialogue:resolved.dialogueSegments.length>0||scope.request.hasPlannedDialogue===true,
             hasImageReferences:referenceAssets.some(asset=>asset.mimeType?.startsWith('image/')),imageReferenceCount:referenceAssets.filter(asset=>asset.mimeType?.startsWith('image/')).length,
             hasVideoReference:referenceAssets.some(asset=>asset.mimeType?.startsWith('video/')),hasAudioReference:referenceAssets.some(asset=>asset.mimeType?.startsWith('audio/')),
-            requiresFirstFrame:!!first,requiresLastFrame:!!last,requiresAudio:audioPolicy==='GENERATE',audioPolicy,requiresMask:metadata.requiresMask===true,requiresSourceAudioPreservation:audioPolicy==='KEEP_SOURCE'};
+            requiresFirstFrame:!!first||metadata.requiresFirstFrame===true||scope.request.requiresFirstFrame,requiresLastFrame:!!last||metadata.requiresLastFrame===true||scope.request.requiresLastFrame,requiresAudio:audioPolicy==='GENERATE'||metadata.generateAudio===true||scope.request.requiresAudio,audioPolicy,requiresMask:metadata.requiresMask===true||scope.request.requiresMask,requiresSourceAudioPreservation:audioPolicy==='KEEP_SOURCE'||metadata.requiresSourceAudioPreservation===true||scope.request.requiresSourceAudioPreservation,
+            previousJobId:typeof metadata.previousJobId==='string'?metadata.previousJobId:scope.request.previousJobId,previousModelId:typeof metadata.previousModelId==='string'?metadata.previousModelId:scope.request.previousModelId,
+            upscaleFactor:metadata.upscaleFactor??scope.request.upscaleFactor,creativity:metadata.creativity??scope.request.creativity};
         shots.push({durationSeconds:Number(shot.durationSeconds),request});
     }
     if(scope.mode==='RENDERER'){const total=shots.reduce((sum,shot)=>sum+shot.durationSeconds,0);if(!shots.length||!Number.isFinite(total)||Math.abs(total-totalSeconds)>0.000001)throw new Error('The composition shot total must match the requested production duration.');return {version:SHOT_DURATION_PLANNING_VERSION,mode:scope.mode,finalAspectRatio:scope.request.aspectRatio,shotSeconds:shots.map(shot=>shot.durationSeconds),checkedAt:asOf};}
     const selections=validatePlannedShotDurations(shots,totalSeconds,scope.catalog,scope.policy,asOf);
-    return {version:SHOT_DURATION_PLANNING_VERSION,mode:scope.mode,finalAspectRatio:scope.request.aspectRatio,shotSeconds:shots.map(shot=>shot.durationSeconds),shotAspectRatios:shots.map(shot=>shot.request.aspectRatio),routes:selections.map(route=>({provider:route.provider,model:route.modelId,resolution:route.resolution??null})),checkedAt:asOf};
+    return {version:SHOT_DURATION_PLANNING_VERSION,mode:scope.mode,finalAspectRatio:scope.request.aspectRatio,shotSeconds:shots.map(shot=>shot.durationSeconds),shotAspectRatios:shots.map(shot=>shot.request.aspectRatio),routes:selections.map(route=>({provider:route.provider,model:route.modelId,resolution:route.resolution??null,...(route.plannedUseDurationSeconds!==undefined?{plannedUseDurationSeconds:route.plannedUseDurationSeconds,generationDurationSeconds:route.generationDurationSeconds}:{} )})),checkedAt:asOf};
 }
 async function safePlanningCall<T>(run:()=>Promise<T>):Promise<T>{try{return await run();}catch(error){if(error instanceof ShotDurationPlanningError)throw new ConvexError({code:error.code,message:error.message});throw error;}}
 export const planningVideoConstraints=(...args:Parameters<typeof planningVideoConstraintsImpl>)=>safePlanningCall(()=>planningVideoConstraintsImpl(...args));

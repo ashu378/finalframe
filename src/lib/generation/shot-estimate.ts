@@ -7,6 +7,8 @@ export interface ShotGenerationEstimate extends ShotEstimateConsent {
     operation: string;
     qualityTier?: 'ECONOMY' | 'STANDARD' | 'PREMIUM';
     generationResolution?: string;
+    generationDurationSeconds?: number;
+    plannedUseDurationSeconds?: number;
     baseProviderUsd: number;
     providerHoldMicros: number;
     totalCredits: number;

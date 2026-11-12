@@ -73,6 +73,7 @@ export function GenerateShotButton({ productionId, shotId, disabled, label = 'Ge
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {quote && <div className="space-y-2 rounded-lg border border-border p-3 text-sm" aria-live="polite">
             <p>{quote.model} · {quote.totalCredits} credits</p><p>{quote.qualityTier ?? qualityTier} · generation {quote.generationResolution ?? 'reviewed route dimensions'} · final export settings unchanged</p>
+            {quote.generationDurationSeconds !== undefined && quote.plannedUseDurationSeconds !== undefined && <p>Generate {quote.generationDurationSeconds}s; planned edit {quote.plannedUseDurationSeconds}s. Cost covers the full generated clip. Finish the requested action within the planned edit; review the take before using its first {quote.plannedUseDurationSeconds}s. The approved shot stays unchanged.</p>}
             <p>Estimated provider cost ${quote.baseProviderUsd.toFixed(4)}. Budget hold ${(quote.providerHoldMicros / 1e6).toFixed(4)}.</p>
             <p className="text-xs text-muted-foreground">Estimate valid until {new Date(quote.expiresAt).toLocaleTimeString()}.</p>
             <div className="flex flex-wrap gap-2">

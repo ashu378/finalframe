@@ -8,13 +8,14 @@ import { requireApprovedResource } from './resourceStates';
 import { validMotionSource, type MotionSourceCertificate } from '../src/lib/ai/video-reference-contracts';
 import { decodedVideoTiming } from '../renderer/src/media/source-audio-contract';
 import { normalizeSha256, sha256Equal } from '../renderer/src/media/sha256';
+import { selectGenerationDuration } from '../src/lib/generation/duration-bridge';
 import { resolveShotReferencePrompt } from '../src/lib/production/workspace-controls';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { requireAdmin, requireMember, requireProjectRole } from "./authorization";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
 import { REVIEWED_OPERATION_CONTRACTS } from '../src/lib/ai/model-registry';
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
-import { videoCatalogFingerprint, videoCatalogQuoteFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
+import { videoCatalogFingerprint, videoCatalogQuoteFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, normalizeVideoType, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
 
 function catalogFingerprint(model: Parameters<typeof videoCatalogFingerprint>[0]) {
   return videoCatalogFingerprint(model);
@@ -282,9 +283,10 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
     available: model.available && model.platformQuarantinedAt === undefined && Boolean(model.reviewedAt) && model.lastSeenAt >= Date.now() - VIDEO_CATALOG_MAX_AGE_MS
       && (!model.reviewedCatalogFingerprint || model.reviewedCatalogFingerprint === catalogFingerprint(model)),
   }));
-  const selection = selectVideoRoute(request, models, policy ? { ...policy, updatedAt: policy.updatedAt } : undefined);
+  const selected = selectGenerationDuration(request, models, policy ? { ...policy, updatedAt: policy.updatedAt } : undefined, raw.durationBridgeAllowed !== true || Array.isArray(raw.dialogueSegments) && raw.dialogueSegments.length > 0);
+  const selection = selected.selection;
   if (selection.provider !== "openrouter" || selection.modelId !== args.modelId || selection.estimatedCostUsd === undefined) throw new Error("Refresh the reviewed video route before submitting this job.");
-  return { estimatedCostUsd: selection.estimatedCostUsd, selection, request };
+  return { estimatedCostUsd: selection.estimatedCostUsd, selection, request: selected.request };
 }
 
 

@@ -120,7 +120,7 @@ export const previewShotEstimate = mutation({
     returns: v.object({
         estimateId: v.id('estimates'), quoteHash: v.string(), model: v.string(), operation: v.string(),
         baseProviderUsd: v.number(), providerHoldMicros: v.number(), totalCredits: v.number(), expiresAt: v.number(),
-        qualityTier:v.optional(v.union(v.literal('ECONOMY'),v.literal('STANDARD'),v.literal('PREMIUM'))), generationResolution:v.optional(v.string()),
+        qualityTier:v.optional(v.union(v.literal('ECONOMY'),v.literal('STANDARD'),v.literal('PREMIUM'))), generationResolution:v.optional(v.string()), generationDurationSeconds:v.optional(v.number()),plannedUseDurationSeconds:v.optional(v.number()),
     }),
     handler: async (ctx, args) => {
         const intent = await resolveGenerationIntent(ctx, args);
@@ -152,7 +152,7 @@ export const previewShotEstimate = mutation({
         return {
             estimateId, quoteHash, model: args.model, operation: quote.operation,
             baseProviderUsd: quote.estimatedProviderCostUsd, providerHoldMicros: quote.providerHoldMicros,
-            totalCredits: quote.estimatedCost, expiresAt,qualityTier:intent.qualityTier,...(typeof quote.normalizedRequest.resolution==='string'?{generationResolution:quote.normalizedRequest.resolution}:{}),
+            totalCredits: quote.estimatedCost, expiresAt,qualityTier:intent.qualityTier,...(typeof quote.normalizedRequest.plannedUseDurationSeconds==='number'?{plannedUseDurationSeconds:quote.normalizedRequest.plannedUseDurationSeconds,generationDurationSeconds:Number(quote.normalizedRequest.duration)}:{}),...(typeof quote.normalizedRequest.resolution==='string'?{generationResolution:quote.normalizedRequest.resolution}:{}),
         };
     },
 });
@@ -241,7 +241,8 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       prompt: promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(promptContext)}` : references.prompt, duration: shot.durationSeconds,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,voiceVersionIds:continuity.voiceVersionIds,
       resourceBindings:continuity.resourceBindings,dialogueSegments:continuity.dialogueSegments,
-      durationSeconds: shot.durationSeconds, qualityTier, videoType,
+      durationBridgeAllowed: metadata.audioPolicy === 'SILENT' && operation === 'GENERATE' && continuity.dialogueSegments.length === 0,
+      durationSeconds: shot.durationSeconds, plannedUseDurationSeconds:undefined,generationDurationSeconds:undefined, qualityTier, videoType,
       ratio, aspectRatio:ratio,
       operation, task: videoTaskForOperation(operation),
       resolution:generationResolution(requested.generationResolution,operation,requested.resolution??object(requested.constraints).resolution??metadata.resolution),
@@ -311,6 +312,15 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     }
     validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
     const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
+    if (validated.request.durationSeconds !== Number(normalizedRequest.durationSeconds)) {
+      // Only the canonical safe-silent selector may add provider handles. The
+      // approved shot and prompt snapshot retain their original use duration.
+      normalizedRequest.plannedUseDurationSeconds = shot.durationSeconds;
+      normalizedRequest.generationDurationSeconds = validated.request.durationSeconds;
+      normalizedRequest.duration = validated.request.durationSeconds;
+      normalizedRequest.durationSeconds = validated.request.durationSeconds;
+      normalizedRequest.prompt = `Finish all requested action within the FIRST ${shot.durationSeconds} seconds, then hold the final pose for the remaining ${validated.request.durationSeconds-shot.durationSeconds} seconds of this ${validated.request.durationSeconds}-second silent clip. The planned edit uses only the first ${shot.durationSeconds} seconds. ${normalizedRequest.prompt}`;
+    }
     normalizedRequest.referenceContract = validated.selection.referenceContract;
     // Never accept a browser-authored output certificate. Canonical routing
     // derives the exact native grid before hashing the reviewed estimate.
@@ -341,7 +351,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     normalizedRequest.resolution = validated.selection.resolution ?? normalizedRequest.resolution;
     const estimatedProviderCostUsd = validated.estimatedCostUsd;
     if (!Number.isFinite(estimatedProviderCostUsd) || estimatedProviderCostUsd <= 0) throw new Error('A verified provider cost estimate is required.');
-    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'LIP_SYNC' || operation === 'UPSCALE' || isSourceVideoEdit(operation) ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
+    const estimatedCost = estimateGenerationCredits({ durationSeconds: operation === 'LIP_SYNC' || operation === 'UPSCALE' || isSourceVideoEdit(operation) || normalizedRequest.plannedUseDurationSeconds !== undefined ? Number(normalizedRequest.durationSeconds) : shot.durationSeconds, qualityTier });
     const catalog = await ctx.db.query('videoModelCatalog').withIndex('by_studio_model', q=>q.eq('studioExternalId',production.studioExternalId).eq('modelId',args.model)).unique();
     if (!catalog || catalog.provider !== args.provider) throw new Error('SHOT_ESTIMATE_MODEL_UNAVAILABLE');
     const catalogFingerprint=videoCatalogFingerprint(catalog);

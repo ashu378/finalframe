@@ -73,6 +73,7 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   const expectedDuration = Number(request.duration);
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || typeof probe.videoCodec !== 'string' || !probe.videoCodec) throw new Error('MEDIA_VALIDATION_FAILED');
   if (Number.isFinite(expectedDuration) && Math.abs(duration - expectedDuration) > Math.max(1, expectedDuration * 0.2)) throw new Error('MEDIA_VALIDATION_FAILED');
+  if (request.plannedUseDurationSeconds !== undefined && (typeof request.plannedUseDurationSeconds !== 'number' || !Number.isFinite(request.plannedUseDurationSeconds) || request.plannedUseDurationSeconds <= 0 || typeof request.generationDurationSeconds !== 'number' || request.generationDurationSeconds !== expectedDuration || request.plannedUseDurationSeconds >= expectedDuration || duration + 0.000001 < request.plannedUseDurationSeconds)) throw new Error('MEDIA_VALIDATION_FAILED');
   const [x, y] = String(request.ratio || '16:9').split(':').map(Number);
   if (!x || !y || Math.abs(width / height - x / y) > 0.08) throw new Error('MEDIA_VALIDATION_FAILED');
   const constraints = { ...request, ...object(request.constraints) };

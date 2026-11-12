@@ -4,9 +4,10 @@ import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
+import { selectGenerationDuration } from './duration-bridge';
 import { generationFinish, generationResolution, type GenerationResolution } from './finish-options';
 import type { QualityTier } from '@/lib/types/database';
-import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type MotionSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
+import { buildVideoRouteMetadata, normalizeVideoType, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type MotionSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { supportsCatalogUpscaleControls, validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '@/lib/production/workspace-controls';
@@ -190,12 +191,14 @@ export async function previewShotGeneration(input: { productionId: string; shotI
                     maxCostUsd: configuration.policy.maxCostUsd,
                     updatedAt: configuration.policy.updatedAt,
                 } : undefined;
-                const selection = selectVideoRoute({
+                const durationSelection = selectGenerationDuration({
                     videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, motionSource, lipSyncSource, lipSyncPortrait,
                     resolution: requestedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference, videoReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('video/')).length,
                     hasAudioReference: shotContext.hasAudioReference,
                     requiresFirstFrame, requiresLastFrame, requiresAudio,
-                }, models, policy);
+                }, models, policy, shotMetadata.audioPolicy !== 'SILENT' || Array.isArray(shotMetadata.dialogueSegments) && shotMetadata.dialogueSegments.length > 0);
+                const selection = durationSelection.selection;
+                durationSeconds = durationSelection.request.durationSeconds;
                 if (selection.path === 'MOTION_GRAPHICS') {
                     return { success: false, error: 'This project is routed to deterministic motion graphics. Create the graphics in the renderer timeline instead of submitting an AI video job.' };
                 }

@@ -93,12 +93,17 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
             <video
                 ref={videoRef}
                 src={url}
+                playsInline
+                preload="metadata"
+                aria-label="Finished video preview"
+                tabIndex={0}
+                onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); togglePlay(); } }}
                 className="w-full h-full object-contain bg-black"
                 onClick={togglePlay}
             />
 
             {/* Premium Custom Controls Overly */}
-            <div className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+            <div className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-500">
                 {/* Progress Bar */}
                 <div className="h-0.5 w-full bg-white/5 rounded-none mb-8 relative cursor-pointer overflow-hidden group/bar">
                     <div
@@ -109,15 +114,15 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
 
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-8">
-                        <button onClick={togglePlay} className="text-white hover:text-primary transition-all active:scale-90">
+                        <button type="button" aria-label={isPlaying ? "Pause preview" : "Play preview"} onClick={togglePlay} className="inline-flex min-h-11 min-w-11 items-center justify-center text-white hover:text-primary transition-all active:scale-90">
                             {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current" />}
                         </button>
-                        <button onClick={toggleMute} className="text-white hover:text-primary transition-colors">
+                        <button type="button" aria-label={isMuted ? "Unmute preview" : "Mute preview"} aria-pressed={isMuted} onClick={toggleMute} className="inline-flex min-h-11 min-w-11 items-center justify-center text-white hover:text-primary transition-colors">
                             {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                         </button>
                     </div>
 
-                    <button onClick={toggleFullscreen} className="text-white hover:text-primary transition-colors">
+                    <button type="button" aria-label="Full screen preview" onClick={toggleFullscreen} className="inline-flex min-h-11 min-w-11 items-center justify-center text-white hover:text-primary transition-colors">
                         <Maximize className="w-5 h-5" />
                     </button>
                 </div>

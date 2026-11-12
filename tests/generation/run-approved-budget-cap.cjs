@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const { fixture } = require('../recipes/backend-fixture.cjs');
+(async () => {
+  const ctx = fixture();
+  await ctx.db.patch('budget', { spentMicros: 13_180_100, reservedMicros: 188_902 });
+  const args = { key: 'recipe-test', limitUsd: 24.848752, allowedStudioExternalIds: ['studio'], active: true };
+  assert.equal(await ctx.call('providerBudget', 'configure', args), 'budget');
+  const raised = await ctx.db.get('budget');
+  assert.equal(raised.limitMicros, 24_848_752);
+  assert.equal(raised.spentMicros, 13_180_100);
+  assert.equal(raised.reservedMicros, 188_902);
+  assert.equal(ctx.count('providerBudgets'), 1);
+  console.log('PASS explicit ceiling increase retains all prior spending, holds, allowlist and budget identity');
+  await assert.rejects(ctx.call('providerBudget', 'configure', { ...args, limitUsd: 25.000001 }), /US\$25/);
+  console.log('PASS the new owner-approved cumulative ceiling cannot be exceeded');
+  await assert.rejects(ctx.call('providerBudget', 'configure', { ...args, key: 'another-test-run', limitUsd: 1 }), /total approved/);
+  assert.equal(ctx.count('providerBudgets'), 1);
+  console.log('PASS a second run cannot reset or enlarge the cumulative allowance');
+  await assert.rejects(ctx.call('providerBudget', 'configure', { ...args, limitUsd: 13 }), /committed funds/);
+  assert.deepEqual(await ctx.db.get('budget'), raised);
+  console.log('PASS lowering below spent plus held funds leaves the ledger unchanged');
+})().catch(error => { console.error(error); process.exitCode = 1; });

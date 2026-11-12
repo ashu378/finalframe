@@ -1,4 +1,5 @@
-import { selectVideoRoute, videoCatalogFingerprint, VIDEO_CATALOG_MAX_AGE_MS, type VideoModelCapabilities, type VideoRoutePolicy, type VideoRoutingRequest } from '../ai/video-routing';
+import { videoCatalogFingerprint, VIDEO_CATALOG_MAX_AGE_MS, type VideoModelCapabilities, type VideoRoutePolicy, type VideoRoutingRequest, type VideoRouteSelection } from '../ai/video-routing';
+import { canBridgeSilentDuration, selectGenerationDuration } from '../generation/duration-bridge';
 
 export const SHOT_DURATION_PLANNING_VERSION = 'REVIEWED_SHOT_DURATIONS_V1' as const;
 export class ShotDurationPlanningError extends Error {
@@ -11,13 +12,22 @@ export function availablePlanningModels(catalog: readonly ReviewedPlanningModel[
         && Boolean(model.reviewedAt) && model.lastSeenAt >= now - VIDEO_CATALOG_MAX_AGE_MS && model.lastSeenAt <= now + 30_000
         && (!model.reviewedCatalogFingerprint || model.reviewedCatalogFingerprint === videoCatalogFingerprint(model)) }));
 }
-export type PlanningVideoRequest = Omit<VideoRoutingRequest, 'durationSeconds'>;
+export type PlanningVideoRequest = Omit<VideoRoutingRequest, 'durationSeconds'> & {
+    /** Internal planning context, independently derived again from actual shots. */
+    durationBridgeAllowed?: boolean;
+    hasPlannedDialogue?: boolean;
+};
+export type PlannedVideoRouteSelection = VideoRouteSelection & {generationDurationSeconds?:number;plannedUseDurationSeconds?:number};
+function selectPlanningDuration(request:PlanningVideoRequest,durationSeconds:number,models:readonly VideoModelCapabilities[],policy:VideoRoutePolicy|undefined){
+    return selectGenerationDuration({...request,durationSeconds},models,policy,request.durationBridgeAllowed!==true||request.hasPlannedDialogue===true||!Number.isInteger(durationSeconds));
+}
 export function eligibleShotDurations(request: PlanningVideoRequest, catalog: readonly ReviewedPlanningModel[], policy: VideoRoutePolicy | undefined, now: number): number[] {
     const models = availablePlanningModels(catalog, now);
-    const candidates = [...new Set(models.filter(model => model.available).flatMap(model => model.supportedDurations))]
+    const conditionalEditSeconds=request.durationBridgeAllowed===true&&canBridgeSilentDuration({...request,durationSeconds:6},request.hasPlannedDialogue===true)?[4,5,6,7,8]:[];
+    const candidates = [...new Set([...models.filter(model => model.available).flatMap(model => model.supportedDurations),...conditionalEditSeconds])]
         .filter(duration => Number.isFinite(duration) && duration > 0 && duration <= 60 && Number.isInteger(duration * 1000)).sort((a,b) => a-b);
     return candidates.filter(durationSeconds => {
-        try { const route=selectVideoRoute({...request,durationSeconds},models,policy); return route.provider==='openrouter' && route.estimatedCostUsd !== undefined; }
+        try { const {selection:route}=selectPlanningDuration(request,durationSeconds,models,policy); return route.provider==='openrouter' && route.estimatedCostUsd !== undefined; }
         catch { return false; }
     });
 }
@@ -38,13 +48,13 @@ export function exactShotSchedule(totalSeconds: number, allowedSeconds: readonly
     if(!best[total])throw new ShotDurationPlanningError('TOTAL_NOT_DECOMPOSABLE',`The requested ${totalSeconds}-second total cannot be made exactly from the reviewed shot lengths (${allowed.join(', ')} seconds). Choose a compatible total or replan; no video request was submitted.`);
     const schedule:number[]=[];let cursor=total;while(cursor>0){const step=best[cursor]!;schedule.push(step.duration);cursor=step.previous;}return schedule.reverse();
 }
-export function validatePlannedShotDurations(shots: readonly { durationSeconds:number; request:PlanningVideoRequest }[], totalSeconds:number, catalog:readonly ReviewedPlanningModel[], policy:VideoRoutePolicy|undefined, now:number) {
+export function validatePlannedShotDurations(shots: readonly { durationSeconds:number; request:PlanningVideoRequest }[], totalSeconds:number, catalog:readonly ReviewedPlanningModel[], policy:VideoRoutePolicy|undefined, now:number):PlannedVideoRouteSelection[] {
     if(!shots.length||shots.length>200)throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED','Create a bounded shot plan before approval.');
     const total=shots.reduce((sum,shot)=>sum+shot.durationSeconds,0);
     if(!Number.isFinite(total)||Math.abs(total-totalSeconds)>0.000001)throw new ShotDurationPlanningError('PLAN_TOTAL_MISMATCH',`The planned shots total ${total} seconds instead of the requested ${totalSeconds}. Revise the plan without cutting dialogue.`);
     const models=availablePlanningModels(catalog,now);
     return shots.map((shot,index)=>{
-        try { const route=selectVideoRoute({...shot.request,durationSeconds:shot.durationSeconds},models,policy);if(route.provider!=='openrouter'||route.estimatedCostUsd===undefined)throw Error();return route; }
+        try { const selected=selectPlanningDuration(shot.request,shot.durationSeconds,models,policy),route=selected.selection;if(route.provider!=='openrouter'||route.estimatedCostUsd===undefined)throw Error();return selected.request.durationSeconds===shot.durationSeconds?route:{...route,generationDurationSeconds:selected.request.durationSeconds,plannedUseDurationSeconds:shot.durationSeconds}; }
         catch { throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED',`Shot ${index+1} has no reviewed route for its ${shot.durationSeconds}-second duration and required controls. Revise that shot or its dialogue timing before approval.`); }
     });
 }

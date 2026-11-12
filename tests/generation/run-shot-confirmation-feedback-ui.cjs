@@ -15,7 +15,7 @@ const quoteRequests=[];
 let confirmCalls = 0;
 let safeToRefresh=false;
 let confirmationError = 'This estimate is no longer valid. Review a fresh estimate before making the take.';
-const quote = { estimateId: 'estimate', quoteHash: 'hash', model: 'reviewed-model', totalCredits: 64, baseProviderUsd: .12, providerHoldMicros: 136000, expiresAt: Date.now() + 60000 };
+const quote = { estimateId: 'estimate', quoteHash: 'hash', model: 'reviewed-model', totalCredits: 64, generationDurationSeconds:8,plannedUseDurationSeconds:6,baseProviderUsd: .12, providerHoldMicros: 136000, expiresAt: Date.now() + 60000 };
 const actions = {
     async previewShotGeneration(args) { quoteRequests.push(args);quoteCalls++; return { success: true, quote }; },
     async confirmShotGeneration(args) {
@@ -85,6 +85,7 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
     assert.equal(quoteCalls, 1);assert.equal(quoteRequests[0].qualityTier,'ECONOMY');assert.equal(quoteRequests[0].generationResolution,'480p');
     const previousId=quoteRequests[0].requestId;find(node=>node.type==='select'&&node.props['aria-label']==='Take generation resolution').props.onChange({target:{value:'720p'}});render();assert.equal(button('Confirm and make take'),undefined);assert.equal(quoteCalls,1);find(node=>node.type==='button').props.onClick();await flush();assert.equal(quoteCalls,2);assert.notEqual(quoteRequests[1].requestId,previousId);assert.equal(quoteRequests[1].generationResolution,'720p');
     assert.equal(confirmCalls, 0);
+    const reviewedMarkup=require('react-dom/server').renderToStaticMarkup(tree);assert.match(reviewedMarkup,/Generate 8s; planned edit 6s/);assert.match(reviewedMarkup,/Cost covers the full generated clip/);
     button('Confirm and make take').props.onClick();
     await flush();
     assert.equal(confirmCalls, 1);const frozenChoice=find(node=>node.type==='select'&&node.props['aria-label']==='Take generation resolution');assert.equal(frozenChoice.props.disabled,true);frozenChoice.props.onChange({target:{value:'480p'}});render();assert.equal(find(node=>node.type==='select'&&node.props['aria-label']==='Take generation resolution').props.value,'720p');
