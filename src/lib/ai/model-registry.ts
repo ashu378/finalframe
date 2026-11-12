@@ -344,6 +344,24 @@ export const PREPARATION_MODELS = {
  * a changed permanent model version, provider, price unit or control surface.
  * Evidence/conflicts: docs/creator-workflows/AVATAR-SEED-MOTION-MASK-RESEARCH-2026-11-02.md */
 export const REVIEWED_OPERATION_CONTRACTS = {
+    promptMotion: {
+        version: 'SEEDANCE_PROMPT_LED_VIDEO_REFERENCE_V1',
+        modelId: 'bytedance/seedance-2.5', canonicalSlug: 'bytedance/seedance-2.5-20260807', providerTag: 'seed',
+        outputSeconds: 5, outputResolution: '480p', outputAspectRatio: '16:9', outputWidth: 854, outputHeight: 480, outputFps: 24,
+        minimumSourceSeconds: 2, maximumSourceSeconds: 4,
+        minimumSourceDimension: 300, minimumSourcePixels: 407696, minimumSourceAspectRatio: .4, maximumSourceAspectRatio: 2.5, minimumSourceFps: 24, maximumSourceFps: 60,
+        maximumSourceBytes: 32_000_000, maximumSourceDimension: 1920, maximumSourcePixels: 1920 * 1080,
+        minimumImageDimension: 300, maximumImageDimension: 2000, minimumImageAspectRatio: .4, maximumImageAspectRatio: 2.5, maximumImageBytes: 16_000_000,
+        videoInputTokenRateUsd: .0000064,
+        // Published 5s/480p/16:9 example: $0.553 for 2–4s input.
+        // Round the published three-decimal estimate UP a whole display unit,
+        // then round tokens up. This is a conservative estimate, not a price cap.
+        minimumVideoTokensUpperBound: 86563,
+        authorizationUsd: 2,
+        expectedPricingSkus: {video_tokens:.0000107,video_tokens_without_audio:.0000107,video_tokens_with_video_input:.0000064},
+        evidence: ['https://openrouter.ai/blog/insights/seedance-2-5-review/', 'https://console.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing', 'https://docs.byteplus.com/en/docs/ModelArk/seedance-2-5'],
+        reviewedAt: '2026-11-12',
+    },
     sfx:{version:'SEED_SFX_ORIGINAL_SECONDS_120_V1',modelId:'bytedance-seed/seed-audio-1-0',canonicalSlug:'bytedance-seed/seed-audio-1-0-20260630',providerTag:'seed',endpointName:'Seed | bytedance-seed/seed-audio-1-0-20260630',maxOriginalOutputSeconds:120,maxInputCharacters:3000,rateUsdPerSecond:.0025,evidence:['https://openrouter.ai/docs/guides/overview/multimodal/tts#non-speech-prompts','https://docs.byteplus.com/en/docs/byteplusvoice/seedaudio-01'],reviewedAt:'2026-11-03'},
     music:{version:'LYRIA3_CLIP_FIXED_SONG_V1',modelId:'google/lyria-3-clip-preview',canonicalSlug:'google/lyria-3-clip-preview-20260330',providerTag:'google-ai-studio',endpointName:'Google AI Studio | google/lyria-3-clip-preview-20260330',songUsd:.04,reservationUsd:.052,priceEvidencePrefix:'30 second duration clips are priced at $0.04 per clip.',nominalDurationSeconds:30,evidence:['https://openrouter.ai/google/lyria-3-clip-preview','https://openrouter.ai/docs/guides/overview/multimodal/audio','https://openrouter.ai/docs/api_reference/streaming'],reviewedAt:'2026-11-02'},
     referenceVoice: {

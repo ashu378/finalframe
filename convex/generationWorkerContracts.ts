@@ -7,9 +7,10 @@ export const GENERATION_MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
 /** Catalog prices can exclude small prompt/token charges. Hold a margin before
  * submission; settlement still records the exact provider receipt. */
-export function videoBudgetReservationUsd(estimate: number): number {
+export function videoBudgetReservationUsd(estimate: number, authorizationUsd = 0): number {
   if (!Number.isFinite(estimate) || estimate <= 0) throw new Error('A positive provider estimate is required.');
-  return Math.ceil((estimate * 1.05 + 0.01) * 1_000_000) / 1_000_000;
+  if (!Number.isFinite(authorizationUsd) || authorizationUsd < 0) throw new Error('A nonnegative provider authorization is required.');
+  return Math.max(authorizationUsd, Math.ceil((estimate * 1.05 + 0.01) * 1_000_000) / 1_000_000);
 }
 
 export function object(value: unknown): Record<string, unknown> {
@@ -82,11 +83,15 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   const resolution = typeof constraints.resolution === 'string' ? constraints.resolution.toLowerCase() : '';
   const dimensions = /^(\d+)x(\d+)$/.exec(resolution);
   const expectedShortEdge = dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : ({ '4k': 2160, '2k': 1440 } as Record<string, number>)[resolution] || (/^\d+p$/.test(resolution) ? Number.parseInt(resolution, 10) : 0);
+  const motionQuote = object(request.motionQuote);
+  const motion = request.operation === 'PERFORMANCE_TRANSFER';
+  if (motion && (motionQuote.version !== 'SEEDANCE_PROMPT_LED_VIDEO_REFERENCE_V1' || !expectedModelId || motionQuote.modelId !== expectedModelId || motionQuote.outputSeconds !== 5 || motionQuote.outputWidth !== 854 || motionQuote.outputHeight !== 480 || motionQuote.outputFps !== 24 || Math.abs(duration - 5) > .1 || width !== 854 || height !== 480)) throw new Error('MEDIA_VALIDATION_FAILED');
   const nativeOutput = object(request.expectedNativeOutput);
   if (request.expectedNativeOutput !== undefined) {
     // The certificate is persisted by the canonical quote, never reconstructed
     // from today's catalog after a provider has already accepted a job.
-    if (!['GENERATE','FRAME_TO_VIDEO'].includes(String(request.operation || request.task)) ||
+    if ((!['GENERATE','FRAME_TO_VIDEO'].includes(String(request.operation || request.task)) && !motion) ||
+      (motion && (nativeOutput.canonicalSlug !== motionQuote.canonicalSlug || nativeOutput.catalogQuoteFingerprint !== motionQuote.catalogQuoteFingerprint)) ||
       nativeOutput.version !== 'NATIVE_VIDEO_OUTPUT_V1' || !expectedModelId || nativeOutput.modelId !== expectedModelId ||
       typeof nativeOutput.canonicalSlug !== 'string' || !nativeOutput.canonicalSlug ||
       typeof nativeOutput.catalogQuoteFingerprint !== 'string' || !nativeOutput.catalogQuoteFingerprint ||

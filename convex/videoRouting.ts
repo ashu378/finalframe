@@ -4,9 +4,15 @@ import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import type { FunctionReference } from 'convex/server';
 import { object } from './generationWorkerContracts';
+import { requireApprovedResource } from './resourceStates';
+import { validMotionSource, type MotionSourceCertificate } from '../src/lib/ai/video-reference-contracts';
+import { decodedVideoTiming } from '../renderer/src/media/source-audio-contract';
+import { normalizeSha256, sha256Equal } from '../renderer/src/media/sha256';
+import { resolveShotReferencePrompt } from '../src/lib/production/workspace-controls';
 import { resolveGenerationContinuity } from './generationContinuity';
 import { requireAdmin, requireMember, requireProjectRole } from "./authorization";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
+import { REVIEWED_OPERATION_CONTRACTS } from '../src/lib/ai/model-registry';
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
 import { videoCatalogFingerprint, videoCatalogQuoteFingerprint, validUpscaleSource, validVideoEditSource, isSourceVideoEdit, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, normalizeVideoType, selectVideoRoute, type VideoOperation, type VideoModelCapabilities, type VideoRoutingRequest, type UpscaleSourceCertificate, type VideoEditSourceCertificate } from "../src/lib/ai/video-routing";
 
@@ -264,6 +270,8 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
     upscaleFactor: typeof raw.upscaleFactor === 'number' ? raw.upscaleFactor : undefined, creativity: typeof raw.creativity === 'number' ? raw.creativity : undefined,
     upscaleSource: raw.upscaleSource as UpscaleSourceCertificate | undefined,
     editSource: raw.editSource as VideoEditSourceCertificate | undefined,
+    motionSource: raw.motionSource as MotionSourceCertificate | undefined,
+    videoReferenceCount: typeof raw.videoReferenceCount === 'number' ? raw.videoReferenceCount : undefined,
     lipSyncSource: raw.lipSyncSource as VideoRoutingRequest['lipSyncSource'],
     lipSyncPortrait: raw.lipSyncPortrait as VideoRoutingRequest['lipSyncPortrait'],
     audioPolicy: raw.audioPolicy as VideoRoutingRequest['audioPolicy'],
@@ -396,3 +404,110 @@ export const prepareEditSource = action({ args: upscaleShotArgs, returns: v.any(
   if (!response.ok) throw new Error('The source video could not be measured.');
   return ctx.runMutation(refs.recordEditSourceProbe, { ...args, assetId: context.assetId, storageId: context.storageId, checksum: context.checksum, byteSize: context.byteSize, probe: await response.json() });
 } });
+
+
+function validMotionImage(probe: Record<string, unknown>, mimeType: string | undefined, byteSize: number) {
+  const c=REVIEWED_OPERATION_CONTRACTS.promptMotion, width=Number(probe.width),height=Number(probe.height);
+  return Number.isSafeInteger(width)&&Number.isSafeInteger(height)&&width>=c.minimumImageDimension&&height>=c.minimumImageDimension&&width<=c.maximumImageDimension&&height<=c.maximumImageDimension&&width/height>=c.minimumImageAspectRatio&&width/height<=c.maximumImageAspectRatio&&byteSize>0&&byteSize<=c.maximumImageBytes&&(mimeType==='image/png'&&probe.imageCodec==='png'||mimeType==='image/jpeg'&&probe.imageCodec==='mjpeg');
+}
+
+export async function resolveMotionIdentityCertificate(ctx: ReadCtx, args: {projectId:Id<'projects'>;referenceAssetIds:string[];actorId?:Id<'users'>}) {
+  const images=[];
+  for(const raw of args.referenceAssetIds){const id=ctx.db.normalizeId('assets',raw),asset=id?await ctx.db.get(id):null;if(asset?.mimeType?.startsWith('image/'))images.push(asset);}
+  if(images.length!==1)throw new Error('Choose one approved identity image for motion guidance.');
+  const asset=images[0],storage=asset.storageId?await ctx.db.system.get('_storage',asset.storageId):null;
+  const probe=await ctx.db.query('verifiedImageProbes').withIndex('by_asset',q=>q.eq('assetId',asset._id)).unique();
+  if(asset.projectId!==args.projectId||asset.scope!=='PROJECT'||asset.deletedAt||!asset.storageId||!storage||!sha256Equal(asset.checksum,storage.sha256)||!normalizeSha256(storage.sha256)||asset.mimeType!==storage.contentType||!probe||probe.projectId!==args.projectId||probe.storageId!==asset.storageId||!sha256Equal(probe.checksum,storage.sha256)||probe.byteSize!==storage.size||!validMotionImage(probe,asset.mimeType,storage.size))throw new Error('Measure the current identity image within supported image bounds.');
+  await requireApprovedResource(ctx,args.projectId,'asset',asset._id,undefined,args.actorId);
+  return {assetId:asset._id,storageId:asset.storageId,checksum:storage.sha256,byteSize:storage.size,width:probe.width,height:probe.height,imageCodec:probe.imageCodec,mimeType:asset.mimeType};
+}
+
+/** Resolve only the two explicitly named, approved project inputs. Shared
+ * metadata and caller-supplied source certificates are never probe authority. */
+export async function resolveMotionSourceCertificate(ctx: ReadCtx, args: { projectId: Id<'projects'>; referenceAssetIds: string[]; referenceBindings: unknown; actorId?: Id<'users'> }): Promise<MotionSourceCertificate> {
+  if (args.referenceAssetIds.length !== 2 || new Set(args.referenceAssetIds).size !== 2) throw new Error('Motion guidance needs one approved source performance video and one identity image.');
+  const assets = await Promise.all(args.referenceAssetIds.map(async raw => {
+    const id = ctx.db.normalizeId('assets', raw);
+    const asset = id ? await ctx.db.get(id) : null;
+    const storage = asset?.storageId ? await ctx.db.system.get('_storage', asset.storageId) : null;
+    if (!asset || asset.projectId !== args.projectId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !storage || !normalizeSha256(storage.sha256) || !sha256Equal(asset.checksum, storage.sha256) || asset.mimeType !== storage.contentType) throw new Error('The motion inputs must be current checksummed media in this project.');
+    await requireApprovedResource(ctx, args.projectId, 'asset', asset._id, undefined, args.actorId);
+    return { asset, storage };
+  }));
+  const video = assets.find(({asset}) => asset.mimeType === 'video/mp4');
+  const image = assets.find(({asset}) => ['image/png','image/jpeg'].includes(asset.mimeType ?? ''));
+  const bindings = resolveShotReferencePrompt({ prompt: '', referenceAssetIds: args.referenceAssetIds, referenceBindings: args.referenceBindings, assets: assets.map(({asset}) => ({id:asset._id,mimeType:asset.mimeType!})) }).referenceBindings;
+  if (!video || !image || bindings.length !== 2 || !bindings.some(binding => binding.assetId === video.asset._id && binding.role === 'SOURCE_PERFORMANCE') || !bindings.some(binding => binding.assetId === image.asset._id && binding.role === 'IDENTITY')) throw new Error('Explicitly name the source video as performance and the portrait as identity.');
+  const imageProbe=await ctx.db.query('verifiedImageProbes').withIndex('by_asset',q=>q.eq('assetId',image.asset._id)).unique();
+  if(!imageProbe||imageProbe.projectId!==args.projectId||imageProbe.storageId!==image.asset.storageId||!sha256Equal(imageProbe.checksum,image.storage.sha256)||imageProbe.byteSize!==image.storage.size||!validMotionImage(imageProbe,image.asset.mimeType,image.storage.size))throw new Error('Measure the current identity image within the supported image bounds before motion guidance.');
+  const probe = await ctx.db.query('verifiedMediaProbes').withIndex('by_asset', q => q.eq('assetId', video.asset._id)).unique();
+  if (!probe || probe.projectId !== args.projectId || probe.storageId !== video.asset.storageId || probe.videoTimingSourceStorageId !== video.asset.storageId || !sha256Equal(probe.checksum,video.storage.sha256) || !sha256Equal(probe.videoTimingSourceChecksum,video.storage.sha256) || probe.byteSize !== video.storage.size) throw new Error('Measure the current motion source video before requesting a quote.');
+  const source = { assetId:video.asset._id,storageId:video.asset.storageId!,checksum:video.storage.sha256,byteSize:video.storage.size,mimeType:'video/mp4' as const,videoCodec:probe.videoCodec,width:probe.width,height:probe.height,durationSeconds:probe.durationSeconds,videoTiming:decodedVideoTiming(probe.videoTiming) };
+  if (!validMotionSource(source as MotionSourceCertificate)) throw new Error('Use a measured 2–4 second MP4/H264 performance within the supported size and dimensions.');
+  return source as MotionSourceCertificate;
+}
+
+async function motionProbeContext(ctx: ReadCtx, args: {productionId:Id<'productions'>;shotId:Id<'shots'>}) {
+  const production = await ctx.db.get(args.productionId), shot = await ctx.db.get(args.shotId);
+  if (!production?.projectId || !shot || shot.projectId !== production.projectId || shot.productionId !== production._id || shot.productionVersionId !== production.currentVersionId || object(shot.metadata).operation !== 'PERFORMANCE_TRANSFER') throw new Error('Choose a motion-guidance shot in the current project production.');
+  const access = await requireProjectRole(ctx, production.projectId, ['OWNER','EDITOR']);
+  if (access.project.archivedAt || access.project.deletedAt || access.project.moderationStatus === 'RESTRICTED') throw new Error('Restore project access before measuring media.');
+  const version = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
+  if (!version || version.productionId !== production._id || version.status !== 'APPROVED') throw new Error('Approve the current plan before measuring its source performance.');
+  const continuity = await resolveGenerationContinuity(ctx,{projectId:production.projectId,productionId:production._id,snapshot:version.planningContextSnapshot,explicitResourceVersionIds:object(shot.metadata).resourceVersionIds,referenceAssetIds:shot.requiredAssetIds??[]});
+  if (continuity.referenceAssetIds.length !== 2) throw new Error('Motion guidance needs exactly one source video and one identity image.');
+  const rows = await Promise.all(continuity.referenceAssetIds.map(async raw => { const id=ctx.db.normalizeId('assets',raw);return id?await ctx.db.get(id):null; }));
+  const video = rows.find(asset => asset?.mimeType === 'video/mp4'), image=rows.find(asset => ['image/png','image/jpeg'].includes(asset?.mimeType??''));
+  const bindings=resolveShotReferencePrompt({prompt:'',referenceAssetIds:continuity.referenceAssetIds,referenceBindings:object(shot.metadata).referenceBindings,assets:rows.filter(asset=>asset!==null).map(asset=>({id:asset._id,mimeType:asset.mimeType??''}))}).referenceBindings;
+  if (!video || !image || bindings.length!==2 || !bindings.some(binding=>binding.assetId===video._id&&binding.role==='SOURCE_PERFORMANCE') || !bindings.some(binding=>binding.assetId===image._id&&binding.role==='IDENTITY')) throw new Error('Choose an explicit source performance video and identity image.');
+  for (const asset of [video,image]) {
+    if(asset.projectId!==production.projectId||asset.scope!=='PROJECT'||asset.deletedAt||!asset.storageId)throw new Error('Select active project motion inputs.');
+    await requireApprovedResource(ctx,production.projectId,'asset',asset._id);
+  }
+  const storage=await ctx.db.system.get('_storage',video.storageId!);
+  if(!storage||storage.contentType!=='video/mp4'||!normalizeSha256(storage.sha256)||!sha256Equal(video.checksum,storage.sha256)||storage.size<=0||storage.size>32_000_000)throw new Error('Choose a checksummed MP4 performance no larger than32MB.');
+  const cached=await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',video._id)).unique();
+  const imageStorage=await ctx.db.system.get('_storage',image.storageId!);
+  const imageContract=REVIEWED_OPERATION_CONTRACTS.promptMotion;
+  if(!imageStorage||imageStorage.contentType!==image.mimeType||!normalizeSha256(imageStorage.sha256)||!sha256Equal(image.checksum,imageStorage.sha256)||imageStorage.size<=0||imageStorage.size>imageContract.maximumImageBytes)throw new Error('Choose current checksummed project PNG or JPEG identity media within supported size.');
+  return {projectId:production.projectId,video,storage,image,imageStorage,cached,referenceAssetIds:continuity.referenceAssetIds,referenceBindings:bindings};
+}
+
+export const motionSourceContext=internalQuery({args:upscaleShotArgs,returns:v.any(),handler:async(ctx,args)=>{
+  const context=await motionProbeContext(ctx,args),url=await ctx.storage.getUrl(context.video.storageId!);
+  if(!url)throw new Error('The source performance is unavailable.');
+  let source:MotionSourceCertificate|undefined;
+  try { source=await resolveMotionSourceCertificate(ctx,context); } catch { /* Reprobe missing/stale technical evidence; authorization was checked above. */ }
+  const imageUrl=await ctx.storage.getUrl(context.image.storageId!);if(!imageUrl)throw new Error('Identity image unavailable.');
+  return {projectId:context.projectId,assetId:context.video._id,storageId:context.video.storageId,checksum:context.storage.sha256,byteSize:context.storage.size,url,identity:{assetId:context.image._id,storageId:context.image.storageId,checksum:context.imageStorage.sha256,byteSize:context.imageStorage.size,mimeType:context.image.mimeType,url:imageUrl},...(source?{source}:{})};
+}});
+export const recordMotionSourceProbe=internalMutation({args:{...upscaleShotArgs,assetId:v.id('assets'),storageId:v.id('_storage'),checksum:v.string(),byteSize:v.number(),probe:v.any(),identityProbe:v.any()},returns:v.any(),handler:async(ctx,args)=>{
+  const context=await motionProbeContext(ctx,args),probe=object(args.probe);
+  if(context.video._id!==args.assetId||context.video.storageId!==args.storageId||context.storage.size!==args.byteSize||!sha256Equal(context.storage.sha256,args.checksum)||!sha256Equal(probe.checksum,args.checksum)||probe.byteSize!==args.byteSize||probe.hasVideo!==true||typeof probe.hasAudio!=='boolean')throw new Error('The performance storage changed while it was measured.');
+  const source={assetId:args.assetId,storageId:args.storageId,checksum:context.storage.sha256,byteSize:args.byteSize,mimeType:'video/mp4' as const,videoCodec:probe.videoCodec,width:probe.width,height:probe.height,durationSeconds:probe.durationSeconds,videoTiming:decodedVideoTiming(probe.videoTiming)};
+  if(!validMotionSource(source as MotionSourceCertificate))throw new Error('Use a measured2–4second MP4/H264 performance within supported bounds.');
+  const imageProbe=object(args.identityProbe);
+  if(!sha256Equal(imageProbe.checksum,context.imageStorage.sha256)||imageProbe.byteSize!==context.imageStorage.size||imageProbe.mimeType!==context.image.mimeType||imageProbe.frameCount!==1||!validMotionImage(imageProbe,context.image.mimeType,context.imageStorage.size))throw new Error('Identity image measurement changed or exceeds supported image bounds.');
+  const imageValue={projectId:context.projectId,assetId:context.image._id,storageId:context.image.storageId!,checksum:context.imageStorage.sha256,byteSize:context.imageStorage.size,width:Number(imageProbe.width),height:Number(imageProbe.height),imageCodec:String(imageProbe.imageCodec),probedAt:Date.now()};
+  const cachedImage=await ctx.db.query('verifiedImageProbes').withIndex('by_asset',q=>q.eq('assetId',context.image._id)).unique();
+  if(cachedImage)await ctx.db.patch(cachedImage._id,imageValue);else await ctx.db.insert('verifiedImageProbes',imageValue);
+  const value={projectId:context.projectId,assetId:args.assetId,storageId:args.storageId,checksum:context.storage.sha256,byteSize:args.byteSize,width:Number(probe.width),height:Number(probe.height),durationSeconds:Number(probe.durationSeconds),videoCodec:'h264',hasAudio:probe.hasAudio,...(typeof probe.audioCodec==='string'?{audioCodec:probe.audioCodec}:{}),videoTiming:source.videoTiming,videoTimingSourceStorageId:args.storageId,videoTimingSourceChecksum:context.storage.sha256,probedAt:Date.now()};
+  if(context.cached)await ctx.db.patch(context.cached._id,value);else await ctx.db.insert('verifiedMediaProbes',value);
+  return resolveMotionSourceCertificate(ctx,context);
+}});
+async function readMotionProbe(response: Response) {
+  if(!response.ok||!response.body)throw new Error('The motion inputs could not be measured.');
+  const reader=response.body.getReader(),parts:Uint8Array[]=[];let size=0;
+  try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>20000)throw new Error('The motion probe exceeded its response limit.');parts.push(part.value);}}finally{await reader.cancel().catch(()=>undefined);}
+  const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+export const prepareMotionSource=action({args:upscaleShotArgs,returns:v.any(),handler:async(ctx,args):Promise<MotionSourceCertificate>=>{
+  const refs=(internal as unknown as {videoRouting:Record<string,FunctionReference<any,'internal',any,any>>}).videoRouting;
+  const context=await ctx.runQuery(refs.motionSourceContext,args);if(context.source)return context.source;
+  const base=process.env.RENDER_WORKER_URL?.trim(),secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();if(!base||!secret)throw new Error('Source performance measurement is not configured.');
+  const measure=async(body:Record<string,unknown>)=>readMotionProbe(await fetch(base.replace(/\/$/,'')+'/media/probe',{method:'POST',headers:{'content-type':'application/json','x-finalframe-worker-secret':secret},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(70000)}));
+  const probe=await measure({url:context.url,kind:'video',checksum:context.checksum,byteSize:context.byteSize,verifyVideoTiming:true});
+  const identityProbe=await measure({...context.identity,kind:'image'});
+  return ctx.runMutation(refs.recordMotionSourceProbe,{...args,assetId:context.assetId,storageId:context.storageId,checksum:context.checksum,byteSize:context.byteSize,probe,identityProbe});
+}});

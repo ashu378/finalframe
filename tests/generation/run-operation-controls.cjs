@@ -12,13 +12,14 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/generation/finish-options')||name==='./finish-options')return finishOptions;if(name==='./castReadiness')return castReadiness; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/character-reference-estimate'))return characterReference;if(name.endsWith('/ai/transcription')||name==='./transcription')return transcription;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/ai/model-registry'))return registry;if(name.endsWith('/ai/video-reference-contracts'))return motionReferences;if(name.endsWith('/renderer/src/media/source-audio-contract'))return sourceAudioContract;if(name.endsWith('/production/workspace-controls'))return controls;if(name==='./resourceStates')return {requireApprovedResource:()=>{throw Error('Unexpected resource approval call');}};if(name.endsWith('/generation/finish-options')||name==='./finish-options')return finishOptions;if(name==='./castReadiness')return castReadiness; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/character-reference-estimate'))return characterReference;if(name.endsWith('/ai/transcription')||name==='./transcription')return transcription;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
 const finishOptions=compile('src/lib/generation/finish-options.ts');
 const checksums = compile('renderer/src/media/sha256.ts');
 const outputPresets = compile('renderer/src/output-presets.ts');
+const sourceAudioContract=compile('renderer/src/media/source-audio-contract.ts');
 const castRequirements=compile('src/lib/production/cast-requirements.ts');
 const castReadiness=compile('convex/castReadiness.ts',{'convex/values':require('convex/values'),'../src/lib/production/cast-requirements':castRequirements,'../renderer/src/media/sha256':checksums});
 const imageResponse = compile('src/lib/ai/image-response.ts');
@@ -35,7 +36,8 @@ const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': r
 const shotEstimate = compile('src/lib/generation/shot-estimate.ts');
 const studioMemberships = compile('convex/studioMemberships.ts');
 const pricing = compile('src/lib/credits/pricing.ts');
-const routing = compile('src/lib/ai/video-routing.ts', { './model-registry': registry });
+const motionReferences=compile('src/lib/ai/video-reference-contracts.ts',{'./model-registry':registry});
+const routing = compile('src/lib/ai/video-routing.ts', { './model-registry': registry,'./video-reference-contracts':motionReferences });
 const contracts = compile('convex/generationWorkerContracts.ts');
 const recipeContract = compile('src/lib/production/recipes/contract.ts');
 const recipeSchema = compile('src/lib/production/recipes/schema.ts', { './contract': recipeContract });
@@ -68,12 +70,13 @@ function publicActionFixture(metadata, references = []) {
   const client = {
     action: async (ref, args) => {
       fixture.actionCalls.push({ ref, args });
+      if (fixture.actionFailures?.[ref]) throw fixture.actionFailures[ref];
       if (ref === 'videoRouting.refreshReviewedForQuote') return null;
       return { ...(fixture.actionSources?.[ref] ?? fixture.source) };
     },
     query: async ref => {
       if (ref === 'account.current') return { user: { id: 'user' } };
-      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: fixture.outputPreset || 'LANDSCAPE', projectType: fixture.productionVideoType }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
+      if (ref === 'generation.getShot') return { production: { projectId: 'project', studioExternalId: 'studio', outputPreset: fixture.outputPreset || 'LANDSCAPE', projectType: fixture.productionVideoType }, project: { projectType: 'REALISTIC_SKIT_UGC' }, shot: { prompt: 'Continue the action', durationSeconds: fixture.shotDurationSeconds ?? 4, metadata }, referenceAssets: references.map(id => ({ assetId: id, mimeType: assets.find(asset => asset.id === id).mimeType })), hasAudioReference: references.includes('audio'), audioAssetIds: references.includes('audio') ? ['audio'] : [] };
       if (ref === 'videoRouting.forGeneration') return { catalog: [{ lastSeenAt: Date.now(), ...fixture.model }], policy: { path: 'AI_VIDEO', preferredModelIds: [fixture.model.modelId], maxCostUsd: 10, updatedAt: 1 } };
       throw new Error('Unexpected query ' + ref);
     },

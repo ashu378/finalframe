@@ -11,7 +11,7 @@ import { requireProjectAccess, requireProjectRole, resolveProjectAccessForActor 
 import { ensureResourceState, getEffectiveResourceState } from './resourceStates';
 import { reserveGenerationCreditsInTransaction, settleGenerationCreditsInTransaction, estimateGenerationCredits } from './financial';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
-import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, validateReviewedVideoJob } from './videoRouting';
+import { resolveUpscaleSourceCertificate, resolveVideoEditSourceCertificate, resolveMotionSourceCertificate, resolveMotionIdentityCertificate, validateReviewedVideoJob } from './videoRouting';
 import { isSourceVideoEdit, videoCatalogFingerprint, normalizeVideoType } from '../src/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
 import { SHOT_ESTIMATE_VERSION, SHOT_ESTIMATE_TTL_MS, shotEstimateHash, stableShotEstimate, assertShotEstimateTime } from '../src/lib/generation/shot-estimate';
@@ -259,10 +259,11 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       hasImageReferences: sourceAssets.some((asset) => asset.mimeType?.startsWith('image/') && !inputFrameIds.has(asset._id)),
       imageReferenceCount: sourceAssets.filter((asset) => asset.mimeType?.startsWith('image/')).length,
       hasVideoReference: sourceAssets.some((asset) => asset.mimeType?.startsWith('video/')),
+      videoReferenceCount: sourceAssets.filter((asset) => asset.mimeType?.startsWith('video/')).length,
       hasAudioReference: sourceAssets.some((asset) => asset.mimeType?.startsWith('audio/')),
       requiresFirstFrame: Boolean(firstFrame) || metadata.requiresFirstFrame === true,
       requiresLastFrame: Boolean(lastFrame) || metadata.requiresLastFrame === true,
-      upscaleSource: undefined, upscaleQuote: undefined, editSource: undefined, editQuote: undefined, continuationQuote: undefined, lipSyncSource: undefined, lipSyncPortrait: undefined, lipSyncQuote: undefined, constraints: undefined,
+      upscaleSource: undefined, upscaleQuote: undefined, editSource: undefined, editQuote: undefined, motionSource: undefined, motionIdentity: undefined, motionQuote: undefined, continuationQuote: undefined, lipSyncSource: undefined, lipSyncPortrait: undefined, lipSyncQuote: undefined, constraints: undefined,
     };
     if (operation === 'LIP_SYNC') {
       const recordings = sourceAssets.filter(asset => asset.mimeType?.startsWith('audio/'));
@@ -303,12 +304,21 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.requiresSourceAudioPreservation = source.hasAudio;
       normalizedRequest.resolution = undefined;
     }
+    if (operation === 'PERFORMANCE_TRANSFER') {
+      normalizedRequest.motionSource = await resolveMotionSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, referenceBindings: references.referenceBindings, ...(execution ? {actorId:access.user._id} : {}) });
+      normalizedRequest.motionIdentity = await resolveMotionIdentityCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, ...(execution ? {actorId:access.user._id} : {}) });
+      normalizedRequest.prompt = `Create a NEW five-second silent clip. Use video reference 1 only as motion/action guidance and image reference 1 as the selected identity. This is prompt-led source-motion guidance, not frame-exact copying or original-voice preservation. ${normalizedRequest.prompt}`;
+    }
     validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
     const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
     normalizedRequest.referenceContract = validated.selection.referenceContract;
     // Never accept a browser-authored output certificate. Canonical routing
     // derives the exact native grid before hashing the reviewed estimate.
     normalizedRequest.expectedNativeOutput = validated.selection.expectedNativeOutput;
+    if (operation === 'PERFORMANCE_TRANSFER') {
+      if (!validated.selection.motionQuote) throw new Error('Source-motion guidance pricing certification is unavailable.');
+      normalizedRequest.motionQuote = validated.selection.motionQuote;
+    }
     if (operation === 'UPSCALE') {
       if (!validated.selection.upscaleQuote) throw new Error('Upscale pricing certification is unavailable.');
       normalizedRequest.upscaleQuote = validated.selection.upscaleQuote;
@@ -336,7 +346,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     if (!catalog || catalog.provider !== args.provider) throw new Error('SHOT_ESTIMATE_MODEL_UNAVAILABLE');
     const catalogFingerprint=videoCatalogFingerprint(catalog);
     const policy=await ctx.db.query('videoRoutePolicies').withIndex('by_studio_type_quality',q=>q.eq('studioExternalId',production.studioExternalId).eq('videoType',validated.request.videoType).eq('qualityTier',qualityTier)).unique();
-    const providerHoldMicros=Math.ceil(videoBudgetReservationUsd(estimatedProviderCostUsd)*1e6);
+    const providerHoldMicros=Math.ceil(videoBudgetReservationUsd(estimatedProviderCostUsd, Number(object(normalizedRequest.motionQuote).authorizationUsd ?? 0))*1e6);
     const canonicalHash=await shotEstimateHash({version:SHOT_ESTIMATE_VERSION,actorUserId:access.user._id,projectId:access.project._id,productionId:production._id,productionVersionId:version._id,shotId:shot._id,idempotencyKey:intent.idempotencyKey,requestHash:intent.requestHash,normalizedRequest,mediaProofs,model:args.model,modelVersion:args.modelVersion,catalogFingerprint,pricingSkus:catalog.pricingSkus,estimatedCostPerSecond:catalog.estimatedCostPerSecond,policy,estimatedProviderCostUsd,providerHoldMicros,totalCredits:estimatedCost});
     return {normalizedRequest,estimatedProviderCostUsd,estimatedCost,providerHoldMicros,catalogFingerprint,canonicalHash,operation};
 }
@@ -360,14 +370,14 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
     const quote=await resolveCanonicalShotQuote(ctx,args,intent,execution);
     const {normalizedRequest,estimatedProviderCostUsd,estimatedCost}=quote;
     const estimateId=execution?undefined:await requireStoredShotEstimate(ctx,args,intent,quote);
-    const recipeAdmission = execution ? await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:videoBudgetReservationUsd(estimatedProviderCostUsd),credits:estimatedCost}) : null;
+    const recipeAdmission = execution ? await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:quote.providerHoldMicros/1e6,credits:estimatedCost}) : null;
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
     const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
     await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId },execution?access.user._id:undefined);
     const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, ...(estimateId?{estimateId}:{}), request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
     const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
-    const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: videoBudgetReservationUsd(estimatedProviderCostUsd), idempotencyKey: `generation:${jobId}` });
+    const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: quote.providerHoldMicros/1e6, idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });
     if (recipeAdmission) await bindRecipeGenerationJob(ctx,recipeAdmission,jobId);
     await schedule(ctx, jobId);
@@ -579,20 +589,28 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
         const frozen = object(request.editQuote);
         if (stable(source) !== stable(request.editSource) || args.liveCatalogFingerprint !== frozen.catalogFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Edit source or catalog certification changed.');
       }
+      if (request.operation === 'PERFORMANCE_TRANSFER') {
+        const source = await resolveMotionSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [], referenceBindings: request.referenceBindings, actorId: actor._id });
+        const identity = await resolveMotionIdentityCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [], actorId: actor._id });
+        if (stable(identity) !== stable(request.motionIdentity)) throw new Error('The approved motion identity changed.');
+        const frozen = object(request.motionQuote);
+        if (stable(source) !== stable(request.motionSource) || args.liveCatalogFingerprint !== frozen.catalogQuoteFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Source motion or catalog certification changed.');
+      }
       const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
+      if (request.operation === 'PERFORMANCE_TRANSFER' && stable(current.selection.motionQuote) !== stable(request.motionQuote)) throw new Error('The frozen source-motion pricing certificate changed.');
       if (request.expectedNativeOutput !== undefined && stable(current.selection.expectedNativeOutput) !== stable(request.expectedNativeOutput)) throw new Error('The frozen native output certificate changed.');
       if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
       if (isSourceVideoEdit(request.operation) && stable(current.selection.editQuote) !== stable(request.editQuote)) throw new Error('The frozen video edit pricing certificate changed.');
       if (request.operation === 'LIP_SYNC' && stable(current.selection.lipSyncQuote) !== stable(request.lipSyncQuote)) throw new Error('The frozen lip-sync pricing certificate changed.');
       if (request.operation === 'EXTEND' && stable(current.selection.continuationQuote) !== stable(request.continuationQuote)) throw new Error('The frozen continuation pricing certificate changed.');
       const estimatedMicros = Math.ceil(current.estimatedCostUsd * 1_000_000);
-      if (!Number.isFinite(estimatedMicros) || estimatedMicros <= 0 || estimatedMicros > reserved.estimatedMicros || (typeof request.path === 'string' && current.selection.path !== request.path) || (typeof request.resolution === 'string' && current.selection.resolution !== request.resolution)) throw new Error('The frozen route or provider quote has changed.');
+      if (!Number.isFinite(estimatedMicros) || estimatedMicros <= 0 || estimatedMicros > reserved.estimatedMicros || (request.operation === 'PERFORMANCE_TRANSFER' && Math.ceil(videoBudgetReservationUsd(current.estimatedCostUsd, Number(current.selection.motionQuote?.authorizationUsd ?? 0))*1e6) > reserved.estimatedMicros) || (typeof request.path === 'string' && current.selection.path !== request.path) || (typeof request.resolution === 'string' && current.selection.resolution !== request.resolution)) throw new Error('The frozen route or provider quote has changed.');
       dispatchValidation = { estimatedCostUsd: current.estimatedCostUsd, policyVersion: current.selection.policyVersion ?? null, resolution: current.selection.resolution ?? null, model: current.selection.modelId };
     } catch {
       throw Object.assign(new Error('The reviewed route or provider quote has changed. Create a new estimate.'), { code: 'ROUTE_CHANGED' });
     }
   }
-  await assertRecipeGenerationFence(ctx,job,job.operation==='PREPARATION'?Number(dispatchValidation.estimatedCostUsd):videoBudgetReservationUsd(Number(dispatchValidation.estimatedCostUsd)));
+  await assertRecipeGenerationFence(ctx,job,job.operation==='PREPARATION'?Number(dispatchValidation.estimatedCostUsd):videoBudgetReservationUsd(Number(dispatchValidation.estimatedCostUsd), Number(object(request.motionQuote).authorizationUsd ?? 0)));
   await ctx.db.patch(job._id, { submissionStartedAt: Date.now(), executionStage: 'SUBMITTING', progress: 5, response: { ...object(job.response), dispatchValidation: { ...dispatchValidation, checkedAt: Date.now() } }, updatedAt: Date.now() });
   return { allowed: true };
 } });

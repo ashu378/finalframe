@@ -6,7 +6,7 @@ import { assertCapability } from '@/lib/ai/capabilities';
 import { estimateProductionCost } from '@/lib/credits/service';
 import { generationFinish, generationResolution, type GenerationResolution } from './finish-options';
 import type { QualityTier } from '@/lib/types/database';
-import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
+import { buildVideoRouteMetadata, normalizeVideoType, selectVideoRoute, videoCatalogFingerprint, videoCatalogQuoteFingerprint, VIDEO_CATALOG_MAX_AGE_MS, VIDEO_OPERATIONS, isSourceVideoEdit, type VideoOperation, type VideoModelCapabilities, type VideoTask, type UpscaleSourceCertificate, type VideoEditSourceCertificate, type MotionSourceCertificate, type LipSyncAudioCertificate, type LipSyncPortraitCertificate } from '@/lib/ai/video-routing';
 import { discoverOpenRouterVideoModels } from '@/lib/ai/model-discovery';
 import { isFeatureEnabled } from '@/lib/config/feature-flags';
 import { supportsCatalogUpscaleControls, validateVideoOperationRequirements, videoTaskForOperation, type ShotOperationControls } from '@/lib/production/workspace-controls';
@@ -99,6 +99,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
         }
         let upscaleSource: UpscaleSourceCertificate | undefined;
         let editSource: VideoEditSourceCertificate | undefined;
+        let motionSource: MotionSourceCertificate | undefined;
         let lipSyncSource: LipSyncAudioCertificate | undefined;
         let lipSyncPortrait: LipSyncPortraitCertificate | undefined;
         if (operation === 'LIP_SYNC') {
@@ -118,10 +119,14 @@ export async function previewShotGeneration(input: { productionId: string; shotI
             durationSeconds = editSource!.durationSeconds;
             aspectRatio = `${editSource!.width}:${editSource!.height}`;
         }
+        if (operation === 'PERFORMANCE_TRANSFER') {
+            try { motionSource = await convex.action(api.videoRouting.prepareMotionSource, { productionId: input.productionId as any, shotId: input.shotId as any }); }
+            catch { return { success: false, error: 'The motion inputs could not be verified. Select one approved 2–4 second MP4/H264 performance and one approved PNG/JPEG identity image, explicitly name their roles, and check that source measurement is available. No new generation was purchased.' }; }
+        }
         let provider = capability.provider;
         let model = capability.model;
         let route: Record<string, unknown> = {
-            videoType, task: requestedTask, ...operationControls, upscaleSource, editSource, lipSyncSource, lipSyncPortrait, path: 'AI_VIDEO', routingMode: 'legacy', routeReason: 'Existing generic route retained while type-based routing is disabled.',
+            videoType, task: requestedTask, ...operationControls, upscaleSource, editSource, motionSource, lipSyncSource, lipSyncPortrait, path: 'AI_VIDEO', routingMode: 'legacy', routeReason: 'Existing generic route retained while type-based routing is disabled.',
             constraints: { durationSeconds, aspectRatio, resolution: requestedResolution, hasImageReferences, hasVideoReference, hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio },
             referenceAssetIds: references.map((asset) => asset.assetId),
             audioAssetIds: shotContext.audioAssetIds || [],
@@ -186,8 +191,8 @@ export async function previewShotGeneration(input: { productionId: string; shotI
                     updatedAt: configuration.policy.updatedAt,
                 } : undefined;
                 const selection = selectVideoRoute({
-                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, lipSyncSource, lipSyncPortrait,
-                    resolution: requestedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference,
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, motionSource, lipSyncSource, lipSyncPortrait,
+                    resolution: requestedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference, videoReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('video/')).length,
                     hasAudioReference: shotContext.hasAudioReference,
                     requiresFirstFrame, requiresLastFrame, requiresAudio,
                 }, models, policy);
@@ -200,8 +205,8 @@ export async function previewShotGeneration(input: { productionId: string; shotI
                 const selectedResolution = selection.resolution || requestedResolution;
                 modelVersion = `video-catalog:${configuration.catalog.reduce((latest: number, entry: any) => Math.max(latest, entry.lastSeenAt || 0), 0)}:policy:${selection.policyVersion || 0}`;
                 route = buildVideoRouteMetadata({
-                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, lipSyncSource, lipSyncPortrait,
-                    resolution: selectedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference,
+                    videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, motionSource, lipSyncSource, lipSyncPortrait,
+                    resolution: selectedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference, videoReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('video/')).length,
                     hasAudioReference: shotContext.hasAudioReference, requiresFirstFrame, requiresLastFrame, requiresAudio,
                 }, selection, {
                     modelVersion, referenceAssetIds: references.map((asset) => asset.assetId),

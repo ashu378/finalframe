@@ -4,7 +4,7 @@ import type { FunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { buildVideoGenerationRequest, generateVideo, pollVideo, downloadVideo } from '../src/lib/adapters/openrouter-adapter';
 import { discoverOpenRouterVideoModels } from '../src/lib/ai/model-discovery';
-import { videoCatalogFingerprint, isSourceVideoEdit, certifyAvatarEndpointCatalog } from '../src/lib/ai/video-routing';
+import { videoCatalogFingerprint, videoCatalogQuoteFingerprint, isSourceVideoEdit, certifyAvatarEndpointCatalog } from '../src/lib/ai/video-routing';
 import { runPreparation } from './preparationWorker';
 import { GENERATION_MAX_MEDIA_BYTES, object, validateMediaProbe, workerEnabled } from './generationWorkerContracts';
 import { sanitizeSubmissionDiagnostic } from '../src/lib/ai/submission-diagnostic';
@@ -62,10 +62,11 @@ export const run = internalAction({
           ...(typeof request.previousJobId === 'string' ? { previousJobId: request.previousJobId } : {}),
         };
         let liveCatalog: { liveCatalogFingerprint: string; liveCatalogCheckedAt: number; liveEndpointFingerprint?: string } | undefined;
-        if (request.operation === 'LIP_SYNC' || request.operation === 'UPSCALE' || isSourceVideoEdit(request.operation) || request.operation === 'EXTEND') {
+        if (request.operation === 'LIP_SYNC' || request.operation === 'UPSCALE' || isSourceVideoEdit(request.operation) || request.operation === 'EXTEND' || request.operation === 'PERFORMANCE_TRANSFER') {
           const current = (await discoverOpenRouterVideoModels({ force: true, staleIfError: false, fetch: (url, init) => fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }) })).find(model => model.id === job.model);
           if (!current) throw Object.assign(new Error('The upscale model is no longer available.'), { code: 'ROUTE_CHANGED' });
-          liveCatalog = { liveCatalogFingerprint: videoCatalogFingerprint({ provider: 'openrouter', modelId: current.id, ...current, supportedParameters: current.allowedPassthroughParameters }), liveCatalogCheckedAt: Date.now() };
+          const fingerprint = request.operation === 'PERFORMANCE_TRANSFER' ? videoCatalogQuoteFingerprint : videoCatalogFingerprint;
+          liveCatalog = { liveCatalogFingerprint: fingerprint({ provider: 'openrouter', modelId: current.id, ...current, supportedParameters: current.allowedPassthroughParameters }), liveCatalogCheckedAt: Date.now() };
         }
         if (request.operation === 'LIP_SYNC') {
           const response = await fetch(`https://openrouter.ai/api/v1/models/${job.model}/endpoints`, { redirect: 'error', signal: AbortSignal.timeout(15_000) });

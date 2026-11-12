@@ -11,10 +11,11 @@ function compileSource(relative, filename) {
   const sourcePath = path.join(root, relative);
   const outputPath = path.join(tempRoot, filename);
   const outputText = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: sourcePath }).outputText;
-  fs.writeFileSync(outputPath, outputText);
+  fs.writeFileSync(outputPath, outputText.replace('require("../../../renderer/src/media/sha256")', 'require("./sha256")'));
   return outputPath;
 }
 compileSource('src/lib/ai/model-registry.ts', 'model-registry.js');
+compileSource('src/lib/ai/video-reference-contracts.ts', 'video-reference-contracts.js');
 const source = fs.readFileSync(path.join(root, 'src/lib/ai/video-routing.ts'), 'utf8');
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: 'video-routing.ts' }).outputText;
 const compiled = new Module(path.join(tempRoot, 'video-routing.js'), module);

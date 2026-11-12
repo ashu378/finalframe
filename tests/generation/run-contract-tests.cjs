@@ -21,6 +21,7 @@ function compileModule(relativePath, outputRelativePath) {
 
 compileModule('renderer/src/media/sha256.ts', 'sha256.js');
 compileModule('src/lib/ai/model-registry.ts', 'model-registry.js');
+compileModule('src/lib/ai/video-reference-contracts.ts', 'video-reference-contracts.js');
 compileModule('src/lib/ai/types.ts', 'types.js');
 compileModule('src/lib/ai/video-routing.ts', 'video-routing.js');
 compileModule('src/lib/ai/planning/quality.ts', 'planning/quality.js');

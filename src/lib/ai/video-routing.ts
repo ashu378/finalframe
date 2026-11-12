@@ -1,6 +1,8 @@
 import type { QualityTier } from '../types/database';
 import { REVIEWED_OPERATION_CONTRACTS, getReviewedVideoReferenceContract, getReviewedVideoOutputGrid, type VideoReferenceContract } from './model-registry';
 import { normalizeSha256 } from '../../../renderer/src/media/sha256';
+import { quotePromptMotionTransfer, type MotionSourceCertificate, type MotionQuoteCertificate } from './video-reference-contracts';
+export { quotePromptMotionTransfer, type MotionSourceCertificate, type MotionQuoteCertificate } from './video-reference-contracts';
 
 export const VIDEO_TYPES = [
     'ANIMATED_COMEDY_2D',
@@ -78,6 +80,7 @@ export interface VideoRoutingRequest {
     editSource?: VideoEditSourceCertificate;
     lipSyncSource?: LipSyncAudioCertificate;
     lipSyncPortrait?: LipSyncPortraitCertificate;
+    motionSource?: MotionSourceCertificate;
     qualityTier: QualityTier;
     durationSeconds: number;
     aspectRatio: string;
@@ -86,6 +89,7 @@ export interface VideoRoutingRequest {
     hasVideoReference?: boolean;
     hasAudioReference?: boolean;
     imageReferenceCount?: number;
+    videoReferenceCount?: number;
     requiresFirstFrame?: boolean;
     requiresLastFrame?: boolean;
     requiresAudio?: boolean;
@@ -116,6 +120,7 @@ export interface VideoRouteSelection {
     editQuote?: VideoEditQuoteCertificate;
     continuationQuote?: ContinuationQuoteCertificate;
     lipSyncQuote?: LipSyncQuoteCertificate;
+    motionQuote?: MotionQuoteCertificate;
 }
 
 /** Frozen before purchase. Nominal resolution labels are not pixel dimensions:
@@ -152,6 +157,7 @@ export function buildVideoRouteMetadata(
         ...(selection.editQuote ? { editQuote: selection.editQuote } : {}),
         ...(selection.continuationQuote ? { continuationQuote: selection.continuationQuote } : {}),
         ...(selection.lipSyncQuote ? { lipSyncQuote: selection.lipSyncQuote } : {}),
+        ...(selection.motionQuote ? { motionQuote: selection.motionQuote } : {}),
         maximumCostUsd: options.costCeilingUsd,
         referenceAssetIds: options.referenceAssetIds || [],
         audioAssetIds: options.audioAssetIds || [],
@@ -343,9 +349,9 @@ export function videoModelSupportsRequest(model: VideoModelCapabilities, request
     if (!model.available) return false;
     const operation = request.operation || request.task;
     const sourceEdit = isSourceVideoEdit(operation) && model.modelId === 'black-forest-labs/flux-video-edit';
-    // Manual capability flags cannot certify an undocumented motion-transfer
-    // contract or a supplied-audio output-duration billing bound.
-    if (operation === 'PERFORMANCE_TRANSFER' || operation === 'LIP_SYNC' && (!model.supportsLipSync || !quoteSuppliedAudioAvatar(model, request)) || isSourceVideoEdit(operation) && !sourceEdit) return false;
+    // Flags alone cannot certify a motion reference, its decoded source bounds,
+    // full input billing, or a supplied-audio output-duration billing bound.
+    if (operation === 'PERFORMANCE_TRANSFER' && (!model.supportsPerformanceTransfer || !quotePromptMotionTransfer(model,request,videoCatalogQuoteFingerprint(model))) || operation === 'LIP_SYNC' && (!model.supportsLipSync || !quoteSuppliedAudioAvatar(model, request)) || isSourceVideoEdit(operation) && !sourceEdit) return false;
     if (!Number.isFinite(request.durationSeconds) || (operation === 'LIP_SYNC' || operation === 'UPSCALE' || sourceEdit ? request.durationSeconds <= 0 : request.durationSeconds < 1)) return false;
     if (request.maximumCostUsd !== undefined && (!Number.isFinite(request.maximumCostUsd) || request.maximumCostUsd < 0)) return false;
     if (!(VIDEO_OPERATIONS as readonly string[]).includes(operation)) return false;
@@ -427,7 +433,7 @@ export function resolveVideoOutputSize(model: Pick<VideoModelCapabilities, 'mode
 
 export function certifyNativeVideoOutput(model: VideoModelCapabilities, request: VideoRoutingRequest): NativeVideoOutputCertificate | undefined {
     const operation = request.operation || request.task;
-    if (!['GENERATE', 'FRAME_TO_VIDEO'].includes(operation) || !model.canonicalSlug) return undefined;
+    if ((!['GENERATE', 'FRAME_TO_VIDEO'].includes(operation) && !(operation === 'PERFORMANCE_TRANSFER' && quotePromptMotionTransfer(model,request,videoCatalogQuoteFingerprint(model)))) || !model.canonicalSlug) return undefined;
     const size = resolveVideoOutputSize(model, request.aspectRatio, request.resolution);
     if (!size) return undefined;
     return { version: 'NATIVE_VIDEO_OUTPUT_V1', modelId: model.modelId, canonicalSlug: model.canonicalSlug,
@@ -435,6 +441,7 @@ export function certifyNativeVideoOutput(model: VideoModelCapabilities, request:
 }
 
 export function estimateVideoCost(model: VideoModelCapabilities, request: VideoRoutingRequest): number | undefined {
+    if ((request.operation || request.task) === 'PERFORMANCE_TRANSFER') return quotePromptMotionTransfer(model,request,videoCatalogQuoteFingerprint(model))?.estimatedCostUsd;
     if ((request.operation || request.task) === 'LIP_SYNC') return quoteSuppliedAudioAvatar(model, request)?.costUsd;
     if ((request.operation || request.task) === 'UPSCALE') return quoteVideoUpscale(model, request)?.costUsd;
     if (model.modelId === 'black-forest-labs/flux-video-edit') return quoteVideoEdit(model, request)?.costUsd;
@@ -577,7 +584,7 @@ export function selectVideoRoute(
         provider: selected.provider,
         modelId: selected.modelId,
         path,
-        routeReason: `Selected by ${preference}; required controls are supported.`,
+        routeReason: (selectedRequest.operation || selectedRequest.task) === 'PERFORMANCE_TRANSFER' ? `Selected by ${preference}; prompt-led source-motion guidance requires output review and does not guarantee frame-exact transfer or original voice.` : `Selected by ${preference}; required controls are supported.`,
         estimatedCostUsd: estimateVideoCost(selected, selectedRequest),
         resolution: selectedRequest.resolution,
         policyVersion: policy?.updatedAt,
@@ -587,5 +594,6 @@ export function selectVideoRoute(
         ...(selected.modelId === 'black-forest-labs/flux-video-edit' ? { editQuote: quoteVideoEdit(selected, selectedRequest) } : {}),
         ...((selectedRequest.operation || selectedRequest.task) === 'EXTEND' ? { continuationQuote: quoteVideoContinuation(selected, selectedRequest) } : {}),
         ...((selectedRequest.operation || selectedRequest.task) === 'LIP_SYNC' ? { lipSyncQuote: quoteSuppliedAudioAvatar(selected, selectedRequest) } : {}),
+        ...((selectedRequest.operation || selectedRequest.task) === 'PERFORMANCE_TRANSFER' ? { motionQuote: quotePromptMotionTransfer(selected, selectedRequest,videoCatalogQuoteFingerprint(selected)) } : {}),
     };
 }
