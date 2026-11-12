@@ -1,3 +1,8 @@
+import { resolveShotDependencyProof, synchronizeShotDependencies } from './productionDependencies';
+import { validateStoryboardImageInput } from './storyboardImageInputs';
+import { sameStoryboardImageQuote } from '../src/lib/ai/storyboard-image';
+import { resolveStoryboardSelection } from './storyboard';
+import { normalizeShotDirecting } from '../src/lib/production/storyboard-contract';
 import { generationFinish, generationResolution } from '../src/lib/generation/finish-options';
 import { internal } from './_generated/api';
 import { proposedCast, requireCastReadiness } from './castReadiness';
@@ -236,9 +241,13 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     const assignedCast = cast.flatMap(item=>continuity.resourceBindings.filter(binding=>binding.role===item.key).map(binding=>({role:item.key,proposedName:item.name,resourceVersionId:binding.resourceVersionId})));
     const castIds = new Set(continuity.resourceBindings.map(binding=>binding.resourceVersionId));
     const promptContext = continuity.promptContext ? {...continuity.promptContext,...(cast.length?{castAssignments:assignedCast,noNamedCast:object(metadata.castCoverage).noNamedCast===true,resources:continuity.promptContext.resources.filter(resource=>resource.kind!=='CHARACTER'||castIds.has(String(resource.resourceVersionId)))}:{})} : null;
+    const storyboardSelection = await resolveStoryboardSelection(ctx,{projectId:access.project._id,productionId:production._id,productionVersionId:version._id,shotId:shot._id,metadata:shot.metadata,requiredAssetIds:shot.requiredAssetIds, ...(execution?{actorUserId:access.user._id}:{})});
+    const directing = normalizeShotDirecting(metadata.directing);
+    const sourceShotDependency = storyboardSelection || metadata.directing ? await resolveShotDependencyProof(ctx,{shotId:shot._id,expectedVersionId:version._id},access.user._id) : undefined;
     const normalizedRequest: Record<string, unknown> = {
       ...requested, ...object(requested.constraints), ...recipeMarkers, referenceBindings: references.referenceBindings, editInstructions: references.editInstructions,
       prompt: promptContext ? `${references.prompt}\nApproved project continuity: ${JSON.stringify(promptContext)}` : references.prompt, duration: shot.durationSeconds,
+      storyboardSelection:storyboardSelection??undefined, sourceShotDependency,
       planningContextSnapshot: continuity.planningContextSnapshot, selectedResourceVersionIds: continuity.selectedResourceVersionIds, voiceIds: continuity.voiceIds,voiceVersionIds:continuity.voiceVersionIds,
       resourceBindings:continuity.resourceBindings,dialogueSegments:continuity.dialogueSegments,
       durationBridgeAllowed: metadata.audioPolicy === 'SILENT' && operation === 'GENERATE' && continuity.dialogueSegments.length === 0,
@@ -305,6 +314,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.requiresSourceAudioPreservation = source.hasAudio;
       normalizedRequest.resolution = undefined;
     }
+    if (Object.values(directing).some(value=>Array.isArray(value)?value.length>0:typeof value==='string'&&value.length>0)) normalizedRequest.prompt = `${normalizedRequest.prompt}\nCreator's shot direction (preserve the approved project references): ${JSON.stringify(directing)}`;
     if (operation === 'PERFORMANCE_TRANSFER') {
       normalizedRequest.motionSource = await resolveMotionSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, referenceBindings: references.referenceBindings, ...(execution ? {actorId:access.user._id} : {}) });
       normalizedRequest.motionIdentity = await resolveMotionIdentityCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, ...(execution ? {actorId:access.user._id} : {}) });
@@ -383,7 +393,8 @@ export async function createCanonicalGenerationJob(ctx: MutationCtx, args: Gener
     const recipeAdmission = execution ? await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:quote.providerHoldMicros/1e6,credits:estimatedCost}) : null;
     const latestTake = await ctx.db.query('shotVersions').withIndex('by_shot_version', (q) => q.eq('shotId', shot._id)).order('desc').first();
     const timestamp = Date.now();
-    const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id }, provider: args.provider, model: args.model, createdAt: timestamp });
+    const shotVersionId = await ctx.db.insert('shotVersions', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, versionNumber: (latestTake?.versionNumber ?? 0) + 1, status: 'QUEUED', promptSnapshot: shot.prompt, contextSnapshot: { request: normalizedRequest, productionVersionId: version._id, ...(normalizedRequest.storyboardSelection?{storyboardSelection:normalizedRequest.storyboardSelection}:{}), ...(normalizedRequest.sourceShotDependency?{sourceShotDependency:normalizedRequest.sourceShotDependency}:{}) }, provider: args.provider, model: args.model, createdAt: timestamp });
+    if (normalizedRequest.sourceShotDependency) await synchronizeShotDependencies(ctx,{shotId:shot._id,expectedVersionId:version._id},access.user._id);
     await ensureResourceState(ctx, { projectId: access.project._id, productionId: production._id, resourceType: 'shotVersion', resourceId: shotVersionId },execution?access.user._id:undefined);
     const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, productionVersionId: version._id, shotId: shot._id, shotVersionId, createdByUserId: access.user._id, operation: 'SHOT_GENERATION', capability: args.capability, modality: 'VIDEO', provider: args.provider, model: args.model, modelVersion: args.modelVersion, ...(estimateId?{estimateId}:{}), request: normalizedRequest, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost, estimatedProviderCostUsd, idempotencyKey, requestHash, correlationId: args.correlationId, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
     const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: estimatedCost, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
@@ -559,7 +570,12 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     if(request.preparationKind==='MUSIC'){if(process.env.FINALFRAME_MUSIC_PREPARATION_ENABLED!=='true')throw new Error('MUSIC_DISABLED');const current=freshMusicQuote(object(args.livePreparationQuote).musicQuote);const frozen=freshMusicQuote({...object(object(request.quote).musicQuote),checkedAt:current.checkedAt});if(!sameMusicQuote(frozen,current)||current.model!==job.model||current.canonicalSlug!==job.modelVersion||current.reservedProviderUsd!==job.estimatedProviderCostUsd||object(args.livePreparationQuote).estimatedProviderCostUsd!==job.estimatedProviderCostUsd)throw new Error('MUSIC_QUOTE_CHANGED');}
     const bookedMicros=Math.ceil(Number(job.estimatedProviderCostUsd)*1_000_000);
     if(!Number.isFinite(bookedMicros)||bookedMicros<=0||bookedMicros>reserved.estimatedMicros)throw new Error('The preparation reservation no longer covers its provider quote.');
-    const selected = preparationModel(request.preparationKind as PreparationKind, request.clone === true);
+    if (request.imageRequest) {
+      await validateStoryboardImageInput(ctx,job.productionId!,request.imageRequest,job.createdByUserId);
+      const current=object(args.livePreparationQuote), frozen=object(request.quote);
+      if (!current.storyboardImageQuote || !sameStoryboardImageQuote(current.storyboardImageQuote,frozen.storyboardImageQuote) || current.model!==job.model || current.estimatedProviderCostUsd!==job.estimatedProviderCostUsd || typeof current.checkedAt!=='number' || Date.now()-current.checkedAt>30000 || current.checkedAt>Date.now()+1000) throw new Error('STORYBOARD_IMAGE_QUOTE_CHANGED');
+    }
+    const selected = preparationModel(request.preparationKind as PreparationKind, request.clone === true, Boolean(request.imageRequest));
     if (selected.id !== job.model) throw new Error('Preparation model configuration changed.');
     if (request.preparationKind === 'TRANSCRIPT') {
       if (request.transcriptionOptions && stable(transcriptRequestOptions(request.transcriptionOptions)) !== stable(object(args.livePreparationQuote).transcriptionOptions)) throw new Error('TRANSCRIPT_REQUEST_CHANGED');
@@ -578,6 +594,12 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
     dispatchValidation = { model: job.model, estimatedCostUsd: job.estimatedProviderCostUsd };
   } else {
     try {
+      if (request.storyboardSelection || request.sourceShotDependency) {
+        const shot = job.shotId ? await ctx.db.get(job.shotId) : null; if(!shot?.productionVersionId || !job.productionId) throw new Error('STORYBOARD_SELECTION_CHANGED');
+        const selection=await resolveStoryboardSelection(ctx,{projectId:project._id,productionId:job.productionId,productionVersionId:shot.productionVersionId,shotId:shot._id,metadata:shot.metadata,requiredAssetIds:shot.requiredAssetIds,actorUserId:actor._id});
+        if(stable(selection??undefined)!==stable(request.storyboardSelection))throw new Error('STORYBOARD_SELECTION_CHANGED');
+        if(request.sourceShotDependency && stable(await resolveShotDependencyProof(ctx,{shotId:shot._id,expectedVersionId:shot.productionVersionId},actor._id))!==stable(request.sourceShotDependency))throw new Error('STORYBOARD_DIRECTION_CHANGED');
+      }
       if (request.operation === 'LIP_SYNC') {
         const source = object(request.lipSyncSource); const portrait = object(request.lipSyncPortrait); const frozen = object(request.lipSyncQuote);
         const audio = await resolveAudioSourceCertificate(ctx, { projectId: project._id, assetId: source.assetId as Id<'assets'> });
@@ -669,6 +691,7 @@ export const succeed = internalMutation({ args: { ...leaseArgs, assetId: v.id('a
   const attempt = await currentAttempt(ctx, job);
   if (attempt) await ctx.db.patch(attempt._id, { status: 'COMPLETED', errorCode: undefined, retryable: undefined, completedAt: timestamp });
   await ctx.db.patch(job._id, { status: 'COMPLETED', executionStage: 'REVIEW_READY', progress: 100, errorCode: undefined, errorMessage: undefined, nextAttemptAt: undefined, nextPollAt: undefined, response: { ...object(job.response), assetId: args.assetId, technicalProbe: args.technicalProbe, visualApproval: 'REQUIRES_HUMAN_REVIEW' }, actualCost: job.estimatedCost, latencyMs: timestamp - (job.startedAt ?? job.createdAt), leaseId: undefined, leaseExpiresAt: undefined, completedAt: timestamp, updatedAt: timestamp });
+  if (object(job.request).sourceShotDependency && job.shotId && job.productionVersionId) await synchronizeShotDependencies(ctx,{shotId:job.shotId,expectedVersionId:job.productionVersionId},job.createdByUserId);
   await settle(ctx, job, true, job.providerCostUsd);
   return { jobId: job._id, assetId: args.assetId };
 } });
@@ -760,7 +783,7 @@ export const preparationContext = internalQuery({
     return { productionId: production._id, projectId: access.project._id, voice, source: asset?.storageId && stored ? { assetId: asset._id,storageId:asset.storageId,checksum:stored.sha256,byteSize:stored.size,mimeType:asset.mimeType,url:await ctx.storage.getUrl(asset.storageId) } : null };
   },
 });
-const preparationCreateArgs = { productionId: v.id('productions'), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), voiceConfigSnapshot: v.optional(v.any()), voiceConfigHash: v.optional(v.string()), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() };
+const preparationCreateArgs = { productionId: v.id('productions'), imageRequest: v.optional(v.any()), kind: preparationKindValidator, text: v.string(), targetVoiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), voiceConfigSnapshot: v.optional(v.any()), voiceConfigHash: v.optional(v.string()), primaryVoiceSampleAssetId: v.optional(v.id('assets')), sourceAssetId: v.optional(v.id('assets')), durationSeconds: v.optional(v.number()), clone: v.boolean(), model: v.string(), capability: v.string(), estimatedProviderCostUsd: v.number(), quote: v.any(), idempotencyKey: v.string() };
 type PreparationCreateArgs = Infer<ReturnType<typeof preparationArgsValidator>>;
 function preparationArgsValidator(){return v.object(preparationCreateArgs);}
 export const createPreparation=internalMutation({args:preparationCreateArgs,returns:v.any(),handler:(ctx,args)=>createCanonicalPreparationJob(ctx,args)});
@@ -791,7 +814,9 @@ export async function createCanonicalPreparationJob(ctx:MutationCtx,args:Prepara
       const frozen = assertReferenceVoiceQuote(object(args.quote).referenceVoiceQuote);
       if (args.estimatedProviderCostUsd !== frozen.costUsd || object(args.quote).model !== args.model || typeof object(args.quote).checkedAt !== 'number' || Date.now() - Number(object(args.quote).checkedAt) > 30_000 || Number(object(args.quote).checkedAt) > Date.now() + 1000) throw new Error('Obtain a fresh reviewed reference voice quote.');
     } else if (args.primaryVoiceSampleAssetId || voice?.mode === 'REFERENCE_CLONE' || voice?.mode === 'RECORDED') throw new Error('Voice mode changed.');
-    const config = preparationModel(args.kind, args.clone);
+    const imageInput = args.imageRequest ? await validateStoryboardImageInput(ctx,production._id,args.imageRequest,execution?access.user._id:undefined) : null;
+    if (imageInput && (args.kind !== 'CHARACTER_REFERENCE' || !object(args.quote).storyboardImageQuote || object(args.quote).model !== args.model || object(args.quote).estimatedProviderCostUsd !== args.estimatedProviderCostUsd)) throw new Error('STORYBOARD_IMAGE_QUOTE_CHANGED');
+    const config = preparationModel(args.kind, args.clone, Boolean(imageInput));
     if (args.model !== config.id || args.capability !== config.capability || !Number.isFinite(args.estimatedProviderCostUsd) || args.estimatedProviderCostUsd <= 0 || args.estimatedProviderCostUsd > 2) throw new Error('A verified preparation quote is required.');
     const sfxQuote=args.kind==='SFX'?freshSfxQuote(object(args.quote).sfxQuote):undefined;if(sfxQuote){validateSfxPrompt(args.text);assertSfxConsent(object(args.quote).sfxEstimateConsent,String(production._id),args.text,sfxQuote);if(sfxQuote.model!==args.model||args.capability!=='SFX_GENERATION'||sfxQuote.reservedProviderUsd!==videoBudgetReservationUsd(sfxQuote.baseProviderCeilingUsd)||sfxQuote.reservedProviderUsd!==args.estimatedProviderCostUsd||object(args.quote).estimatedProviderCostUsd!==args.estimatedProviderCostUsd)throw sfxError('SFX_QUOTE_INVALID');}
     const musicQuote=args.kind==='MUSIC'?freshMusicQuote(object(args.quote).musicQuote):undefined;if(musicQuote&&(musicQuote.model!==args.model||musicQuote.reservedProviderUsd!==args.estimatedProviderCostUsd||object(args.quote).estimatedProviderCostUsd!==args.estimatedProviderCostUsd))throw new Error('MUSIC_QUOTE_INVALID');
@@ -811,14 +836,14 @@ export async function createCanonicalPreparationJob(ctx:MutationCtx,args:Prepara
     const recipeMarker=execution?{recipeRunNodeId:execution.nodeId,recipeResolvedRequestHash:(await recipeExecutionScope(ctx,execution)).node.resolvedRequestHash}:{};
     const voiceVersionId = voice ? await freezeVoiceVersion(ctx,voice,access.user._id) : undefined;
     const frozenVoice = voice ? {voiceVersionId,voiceConfigSnapshot:voice.voiceConfigSnapshot,voiceConfigHash:voice.voiceConfigHash} : {};
-    const request = { ...recipeMarker, ...frozenVoice, preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: args.sourceAssetId ? [args.sourceAssetId] : [] };
-    const requestHash = stable({ ...recipeMarker, ...(voice?{voiceConfigHash:voice.voiceConfigHash}:{}), productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
+    const request = { ...recipeMarker, ...frozenVoice, ...(imageInput?{imageRequest:imageInput.request}:{}), preparationKind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, cloneSource, sourceAssetId: args.sourceAssetId,transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),transcriptFormat:transcriptSource?transcriptFormat(transcriptSource):undefined, clone: args.clone, durationSeconds: args.durationSeconds, quote: args.quote, referenceAssetIds: imageInput ? imageInput.request.sourceAssetIds : args.sourceAssetId ? [args.sourceAssetId] : [] };
+    const requestHash = stable({ ...recipeMarker, ...(imageInput?{imageRequest:imageInput.request}:{}), ...(voice?{voiceConfigHash:voice.voiceConfigHash}:{}), productionId: production._id, model: args.model, kind: args.kind, text: args.text.trim(), targetVoiceId: args.targetVoiceId, primaryVoiceSampleAssetId: args.primaryVoiceSampleAssetId, sourceAssetId: args.sourceAssetId, cloneSource, transcriptSource,...(transcriptionOptions?{transcriptionOptions}:{}),...(musicQuote?{musicQuote:{...musicQuote,checkedAt:0}}:{}),...(sfxQuote?{sfxQuote:{...sfxQuote,checkedAt:0},sfxEstimateConsent:object(args.quote).sfxEstimateConsent}:{}) });
     const idempotencyKey = key(args.idempotencyKey);
     const existing = await ctx.db.query('generationJobs').withIndex('by_idempotency', q => q.eq('idempotencyKey', idempotencyKey)).unique();
     if (existing) { if (existing.requestHash !== requestHash || existing.projectId !== access.project._id||(musicQuote||sfxQuote)&&existing.createdByUserId!==access.user._id) throw new Error('Idempotency key conflict.'); return publicJob(existing as unknown as Record<string, unknown>); }
     const admission=execution?await assertRecipeAdmission(ctx,execution,{model:args.model,providerCeilingUsd:args.estimatedProviderCostUsd,credits:1}):undefined;
     const timestamp = Date.now();
-    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, productionId: production._id, createdByUserId: access.user._id, operation: 'PREPARATION', capability: args.capability,...(musicQuote||sfxQuote?{modelVersion:(musicQuote||sfxQuote)!.canonicalSlug}:{}), modality: args.kind === 'CHARACTER_REFERENCE' ? 'IMAGE' : args.kind === 'TRANSCRIPT' ? 'TEXT' : 'AUDIO', provider: 'openrouter', model: args.model, request, requestHash, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost: 1, estimatedProviderCostUsd: args.estimatedProviderCostUsd, idempotencyKey, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
+    const jobId = await ctx.db.insert('generationJobs', { studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: access.project._id, ...(imageInput?{productionVersionId:imageInput.version._id}:{}), productionId: production._id, createdByUserId: access.user._id, operation: 'PREPARATION', capability: args.capability,...(musicQuote||sfxQuote?{modelVersion:(musicQuote||sfxQuote)!.canonicalSlug}:{}), modality: args.kind === 'CHARACTER_REFERENCE' ? 'IMAGE' : args.kind === 'TRANSCRIPT' ? 'TEXT' : 'AUDIO', provider: 'openrouter', model: args.model, request, requestHash, status: 'QUEUED', executionStage: 'QUEUED', progress: 0, estimatedCost: 1, estimatedProviderCostUsd: args.estimatedProviderCostUsd, idempotencyKey, attemptCount: 0, createdAt: timestamp, updatedAt: timestamp });
     const reservation = await reserveGenerationCreditsInTransaction(ctx, { studioExternalId: production.studioExternalId, amount: 1, idempotencyKey: `generation:${jobId}`, generationJobId: jobId },execution?access.user._id:undefined);
     const providerBudgetReservationId = await reserveProviderBudget(ctx, { jobId, studioExternalId: production.studioExternalId, estimatedCostUsd: args.estimatedProviderCostUsd, idempotencyKey: `generation:${jobId}` });
     await ctx.db.patch(jobId, { canonicalReservationId: reservation.reservationId, providerBudgetReservationId });

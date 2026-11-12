@@ -346,6 +346,7 @@ export type ProductionStatus = 'DRAFT' | 'PLANNED' | 'APPROVED' | 'GENERATING' |
 export type GenerationJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 export interface CreateIntent {
+    creatorIntent?: import('../production/creator-intent').CreatorIntent;
     projectId?: string;
     productionId?: string;
     continuityBibleId?: string;

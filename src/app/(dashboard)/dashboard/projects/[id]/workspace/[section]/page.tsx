@@ -1,7 +1,12 @@
+import { ProductionJourney } from '@/components/production-workspace/production-journey';
+import { PlanStagePanel } from '@/components/production-workspace/plan-stage-panel';
+import { VisualStoryboard } from '@/components/production-workspace/visual-storyboard';
+import { parseCreatorIntent } from '@/lib/production/creator-intent';
+import type { CreatorStage } from '@/lib/production/creator-journey';
 import { decodeProjectRouteId } from '@/lib/project/route-id';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { ArrowRight, Check, Film, Sparkles } from 'lucide-react';
+import { ArrowRight, Film, Sparkles } from 'lucide-react';
 import { api } from '../../../../../../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { GraphMap } from '@/components/production-workspace/graph-map';
@@ -19,15 +24,7 @@ import { RecipePanel } from '@/components/production-workspace/recipe-panel';
 import { ShotWorkspace } from '@/components/production-workspace/shot-workspace';
 import type { Id } from '../../../../../../../../convex/_generated/dataModel';
 
-const steps = [
-  { label: 'Idea', description: 'Start with what you want to make.' },
-  { label: 'Plan', description: 'Shape the story before generation.' },
-  { label: 'Make', description: 'Create and compare individual takes.' },
-  { label: 'Review', description: 'Request changes or approve the result.' },
-  { label: 'Download', description: 'Export the finished video.' },
-];
-
-export default async function WorkspaceSectionPage({ params, searchParams }: { params: Promise<{ id: string; section: string }>; searchParams: Promise<{ production?: string; timeline?: string | string[] }> }) {
+export default async function WorkspaceSectionPage({ params, searchParams }: { params: Promise<{ id: string; section: string }>; searchParams: Promise<{ production?: string; timeline?: string | string[]; stage?: string | string[] }> }) {
   await requireOnboardingComplete();
   const { id: routeId, section } = await params;
   const id = decodeProjectRouteId(routeId);
@@ -41,7 +38,7 @@ export default async function WorkspaceSectionPage({ params, searchParams }: { p
   const picker = <EpisodePicker projectExternalId={id} options={navigation.options} selectedProductionId={selectedProductionId} nextEpisodeNumber={navigation.nextEpisodeNumber} />;
   if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6">{picker}<p className="text-sm text-muted-foreground">Select an episode to open its production workspace.</p></div>;
   const convex = await getAuthenticatedConvexClient();
-  const graph = await convex.query(api.productionGraph.getByProject, { projectExternalId: id, productionId: selectedProductionId as Id<'productions'> | undefined });
+  const graph = await convex.query(api.productionGraph.getByProject, { projectExternalId: id, productionId: selectedProductionId as Id<'productions'> | undefined, ...(typeof query.timeline==='string'?{timelineId:query.timeline as Id<'timelines'>}:{}) });
   if (!graph) return <div className="space-y-6">{picker}<EmptyProject projectId={id} /></div>;
   let selectedTimelineId: string | undefined;
   if (active === 'edit' && query.timeline !== undefined) {
@@ -58,18 +55,24 @@ export default async function WorkspaceSectionPage({ params, searchParams }: { p
   // the authorized association explicit before same-production navigation.
   if (selectedTimelineId && !query.production) redirect(`/dashboard/projects/${encodeURIComponent(id)}/workspace/edit?${new URLSearchParams({ production: String(graph.production._id), timeline: selectedTimelineId })}`);
 
-  const controls = ['media', 'storyboard', 'takes', 'review', 'edit'].includes(active) ? await loadWorkspaceControls(id, String(graph.production._id)) : null;
+  const controls = await loadWorkspaceControls(id,String(graph.production._id));
+  const canonical = await convex.query(api.productions.getWorkspace,{productionId:graph.production._id});
+  const savedInput=canonical?.plan?.input;
+  let creatorIntent;try{creatorIntent=parseCreatorIntent(savedInput?.creatorIntent);}catch{creatorIntent=undefined;}
+  const planStage = typeof query.stage==='string'&&['brief','script','guide'].includes(query.stage)?query.stage as 'brief'|'script'|'guide':'script';
+  const journeyStage:CreatorStage=active==='plan'?planStage:active==='media'?'guide':active==='canvas'?'storyboard':active==='overview'?'brief':active as CreatorStage;
   const finishingUncertain=graph.summary.finishingHistoryLimited&&!graph.summary.hasExport;
   const currentStep = finishingUncertain ? 'Check finishing history' : graph.summary.hasExport ? 'Download' : graph.summary.hasTimeline ? 'Review' : graph.summary.hasVersion ? 'Make' : graph.summary.hasPlan ? 'Plan' : 'Idea';
   return <div className="space-y-8">
     {picker}
     <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="ff-eyebrow">Video project workspace</p><h1 className="ff-display mt-2 text-4xl font-semibold capitalize sm:text-5xl">{graph.production.workflow.replaceAll('_', ' ').toLowerCase()}</h1><p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">Your production stays connected from the plan to the final download.</p></div><div className="rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm"><span className="text-muted-foreground">Current step</span><span className="ml-2 font-semibold">{currentStep}</span></div></header>
-    <section className="ff-card overflow-hidden p-5 sm:p-7" aria-label="Video production progress"><div className="grid gap-4 sm:grid-cols-5">{steps.map((step, index) => { const complete = index === 0 || (index === 1 && graph.summary.hasPlan) || (index === 2 && graph.summary.hasVersion) || (index === 3 && graph.summary.hasReview) || (index === 4 && graph.summary.hasExport); return <div key={step.label} className="relative"><div className="relative z-10 flex w-fit items-center gap-3 bg-card pr-3"><span className={`grid size-9 place-items-center rounded-full ${complete ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground'}`}>{complete ? <Check className="size-4" /> : index + 1}</span><span className="font-semibold">{step.label}</span></div><p className="mt-2 pl-12 text-xs leading-5 text-muted-foreground">{step.description}</p>{index < steps.length - 1 ? <span className="absolute left-9 top-4 hidden h-px w-[calc(100%-1.5rem)] bg-border sm:block" aria-hidden="true" /> : null}</div>; })}</div></section>
+    <ProductionJourney projectId={id} projectRecordId={graph.production.projectId?String(graph.production.projectId):undefined} productionId={String(graph.production._id)} activeStage={journeyStage} timelineId={typeof query.timeline==='string'?query.timeline:undefined} creatorIntent={creatorIntent} canEdit={controls?.canEdit??false} />
+    {graph.summary.sourceHistoryLimited?<p role="status" className="text-sm text-muted-foreground">This production map shows a bounded selection of source history. Use the visual storyboard and saved take lists to inspect retained alternatives.</p>:null}
     {graph.summary.finishingHistoryLimited ? <section role="status" className="ff-card space-y-2 p-5 text-sm text-muted-foreground"><p>{finishingUncertain?'Only recent finishing history was checked. Current finishing progress is not confirmed.':'This map includes only recent finishing history; earlier records are not shown.'}</p><Link className="inline-flex min-h-11 items-center text-primary underline underline-offset-4" href={`/dashboard/projects/${encodeURIComponent(id)}/workspace/review?production=${encodeURIComponent(String(graph.production._id))}`}>Inspect saved assembly versions</Link></section> : null}
     {/* Convex owns recipe rollout. RecipePanel reads the authorized project's
         enabled state; a second frontend flag hid enabled execution controls. */}
-    {['storyboard','takes'].includes(active) ? <RecipePanel productionId={String(graph.production._id)} /> : null}
-    {active === 'media' && controls ? <ContinuityStudio key={`${controls.productionId}:${controls.versionId ?? 'unplanned'}`} data={controls} /> : (active === 'storyboard' || active === 'takes') && controls ? <ShotWorkspace data={controls} /> : active === 'overview' ? <GraphMap projectId={id} productionId={String(graph.production._id)} nodes={graph.nodes} edges={graph.edges} /> : active === 'canvas' ? <CanvasSurface nodes={graph.nodes} edges={graph.edges} /> : active === 'edit' ? <><TimelineComposer data={controls!} /><EditSurface key={`${graph.production._id}:${selectedTimelineId ?? 'latest'}`} productionId={String(graph.production._id)} initialTimelineId={selectedTimelineId} nodes={graph.nodes} /></> : active === 'review' || active === 'export' ? <ReleaseSurface productionId={String(graph.production._id)} /> : <SectionView projectId={id} productionId={String(graph.production._id)} section={active} hasPlan={graph.summary.hasPlan} hasVersion={graph.summary.hasVersion} />}
+    {['storyboard','takes'].includes(active) ? <RecipePanel productionId={String(graph.production._id)} creatorIntent={creatorIntent} /> : null}
+    {active === 'media' && controls ? <ContinuityStudio key={`${controls.productionId}:${controls.versionId ?? 'unplanned'}`} data={controls} /> : active === 'storyboard' && controls ? <VisualStoryboard data={controls} /> : active === 'takes' && controls ? <ShotWorkspace data={controls} /> : active === 'plan' ? <PlanStagePanel projectId={id} productionId={String(graph.production._id)} stage={planStage} planId={canonical?.plan?._id} versionId={canonical?.version?._id} status={canonical?.version?.status} input={savedInput} plan={canonical?.version?.snapshot??canonical?.plan?.plan} canEdit={controls?.canEdit??false} creatorIntent={creatorIntent} /> : active === 'overview' ? <GraphMap projectId={id} productionId={String(graph.production._id)} nodes={graph.nodes} edges={graph.edges} /> : active === 'canvas' ? <CanvasSurface nodes={graph.nodes} edges={graph.edges} /> : active === 'edit' ? <><TimelineComposer data={controls!} /><EditSurface key={`${graph.production._id}:${selectedTimelineId ?? 'latest'}`} productionId={String(graph.production._id)} initialTimelineId={selectedTimelineId} nodes={graph.nodes} /></> : active === 'review' || active === 'export' ? <ReleaseSurface productionId={String(graph.production._id)} /> : <SectionView projectId={id} productionId={String(graph.production._id)} section={active} hasPlan={graph.summary.hasPlan} hasVersion={graph.summary.hasVersion} />}
     {active === 'review' && controls ? <StoryAcceptance data={controls} /> : null}
   </div>;
 }

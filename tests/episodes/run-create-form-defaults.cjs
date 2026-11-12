@@ -12,7 +12,7 @@ function load(file, imports) {
   instance.filename = filename;
   instance.paths = Module._nodeModulePaths(path.dirname(filename));
   const normal = instance.require.bind(instance);
-  instance.require = name => Object.hasOwn(imports, name) ? imports[name] : normal(name);
+  instance.require = name => Object.hasOwn(imports, name) ? imports[name] : (name==='./creator-intent'||name==='@/lib/production/creator-intent') ? load('src/lib/production/creator-intent.ts',{}) : name==='./creation-intent-controls' ? {CreationIntentControls:()=>null} : name==='@/lib/production/episode-actions' ? {saveProjectCreatorPreference:async()=>({success:true})} : normal(name);
   instance._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename);
   return instance.exports;
 }
@@ -26,6 +26,7 @@ let foreign = false;
 let transportFailure = false;
 let savedPlan = null;
 let savedVersion = null;
+const sourceContracts=new Map();
 let calls = [];
 const client = {
   query: async (reference, args) => {
@@ -39,6 +40,7 @@ const client = {
       { bibleId: 'approved-bible', versionNumber: 4, state: 'APPROVED', snapshot: { resourceBindings: [{ resourceId: 'character', resourceVersionId: 'character-v1' }], rules: ['Keep the identity.', 'x'.repeat(300), 'rule three', 'rule four'], story: 'y'.repeat(500), visualStyle: 'z'.repeat(300) } },
       { bibleId: 'draft-bible', versionNumber: 5, state: 'DRAFT', snapshot: { resourceBindings: [], rules: [], story: '', visualStyle: '' } },
     ];
+    if(reference==='assetContract')return sourceContracts.get(args.assetId)??null;
     if (reference === 'workspace') {
       assert.equal(args.projectExternalId, project.externalId);
       const production = args.productionId === recent._id ? recent : args.productionId === oldest._id ? oldest : null;
@@ -55,7 +57,7 @@ const client = {
 };
 const actions = load('src/lib/production/episode-actions.ts', {
   'next/cache': { revalidatePath() {} }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client },
-  '../../../convex/_generated/api': { api: { projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode', changeContinuityMode: 'changeRelationship' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
+  '../../../convex/_generated/api': { api: { assetStorage:{getAssetContract:'assetContract'}, projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode', changeContinuityMode: 'changeRelationship' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
   '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value, VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'CINEMATIC_FILM', 'MOTION_GRAPHICS', 'PRODUCT_SAAS_LAUNCH'] },
   '../../../renderer/src/output-presets': outputPresets,
   './plan-settings': load('src/lib/production/plan-settings.ts',{'../../../renderer/src/output-presets':outputPresets}),
@@ -144,6 +146,13 @@ function all(element) {
   assert.equal(continuity.bibles[0].rulePreview.length, 3); assert.equal(continuity.bibles[0].rulePreview[1].length, 240);
   assert.equal(continuity.bibles[0].storyPreview.length, 400); assert.equal(continuity.bibles[0].visualStylePreview.length, 240);
   console.log('PASS authorized continuity projection excludes drafts and bounds UI summaries without changing snapshots');
+
+  savedPlan={_id:'retained-plan',productionId:recent._id,input:{inputAssetIds:['retained-video']}};savedVersion={status:'DRAFT',sourcePlanId:'retained-plan'};
+  sourceContracts.set('retained-video',{assetId:'retained-video',projectId:project._id,scope:'PROJECT',storageId:'storage',name:'Original authorized clip',mimeType:'video/mp4'});
+  assert.deepEqual((await actions.getSelectedProductionDefaults(project.externalId,recent._id)).inputAssets,[{id:'retained-video',name:'Original authorized clip',mimeType:'video/mp4'}]);
+  sourceContracts.get('retained-video').projectId='foreign-project';const foreignSource=await actions.getSelectedProductionDefaults(project.externalId,recent._id);assert.equal(foreignSource.inputAssets.length,0);assert(foreignSource.inputSourcesError.includes('unavailable in this project'));
+  savedPlan=null;savedVersion=null;sourceContracts.clear();
+  console.log('PASS saved inputs retain authorized project IDs and MIME while foreign or unavailable sources produce an actionable denial');
 
   const cells = []; let cell = 0; let captured;
   const form = load('src/components/production/create-production-form.tsx', {
@@ -242,7 +251,7 @@ function all(element) {
     'next/link': () => null, 'next/navigation': { notFound() { throw new Error('404'); } },
     '@/lib/guards': { requireAuth: async () => {} }, '@/components/production/create-production-form': { CreateProductionForm: FormStub },
     '@/lib/project/actions': { getStudioContext: async () => ({ studioId: 'unrelated-selected-workspace' }) },
-    '@/lib/production/episode-actions': { ...actions, getPlanningContinuityOptions: async () => implicitProductionId ? { productionId: implicitProductionId, requiresBible: false, bibles: [], selectionError: null } : undefined },
+    '@/lib/production/episode-actions': { ...actions, getProjectCreatorPreference:async()=>undefined, getPlanningContinuityOptions: async () => implicitProductionId ? { productionId: implicitProductionId, requiresBible: false, bibles: [], selectionError: null } : undefined },
     '@/lib/templates/actions': { getTemplateDefaultsForProject: async () => catalog.getStarterTemplate('music-montage') }, '@/lib/templates/catalog': catalog,
   }).default;
   const first = all(await CreatePage({ searchParams: Promise.resolve({ project: project.externalId, production: recent._id, mode: 'AD' }) })).find(element => element.type === FormStub);

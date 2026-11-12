@@ -1,3 +1,4 @@
+import { synchronizeStoryboardTimeline } from './storyboardLineage';
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from 'convex/server';
@@ -673,6 +674,7 @@ async function persistDraft(
   const encoded = encodeState({ ...state, tracks: normalizedTracks }, timelineKey(sourceTimelineId), source.versionNumber, { tracks: trackMap, clips: clipMap });
   if (new TextEncoder().encode(JSON.stringify(encoded)).length > 512 * 1024) throw new Error('This edit is too large for one timeline. Split it into shorter components.');
   await ctx.db.patch(provisional, { durationSeconds, tracks: encoded, updatedAt: timestamp });
+  await synchronizeStoryboardTimeline(ctx,provisional,member.user._id);
   return { timelineId: provisional, createdTrackIds, createdClipIds, durationSeconds };
 }
 

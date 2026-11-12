@@ -1,10 +1,12 @@
+import { certifyStoryboardImageQuote, type StoryboardImageQuote } from './storyboard-image';
 import {quoteSfx,validateSfxPrompt,type SfxQuoteCertificate} from './sfx';
 import {quoteMusic,type MusicQuoteCertificate} from './music';
 import { PREPARATION_MODELS, REVIEWED_OPERATION_CONTRACTS } from './model-registry';
 import { TRANSCRIPT_SEGMENT_REQUEST } from './transcription';
 
 export type PreparationKind = 'CHARACTER_REFERENCE' | 'NARRATION' | 'VOICE_PREVIEW' | 'TRANSCRIPT' | 'MUSIC' | 'SFX';
-export function preparationModel(kind: PreparationKind, clone = false) {
+export function preparationModel(kind: PreparationKind, clone = false, storyboardImage = false) {
+  if (storyboardImage) { if (kind !== 'CHARACTER_REFERENCE' || clone) throw new Error('STORYBOARD_IMAGE_INVALID'); return PREPARATION_MODELS.storyboard; }
   if(kind==='SFX')return PREPARATION_MODELS.sfx;
   if(kind==='MUSIC')return PREPARATION_MODELS.music;
   return kind === 'CHARACTER_REFERENCE' ? PREPARATION_MODELS.image : kind === 'TRANSCRIPT' ? PREPARATION_MODELS.transcription : clone ? PREPARATION_MODELS.referenceVoice : PREPARATION_MODELS.narration;
@@ -38,10 +40,10 @@ export function assertReferenceVoiceQuote(value: unknown): ReferenceVoiceQuoteCe
 }
 /** Only server actions call this public, no-cost catalog endpoint. Every
  * endpoint is priced conservatively; unknown billing units fail closed. */
-export interface PreparationQuote {model:string;capability:typeof PREPARATION_MODELS[keyof typeof PREPARATION_MODELS]['capability'];estimatedProviderCostUsd:number;checkedAt:number;billing:string;musicQuote?:MusicQuoteCertificate;sfxQuote?:SfxQuoteCertificate;referenceVoiceQuote?:ReferenceVoiceQuoteCertificate;billableInputSeconds?:number;durationMeasurement?:'DECODED_PCM_SAMPLES_V1';inputDurationSeconds?:number;transcriptionOptions?:typeof TRANSCRIPT_SEGMENT_REQUEST}
-export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1' }, fetcher: typeof fetch = fetch):Promise<PreparationQuote> {
+export interface PreparationQuote {storyboardImageQuote?:StoryboardImageQuote;model:string;capability:typeof PREPARATION_MODELS[keyof typeof PREPARATION_MODELS]['capability'];estimatedProviderCostUsd:number;checkedAt:number;billing:string;musicQuote?:MusicQuoteCertificate;sfxQuote?:SfxQuoteCertificate;referenceVoiceQuote?:ReferenceVoiceQuoteCertificate;billableInputSeconds?:number;durationMeasurement?:'DECODED_PCM_SAMPLES_V1';inputDurationSeconds?:number;transcriptionOptions?:typeof TRANSCRIPT_SEGMENT_REQUEST}
+export async function quotePreparation(input: { kind: PreparationKind; text?: string; clone?: boolean; durationSeconds?: number; durationMeasurement?: 'DECODED_PCM_SAMPLES_V1'; imageRequest?: {sourceAssetIds:string[]} }, fetcher: typeof fetch = fetch):Promise<PreparationQuote> {
   if(input.kind==='SFX'&&process.env.FINALFRAME_SFX_PREPARATION_ENABLED!=='true')throw new Error('Sound effect generation is not enabled.');
-  const config = preparationModel(input.kind, input.clone);
+  const config = preparationModel(input.kind, input.clone, Boolean(input.imageRequest));
   if ('certifiedModel' in config && config.id !== config.certifiedModel) throw new Error('This preparation model needs a billing-unit review.');
   if(input.kind==='SFX'){if(input.clone||input.durationSeconds!==undefined)throw new Error('SFX_REQUEST_INVALID');validateSfxPrompt(input.text);const sfxQuote=await quoteSfx(fetcher);return {model:config.id,capability:config.capability,estimatedProviderCostUsd:sfxQuote.reservedProviderUsd,checkedAt:sfxQuote.checkedAt,billing:config.billing,sfxQuote};}
   if(input.kind==='MUSIC'){if(input.clone||!input.text?.trim()||input.text.length>4000||input.durationSeconds!==undefined)throw new Error('Music accepts a text prompt for one thirty-second clip.');const musicQuote=await quoteMusic(fetcher);return {model:config.id,capability:config.capability,estimatedProviderCostUsd:musicQuote.reservedProviderUsd,checkedAt:musicQuote.checkedAt,billing:config.billing,musicQuote};}
@@ -53,6 +55,7 @@ export async function quotePreparation(input: { kind: PreparationKind; text?: st
   const catalog = image ? payload : row(payload.data);
   if (catalog.id !== config.id || !Array.isArray(catalog.endpoints) || !catalog.endpoints.length) throw new Error('Preparation model is unavailable.');
   const endpoints = catalog.endpoints.map(row);
+  if (input.imageRequest) { const certificate=certifyStoryboardImageQuote(catalog,input.imageRequest.sourceAssetIds.length); return {model:config.id,capability:config.capability,estimatedProviderCostUsd:certificate.maximumProviderCostUsd,checkedAt:Date.now(),billing:config.billing,storyboardImageQuote:certificate}; }
   if (!image && !input.clone && endpoints.some((endpoint: Record<string, any>) => Number(row(endpoint.pricing).completion || 0) !== 0)) throw new Error('Preparation output billing needs a new review.');
   let usd: number; let referenceVoiceQuote: ReferenceVoiceQuoteCertificate | undefined; let billableInputSeconds: number | undefined;
   if (image) {

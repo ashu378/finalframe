@@ -1,3 +1,4 @@
+import { dependencyIsCurrent, dependencyIsSuperseded } from "./productionDependencies";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -151,12 +152,19 @@ async function authorizedTimeline(ctx: ReadCtx, production: Production, requeste
   return timeline;
 }
 
-async function assertDependenciesAreCurrent(ctx: ReadCtx, production: Production, timeline: Timeline, sourceIds: Set<string>) {
-  const dependencies = await ctx.db.query("productionDependencies").withIndex("by_production", (q) => q.eq("productionId", production._id)).collect();
-  const stale = dependencies.find((dependency) => dependency.state !== "ACTIVE" && (
-    sourceIds.has(dependency.sourceId) || sourceIds.has(dependency.targetId) || sourceIds.has(String(dependency.sourceVersionId ?? "")) || sourceIds.has(String(dependency.targetVersionId ?? "")) || dependency.sourceId === timeline._id.toString() || dependency.targetId === timeline._id.toString()
-  ));
-  if (stale) throw new Error(`Assembly is blocked because a production dependency is ${stale.state.toLowerCase()}. Refresh the affected take first.`);
+async function assertDependenciesAreCurrent(ctx: ReadCtx, production: Production, timeline: Timeline, sourceIds: Set<string>,actorId?:Id<'users'>) {
+  const dependencies = await ctx.db.query("productionDependencies").withIndex("by_production", (q) => q.eq("productionId", production._id)).take(1000);
+  if(dependencies.length>=1000)throw new Error('This production dependency history needs a bounded component review.');
+  for(const dependency of dependencies){
+    if(dependency.productionVersionId&&dependency.productionVersionId!==production.currentVersionId)continue;
+    const relevant=sourceIds.has(dependency.targetId)||sourceIds.has(String(dependency.targetVersionId??''))||dependency.targetId===timeline._id;
+    if(!relevant)continue;
+    if(dependency.state==='ACTIVE'){
+      if((dependency.sourceHash||dependency.targetHash)&&!await dependencyIsCurrent(ctx,production,dependency,actorId))throw new Error('Assembly is blocked because an upstream dependency receipt no longer matches its source. Review the affected resources first.');
+      continue;
+    }
+    if(!await dependencyIsSuperseded(ctx,production,dependency,actorId))throw new Error("Assembly is blocked because an upstream dependency is outdated or broken. Review the affected resources first.");
+  }
 }
 
 async function clipMatchesSelection(ctx: ReadCtx, clip: Doc<"timelineClips">, scope: SelectionScope, selectedIds: Set<string>) {
@@ -347,7 +355,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
     sources.push(source);
   }
 
-  await assertDependenciesAreCurrent(ctx, production, timeline, sourceIds);
+  await assertDependenciesAreCurrent(ctx, production, timeline, sourceIds,actorId);
   const scopedSources = scopeSourceItems(sources, selectionScope);
   const end = Math.max(...scopedSources.map(source => source.startSeconds + source.durationSeconds), ['FULL_PROJECT', 'TIMELINE'].includes(selectionScope) ? timeline.durationSeconds : 0);
   const durationInFrames = Math.max(1, finishingV5Enabled() ? Math.round(end * preset.fps) : Math.ceil(end * preset.fps));

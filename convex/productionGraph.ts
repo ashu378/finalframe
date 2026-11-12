@@ -2,7 +2,7 @@ import { query } from "./_generated/server";
 import { selectProjectProduction } from "./projectProductions";
 import { v } from "convex/values";
 import type { QueryCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getProduction } from "./_shared";
 
 type GraphCtx = QueryCtx;
@@ -42,11 +42,45 @@ function edge(id: string, source: string, target: string, kind: string) {
 }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
-async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
+async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, requestedTimelineId?: Id<"timelines">) {
   const nodes: ReturnType<typeof node>[] = [];
   const edges: ReturnType<typeof edge>[] = [];
-  const addNode = (...args: Parameters<typeof node>) => nodes.push(node(...args));
-  const addEdge = (...args: Parameters<typeof edge>) => edges.push(edge(...args));
+  const knownNodes = new Set<string>();
+  const knownEdges = new Set<string>();
+  const addNode = (...args: Parameters<typeof node>) => { if (!knownNodes.has(args[0])) { knownNodes.add(args[0]); nodes.push(node(...args)); } };
+  let sourceHistoryLimited = false;
+  let shownShots = 0;
+  const activeOwned = (row: {status?:string;productionId?:Id<"productions">;projectId?:Id<"projects">}) => !["ARCHIVED","DELETED"].includes(row.status??"") && row.productionId===production._id && (!row.projectId||row.projectId===production.projectId);
+  const ownedAssets = new Map<string, Doc<'assets'>>();
+  const knownTakes = new Map<string, Doc<'shotVersions'>>();
+  const denied = (value: unknown) => { const data = record(value); return data.approved === false || data.consent === false || ['REVOKED','DENIED','REJECTED','BLOCKED','QUARANTINED','RESTRICTED'].includes(String(data.status ?? data.state ?? value ?? '').toUpperCase()); };
+  async function assetNode(id: Id<'assets'>) {
+    const asset = ownedAssets.get(id) ?? await ctx.db.get(id);
+    if (!asset || asset.projectId !== production.projectId || asset.studioExternalId !== production.studioExternalId || asset.scope !== 'PROJECT' || asset.deletedAt) return null;
+    ownedAssets.set(id, asset);
+    addNode(`asset:${id}`, 'image', asset.name || 'Project media', friendlyState(asset.lifecycle), 'assets', id, asset.mimeType || 'Media');
+    return asset;
+  }
+  async function frameNode(frame: Doc<'storyboardFrames'>, shot: Doc<'shots'>, selected: boolean) {
+    if(frame.shotId!==shot._id||frame.projectId!==production.projectId||frame.productionId!==production._id||frame.productionVersionId!==production.currentVersionId||!await assetNode(frame.assetId))return false;
+    addNode(`frame:${frame._id}`, 'imageEdit', `Storyboard frame${selected?' · selected':''}`, 'needsApproval', 'storyboardFrames', frame._id, selected?'Explicit visual guide for this shot':'Retained alternative composition; not automatically a shot');
+    addEdge(`frame-asset:${frame._id}`,`asset:${frame.assetId}`,`frame:${frame._id}`,'derivedFrom');
+    if(selected)addEdge(`frame-guide:${frame._id}:${shot._id}`,`frame:${frame._id}`,`shot:${shot._id}`,'references');
+    return true;
+  }
+  async function addTake(shot: Doc<'shots'>, take: Doc<'shotVersions'>) {
+    if (take.projectId !== production.projectId || take.productionId !== production._id || take.productionVersionId !== production.currentVersionId || take.shotId !== shot._id || !activeOwned(shot) || shot.productionVersionId !== production.currentVersionId) return;
+    knownTakes.set(take._id, take);
+    addNode(`shot:${shot._id}`, 'shot', shot.title, friendlyState(shot.status), 'shots', shot._id, `${shot.durationSeconds}s take`);
+    const approval = production.projectId ? await ctx.db.query('resourceStates').withIndex('by_project_resource', q=>q.eq('projectId',production.projectId!).eq('resourceType','shotVersion').eq('resourceId',take._id)).unique() : null;
+    const state = take.status === 'COMPLETED' ? approval?.state ?? 'DRAFT' : take.status;
+    addNode(`take:${take._id}`, 'videoTake', `Take ${take.versionNumber}`, friendlyState(state), 'shotVersions', take._id, `${take.status.toLowerCase()}${take.model ? ` · ${take.model}` : ''} · selection belongs to an explicit edit`);
+    addEdge(`feeds:${shot._id}:${take._id}`, `shot:${shot._id}`, `take:${take._id}`, 'feeds');
+    if (take.assetId && await assetNode(take.assetId)) addEdge(`derived:${take.assetId}:${take._id}`, `asset:${take.assetId}`, `take:${take._id}`, 'derivedFrom');
+    const consumed=record(record(take.contextSnapshot).storyboardSelection).frameId;
+    if(typeof consumed==='string'){const id=ctx.db.normalizeId('storyboardFrames',consumed),frame=id?await ctx.db.get(id):null;if(frame&&await frameNode(frame,shot,record(record(shot.metadata).storyboard).frameId===consumed))addEdge(`frame-take:${frame._id}:${take._id}`,`frame:${frame._id}`,`take:${take._id}`,'references');}
+  }
+  const addEdge = (...args: Parameters<typeof edge>) => { if(!knownEdges.has(args[0])){knownEdges.add(args[0]);edges.push(edge(...args));} };
 
   const productionNodeId = `production:${production._id}`;
   addNode(productionNodeId, "production", "Video project", friendlyState(production.status), "productions", production._id, production.workflow.replaceAll("_", " ").toLowerCase());
@@ -68,39 +102,42 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
       addNode(versionNodeId, "productionVersion", `Version ${version.versionNumber}`, friendlyState(version.status), "productionVersions", version._id, versionDetail);
       addEdge(`contains:${productionNodeId}:${versionNodeId}`, productionNodeId, versionNodeId, "contains");
 
-      const sequences = (await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", version._id)).collect()).sort((a, b) => a.orderIndex - b.orderIndex);
+      const sequencePage = await ctx.db.query("sequences").withIndex("by_version", (q) => q.eq("productionVersionId", version._id)).take(201);
+      if(sequencePage.length>200)sourceHistoryLimited=true;
+      const sequences = sequencePage.slice(0,200).filter(activeOwned).sort((a, b) => a.orderIndex - b.orderIndex);
       for (const sequence of sequences) {
+        if(shownShots>=200){sourceHistoryLimited=true;break;}
         const sequenceNodeId = `sequence:${sequence._id}`;
         addNode(sequenceNodeId, "sequence", sequence.title, friendlyState(sequence.status), "sequences", sequence._id, sequence.description);
         addEdge(`contains:${versionNodeId}:${sequenceNodeId}`, versionNodeId, sequenceNodeId, "contains");
 
-        const scenes = (await ctx.db.query("scenes").withIndex("by_sequence", (q) => q.eq("sequenceId", sequence._id)).collect()).sort((a, b) => a.orderIndex - b.orderIndex);
+        const scenePage=await ctx.db.query("scenes").withIndex("by_sequence", (q) => q.eq("sequenceId", sequence._id)).take(201);
+        if(scenePage.length>200)sourceHistoryLimited=true;
+        const scenes = scenePage.slice(0,200).filter(activeOwned).sort((a, b) => a.orderIndex - b.orderIndex);
         for (const scene of scenes) {
+          if(shownShots>=200){sourceHistoryLimited=true;break;}
           const sceneNodeId = `scene:${scene._id}`;
           addNode(sceneNodeId, "scene", scene.title, friendlyState(scene.status), "scenes", scene._id, scene.purpose);
           addEdge(`contains:${sequenceNodeId}:${sceneNodeId}`, sequenceNodeId, sceneNodeId, "contains");
 
-          const shots = (await ctx.db.query("shots").withIndex("by_scene", (q) => q.eq("sceneId", scene._id)).collect()).sort((a, b) => a.orderIndex - b.orderIndex);
+          const shotPage=await ctx.db.query("shots").withIndex("by_scene", (q) => q.eq("sceneId", scene._id)).take(201);
+          if(shotPage.length>200)sourceHistoryLimited=true;
+          const shots = shotPage.slice(0,200).filter(activeOwned).sort((a, b) => a.orderIndex - b.orderIndex);
           for (const shot of shots) {
+            if(shownShots>=200){sourceHistoryLimited=true;break;}shownShots++;
             const shotNodeId = `shot:${shot._id}`;
             addNode(shotNodeId, "shot", shot.title, friendlyState(shot.status), "shots", shot._id, `${shot.durationSeconds}s take`);
             addEdge(`contains:${sceneNodeId}:${shotNodeId}`, sceneNodeId, shotNodeId, "contains");
 
-            const versions = await ctx.db.query("shotVersions").withIndex("by_shot", (q) => q.eq("shotId", shot._id)).collect();
-            const latest = versions.sort((a, b) => b.versionNumber - a.versionNumber)[0];
-            if (latest) {
-              const takeNodeId = `take:${latest._id}`;
-              addNode(takeNodeId, "videoTake", `Take ${latest.versionNumber}`, friendlyState(latest.status), "shotVersions", latest._id, latest.model ? `Generated with ${latest.model}` : "Awaiting a generated take");
-              addEdge(`feeds:${shotNodeId}:${takeNodeId}`, shotNodeId, takeNodeId, "feeds");
-              if (latest.assetId) {
-                const asset = await ctx.db.get(latest.assetId);
-                if (asset) {
-                  const assetNodeId = `asset:${asset._id}`;
-                  addNode(assetNodeId, "image", asset.name || "Generated media", friendlyState(asset.lifecycle), "assets", asset._id, asset.mimeType || "Media");
-                  addEdge(`derived:${takeNodeId}:${assetNodeId}`, takeNodeId, assetNodeId, "derivedFrom");
-                }
-              }
-            }
+            const takePage = await ctx.db.query('shotVersions').withIndex('by_shot_version', q=>q.eq('shotId',shot._id)).order('desc').take(4);
+            if (takePage.length > 3) sourceHistoryLimited = true;
+            for (const take of takePage.slice(0,3)) await addTake(shot,take);
+            const framePage = await ctx.db.query('storyboardFrames').withIndex('by_shot',q=>q.eq('shotId',shot._id)).order('desc').take(3);
+            if (framePage.length > 2) sourceHistoryLimited = true;
+            const selection = record(record(shot.metadata).storyboard);
+            const frames=framePage.slice(0,2);
+            if(typeof selection.frameId==='string'&&!frames.some(frame=>frame._id===selection.frameId)){const id=ctx.db.normalizeId('storyboardFrames',selection.frameId);const selected=id?await ctx.db.get(id):null;if(selected)frames.push(selected);}
+            for (const frame of frames) await frameNode(frame,shot,selection.frameId===frame._id);
           }
         }
       }
@@ -131,11 +168,23 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
   }
   const currentTimelineIds=new Set<string>();
   for(const timeline of timelines)if(production.currentVersionId&&await timelineVersion(timeline)===production.currentVersionId)currentTimelineIds.add(timeline._id);
-  const latestTimeline = timelines.find(timeline=>currentTimelineIds.has(timeline._id));
+  let latestTimeline = timelines.find(timeline=>currentTimelineIds.has(timeline._id));
+  if(requestedTimelineId){const requested=await ctx.db.get(requestedTimelineId);if(!requested||await timelineVersion(requested)!==production.currentVersionId)throw new Error('Selected edit is unavailable for this production version.');latestTimeline=requested;}
   if (latestTimeline) {
     const timelineNodeId = `timeline:${latestTimeline._id}`;
     addNode(timelineNodeId, "timeline", `Edit version ${latestTimeline.versionNumber}`, friendlyState(latestTimeline.status), "timelines", latestTimeline._id, `${latestTimeline.durationSeconds}s timeline`);
     addEdge(`placed:${productionNodeId}:${timelineNodeId}`, productionNodeId, timelineNodeId, "placedOn");
+    const clipPage=await ctx.db.query('timelineClips').withIndex('by_timeline',q=>q.eq('timelineId',latestTimeline!._id)).take(201);
+    if(clipPage.length>200)sourceHistoryLimited=true;
+    for(const clip of clipPage.slice(0,200)){
+      if(clip.studioExternalId!==production.studioExternalId)continue;
+      const clipNode=`clip:${clip._id}`;
+      addNode(clipNode,'timeline',`Placed clip · ${clip.startSeconds}s`,'ready','timelineClips',clip._id,`${clip.durationSeconds}s · edit ${latestTimeline.versionNumber}`);
+      addEdge(`clip-timeline:${clip._id}`,clipNode,timelineNodeId,'placedOn');
+      if(clip.shotVersionId){const take=knownTakes.get(clip.shotVersionId)??await ctx.db.get(clip.shotVersionId);const shot=take?await ctx.db.get(take.shotId):null;
+        if(take&&shot&&take.assetId===clip.assetId&&take.productionId===production._id&&take.projectId===production.projectId&&take.productionVersionId===production.currentVersionId){await addTake(shot,take);addEdge(`take-clip:${take._id}:${clip._id}`,`take:${take._id}`,clipNode,'placedOn');const n=nodes.find(row=>row.id===`take:${take._id}`);if(n)n.detail=`${n.detail ?? ''} · placed in edit ${latestTimeline.versionNumber}`;}}
+      if(clip.assetId&&await assetNode(clip.assetId))addEdge(`asset-clip:${clip.assetId}:${clip._id}`,`asset:${clip.assetId}`,clipNode,'references');
+    }
   }
 
   const reviewPage = await ctx.db.query("reviews").withIndex("by_production", (q) => q.eq("productionId", production._id)).order('desc').take(201);
@@ -167,12 +216,26 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
     addEdge(`renders:${productionNodeId}:${exportNodeId}`, productionNodeId, exportNodeId, "rendersTo");
   }
 
+  const project=production.projectId?await ctx.db.get(production.projectId):null;
+  const external=project?.externalId??production.externalProjectId;
+  const base=external?`/dashboard/projects/${encodeURIComponent(external)}/workspace`:null;
+  const withLinks=await Promise.all(nodes.map(async current=>{
+    if(!base)return current;
+    const selected=`?production=${encodeURIComponent(production._id)}`;
+    let artifactHref= ['production','plan','productionVersion'].includes(current.kind)?`/dashboard/projects/${encodeURIComponent(external!)}/blueprint${selected}`:current.resourceType==='timelines'?`${base}/edit${selected}&timeline=${encodeURIComponent(current.resourceId)}`:current.resourceType==='timelineClips'?`${base}/edit${selected}&timeline=${encodeURIComponent(latestTimeline!._id)}#clip-${encodeURIComponent(current.resourceId)}`:current.resourceType==='reviews'?`${base}/review${selected}`:current.resourceType==='exports'?`${base}/export${selected}`:current.resourceType==='shotVersions'?`${base}/takes${selected}#take-${encodeURIComponent(current.resourceId)}`:`${base}/storyboard${selected}#shot-${encodeURIComponent(current.resourceId)}`;
+    const frame=current.resourceType==='storyboardFrames'?await ctx.db.get(current.resourceId as Id<'storyboardFrames'>):null;
+    const assetId=current.resourceType==='assets'?current.resourceId:current.resourceType==='shotVersions'?knownTakes.get(current.resourceId)?.assetId:frame?.assetId;
+    const asset=assetId?ownedAssets.get(assetId):undefined;
+    if(asset&&asset.storageId&&![asset.rights,asset.provenance,asset.moderation].some(denied)){const url=await ctx.storage.getUrl(asset.storageId);if(url)artifactHref=url;}
+    return {...current,artifactHref};
+  }));
   return {
     production,
-    nodes,
+    nodes:withLinks,
     edges,
     summary: {
       nodeCount: nodes.length,
+      sourceHistoryLimited,
       edgeCount: edges.length,
       hasPlan: Boolean(production.currentPlanId),
       hasVersion: Boolean(production.currentVersionId),
@@ -185,17 +248,17 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">) {
 }
 
 export const get = query({
-  args: { productionId: v.id("productions") },
-  handler: async (ctx, args) => buildGraph(ctx, await getProduction(ctx, args.productionId.toString())),
+  args: { productionId: v.id("productions"), timelineId:v.optional(v.id("timelines")) },
+  handler: async (ctx, args) => buildGraph(ctx, await getProduction(ctx, args.productionId.toString()),args.timelineId),
 });
 
 export const getByProject = query({
-  args: { projectExternalId: v.string(), productionId: v.optional(v.id("productions")) },
+  args: { projectExternalId: v.string(), productionId: v.optional(v.id("productions")),timelineId:v.optional(v.id("timelines")) },
   handler: async (ctx, args) => {
     const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
     if (!project) return null;
     const production = await selectProjectProduction(ctx, project, args.productionId);
     if (!production) return null;
-    return buildGraph(ctx, await getProduction(ctx, production._id.toString()));
+    return buildGraph(ctx, await getProduction(ctx, production._id.toString()),args.timelineId);
   },
 });

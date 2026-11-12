@@ -4,6 +4,7 @@ import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, LockKeyhole, X } from 
 import type { ProductionGraphNode } from '@/lib/production-graph/contracts';
 import { graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 const kindLabels: Record<string, string> = {
   production: 'Video project',
@@ -53,6 +54,7 @@ export function NodeInspector({ node, onClose, onInspect, className }: NodeInspe
   }
 
   const kindLabel = kindLabels[node.kind] ?? 'Production step';
+  const artifactHref = node.artifactHref && (/^\/(?!\/)/.test(node.artifactHref) || /^https:\/\//.test(node.artifactHref)) ? node.artifactHref : undefined;
 
   return (
     <aside className={cn('border-l border-border/70 bg-card/75 p-6 lg:p-7', className)} aria-label={`Inspector for ${node.label}`}>
@@ -90,7 +92,7 @@ export function NodeInspector({ node, onClose, onInspect, className }: NodeInspe
 
       {node.detail ? <p className="mt-5 text-sm leading-6 text-muted-foreground">{node.detail}</p> : null}
 
-      {onInspect ? (
+      {artifactHref ? <Link className="ff-button-secondary mt-7 flex min-h-11 w-full items-center justify-center gap-2" href={artifactHref} prefetch={false}>Open this exact artifact<ArrowUpRight className="size-4" aria-hidden="true" /></Link> : onInspect ? (
         <button type="button" onClick={() => onInspect(node)} className="ff-button-secondary mt-7 w-full">
           Inspect this step
           <ArrowUpRight className="size-4" aria-hidden="true" />

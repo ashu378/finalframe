@@ -1,6 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { makeFunctionReference } from 'convex/server';
+import { parseCreatorIntent, type CreatorIntent } from './creator-intent';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { api } from '../../../convex/_generated/api';
 import type { Doc, Id } from '../../../convex/_generated/dataModel';
@@ -34,6 +36,9 @@ export interface SelectedProductionDefaults {
     outputPreset: OutputPreset;
     videoType: VideoType;
     brief: string;
+    creatorIntent?: CreatorIntent;
+    inputAssets?: Array<{id:string;name:string;mimeType:string}>;
+    inputSourcesError?: string;
 }
 
 async function selectedProductionWorkspace(projectExternalId: string, productionId: string) {
@@ -50,13 +55,13 @@ async function selectedProductionWorkspace(projectExternalId: string, production
     const [project, workspace] = selected;
     const production = workspace.production;
     if (!project || !production || String(production._id) !== productionId || production.externalProjectId !== project.externalId || production.studioExternalId !== project.studioExternalId || production.projectId && production.projectId !== project._id) return null;
-    return { project, workspace, production };
+    return { project, workspace, production, convex };
 }
 
 export async function getSelectedProductionDefaults(projectExternalId: string, productionId: string): Promise<SelectedProductionDefaults | null> {
     const selected = await selectedProductionWorkspace(projectExternalId, productionId);
     if (!selected) return null;
-    const { project, workspace, production } = selected;
+    const { project, workspace, production, convex } = selected;
     const candidatePlan = workspace.plan?.productionId === production._id ? workspace.plan : null;
     const selectedPlan=candidatePlan&&(!workspace.version?.sourcePlanId||workspace.version.sourcePlanId===candidatePlan._id)?candidatePlan:null;
     const input = selectedPlan?.input;
@@ -69,10 +74,22 @@ export async function getSelectedProductionDefaults(projectExternalId: string, p
     if (!mode || !supportedSettings({...settings,inputMode:settings.mode}) || settings.requestedDurationSeconds < 4) throw new UnsupportedSettingsError('This older production needs explicit settings. Return to its workspace, choose New episode, then choose its mode, workflow, format, and language.');
     const brief = mode === 'SCRIPT' ? savedInput.script : savedInput.prompt;
     const draftVideoType = isDraft && typeof savedInput.videoType === 'string' && (VIDEO_TYPES as readonly string[]).includes(savedInput.videoType) ? savedInput.videoType as VideoType : undefined;
+    const rawInputs=savedInput.inputAssetIds;
+    let inputSourcesError:string|undefined;
+    const inputAssets:Array<{id:string;name:string;mimeType:string}>=[];
+    if(rawInputs!==undefined&&(!Array.isArray(rawInputs)||rawInputs.length>100||rawInputs.some(id=>typeof id!=='string')||new Set(rawInputs).size!==rawInputs.length))inputSourcesError='The saved input selection is invalid. Review this production’s original media before revising.';
+    else if(Array.isArray(rawInputs)){
+        const sources=await Promise.all(rawInputs.map(async id=>{try{return await convex.query(api.assetStorage.getAssetContract,{assetId:id as Id<'assets'>});}catch{return null;}}));
+        for(const [index,asset]of sources.entries()){
+            if(!asset||String(asset.assetId)!==rawInputs[index]||asset.projectId!==project._id||asset.scope!=='PROJECT'||!asset.storageId||typeof asset.mimeType!=='string')inputSourcesError='A saved input is unavailable in this project. Review or restore its original media before revising; it will not be silently replaced.';
+            else inputAssets.push({id:String(asset.assetId),name:typeof asset.name==='string'?asset.name:'Retained input',mimeType:asset.mimeType});
+        }
+    }
     return {
         projectExternalId: project.externalId, productionId, studioExternalId: production.studioExternalId,
         durationSeconds: settings.requestedDurationSeconds, mode, workflow, language: settings.language,
         outputPreset, videoType: draftVideoType ?? normalizeVideoType(production.projectType ?? project.projectType), brief: typeof brief === 'string' ? brief : '',
+        creatorIntent: parseCreatorIntent(savedInput.creatorIntent), inputAssets, ...(inputSourcesError?{inputSourcesError}:{}),
     };
 }
 
@@ -232,4 +249,34 @@ export async function refreshProjectEpisodeContinuity(projectExternalId: string,
     } catch {
         return { success: false as const, error: 'Approve the preceding episode’s current story state before refreshing continuity.' };
     }
+}
+
+/** Read the separately mutable project preference, never another production's plan. */
+export async function getProjectCreatorPreference(projectExternalId: string): Promise<CreatorIntent | undefined> {
+    const convex=await getAuthenticatedConvexClient();
+    const project=await convex.query(api.projects.getByExternalId,{externalId:projectExternalId});
+    if(!project)return undefined;
+    const result=await convex.query(makeFunctionReference<'query'>('creatorPreferences:get'),{projectId:project._id});
+    return parseCreatorIntent(result.creatorIntent??undefined);
+}
+export async function saveProjectCreatorPreference(projectExternalId:string,value:CreatorIntent):Promise<{success:boolean;error?:string}> {
+    try{
+        const creatorIntent=parseCreatorIntent(value);if(!creatorIntent)return {success:false,error:'Choose the creation preferences first.'};
+        const convex=await getAuthenticatedConvexClient(),project=await convex.query(api.projects.getByExternalId,{externalId:projectExternalId});
+        if(!project)return {success:false,error:'This project is unavailable.'};
+        const previous=await convex.query(makeFunctionReference<'query'>('creatorPreferences:get'),{projectId:project._id});
+        await convex.mutation(makeFunctionReference<'mutation'>('creatorPreferences:set'),{projectId:project._id,creatorIntent,...(previous.updatedAt!==null?{expectedUpdatedAt:previous.updatedAt}:{})});
+        return {success:true};
+    }catch{return {success:false,error:'Your creation preferences could not be saved. Refresh this project and try again. No approval or purchase was made.'};}
+}
+
+export async function saveProjectInvolvement(projectExternalId:string,involvement:CreatorIntent['involvement'],fallback:CreatorIntent):Promise<{success:boolean;error?:string}> {
+    try{
+        const convex=await getAuthenticatedConvexClient(),project=await convex.query(api.projects.getByExternalId,{externalId:projectExternalId});
+        if(!project)return {success:false,error:'This project is unavailable.'};
+        const previous=await convex.query(makeFunctionReference<'query'>('creatorPreferences:get'),{projectId:project._id});
+        const creatorIntent=parseCreatorIntent({...parseCreatorIntent(previous.creatorIntent??undefined)??parseCreatorIntent(fallback),involvement});
+        await convex.mutation(makeFunctionReference<'mutation'>('creatorPreferences:set'),{projectId:project._id,creatorIntent,...(previous.updatedAt!==null?{expectedUpdatedAt:previous.updatedAt}:{})});
+        return {success:true};
+    }catch{return {success:false,error:'This involvement preference could not be saved. Reload this project and try again. Existing versions, approvals and budgets remain unchanged.'};}
 }

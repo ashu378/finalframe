@@ -442,6 +442,20 @@ export default defineSchema({
   }).index("by_scene", ["sceneId"]).index("by_production", ["productionId"])
     .index("by_version", ["productionVersionId"]).index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]).index("by_order", ["sceneId", "orderIndex"]),
 
+  // Immutable visual candidates; selection stays on the canonical draft shot.
+  storyboardImageEstimates: defineTable({
+    projectId: v.id("projects"), productionId: v.id("productions"), productionVersionId: v.id("productionVersions"), shotId: v.id("shots"),
+    createdByUserId: v.id("users"), createdAt: timestamp, expiresAt: timestamp, requestHash: v.string(),
+    entries: json, quote: json, confirmedAt: v.optional(timestamp), jobIds: v.optional(v.array(v.id("generationJobs"))),
+  }).index("by_shot", ["shotId"]).index("by_production", ["productionId"]).index("by_shot_confirmed", ["shotId", "confirmedAt"]),
+
+  storyboardFrames: defineTable({
+    projectId: v.id("projects"), productionId: v.id("productions"), productionVersionId: v.id("productionVersions"), shotId: v.id("shots"),
+    assetId: v.id("assets"), sourceFrameId: v.optional(v.id("storyboardFrames")), generationJobId: v.optional(v.id("generationJobs")),
+    kind: v.union(v.literal("UPLOAD"), v.literal("PROJECT_REFERENCE"), v.literal("GENERATED"), v.literal("IMAGE_EDIT"), v.literal("ANGLE")),
+    direction: json, prompt: v.string(), createdByUserId: v.id("users"), createdAt: timestamp,
+  }).index("by_shot", ["shotId"]).index("by_production_version", ["productionVersionId"]).index("by_project", ["projectId"]),
+
   shotVersions: defineTable({
     studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), projectId: v.optional(v.id("projects")), productionId: v.optional(v.id("productions")),
     productionVersionId: v.optional(v.id("productionVersions")),
@@ -822,6 +836,7 @@ export default defineSchema({
   // They make upstream/downstream impact durable without making Canvas layout
   // the source of truth for production meaning.
   productionDependencies: defineTable({
+    projectId: v.optional(v.id("projects")), sourceHash: v.optional(v.string()), targetHash: v.optional(v.string()),
     studioExternalId: v.string(), studioId: v.optional(v.id("studios")), productionId: v.id("productions"),
     productionVersionId: v.optional(v.id("productionVersions")), sourceType: v.string(), sourceId: v.string(),
     sourceVersionId: v.optional(v.string()), targetType: v.string(), targetId: v.string(), targetVersionId: v.optional(v.string()),

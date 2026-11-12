@@ -6,8 +6,13 @@ import type { CostEstimate, OutputPreset, QualityTier } from '@/lib/types/databa
 import type { PlanningPreview } from '@/lib/production/actions';
 import { cn } from '@/lib/utils';
 import { getOutputPreset } from '../../../../renderer/src/output-presets';
+import { ProductionJourney } from '@/components/production-workspace/production-journey';
+import type { CreatorIntent } from '@/lib/production/creator-intent';
 
 interface PlanPreviewProps {
+    projectId?: string;
+    productionId?: string;
+    creatorIntent?: CreatorIntent;
     preview: PlanningPreview;
     balance: number;
     outputPreset: OutputPreset;
@@ -59,7 +64,7 @@ function GuideList({ icon: Icon, title, items, empty }: { icon: typeof Users; ti
     );
 }
 
-export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSubmitting, onRevise, onApprove, onBack, referenceSetupHref, referenceBindingHref, castReferencesRequired = false }: PlanPreviewProps) {
+export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSubmitting, onRevise, onApprove, onBack, referenceSetupHref, referenceBindingHref, castReferencesRequired = false, projectId, productionId, creatorIntent }: PlanPreviewProps) {
     const [revisionOpen, setRevisionOpen] = useState(false);
     const [revisionNote, setRevisionNote] = useState('');
     const affordable = balance >= preview.estimate.totalCredits;
@@ -75,7 +80,7 @@ export function PlanPreview({ preview, balance, outputPreset, qualityTier, isSub
     }
 
     return (
-        <div className="space-y-6 pb-8">
+        <div className="space-y-6 pb-8">{projectId&&productionId?<ProductionJourney projectId={projectId} productionId={productionId} activeStage="script" creatorIntent={creatorIntent} canEdit/>:null}
             <section className="overflow-hidden rounded-[1.5rem] bg-[#0f141c] p-6 sm:p-9" aria-labelledby="plan-preview-title">
                 <div className="flex flex-wrap items-center gap-2 text-sm font-semibold"><span className="inline-flex items-center gap-2 rounded-full bg-white/65 px-3 py-1.5"><Sparkles className="size-4 text-accent" aria-hidden="true" /> Plan ready</span><span className="text-muted-foreground">Nothing is being made yet</span></div>
                 <h2 id="plan-preview-title" className="ff-display mt-5 max-w-3xl text-3xl font-semibold sm:text-4xl">{preview.title}</h2>

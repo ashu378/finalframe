@@ -12,7 +12,7 @@ function compile(relative, imports = {}) {
   const filename = path.join(temp, relative.replaceAll('/', '-') + '.cjs');
   const result = new Module(filename, module);
   result.filename = filename;
-  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name.endsWith('/ai/model-registry'))return registry;if(name.endsWith('/ai/video-reference-contracts'))return motionReferences;if(name.endsWith('/renderer/src/media/source-audio-contract'))return sourceAudioContract;if(name.endsWith('/production/workspace-controls'))return controls;if(name==='./resourceStates')return {requireApprovedResource:()=>{throw Error('Unexpected resource approval call');}};if(name.endsWith('/generation/duration-bridge')||name==='./duration-bridge')return durationBridge;if(name.endsWith('/generation/finish-options')||name==='./finish-options')return finishOptions;if(name==='./castReadiness')return castReadiness; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/character-reference-estimate'))return characterReference;if(name.endsWith('/ai/transcription')||name==='./transcription')return transcription;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
+  result.require = name => { if (Object.hasOwn(imports, name)) return imports[name]; if(name==='./storyboard'||name==='./storyboardImageInputs')return require('../recipes/backend-fixture.cjs').load('convex/'+name.slice(2)+'.ts'); if(name.endsWith('/production/storyboard-contract'))return compile('src/lib/production/storyboard-contract.ts');if(name.endsWith('/ai/storyboard-image'))return storyboardImage; if(name==='./creator-intent'||name==='@/lib/production/creator-intent')return compile('src/lib/production/creator-intent.ts'); if(name.endsWith('/ai/model-registry'))return registry;if(name.endsWith('/ai/video-reference-contracts'))return motionReferences;if(name.endsWith('/renderer/src/media/source-audio-contract'))return sourceAudioContract;if(name.endsWith('/production/workspace-controls'))return controls;if(name==='./resourceStates')return {requireApprovedResource:()=>{throw Error('Unexpected resource approval call');}};if(name.endsWith('/generation/duration-bridge')||name==='./duration-bridge')return durationBridge;if(name.endsWith('/generation/finish-options')||name==='./finish-options')return finishOptions;if(name==='./castReadiness')return castReadiness; if(name.endsWith('/renderer/src/output-presets')) return outputPresets; if (name.endsWith('/renderer/src/media/sha256')) return checksums;if(name.endsWith('/ai/character-reference-estimate'))return characterReference;if(name.endsWith('/ai/transcription')||name==='./transcription')return transcription;if(name.endsWith('/ai/music'))return music;if(name.endsWith('/ai/sfx')||name==='./sfx')return sfx;if(name.endsWith('/ai/image-response'))return imageResponse;if(name.endsWith('/ai/submission-diagnostic'))return submissionDiagnostic;if(name.endsWith('/ai/model-discovery'))return {discoverOpenRouterVideoModels:()=>{throw Error('Unexpected catalog request');}}; throw new Error('Unexpected dependency: ' + name); };
   result._compile(ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: relative }).outputText, filename);
   return result.exports;
 }
@@ -32,7 +32,8 @@ const transcription = compile('src/lib/ai/transcription.ts');
 const characterReference = compile('src/lib/ai/character-reference-estimate.ts');
 const music=compile('src/lib/ai/music.ts',{'./model-registry':registry});
 const sfx=compile('src/lib/ai/sfx.ts',{'./model-registry':registry});
-const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music });
+const storyboardImage=compile('src/lib/ai/storyboard-image.ts',{'./model-registry':registry});
+const preparation = compile('src/lib/ai/preparation.ts', { './model-registry': registry,'./music':music,'./storyboard-image':storyboardImage });
 const shotEstimate = compile('src/lib/generation/shot-estimate.ts');
 const studioMemberships = compile('convex/studioMemberships.ts');
 const pricing = compile('src/lib/credits/pricing.ts');
@@ -152,7 +153,20 @@ function backendFixture(metadata, referenceAssetIds = [], routingFactory, depend
   }, scheduler: { runAfter: async (...args) => state.schedules.push(args) } };
   const v = new Proxy({}, { get: () => () => ({}) });
   const auth = async () => ({ project: state.rows.get('project'), user: state.rows.get('user') });
+  // These fixtures exercise legacy operations without storyboard bindings.
+  // Return no selection only for that absence; fail if a new path is invoked
+  // rather than silently certifying storyboard proofs with a permissive stub.
+  const legacyStoryboard = {
+    resolveStoryboardSelection: async (_ctx, args) => {
+      assert.equal(args.metadata?.storyboard == null, true, 'Legacy operation fixture must not resolve a storyboard binding');
+      return null;
+    },
+  };
+  const unexpectedStoryboard = () => { throw new Error('Unexpected storyboard capability in legacy operation fixture'); };
   const jobs = compile('convex/generationJobs.ts', {
+    './storyboard': legacyStoryboard,
+    './productionDependencies': { resolveShotDependencyProof: unexpectedStoryboard, synchronizeShotDependencies: unexpectedStoryboard },
+    './storyboardImageInputs': { validateStoryboardImageInput: unexpectedStoryboard },
     './_generated/api': { internal: { generationWorker: { run: 'run' },generationJobs:{expireLease:'expireLease'},providerReceipts:{reconcile:'receipt-reconcile'} } },
     './_generated/server': { query: value => value, mutation: value => value, internalQuery: value => value, internalMutation: value => value },
     './recipeAdmissions': recipeAdmissions, 'convex/values': { v }, './authorization': dependencies.authorization || { requireProjectAccess: auth, requireProjectRole: auth,resolveProjectAccessForActor:auth },

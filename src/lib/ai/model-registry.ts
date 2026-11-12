@@ -334,6 +334,7 @@ export function isRegisteredModelId(model: string): boolean {
 export const PREPARATION_MODELS = {
     sfx:{id:configuredModel('OPENROUTER_SFX_MODEL','bytedance-seed/seed-audio-1-0'),capability:'SFX_GENERATION' as const,billing:'REVIEWED_ORIGINAL_AUDIO_SECONDS' as const,certifiedModel:'bytedance-seed/seed-audio-1-0'},
     music:{id:configuredModel('OPENROUTER_MUSIC_MODEL','google/lyria-3-clip-preview'),capability:'MUSIC_GENERATION' as const,billing:'REVIEWED_FIXED_SONG' as const,certifiedModel:'google/lyria-3-clip-preview'},
+    storyboard: { id: configuredModel('OPENROUTER_STORYBOARD_IMAGE_MODEL', 'qwen/qwen-image-2.1-pro'), capability: 'IMAGE_GENERATION' as const, billing: 'REVIEWED_IMAGE_REFERENCE_SKUS' as const, certifiedModel: 'qwen/qwen-image-2.1-pro' },
     image: { id: configuredModel('OPENROUTER_REFERENCE_IMAGE_MODEL', 'sourceful/riverflow-v2.6-pro'), capability: 'IMAGE_GENERATION' as const, billing: 'ENDPOINT_IMAGE_SKUS' as const },
     narration: { id: configuredModel('OPENROUTER_NARRATION_MODEL', 'mistralai/voxtral-mini-tts-3-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'CHARACTER' as const, certifiedModel: 'mistralai/voxtral-mini-tts-3-0' },
     referenceVoice: { id: configuredModel('OPENROUTER_REFERENCE_VOICE_MODEL', 'bytedance-seed/seed-audio-1-0'), capability: 'TEXT_TO_SPEECH' as const, billing: 'OUTPUT_SECONDS' as const, certifiedModel: 'bytedance-seed/seed-audio-1-0', maxOutputSeconds: 120 },

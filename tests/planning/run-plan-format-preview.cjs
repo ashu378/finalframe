@@ -13,7 +13,7 @@ function load(file, imports = {}) {
   mod.filename = filename;
   mod.paths = Module._nodeModulePaths(path.dirname(filename));
   const normalRequire = mod.require.bind(mod);
-  mod.require = name => Object.hasOwn(imports, name) ? imports[name] : normalRequire(name);
+  mod.require = name => Object.hasOwn(imports, name) ? imports[name] : name==='@/components/production-workspace/production-journey'?{ProductionJourney:()=>null}:normalRequire(name);
   mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, filename);
   return mod.exports;
 }

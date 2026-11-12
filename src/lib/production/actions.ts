@@ -11,6 +11,7 @@ import type { CostEstimate, CreateIntent, DirectorPlan, DirectorScenePlan, Produ
 import type { Id } from '../../../convex/_generated/dataModel';
 import { ShotDurationPlanningError } from './shot-duration-planning';
 import {getOutputPreset} from '../../../renderer/src/output-presets';
+import { parseCreatorIntent, legacyVideoTypeForCreatorIntent, CreatorIntentValidationError } from './creator-intent';
 
 export interface PlanningPreview {
     title: string;
@@ -171,7 +172,7 @@ function planningFallbackEnabled(): boolean {
 }
 
 function planningFailureMessage(error: unknown): string {
-    if(error instanceof ShotDurationPlanningError)return error.message;
+    if(error instanceof ShotDurationPlanningError||error instanceof CreatorIntentValidationError)return error.message;
     const safe=(error as {data?:{code?:string;message?:string}})?.data;
     if(safe?.code==='RECIPE_CAST_REFERENCES_REQUIRED'||safe?.code==='RECIPE_CAST_RESOURCE_UNAVAILABLE')return 'Approve project character references and a bible, then explicitly bind each proposed character to the draft shots before approval. A description alone does not establish a recurring identity.';
     if(safe?.code==='SHOT_NOT_SUPPORTED'&&safe.message==='Preserving source audio requires an explicit project video. Revise the shot source before approval.')return 'The proposed plan needs source audio, but no project video is bound. Check the selected continuity bible and source media. For original silent footage, deliberately select a matching or blank bible before requesting another plan. No executable plan was saved.';
@@ -219,7 +220,8 @@ export async function createDirectorPlan(intent: CreateIntent): Promise<CreateDi
     try {
         const context = await authenticatedStudio();
         if (!context) return { success: false, error: 'Authentication or studio setup required' };
-        const normalized: CreateIntent = { ...intent, requestedDurationSeconds: clampDuration(intent.requestedDurationSeconds), inputAssetIds: intent.inputAssetIds || [], outputPreset: intent.outputPreset || 'SOCIAL_VERTICAL', qualityTier: intent.qualityTier || 'STANDARD' };
+        const creatorIntent=parseCreatorIntent(intent.creatorIntent);
+        const normalized: CreateIntent = { ...intent, ...(creatorIntent?{creatorIntent,videoType:legacyVideoTypeForCreatorIntent(creatorIntent)}:{}), requestedDurationSeconds: clampDuration(intent.requestedDurationSeconds), inputAssetIds: intent.inputAssetIds || [], outputPreset: intent.outputPreset || 'SOCIAL_VERTICAL', qualityTier: intent.qualityTier || 'STANDARD' };
         const outputFormat=getOutputPreset(normalized.outputPreset);
         if (!normalized.projectId) return { success: false, error: 'A project is required before creating a production plan' };
         const projects = await context.convex.query(api.projects.list, { studioExternalId: context.studio.externalId });

@@ -1,3 +1,5 @@
+import { resolveStoryboardSelection, cloneStoryboardSelection } from './storyboard';
+import { parseCreatorIntent } from '../src/lib/production/creator-intent';
 import { freezePlanSettings, readPlanSettings, requirePlanDuration } from '../src/lib/production/plan-settings';
 import { mutation, query } from "./_generated/server";
 import { v, type Infer } from "convex/values";
@@ -181,7 +183,7 @@ async function materializeApprovedPlan(ctx: MutationCtx, production: Doc<"produc
       const shots = Array.isArray(scene.shots) ? scene.shots : [];
       for (const shotValue of shots) {
         const shot = record(shotValue);
-        await ctx.db.insert("shots", {
+        const insertedShotId = await ctx.db.insert("shots", {
           studioExternalId: production.studioExternalId,
           studioId: production.studioId,
           projectId: production.projectId,
@@ -198,6 +200,10 @@ async function materializeApprovedPlan(ctx: MutationCtx, production: Doc<"produc
           metadata: canonicalShotMetadata(shot),
           status: graphStatus,
         });
+        if (record(canonicalShotMetadata(shot)).storyboard) {
+          const copied = await cloneStoryboardSelection(ctx,{projectId:production.projectId!,productionId:production._id,productionVersionId:version._id,shotId:insertedShotId,metadata:canonicalShotMetadata(shot)});
+          await ctx.db.patch(insertedShotId,{metadata:copied});
+        }
       }
     }
   }
@@ -221,8 +227,14 @@ export async function draftSnapshot(ctx: ReadCtx, version: Doc<"productionVersio
       const activeShots = shots.filter((row) => row.status !== "DELETED" && row.status !== "ARCHIVED").sort((a, b) => a.orderIndex - b.orderIndex);
       totalShots += activeShots.length;
       durationSeconds += activeShots.reduce((sum, shot) => sum + shot.durationSeconds, 0);
+      const canonicalMetadata = new Map<string, unknown>();
+      for (const shot of activeShots) {
+        const selection = await resolveStoryboardSelection(ctx,{projectId:shot.projectId!,productionId:version.productionId,productionVersionId:version._id,shotId:shot._id,metadata:shot.metadata,requiredAssetIds:shot.requiredAssetIds});
+        const {storyboardSelection:_untrusted,...metadata}=record(shot.metadata);
+        canonicalMetadata.set(shot._id,{...metadata,...(selection?{storyboardSelection:selection}:{})});
+      }
       nested.push({ title: scene.title, purpose: scene.purpose, visualDirection: scene.visualDirection, orderIndex: scene.orderIndex,
-        shots: activeShots.map((shot) => ({ title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, orderIndex: shot.orderIndex, camera: shot.camera ?? {}, requiredAssetIds: shot.requiredAssetIds ?? [], metadata: shot.metadata ?? {} })) });
+        shots: activeShots.map((shot) => ({ title: shot.title, prompt: shot.prompt, durationSeconds: shot.durationSeconds, orderIndex: shot.orderIndex, camera: shot.camera ?? {}, requiredAssetIds: shot.requiredAssetIds ?? [], metadata: canonicalMetadata.get(shot._id) ?? {} })) });
     }
     result.push({ title: sequence.title, description: sequence.description, orderIndex: sequence.orderIndex, scenes: nested });
   }
@@ -245,6 +257,8 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
     await validatePlanGraph(ctx, project._id, args.plan);
 
     const sourceInput = freezePlanSettings(args.input,args);
+    const creatorIntent = parseCreatorIntent(sourceInput.creatorIntent);
+    if (creatorIntent) sourceInput.creatorIntent = creatorIntent;
     if (sourceInput.castBindingReview && !privateBinding) throw new Error("RECIPE_CAST_BINDING_CHANGED");
     let production = await selectProjectProduction(ctx, project, args.productionId);
     const requestedVideoType=planningVideoType(sourceInput,production?.projectType??project.projectType);
@@ -336,6 +350,30 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
 }
 export const createPlan = mutation({ args: createPlanArgs, returns: v.any(), handler: (ctx, args) => createCanonicalPlan(ctx, args) });
 
+/** A no-cost authored revision uses the canonical plan/version path. It does
+ * not ask a model to reconstruct approved shots or discard their frames. */
+export const copyApprovedToDraft = mutation({
+  args:{productionId:v.id('productions'),sourceVersionId:v.id('productionVersions')},returns:v.any(),
+  handler:async(ctx,args)=>{
+    const production=await ctx.db.get(args.productionId),source=await ctx.db.get(args.sourceVersionId);
+    if(!production?.projectId||!source||source.productionId!==production._id||source.status!=='APPROVED'||production.currentVersionId!==source._id)throw new Error('Choose the current approved production version to revise.');
+    const access=await requireProjectRole(ctx,production.projectId,['OWNER','EDITOR']);
+    const previous=await ctx.db.get(source.sourcePlanId);
+    if(!previous||previous.productionId!==production._id)throw new Error('Approved plan unavailable.');
+    if(production.currentPlanId!==previous._id){
+      const current=production.currentPlanId?await ctx.db.get(production.currentPlanId):null;
+      if(current&&record(current.input).revisionOfVersionId===source._id){const version=await ctx.db.query('productionVersions').withIndex('by_source_plan',q=>q.eq('sourcePlanId',current._id)).unique();if(version?.status==='DRAFT')return{productionId:production._id,planId:current._id,versionId:version._id,replayed:true};}
+      throw new Error('A newer draft already exists. Open it instead of replacing its edits.');
+    }
+    const {planningReceipt,castBindingReview:_binding,planningVideoContract:_routing,...retained}=record(previous.input);
+    const settings=readPlanSettings(previous.input,production);
+    const result=await createCanonicalPlan(ctx,{studioExternalId:production.studioExternalId,projectExternalId:access.project.externalId!,productionId:production._id,workflow:settings.workflow,inputMode:settings.mode,durationSeconds:settings.requestedDurationSeconds,language:settings.language,outputPreset:settings.outputPreset,input:{...retained,manualRevision:true,revisionOfVersionId:source._id,sourcePlanId:previous._id,...(planningReceipt?{sourcePlanningReceipt:planningReceipt}:{})},plan:source.snapshot,estimate:{providerPurchases:0,revisionOfVersionId:source._id},idempotencyKey:`authored-revision:${source._id}`});
+    if(!result.versionId)throw new Error('Production revision could not be created.');
+    await ctx.db.insert('audit',{studioExternalId:production.studioExternalId,studioId:production.studioId,actorUserId:access.user._id,action:'PRODUCTION_AUTHORED_REVISION_CREATED',entityType:'productionVersion',entityId:String(result.versionId),metadata:{productionId:production._id,sourceVersionId:source._id,sourcePlanId:previous._id,providerPurchases:0},createdAt:Date.now()});
+    return{...result,replayed:false};
+  },
+});
+
 export const approvePlan = mutation({
   args: { planId: v.id("directorPlans"), idempotencyKey: v.optional(v.string()) },
   handler: async (ctx, args) => {
@@ -355,6 +393,17 @@ export const approvePlan = mutation({
     if (!version) throw new Error("Unable to create production draft version");
     if (version.status !== "DRAFT") throw new Error("This production version cannot be approved");
     await materializeApprovedPlan(ctx, production, version, planRecord);
+    // Freeze exactly the same server-derived frame receipt into the actual
+    // draft row and approved descriptor; caller-authored receipts are removed.
+    const authoredShots=await ctx.db.query('shots').withIndex('by_version',q=>q.eq('productionVersionId',version._id)).take(201);
+    if(authoredShots.length>200)throw new Error('Production shot limit exceeded.');
+    for(const shot of authoredShots){
+      if(!record(shot.metadata).storyboard&&!record(shot.metadata).storyboardSelection)continue;
+      if(shot.projectId!==production.projectId||shot.productionId!==production._id)throw new Error('STORYBOARD_SELECTION_INVALID');
+      const selection=await resolveStoryboardSelection(ctx,{projectId:production.projectId,productionId:production._id,productionVersionId:version._id,shotId:shot._id,metadata:shot.metadata,requiredAssetIds:shot.requiredAssetIds});
+      const {storyboardSelection:_untrusted,...metadata}=record(shot.metadata);
+      await ctx.db.patch(shot._id,{metadata:{...metadata,...(selection?{storyboardSelection:selection}:{})}});
+    }
     const snapshot = await draftSnapshot(ctx, version, planRecord.plan);
     await validatePlanGraph(ctx, production.projectId, snapshot);
     await requireCastReadiness(ctx, production.projectId, snapshot, version.planningContextSnapshot);

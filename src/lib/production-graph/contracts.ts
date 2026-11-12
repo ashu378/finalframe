@@ -13,6 +13,7 @@ export type ProductionGraphNode = {
   resourceType: string;
   resourceId: string;
   detail?: string;
+  artifactHref?: string;
 };
 
 export type ProductionGraphEdge = { id: string; source: string; target: string; kind: string };

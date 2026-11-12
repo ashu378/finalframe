@@ -1,3 +1,4 @@
+import { synchronizeStoryboardTimeline } from './storyboardLineage';
 import { mutation, query } from "./_generated/server";
 import { v, type Infer } from "convex/values";
 import type { MutationCtx } from "./_generated/server";
@@ -293,6 +294,7 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
     if(args.captionId){if(!finishingV5Enabled())throw new Error('Caption export requires canonical finishing v5.');const caption=await ctx.db.get(args.captionId);if(!caption||caption.productionId!==production._id||caption.studioExternalId!==production.studioExternalId)throw new Error('Choose captions from this production.');await requireApprovedResource(ctx,projectId,'caption',caption._id,production._id,actorId);normalizeCaptionTrack({language:caption.language,style:caption.style??{},cues:caption.cues},elapsed,args.fps??30,String(caption._id));const trackId=await ctx.db.insert('timelineTracks',{timelineId,studioId:access.studio._id,studioExternalId:access.studio.externalId,kind:'CAPTIONS',name:'Reviewed captions',orderIndex:100});await ctx.db.insert('timelineClips',{timelineId,trackId,studioId:access.studio._id,studioExternalId:access.studio.externalId,startSeconds:0,durationSeconds:elapsed,metadata:{clipKind:'CAPTIONS',captionId:caption._id}});}
     await ensureResourceState(ctx, { projectId, productionId: production._id, resourceType: 'timeline', resourceId: timelineId },actorId);
     await ctx.db.insert('productionOperations', { studioId: access.studio._id, studioExternalId: access.studio.externalId, productionId: production._id, kind: 'CREATE_TIMELINE', targetType: 'timeline', targetId: timelineId, targetVersionId: String(versionNumber), idempotencyKey: `compose:${key}`, input: { productionVersionId: version._id, clipCount: args.clips.length, audioCount: args.audioTracks?.length ?? 0 }, status: 'COMPLETED', actorUserId: access.user._id, outputResourceIds: [timelineId], createdAt: timestamp, updatedAt: timestamp, completedAt: timestamp });
+    await synchronizeStoryboardTimeline(ctx,timelineId,access.user._id);
     return { timelineId, versionNumber, replayed: false };
 }
 
