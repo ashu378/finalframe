@@ -91,6 +91,10 @@ export class RemotionRenderRuntime implements RenderRuntime {
         outputLocation: remotionPath,
         inputProps: { manifest },
         concurrency: Math.max(1, Math.min(this.options.maxConcurrency ?? Math.max(1, Math.floor(os.cpus().length / 2)), 8)),
+        // Bound native frame extraction on the shared 2 GiB worker. Remotion's
+        // default cache otherwise follows host memory, not this app's budget.
+        offthreadVideoCacheSizeInBytes: 64 * 1024 * 1024,
+        offthreadVideoThreads: 1,
         ...(losslessIntermediate ? { preferLossless: true } : {}),
         // Remotion may collect still-image assets while deciding whether an
         // audio mix exists. Known-silent visual plans need no synthetic mix;

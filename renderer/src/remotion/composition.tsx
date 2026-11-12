@@ -1,4 +1,4 @@
-import { AbsoluteFill, Audio, Freeze, Img, Sequence, Video, interpolate, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, Audio, Freeze, Img, Sequence, OffthreadVideo, interpolate, useCurrentFrame } from 'remotion';
 import { createAssemblyPlan } from '../assembly/plan.js';
 import type { RenderManifest, VideoRenderItem } from '../types.js';
 import { renderMotionTemplate } from '../templates/renderer.js';
@@ -12,7 +12,7 @@ export interface FinalFrameCompositionProps extends Record<string, unknown> {
 
 function SourceVideo({item,version,volume}:{item:VideoRenderItem;version:number;volume:number|((frame:number)=>number)}){
   const frame=useCurrentFrame();
-  const video=<Video src={item.src} startFrom={item.trimStartInFrames??0} volume={volume} style={{width:'100%',height:'100%',objectFit:version===5?item.fit??'cover':'cover',objectPosition:version===5?item.position??'center':'center'}}/>;
+  const video=<OffthreadVideo src={item.src} startFrom={item.trimStartInFrames??0} volume={volume} style={{width:'100%',height:'100%',objectFit:version===5?item.fit??'cover':'cover',objectPosition:version===5?item.position??'center':'center'}}/>;
   return version===5&&item.holdAfterFrame!==undefined&&frame>=item.holdAfterFrame?<Freeze frame={item.holdAfterFrame-1}>{video}</Freeze>:video;
 }
 
