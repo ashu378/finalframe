@@ -34,7 +34,7 @@ New candidate/estimate tables and optional dependency proofs are additive. No re
 
 ## Evidence and current state
 
-Implementation is in progress. The release checklist remains the sole pass/fail record; this document is the execution plan, not a completion certificate. Relevant evidence folders: `creator-workflow-20261112`, `unified-creator-app-20261112`, `storyboard-backend-20261112`, `storyboard-director-20261112`, and `storyboard-image-tests-20261112` under the existing FinalFrame artifact directory.
+The connected workflow implementation is deployed in Preview. The directed storyboard-to-video case reached a reviewed downloadable MP4, and four camera compositions have independently passing samples after one targeted medium repair. The release checklist remains the sole pass/fail record; whole-product creative/browser acceptance is still open. See [factual handoff](UNIFIED-PRODUCTION-FUNCTIONAL-HANDOFF.md) for exact revisions, 211 regression checks, live evidence, spending and remaining limits. Relevant evidence folders: `creator-workflow-20261112`, `unified-creator-app-20261112`, `storyboard-backend-20261112`, `storyboard-director-20261112`, and `storyboard-image-tests-20261112` under the existing FinalFrame artifact directory.
 
 ## Director responsibilities and actual artifacts
 
