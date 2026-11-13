@@ -11,7 +11,7 @@ const object = (value: unknown): Record<string, any> => value && typeof value ==
  * charged per actual source; unknown units and controls fail before purchase. */
 export function certifyStoryboardImageQuote(value: unknown, sourceCount: number): StoryboardImageQuote {
   const catalog = object(value), model = catalog.id;
-  const reviewed = typeof model === 'string' && Object.hasOwn(REVIEWED_STORYBOARD_IMAGE_MODELS, model) ? REVIEWED_STORYBOARD_IMAGE_MODELS[model] : undefined;
+  const reviewed = typeof model === 'string' && Object.prototype.hasOwnProperty.call(REVIEWED_STORYBOARD_IMAGE_MODELS, model) ? REVIEWED_STORYBOARD_IMAGE_MODELS[model] : undefined;
   if(!reviewed)throw new Error('STORYBOARD_IMAGE_MODEL_REVIEW_REQUIRED');
   if (!Number.isInteger(sourceCount) || sourceCount < 0 || sourceCount > reviewed.maxReferences || !Array.isArray(catalog.endpoints) || !catalog.endpoints.length) throw new Error('STORYBOARD_IMAGE_ROUTE_UNAVAILABLE');
   const endpoints = catalog.endpoints.map(object);
