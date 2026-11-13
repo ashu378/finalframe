@@ -6,13 +6,8 @@ import { decodeProjectRouteId } from '@/lib/project/route-id';
  */
 
 import Link from 'next/link';
-import { ArrowLeft, Sparkles } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/guards';
-import { getProjectById } from '@/lib/project/actions';
-import { getScenesForProject } from '@/lib/scene/actions';
-import { BlueprintEditor } from '@/components/project';
-import { getProjectAssets } from '@/lib/assets/actions';
 import { getEpisodeNavigation } from '@/lib/production/episode-actions';
 import { getProductionWorkspace } from '@/lib/production/actions';
 import { EpisodePicker } from '@/components/production-workspace/episode-picker';
@@ -67,33 +62,13 @@ export default async function BlueprintPage({ params, searchParams }: BlueprintP
         /></div>;
     }
 
-    const [result, scenesResult] = await Promise.all([
-        getProjectById(id),
-        getScenesForProject(id, selectedProductionId)
-    ]);
-
-    if (!result.success || !result.project) {
-        notFound();
-        return null;
-    }
-
-    const project = result.project;
-    const scenes = scenesResult.success ? (scenesResult.scenes || []) : [];
-
-    // Fetch assets for the studio
-    const assets = await getProjectAssets(project.id);
-
-    return (
-        <div className="mx-auto max-w-6xl py-5 sm:py-8">
-            {picker}
-            <header className="mb-10 space-y-4">
-                <Link href={`/dashboard/projects/${id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground">
-                    <ArrowLeft className="size-4" /> Back to project
-                </Link>
-                <div className="rounded-[1.5rem] bg-[#0f141c] p-7 sm:p-10"><p className="ff-eyebrow flex items-center gap-2"><Sparkles className="size-4 text-accent" /> Your video plan</p><h1 className="public-heading-section mt-4">{project.name}</h1><p className="public-body-text mt-4 max-w-2xl">Read the story, adjust the parts that matter, and approve the plan when it feels right.</p></div>
-            </header>
-
-            <BlueprintEditor project={project} scenes={scenes} studioAssets={assets} />
-        </div>
-    );
+    const client = await getAuthenticatedConvexClient();
+    const access = await client.query(makeFunctionReference<'query'>('continuity:resourceVersionPage'), { projectId: navigation.projectId, paginationOpts: { numItems: 1, cursor: null } });
+    const canEdit = ['OWNER', 'EDITOR'].includes(access.projectRole);
+    return <div className="mx-auto max-w-6xl space-y-6 py-5 sm:py-8">{picker}<section className="ff-card space-y-4 p-6">
+        <h1 className="text-2xl font-semibold">No production plan yet</h1>
+        <p className="text-sm leading-6 text-muted-foreground">Start this project's canonical plan from an idea, script or supplied media. Existing project records stay retained; no studio identity, minimum scene count or global brand is imposed.</p>
+        {canEdit ? <Link className="ff-button-primary min-h-11" href={`/dashboard/create?project=${encodeURIComponent(id)}`}>Create this project's plan</Link> : <p className="text-sm text-muted-foreground">A project owner or editor can create its first plan.</p>}
+        <Link className="ff-link inline-flex min-h-11 items-center" href={`/dashboard/projects/${encodeURIComponent(id)}`}>Back to project</Link>
+    </section></div>;
 }
