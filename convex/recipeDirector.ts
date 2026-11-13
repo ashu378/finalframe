@@ -99,7 +99,7 @@ export const approveCutMedia=mutation({args:{runId:v.id('recipeRuns'),contentHas
   for(const [index,target]of current.targets.entries()){
     const args={projectId:run.projectId,productionId:target.productionId,resourceType:target.type,resourceId:target.id,roles:['OWNER','EDITOR'] as const,note:`Explicit human first-cut review ${result.contentHash}; exact saved media only, no timeline/export or spending authority.`};
     if(current.states[index].currentState==='DRAFT')await transitionResourceState(ctx,{...args,targetState:'IN_REVIEW',decision:'DIRECTOR_CUT_REVIEW_REQUESTED'});
-    if(!['APPROVED','LOCKED'].includes(current.states[index].currentState))await transitionResourceState(ctx,{...args,targetState:'APPROVED',decision:'DIRECTOR_CUT_MEDIA_APPROVED'});
+    if(!['APPROVED','LOCKED'].includes(current.states[index].currentState))await transitionResourceState(ctx,{...args,targetState:'APPROVED',decision:'APPROVED'});
   }
   return{approved:true,contentHash:result.contentHash,resourceCount:current.targets.length,providerPurchases:0};
 }});

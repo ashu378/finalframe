@@ -314,7 +314,9 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       const sequence = scene ? await ctx.db.get(scene.sequenceId) : null;
       if (!shot || !scene || !sequence || sequence.productionVersionId !== production.currentVersionId) throw new Error("Assembly is blocked because a take belongs to an outdated production version.");
       const approvals = await ctx.db.query("approvals").withIndex("by_resource", (q) => q.eq("resourceType", "shotVersion").eq("resourceId", shotVersion._id.toString())).collect();
-      if (!hasReviewedTake(shotVersion, approvedTakeIds) && !approvals.some((approval) => approval.productionId === production._id && String(approval.decision).toUpperCase() === "APPROVED")) throw new Error("Assembly is blocked until every selected take has been reviewed and approved.");
+      // Retain the first Director review event spelling. New reviews use the
+      // canonical APPROVED decision; the owned current state is required above.
+      if (!hasReviewedTake(shotVersion, approvedTakeIds) && !approvals.some((approval) => approval.productionId === production._id && ["APPROVED", "DIRECTOR_CUT_MEDIA_APPROVED"].includes(String(approval.decision).toUpperCase()))) throw new Error("Assembly is blocked until every selected take has been reviewed and approved.");
       source.shotId = shot._id.toString();
       source.sceneId = scene._id.toString();
       source.shotVersionId = shotVersion._id.toString();
