@@ -13,11 +13,12 @@ import { getProjectById } from '@/lib/project/actions';
 import { getScenesForProject } from '@/lib/scene/actions';
 import { BlueprintEditor } from '@/components/project';
 import { getProjectAssets } from '@/lib/assets/actions';
-import styles from './page.module.css';
 import { getEpisodeNavigation } from '@/lib/production/episode-actions';
 import { getProductionWorkspace } from '@/lib/production/actions';
 import { EpisodePicker } from '@/components/production-workspace/episode-picker';
 import { EpisodeBlueprint } from '@/components/production-workspace/episode-blueprint';
+import { getAuthenticatedConvexClient } from '@/lib/convex/server';
+import { makeFunctionReference } from 'convex/server';
 
 export const metadata = {
     title: 'Blueprint Editor',
@@ -40,15 +41,29 @@ export default async function BlueprintPage({ params, searchParams }: BlueprintP
     if (selectedProductionId && !navigation.options.some((option) => option.productionId === selectedProductionId)) notFound();
     const picker = <EpisodePicker projectExternalId={id} options={navigation.options} selectedProductionId={selectedProductionId} nextEpisodeNumber={navigation.nextEpisodeNumber} />;
     if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6">{picker}<p className="text-sm text-muted-foreground">Select an episode to review its plan.</p></div>;
-    if (selectedProductionId && navigation.options.some((option) => option.episodeId)) {
+    if (selectedProductionId) {
         const workspace = await getProductionWorkspace(id, selectedProductionId);
         if (!workspace.success || !workspace.production) notFound();
         const plan = workspace.plan;
+        const version = workspace.version;
+        const exactPlan = Boolean(plan && version?.sourcePlanId === plan._id);
+        const client = await getAuthenticatedConvexClient();
+        const access = await client.query(makeFunctionReference<'query'>('continuity:resourceVersionPage'), { projectId: workspace.production.projectId, paginationOpts: { numItems: 1, cursor: null } });
+        const canEdit = ['OWNER', 'EDITOR'].includes(access.projectRole);
+        const rows = version?.status === 'APPROVED' ? version.snapshot?.sequences : workspace.sequences;
+        const active = (row: {status?:string}) => !['ARCHIVED','DELETED'].includes(row.status ?? '');
+        const sequences = (Array.isArray(rows) ? rows : []).filter(active).map((sequence:any) => ({
+            title: sequence.title,
+            scenes: (Array.isArray(sequence.scenes) ? sequence.scenes : []).filter(active).map((scene:any) => ({
+                title: scene.title, purpose: scene.purpose ?? '',
+                shots: (Array.isArray(scene.shots) ? scene.shots : []).filter(active).map((shot:any) => ({ title:shot.title,prompt:shot.prompt,durationSeconds:shot.durationSeconds })),
+            })),
+        }));
         return <div className="mx-auto max-w-6xl space-y-6 py-5 sm:py-8">{picker}<EpisodeBlueprint
-            projectId={id} productionId={selectedProductionId} planId={plan?._id}
-            summary={plan?.plan?.summary || ''}
-            approved={workspace.version?.status === 'APPROVED' && workspace.version?.sourcePlanId === plan?._id}
-            sequences={Array.isArray(plan?.plan?.sequences) ? plan.plan.sequences : workspace.sequences || []}
+            projectId={id} productionId={selectedProductionId} planId={exactPlan && version?.status === 'DRAFT' ? plan?._id : undefined} versionId={version?._id} canEdit={canEdit}
+            summary={(version?.status === 'APPROVED' ? version.snapshot?.summary : plan?.plan?.summary) || ''}
+            approved={version?.status === 'APPROVED' && exactPlan}
+            sequences={sequences}
         /></div>;
     }
 
