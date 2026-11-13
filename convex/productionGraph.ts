@@ -42,7 +42,21 @@ function edge(id: string, source: string, target: string, kind: string) {
 }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
-async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, requestedTimelineId?: Id<"timelines">) {
+async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, requestedTimelineId?: Id<"timelines">, preferDraft = false) {
+  // Authoring may show the exact current draft while approved finishing keeps
+  // the persisted currentVersionId. Never rewrite either pointer in a read.
+  let selectedVersionId = production.currentVersionId;
+  let selectedVersion = selectedVersionId ? await ctx.db.get(selectedVersionId) : null;
+  if (selectedVersion && selectedVersion.productionId !== production._id) throw new Error('Production version is unavailable.');
+  if (preferDraft && production.currentPlanId) {
+    const plan = await ctx.db.get(production.currentPlanId);
+    if (!plan || plan.productionId !== production._id || plan.studioExternalId && plan.studioExternalId !== production.studioExternalId || record(plan).projectId && record(plan).projectId !== production.projectId) throw new Error('Current draft plan is unavailable.');
+    const matches = await ctx.db.query('productionVersions').withIndex('by_source_plan', q => q.eq('sourcePlanId', production.currentPlanId!)).take(2);
+    if (!matches.length && ['DRAFT','READY'].includes(plan.status)) throw new Error('Current draft version is unavailable.');
+    if (matches.length > 1 || matches.some(version => version.productionId !== production._id || record(version).projectId && record(version).projectId !== production.projectId)) throw new Error('Current draft version is unavailable.');
+    if (matches[0]?.status === 'DRAFT') { selectedVersion = matches[0]; selectedVersionId = selectedVersion._id; }
+  }
+  const viewContext = selectedVersion?.status === 'DRAFT' ? 'DRAFT' : selectedVersion?.status === 'APPROVED' ? 'APPROVED' : selectedVersion ? 'RETAINED' : 'UNPLANNED';
   const nodes: ReturnType<typeof node>[] = [];
   const edges: ReturnType<typeof edge>[] = [];
   const knownNodes = new Set<string>();
@@ -50,7 +64,7 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
   const addNode = (...args: Parameters<typeof node>) => { if (!knownNodes.has(args[0])) { knownNodes.add(args[0]); nodes.push(node(...args)); } };
   let sourceHistoryLimited = false;
   let shownShots = 0;
-  const activeOwned = (row: {status?:string;productionId?:Id<"productions">;projectId?:Id<"projects">}) => !["ARCHIVED","DELETED"].includes(row.status??"") && row.productionId===production._id && (!row.projectId||row.projectId===production.projectId);
+  const activeOwned = (row: {status?:string;productionId?:Id<"productions">;projectId?:Id<"projects">;productionVersionId?:Id<"productionVersions">}) => !["ARCHIVED","DELETED"].includes(row.status??"") && row.productionId===production._id && (!row.productionVersionId||row.productionVersionId===selectedVersionId) && (!row.projectId||row.projectId===production.projectId);
   const ownedAssets = new Map<string, Doc<'assets'>>();
   const knownTakes = new Map<string, Doc<'shotVersions'>>();
   const denied = (value: unknown) => { const data = record(value); return data.approved === false || data.consent === false || ['REVOKED','DENIED','REJECTED','BLOCKED','QUARANTINED','RESTRICTED'].includes(String(data.status ?? data.state ?? value ?? '').toUpperCase()); };
@@ -62,14 +76,14 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
     return asset;
   }
   async function frameNode(frame: Doc<'storyboardFrames'>, shot: Doc<'shots'>, selected: boolean) {
-    if(frame.shotId!==shot._id||frame.projectId!==production.projectId||frame.productionId!==production._id||frame.productionVersionId!==production.currentVersionId||!await assetNode(frame.assetId))return false;
+    if(frame.shotId!==shot._id||frame.projectId!==production.projectId||frame.productionId!==production._id||frame.productionVersionId!==selectedVersionId||!await assetNode(frame.assetId))return false;
     addNode(`frame:${frame._id}`, 'imageEdit', `Storyboard frame${selected?' · selected':''}`, 'needsApproval', 'storyboardFrames', frame._id, selected?'Explicit visual guide for this shot':'Retained alternative composition; not automatically a shot');
     addEdge(`frame-asset:${frame._id}`,`asset:${frame.assetId}`,`frame:${frame._id}`,'derivedFrom');
     if(selected)addEdge(`frame-guide:${frame._id}:${shot._id}`,`frame:${frame._id}`,`shot:${shot._id}`,'references');
     return true;
   }
   async function addTake(shot: Doc<'shots'>, take: Doc<'shotVersions'>) {
-    if (take.projectId !== production.projectId || take.productionId !== production._id || take.productionVersionId !== production.currentVersionId || take.shotId !== shot._id || !activeOwned(shot) || shot.productionVersionId !== production.currentVersionId) return;
+    if (take.projectId !== production.projectId || take.productionId !== production._id || take.productionVersionId !== selectedVersionId || take.shotId !== shot._id || !activeOwned(shot) || shot.productionVersionId !== selectedVersionId) return;
     knownTakes.set(take._id, take);
     addNode(`shot:${shot._id}`, 'shot', shot.title, friendlyState(shot.status), 'shots', shot._id, `${shot.durationSeconds}s take`);
     const approval = production.projectId ? await ctx.db.query('resourceStates').withIndex('by_project_resource', q=>q.eq('projectId',production.projectId!).eq('resourceType','shotVersion').eq('resourceId',take._id)).unique() : null;
@@ -94,8 +108,8 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
     }
   }
 
-  if (production.currentVersionId) {
-    const version = await ctx.db.get(production.currentVersionId);
+  if (selectedVersionId) {
+    const version = selectedVersion;
     if (version) {
       const versionNodeId = `version:${version._id}`;
       const versionDetail = version.status === "DRAFT" ? "Editable planning snapshot" : "Immutable approved production snapshot";
@@ -167,9 +181,9 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
     return ids.length&&new Set(ids).size===1?ids[0]:null;
   }
   const currentTimelineIds=new Set<string>();
-  for(const timeline of timelines)if(production.currentVersionId&&await timelineVersion(timeline)===production.currentVersionId)currentTimelineIds.add(timeline._id);
+  for(const timeline of timelines)if(selectedVersionId&&await timelineVersion(timeline)===selectedVersionId)currentTimelineIds.add(timeline._id);
   let latestTimeline = timelines.find(timeline=>currentTimelineIds.has(timeline._id));
-  if(requestedTimelineId){const requested=await ctx.db.get(requestedTimelineId);if(!requested||await timelineVersion(requested)!==production.currentVersionId)throw new Error('Selected edit is unavailable for this production version.');latestTimeline=requested;}
+  if(requestedTimelineId){const requested=await ctx.db.get(requestedTimelineId);if(!requested||await timelineVersion(requested)!==selectedVersionId)throw new Error('Selected edit is unavailable for this production version.');latestTimeline=requested;}
   if (latestTimeline) {
     const timelineNodeId = `timeline:${latestTimeline._id}`;
     addNode(timelineNodeId, "timeline", `Edit version ${latestTimeline.versionNumber}`, friendlyState(latestTimeline.status), "timelines", latestTimeline._id, `${latestTimeline.durationSeconds}s timeline`);
@@ -182,7 +196,7 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
       addNode(clipNode,'timeline',`Placed clip · ${clip.startSeconds}s`,'ready','timelineClips',clip._id,`${clip.durationSeconds}s · edit ${latestTimeline.versionNumber}`);
       addEdge(`clip-timeline:${clip._id}`,clipNode,timelineNodeId,'placedOn');
       if(clip.shotVersionId){const take=knownTakes.get(clip.shotVersionId)??await ctx.db.get(clip.shotVersionId);const shot=take?await ctx.db.get(take.shotId):null;
-        if(take&&shot&&take.assetId===clip.assetId&&take.productionId===production._id&&take.projectId===production.projectId&&take.productionVersionId===production.currentVersionId){await addTake(shot,take);addEdge(`take-clip:${take._id}:${clip._id}`,`take:${take._id}`,clipNode,'placedOn');const n=nodes.find(row=>row.id===`take:${take._id}`);if(n)n.detail=`${n.detail ?? ''} · placed in edit ${latestTimeline.versionNumber}`;}}
+        if(take&&shot&&take.assetId===clip.assetId&&take.productionId===production._id&&take.projectId===production.projectId&&take.productionVersionId===selectedVersionId){await addTake(shot,take);addEdge(`take-clip:${take._id}:${clip._id}`,`take:${take._id}`,clipNode,'placedOn');const n=nodes.find(row=>row.id===`take:${take._id}`);if(n)n.detail=`${n.detail ?? ''} · placed in edit ${latestTimeline.versionNumber}`;}}
       if(clip.assetId&&await assetNode(clip.assetId))addEdge(`asset-clip:${clip.assetId}:${clip._id}`,`asset:${clip.assetId}`,clipNode,'references');
     }
   }
@@ -191,7 +205,7 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
   const reviews = reviewPage.slice(0,200).sort((a, b) => b.createdAt - a.createdAt);
   async function currentManifest(id: string | undefined) {
     const manifest=await ownedManifest(id),payload=record(manifest?.manifest);
-    return manifest&&production.currentVersionId&&payload.productionVersionId===production.currentVersionId&&typeof payload.timelineId==='string'&&currentTimelineIds.has(payload.timelineId)?manifest:null;
+    return manifest&&selectedVersionId&&payload.productionVersionId===selectedVersionId&&typeof payload.timelineId==='string'&&currentTimelineIds.has(payload.timelineId)?manifest:null;
   }
   let review: Doc<'reviews'> | undefined;
   for(const candidate of reviews){const manifest=await currentManifest(candidate.manifestId);if(manifest&&candidate.timelineId===record(manifest.manifest).timelineId&&(!candidate.projectId||candidate.projectId===production.projectId)&&candidate.studioExternalId===production.studioExternalId){review=candidate;break;}}
@@ -234,11 +248,15 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
     nodes:withLinks,
     edges,
     summary: {
+      selectedVersionId: selectedVersionId ?? null,
+      selectedVersionStatus: selectedVersion?.status ?? null,
+      selectedVersionNumber: selectedVersion?.versionNumber ?? null,
+      viewContext,
       nodeCount: nodes.length,
       sourceHistoryLimited,
       edgeCount: edges.length,
       hasPlan: Boolean(production.currentPlanId),
-      hasVersion: Boolean(production.currentVersionId),
+      hasVersion: Boolean(selectedVersionId),
       hasTimeline: Boolean(latestTimeline),
       hasReview: review?.status==='APPROVED',
       hasExport: exportRecord?.status==='COMPLETED'&&Boolean(exportRecord.storageId),
@@ -248,17 +266,19 @@ async function buildGraph(ctx: GraphCtx, production: Doc<"productions">, request
 }
 
 export const get = query({
-  args: { productionId: v.id("productions"), timelineId:v.optional(v.id("timelines")) },
-  handler: async (ctx, args) => buildGraph(ctx, await getProduction(ctx, args.productionId.toString()),args.timelineId),
+  args: { productionId: v.id("productions"), timelineId:v.optional(v.id("timelines")), preferDraft:v.optional(v.boolean()) },
+  returns: v.any(),
+  handler: async (ctx, args) => buildGraph(ctx, await getProduction(ctx, args.productionId.toString()),args.timelineId,args.preferDraft),
 });
 
 export const getByProject = query({
-  args: { projectExternalId: v.string(), productionId: v.optional(v.id("productions")),timelineId:v.optional(v.id("timelines")) },
+  args: { projectExternalId: v.string(), productionId: v.optional(v.id("productions")),timelineId:v.optional(v.id("timelines")), preferDraft:v.optional(v.boolean()) },
+  returns: v.any(),
   handler: async (ctx, args) => {
     const project = await ctx.db.query("projects").withIndex("by_external_id", (q) => q.eq("externalId", args.projectExternalId)).unique();
     if (!project) return null;
     const production = await selectProjectProduction(ctx, project, args.productionId);
     if (!production) return null;
-    return buildGraph(ctx, await getProduction(ctx, production._id.toString()),args.timelineId);
+    return buildGraph(ctx, await getProduction(ctx, production._id.toString()),args.timelineId,args.preferDraft);
   },
 });
