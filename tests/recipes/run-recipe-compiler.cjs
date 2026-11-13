@@ -34,6 +34,25 @@ await check('recorded narration is local, measured, explicitly ranged and never 
 await check('locking an approved source does not rewrite immutable recipe or job identity',async()=>{const r=recipe();const {plan,context:c}=await quoted(r);c.assets[0].state='LOCKED';const again=await compileRecipe(r,c,now);assert.equal(again.recipeHash,plan.recipeHash);assert.equal(again.nodes.find(n=>n.id==='pictureShot').requestHash,plan.nodes.find(n=>n.id==='pictureShot').requestHash);});
 await check('downstream quote certificates bind exact recorded source windows through approval dependencies',async()=>{const r=recipe('EXPLAINER_STORY');const c=context();c.shots[0].durationFrames=360;c.assets.find(a=>a.id==='sample').durationSeconds=12;r.steps[1]={key:'narration',operation:'NARRATION',mode:'RECORDING',sourceAssetId:'sample',startFrame:0,durationFrames:120};r.steps.push({key:'transcript',operation:'PREPARATION',kind:'TRANSCRIPT',text:'',sourceStepKey:'narration'},{key:'captions',operation:'CAPTIONS',transcriptStepKey:'transcript',language:'en'});r.captionStepKey='captions';const {plan,context:ctx}=await quoted(r,c);r.steps[1].durationFrames=240;const changed=await compileRecipe(r,ctx,now);for(const id of ['narration','approve:narration','transcript','approve:transcript','captions'])assert.notEqual(changed.nodes.find(n=>n.id===id).requestHash,plan.nodes.find(n=>n.id===id).requestHash);assert.equal(changed.estimate.complete,false);assert.ok(changed.estimate.blockedNodeIds.includes('transcript'));assert.equal(changed.nodes.find(n=>n.id==='transcript').request.dependencyRequests[0].nodeId,'approve:narration');});
 await check('schema validates the exact serialized snapshot instead of a mutable or toJSON original',async()=>{for(const inherited of [false,true]){const r=recipe('MOTION_GRAPHICS');const forbidden=structuredClone(r);forbidden.steps[0].maskAssetId='unsupported';const fn=()=>forbidden;if(inherited)Object.setPrototypeOf(r,{toJSON:fn});else Object.defineProperty(r,'toJSON',{value:fn,enumerable:false});assert.throws(()=>parseRecipeDocument(r),/schema/);await assert.rejects(compileRecipe(r,context(),now),/schema/);}const r=recipe();Object.defineProperty(r,'toJSON',{value:()=>({...recipe(),version:99}),enumerable:false});assert.throws(()=>parseRecipeDocument(r),/schema/);});
-assert.equal(fs.readFileSync(path.join(root,'src/lib/production/actions.ts'),'utf8').includes('recipes/compiler'),false);assert.equal(fs.readFileSync(path.join(root,'convex/productions.ts'),'utf8').includes('recipes/compiler'),false);
-console.log(`Recipe compiler: ${checks} PASS; pure only, no database/provider/render calls or active imports.`);
+await check('ordinary plan approval cannot compile or dispatch recipes; only explicit pure hash imports are allowed',()=>{
+ for(const file of ['src/lib/production/actions.ts','convex/productions.ts']){
+  const source=ts.createSourceFile(file,fs.readFileSync(path.join(root,file),'utf8'),ts.ScriptTarget.Latest,true);
+  for(const item of source.statements.filter(ts.isImportDeclaration)){
+   const dependency=item.moduleSpecifier.text;
+   assert(!/recipeRunner|recipeWorker/.test(dependency),'Ordinary planning must not import recipe execution');
+   if(!dependency.includes('recipes/compiler'))continue;
+   assert.equal(file,'convex/productions.ts','Frontend planning actions must not import recipe compiler');
+   const names=item.importClause?.namedBindings;
+   assert(names&&ts.isNamedImports(names),'Hash seam must not expose namespace or default compiler imports');
+   assert.equal(item.importClause.name,undefined,'No default compiler import');
+   assert.deepEqual(names.elements.map(name=>[name.propertyName?.text??name.name.text,name.name.text]),[['recipeHash','recipeHash']],'Only the reviewed pure recipeHash helper is allowed');
+  }
+  if(file==='convex/productions.ts'){
+   const approval=source.statements.flatMap(item=>ts.isVariableStatement(item)?[...item.declarationList.declarations]:[]).find(item=>ts.isIdentifier(item.name)&&item.name.text==='approvePlan');
+   assert(approval,'Canonical approval mutation must exist');
+   assert(!/\b(?:recipeHash|compileRecipe|recipeNodeActions|recipeRunner|recipeWorker)\b/.test(approval.getText(source)),'Approval may not trigger compilation or execution');
+  }
+ }
+});
+console.log(`Recipe compiler: ${checks} PASS; pure only, no database/provider/render calls or recipe execution imports.`);
 })().catch(error=>{console.error(error);process.exitCode=1;});

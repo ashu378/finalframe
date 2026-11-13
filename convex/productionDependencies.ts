@@ -9,6 +9,7 @@ import { parseStoryboardBinding, stableStoryboardValue, storyboardObject as obje
 type ReadCtx = QueryCtx | MutationCtx;
 type Endpoint = { type: 'asset' | 'storyboardFrame' | 'shot' | 'shotVersion' | 'timelineClip' | 'timeline'; id: string };
 type Kind = 'references' | 'derivedFrom' | 'feeds' | 'placedOn';
+const DRAFT_REBIND_REASON='A newer explicit draft binding exists; retained approved artifacts are unchanged.';
 async function hash(value: unknown) {
   const bytes = new TextEncoder().encode(stableStoryboardValue(value));
   if (bytes.length > 128 * 1024) throw new Error('DEPENDENCY_CONTENT_LIMIT');
@@ -93,7 +94,7 @@ export async function recordProductionDependency(ctx: MutationCtx, args: { produ
   const exact = same.find(row => row.state === 'ACTIVE' && row.projectId === owner.projectId && row.sourceHash === source.hash && row.targetHash === target.hash);
   if (exact) return exact._id;
   const now = Date.now();
-  for (const row of same) if (row.state === 'ACTIVE') await ctx.db.patch(row._id, { state: 'OUTDATED', reason: 'A newer explicit draft binding exists; retained approved artifacts are unchanged.', updatedAt: now });
+  for (const row of same) if (row.state === 'ACTIVE') await ctx.db.patch(row._id, { state: 'OUTDATED', reason: DRAFT_REBIND_REASON, updatedAt: now });
   return ctx.db.insert('productionDependencies', { projectId: owner.projectId, studioExternalId: owner.production.studioExternalId, studioId: owner.production.studioId, productionId: owner.production._id, productionVersionId: owner.version._id, sourceType: args.source.type, sourceId: args.source.id, sourceVersionId: args.source.id, sourceHash: source.hash, targetType: args.target.type, targetId: args.target.id, targetVersionId: args.target.id, targetHash: target.hash, kind: args.kind, state: 'ACTIVE', createdAt: now, updatedAt: now });
 }
 export async function synchronizeShotDependencies(ctx: MutationCtx, args: { shotId: Id<'shots'>; expectedVersionId: Id<'productionVersions'> }, actorId?:Id<'users'>) {
@@ -179,7 +180,16 @@ export async function dependencyIsSuperseded(ctx: ReadCtx, production: Doc<'prod
   const owner=await scope(ctx,production._id,production.currentVersionId,actorId);
   let candidates=await ctx.db.query('productionDependencies').withIndex('by_source',q=>q.eq('sourceType',stale.sourceType).eq('sourceId',stale.sourceId)).take(201);
   if(candidates.length>200)throw new Error('DEPENDENCY_HISTORY_LIMIT');
-  if(stale.reason==='STORYBOARD_SELECTION_REPLACED'&&stale.sourceType==='storyboardFrame'&&stale.targetType==='shot'){
+  // Direction edits create several retained hashes for the same selected
+  // frame. A later explicit selection replacement supersedes that whole
+  // source-preserving chain, but only when its recorded replacement receipt
+  // matches the exact original endpoints, project, version and source hash.
+  const frameToShot=stale.sourceType==='storyboardFrame'&&stale.targetType==='shot';
+  const retainedSelectionReplacement=frameToShot&&stale.state==='OUTDATED'&&stale.reason===DRAFT_REBIND_REASON&&Boolean(normalizeSha256(stale.sourceHash))&&Boolean(normalizeSha256(stale.targetHash))&&stale.sourceVersionId===stale.sourceId&&stale.targetVersionId===stale.targetId&&candidates.some(row=>
+    row.state==='OUTDATED'&&row.reason==='STORYBOARD_SELECTION_REPLACED'&&row.projectId===owner.projectId&&row.productionId===production._id&&row.productionVersionId===owner.version._id&&
+    row.sourceType===stale.sourceType&&row.sourceId===stale.sourceId&&row.sourceVersionId===stale.sourceVersionId&&row.sourceHash===stale.sourceHash&&
+    row.targetType===stale.targetType&&row.targetId===stale.targetId&&row.targetVersionId===stale.targetVersionId&&row.kind===stale.kind&&Boolean(normalizeSha256(row.targetHash))&&row.createdAt>=stale.createdAt);
+  if(frameToShot&&(stale.reason==='STORYBOARD_SELECTION_REPLACED'||retainedSelectionReplacement)){
     const shotId=ctx.db.normalizeId('shots',stale.targetId),shot=shotId?await ctx.db.get(shotId):null;const selected=shot?parseStoryboardBinding(object(shot.metadata).storyboard):null;
     if(!shot||shot.projectId!==owner.projectId||shot.productionId!==production._id||shot.productionVersionId!==owner.version._id||!selected||selected.frameId===stale.sourceId)return false;
     candidates=await ctx.db.query('productionDependencies').withIndex('by_target',q=>q.eq('targetType','shot').eq('targetId',shot._id)).take(201);
