@@ -14,10 +14,10 @@ const refs:Record<string,FunctionReference<any,'internal',any,any>> = (internal 
 const operations = v.union(v.literal('FRAME'),v.literal('FOUR_ANGLES'),v.literal('RELIGHT'),v.literal('BACKGROUND_REPLACE'),v.literal('OBJECT_REPLACE'),v.literal('CHARACTER_REPLACE'));
 const input = {shotId:v.id('shots'),operation:operations,instructions:v.string(),sourceFrameId:v.optional(v.id('storyboardFrames')),referenceAssetIds:v.optional(v.array(v.id('assets')))};
 const angleControls = [
-  {framing:'wide',angle:'eye-level',label:'Wide establishing composition'},
-  {framing:'medium',angle:'eye-level',label:'Medium composition'},
-  {framing:'close-up',angle:'eye-level',label:'Close-up or reaction'},
-  {framing:'medium',angle:'low angle',label:'Low-angle composition'},
+  {framing:'wide',angle:'eye-level',label:'Wide establishing composition',compositionInstruction:'WIDE SHOT: show the complete subject and enough surrounding environment to establish the setting.'},
+  {framing:'medium',angle:'eye-level',label:'Medium composition',compositionInstruction:'MEDIUM SHOT: crop a person from the waist upward. The face and torso fill the frame; legs and shoes must be outside the image. For an object, show its main working area rather than its entire surroundings.'},
+  {framing:'close-up',angle:'eye-level',label:'Close-up or reaction',compositionInstruction:'CLOSE-UP: frame only the face and shoulders of a person. The head fills most of the image. Do not show the waist, legs, shoes or a full body. For an object, fill the frame with one meaningful detail.'},
+  {framing:'medium',angle:'low angle',label:'Low-angle composition',compositionInstruction:'LOW ANGLE: move the viewpoint below the subject and look upward. Make the changed camera height visually clear; do not return another eye-level view.'},
 ];
 
 async function assertFrameCapacity(ctx: import('./_generated/server').QueryCtx | import('./_generated/server').MutationCtx, shotId:Id<'shots'>, count:number) {
@@ -39,12 +39,12 @@ export const context = internalQuery({args:input,returns:v.any(),handler:async(c
   const direction=normalizeShotDirecting(object(shot.metadata).directing);
   const purpose=args.operation==='FOUR_ANGLES'?'ANGLE':args.operation==='FRAME'?'STORYBOARD_FRAME':'IMAGE_EDIT';
   const checked=await validateStoryboardImageInput(ctx,production._id,{purpose,shotId:shot._id,productionVersionId:shot.productionVersionId,sourceAssetIds,...(args.sourceFrameId?{sourceFrameId:args.sourceFrameId}:{}),direction});
-  const controls=args.operation==='FOUR_ANGLES'?angleControls:[{...direction,label:args.operation==='FRAME'?'Storyboard frame':args.operation.replaceAll('_',' ').toLowerCase()}];
+  const controls=args.operation==='FOUR_ANGLES'?angleControls:[{...direction,label:args.operation==='FRAME'?'Storyboard frame':args.operation.replaceAll('_',' ').toLowerCase(),compositionInstruction:''}];
   const entries=controls.map((control,index)=>{
-    const {label,...composition}=control;
+    const {label,compositionInstruction,...composition}=control;
     const applied=normalizeShotDirecting({...direction,...composition});
-    const base=source?`Use [Image 1] as the approved scene and identity reference. Preserve character identity, outfit, props, product markings, location and treatment except the creator's explicit requested change.`:'Create one still storyboard frame for the approved project brief and its explicit reference images.';
-    const change=args.operation==='FOUR_ANGLES'?`Explore a ${label}. Change camera composition, keeping the same character, scene and action.`:args.operation==='FRAME'?'Create the planned shot image.':`Edit only ${args.operation==='RELIGHT'?'lighting and atmosphere':args.operation==='BACKGROUND_REPLACE'?'the background':args.operation==='OBJECT_REPLACE'?'the identified object or product':'the identified character'} as instructed. Preserve all other specified elements.`;
+    const base=source?`Use [Image 1] as the approved scene and identity reference. Preserve character identity, garment cut and sleeve length, exposed-skin regions, outfit colors, props, product markings, location and treatment except the creator's explicit requested change.`:'Create one still storyboard frame for the approved project brief and its explicit reference images.';
+    const change=args.operation==='FOUR_ANGLES'?`Explore a ${label}. ${compositionInstruction} This framing requirement overrides the source image's crop and any full-body framing in the shot description. Preserve identity, outfit and setting within the new crop; showing less of the body is intentional. Keep the scene and action.`:args.operation==='FRAME'?'Create the planned shot image.':`Edit only ${args.operation==='RELIGHT'?'lighting and atmosphere':args.operation==='BACKGROUND_REPLACE'?'the background':args.operation==='OBJECT_REPLACE'?'the identified object or product':'the identified character'} as instructed. Preserve all other specified elements.`;
     const prompt=`${base} ${change}\nShot: ${shot.prompt}\nDirecting: ${JSON.stringify(applied)}\nCreator instruction: ${text||'Follow the saved shot direction.'}\nOne composition, no grid, contact sheet, captions or invented logos.`;
     if(prompt.length>4000)throw new Error('Shorten the shot description or image instructions before quoting.');
     return{index,label,text:prompt,imageRequest:{...checked.request,direction:applied}};
