@@ -26,6 +26,11 @@ export function ShotWorkspace({ data }: { data: WorkspaceControlData }) {
     </div>;
 }
 
+function OnDemandVideo({url,label}:{url:string;label:string}) {
+    const [open,setOpen]=useState(false);
+    return <details onToggle={event=>setOpen(event.currentTarget.open)} className="space-y-2"><summary className="min-h-11 cursor-pointer text-sm">Preview {label.toLowerCase()}</summary>{open?<video src={url} controls playsInline preload="metadata" aria-label={label} className="max-h-72 w-full rounded-lg bg-black" />:null}</details>;
+}
+
 function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotControlView }) {
     const router = useRouter(); const [pending, start] = useTransition(); const [error, setError] = useState(''); const [saved, setSaved] = useState('');
     const [controls, setControls] = useState(shot.operationControls);
@@ -77,9 +82,9 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
         <section aria-label={`${shot.title} takes`} className="space-y-3"><h5 className="text-sm font-semibold">Saved takes</h5>{!shot.takes.length ? <p className="text-sm text-muted-foreground">{data.versionState==='APPROVED'?'No takes yet.':'No takes yet. Approve the plan before starting a generation job.'}</p> : <div className="grid gap-4 lg:grid-cols-2">
             {comparisonSource?.url && <figure className="min-w-0 space-y-3 rounded-xl border border-border p-4">
                 <figcaption className="text-sm font-medium">Original source · {comparisonSource.name}</figcaption>
-                <video src={comparisonSource.url} controls playsInline preload="metadata" aria-label="Original source footage" className="max-h-72 w-full rounded-lg bg-black" />
+                <OnDemandVideo key={comparisonSource.url} url={comparisonSource.url} label="Original source footage" />
             </figure>}
-            {shot.takes.map((take) => <div key={take.id} className="min-w-0 space-y-3 rounded-xl border border-border p-4"><p className="text-sm font-medium">Take {take.versionNumber} · {take.status.toLowerCase()}</p>{take.url && take.mimeType?.startsWith('video/') ? <video src={take.url} controls playsInline preload="metadata" className="max-h-72 w-full rounded-lg bg-black" /> : take.url && take.mimeType?.startsWith('image/') ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">View take image</a> : null}{take.url ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">Open or download take</a> : <p className="text-xs text-muted-foreground">Media is not available for this take.</p>}{take.provider || take.model ? <p className="break-words text-xs text-muted-foreground">{take.provider} · {take.model}</p> : null}<ApprovalControls data={data} resourceType="shotVersion" resourceId={take.id} state={take.state} /></div>)}</div>}</section>
+            {shot.takes.map((take) => <div key={take.id} className="min-w-0 space-y-3 rounded-xl border border-border p-4"><p className="text-sm font-medium">Take {take.versionNumber} · {take.status.toLowerCase()}</p>{take.url && take.mimeType?.startsWith('video/') ? <OnDemandVideo key={take.url} url={take.url} label={`Take ${take.versionNumber}`} /> : take.url && take.mimeType?.startsWith('image/') ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">View take image</a> : null}{take.url ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">Open or download take</a> : <p className="text-xs text-muted-foreground">Media is not available for this take.</p>}{take.provider || take.model ? <p className="break-words text-xs text-muted-foreground">{take.provider} · {take.model}</p> : null}<ApprovalControls data={data} resourceType="shotVersion" resourceId={take.id} state={take.state} /></div>)}</div>}</section>
         {saved ? <p role="status" className="text-sm text-emerald-300">{saved}</p> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </article>;
