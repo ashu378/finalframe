@@ -17,6 +17,14 @@ interface AssetGridProps {
     isPresetMode?: boolean;
 }
 
+function LibraryVideoPreview({ url, name }: { url: string; name: string }) {
+    const [open, setOpen] = useState(false);
+    return <details className="border-t border-zinc-800 p-3" onClick={event => event.stopPropagation()} onToggle={event => setOpen(event.currentTarget.open)}>
+        <summary aria-label={`Preview video ${name}`} className="min-h-11 cursor-pointer rounded-sm px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Preview video</summary>
+        {open ? <video src={url} controls playsInline preload="metadata" aria-label={`Saved video ${name}`} className="mt-2 aspect-video w-full rounded-sm bg-black object-contain" /> : null}
+    </details>;
+}
+
 export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterType = 'all', isPresetMode = false }: AssetGridProps) {
     const router = useRouter();
     const [assets, setAssets] = useState<StudioAsset[]>(initialAssets);
@@ -160,7 +168,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                                         <Image src={asset.url} alt={asset.name} fill className="object-cover transition-transform duration-500 group-hover:scale-110" />
                                     </div>
                                 ) : asset.type === 'video' ? (
-                                    <video src={asset.url} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                                    <FileVideo className="h-12 w-12 text-zinc-500" aria-hidden="true" />
                                 ) : (
                                     <div className="flex flex-col items-center gap-2">
                                         <div className="w-12 h-12 rounded-sm bg-primary/5 flex items-center justify-center border border-primary/20">
@@ -200,6 +208,8 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                                     </div>
                                 )}
                             </div>
+
+                            {asset.type === 'video' ? <LibraryVideoPreview key={`${asset.id}:${asset.url}`} url={asset.url} name={asset.name} /> : null}
 
                             {/* Metadata */}
                             <div className="p-5 bg-zinc-950 border-t border-zinc-800">
