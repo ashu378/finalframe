@@ -1,5 +1,7 @@
 # FinalFrame creator workflow implementation
 
+**Current operating instructions —14November2026:** the owner approved consolidation onto [usefinalframe.xyz](https://usefinalframe.xyz). Publish reviewed and tested changes through `main` in the existing Vercel `finalframe` project. Both the public app and any retained Preview use the existing online `knowing-snail-785` database; do not create another project, copy media, switch to the empty `opulent-parakeet-3` database, or run anonymous/local Convex. The Development label is retained during prelaunch work; no database migration is claimed. Preserve owner changes and Yafpay. The current cumulative AI ceiling is **$25**, with stricter live application/provider limits still enforced; the older limits below are historical. No additional spending is implied by the domain release. Redesign, email/recovery and payments remain later phases. [Consolidation evidence and rollback](STORAGE-AND-DOMAIN-CONSOLIDATION.md).
+
 Approved scope: all eight video types, appearance/hairstyle edits, object/car transformations, performance-driven video, recorded audio, consented reference voice synthesis, lip sync, and episodic stories. OpenRouter first. Current authorization (2 November 2026): **US$10 working budget, US$15 absolute ceiling across every paid capability and retry**. The owner’s newer instruction replaces the earlier US$40 allowance. Launch is acceptance-gated; it is not promised for a calendar date.
 
 ## Non-negotiable ownership

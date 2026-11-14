@@ -34,7 +34,8 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 | Q03 | Real outputs reviewed for identity/action/dialogue/lip sync/readability/audio/pacing >=4/5 each | creative-output-review | Pending; no inferred artistic approval |
 | Z01 | Signup OTP, recovery, resend/attempt limits, real sending/inbox delivery | online-auth-email | LAST; provider credentials/domain required |
 | Z02 | Payment pages accurately disabled; no live checkout/charge | billing-disabled-browser | LAST; remains disabled under current authorization |
-| R01 | Backups, additive readers-before-writers, FinalFrame-only deployment, production safe smoke and rollback | production-release | Pending; all required gates above |
+| R01 | Backups, additive readers-before-writers, FinalFrame-only deployment, production safe smoke and rollback | production-release | Whole-launch gates remain open; current build is now published on the purchased domain under the owner’s14November consolidation instruction. See R02; this is not complete-product certification. |
+| R02 | One canonical domain/current database, reversible test cleanup and on-demand media | storage-domain-consolidation | Current main/domain published; existing owner login and retained project PASS;26 oldtestprojects archived/restorable; no filespurged or data copied.215+5 focused groups pass; final media-library rollout/readback in consolidation artifact. Monthly1.28GBtransfer is not255MiBstoredfiles and is not reset by cleanup. |
 
 ## Runtime limits and proof
 
@@ -308,3 +309,18 @@ Native Pidgin still requires a fluent reviewer as the owner confirmed. Required 
 - **Operational warning.** Successful Convex deploy reports the team is above Free-plan limits. Dashboard inspection confirms **FinalFrame November data egress1.28GB versus the team's1GB included allowance**. Other scoped measurements: database34.5MB, file storage255.17MB. An owner hosting-plan/usage decision is required before launch; no automatic upgrade, retained-data deletion or other-project change. [Observed usage](/home/ashuboris/.codex/artifacts/finalframe/creator-workflow-20261112/CONVEX-USAGE.json).
 
 The required full recipe/browser/creative, advanced preservation, multi-session movie and operational matrix remains open exactly as recorded above. Fluent Pidgin and consented personal-likeness evidence require the stated human inputs. The new workflow pass does not replace those gates. Redesign, email and payments remain later phases; a complete-product done email is not sent while these required gates remain open.
+
+
+### 14 November no-cost domain and media-transfer consolidation
+
+[Inventory, changes, environment bindings and rollback](STORAGE-AND-DOMAIN-CONSOLIDATION.md).
+
+- **Inventory:** one Vercel project and one Convex project. The empty production deployment had no users or files. The active database contains 307 files / 267,567,285 bytes (about 255 MiB). The full metadata scan covers 115 tables and 9,980 documents, with six database-unreferenced objects totaling 27,896 bytes. No file purge, media copy, S3 bucket or plan upgrade occurred.
+- **Restorable cleanup:** 26 clearly named owner test projects were archived through existing authenticated lifecycle functions and read back. No assets, paid receipts, approvals or files were deleted. A project needing recovery and the owner's personal projects were preserved.
+- **Transfer reduction:** closed composition/result previews, saved take/source players and first-cut sound now wait for deliberate use. First-cut Play waits for requested picture and sound. The global media library also mounts only an explicitly opened video's player; selection, deletion and importing retain their existing behavior.
+- **Domain release:** main was fast-forwarded to the tested source. Production `3167c0e` is Ready in deployment `2WGxbBekQ45J5n2Li2UyojiQP13D`. The owner logged in at the purchased domain, opened retained projects and reached the current draft storyboard. That page has one selected image and zero images in five closed generated previews. A no-body signed-media HEAD with a nonexistent token returned 404/private-no-store instead of a missing-secret 503.
+- **One active database:** Production Vercel uses existing `knowing-snail-785` data. Both site URL settings use `https://usefinalframe.xyz`, and the backend-matching signing value is protected as Secret. The empty `opulent-parakeet-3` deployment was not copied into, deleted or represented as migrated. This prelaunch choice preserves existing IDs and accounts without duplicating files. Preview/history URLs are builds of the same project. The owner's consolidation instruction supersedes earlier Preview-only rollout limits.
+- **Validation:** 220 passing groups across 20 focused test files, full TypeScript, scoped lint and production build. Source `0aef4ad` adds the last media-library fix. Exact final deployment and live checks are in the private-safe consolidation artifact `FINAL-CHECKS.json`.
+- **Costs and limits:** no paid AI calls, key rotation, top-up, subscription or payment. The monthly transfer meter remains historical usage; cleanup cannot undo transferred bytes. These changes reduce unnecessary future downloads. Yafpay and other projects were not changed.
+
+The separate functional-acceptance checklist remains open for its listed creative, human-review and recovery cases. Publishing the current prelaunch app does not certify those cases. Redesign, email/recovery and payments remain deferred.

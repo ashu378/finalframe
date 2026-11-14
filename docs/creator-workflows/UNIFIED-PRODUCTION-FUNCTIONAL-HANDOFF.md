@@ -1,6 +1,6 @@
 # Unified production workflow: implementation and verification
 
-Date: 13 November 2026. Scope: the owner's attached workflow improvement, integrated with existing functional completion. This is a factual checkpoint, not whole-product launch certification. Redesign, email verification/recovery and payments remain deferred in that order. Yafpay and unrelated projects were not changed.
+Date: 13 November 2026. **14 November update:** the owner subsequently approved publishing the current build on the purchased domain. Use [usefinalframe.xyz](https://usefinalframe.xyz); the existing account/data are shared with the retained Preview. [Current hosting, media-loading fixes and rollback](STORAGE-AND-DOMAIN-CONSOLIDATION.md). The Preview-only scope below records the earlier checkpoint. Scope: the owner's attached workflow improvement, integrated with existing functional completion. This is a factual checkpoint, not whole-product launch certification. Redesign, email verification/recovery and payments remain deferred in that order. Yafpay and unrelated projects were not changed.
 
 ## Delivered behavior
 
