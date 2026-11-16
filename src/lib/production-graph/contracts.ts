@@ -39,3 +39,16 @@ export function graphStateClass(state: ProductionGraphNodeState) {
     blocked: 'border-destructive/30 bg-destructive/10 text-destructive', locked: 'border-border bg-secondary text-muted-foreground',
   }[state];
 }
+
+/** Translate known system descriptions only; never rewrite a creator's story. */
+export function graphNodeDetail(node: Pick<ProductionGraphNode, 'kind' | 'detail'>) {
+  const detail = node.detail;
+  if (node.kind === 'productionVersion') {
+    if (detail === 'Immutable approved production snapshot') return 'Approved plan. Changes are saved as a new version.';
+    if (detail === 'Editable planning snapshot') return 'Draft plan. You can still make changes.';
+  }
+  if (node.kind === 'plan' && detail === 'Creative direction and ordered video plan') return 'Your idea, style and scenes in order.';
+  if (node.kind === 'shot' && /^\d+(?:\.\d+)?s take$/.test(detail ?? '')) return detail!.replace('s take', '-second shot');
+  if (node.kind === 'timeline' && /^\d+(?:\.\d+)?s timeline$/.test(detail ?? '')) return detail!.replace('s timeline', '-second edit');
+  return detail;
+}

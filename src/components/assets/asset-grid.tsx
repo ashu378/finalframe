@@ -91,7 +91,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                     <FileImage className="w-8 h-8 opacity-20" />
                 </div>
                 <h3 className="text-sm font-semibold tracking-normal text-zinc-50 mb-4 ">No matching media</h3>
-                <p className="text-metadata font-bold tracking-normal text-muted-foreground ">Upload a file, clear your search, or choose a different file type.</p>
+                <p className="text-sm font-normal leading-6 text-muted-foreground ">Upload a file, clear your search, or choose a different file type.</p>
             </div>
         );
     }
@@ -102,14 +102,14 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
             {!isPresetMode && selectedIds.size > 0 && (
                 <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-[60] animate-in slide-in-from-bottom-12 fade-in duration-300">
                     <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 bg-zinc-950 border border-primary/30 rounded-xl shadow-3xl backdrop-blur-2xl">
-                        <span className="text-metadata font-semibold text-zinc-50 tracking-normal ">
+                        <span className="text-sm font-semibold text-zinc-50 tracking-normal ">
                             {selectedIds.size} {selectedIds.size === 1 ? 'file' : 'files'} selected
                         </span>
                         <div className="h-6 w-px bg-zinc-800" />
                         <Button
                             variant="danger"
                             size="sm"
-                            className="h-12 px-8 rounded-xl gap-3 font-semibold text-metadata tracking-widest bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-black transition-all shadow-2xl shadow-red-500/10 "
+                            className="h-12 px-8 rounded-xl gap-3 font-semibold text-sm tracking-widest bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-black transition-all shadow-2xl shadow-red-500/10 "
                             onClick={handleBulkDelete}
                             disabled={isDeleting}
                         >
@@ -119,7 +119,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-12 px-8 rounded-xl text-zinc-500 hover:text-zinc-50 text-metadata font-semibold tracking-widest transition-colors"
+                            className="h-12 px-8 rounded-xl text-zinc-500 hover:text-zinc-50 text-sm font-semibold tracking-widest transition-colors"
                             onClick={() => setSelectedIds(new Set())}
                         >
                             Cancel
@@ -210,11 +210,11 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                             {/* Metadata */}
                             <div className="p-5 bg-zinc-950 border-t border-zinc-800">
-                                <p className="text-metadata font-semibold text-zinc-50 truncate group-hover:text-primary transition-colors tracking-normal " title={asset.name}>
+                                <p className="text-sm font-semibold text-zinc-50 truncate group-hover:text-primary transition-colors tracking-normal " title={asset.name}>
                                     {asset.name}
                                 </p>
                                 <div className="flex items-center justify-between mt-3">
-                                    <p className="text-metadata text-muted-foreground tracking-normal font-semibold ">
+                                    <p className="text-sm text-muted-foreground tracking-normal font-semibold ">
                                         {asset.size > 0 ? `${(asset.size / 1024 / 1024).toFixed(1)} MB` : 'Saved reference'}
                                     </p>
                                     {!isPresetMode && (

@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { ArrowDown, CircleAlert, GitBranch, LoaderCircle, LockKeyhole } from 'lucide-react';
 import type { ProductionGraphEdge, ProductionGraphNode } from '@/lib/production-graph/contracts';
-import { graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
+import { graphNodeDetail, graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
 import { cn } from '@/lib/utils';
 import { GraphActionList, type ProductionCanvasActionEvent } from './graph-action-list';
 
@@ -24,7 +24,7 @@ const kindLabels: Record<string, string> = {
   productionVersion: 'Version',
   sequence: 'Chapter',
   scene: 'Scene',
-  shot: 'Shot brief',
+  shot: 'Shot',
   videoTake: 'Video take',
   image: 'Media',
   imageEdit: 'Edited media',
@@ -182,7 +182,7 @@ export function MobileGraphList({
                         ) : (
                           <h3 className="mt-2 break-words font-semibold text-foreground">{node.label}</h3>
                         )}
-                        {node.detail ? <p className="mt-1 break-words text-sm leading-6 text-muted-foreground">{node.detail}</p> : null}
+                        {node.detail ? <p className="mt-1 break-words text-sm leading-6 text-muted-foreground">{graphNodeDetail(node)}</p> : null}
                       </div>
                     </div>
 

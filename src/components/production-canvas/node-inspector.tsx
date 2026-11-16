@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, LockKeyhole, X } from 'lucide-react';
 import type { ProductionGraphNode } from '@/lib/production-graph/contracts';
-import { graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
+import { graphNodeDetail, graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -12,7 +12,7 @@ const kindLabels: Record<string, string> = {
   productionVersion: 'Plan version',
   sequence: 'Chapter',
   scene: 'Scene',
-  shot: 'Shot brief',
+  shot: 'Shot',
   videoTake: 'Video take',
   image: 'Image',
   imageEdit: 'Image version',
@@ -89,7 +89,7 @@ export function NodeInspector({ node, onClose, onInspect, className }: NodeInspe
         </div>
       </dl>
 
-      {node.detail ? <p className="mt-5 text-sm leading-6 text-muted-foreground">{node.detail}</p> : null}
+      {node.detail ? <p className="mt-5 text-sm leading-6 text-muted-foreground">{graphNodeDetail(node)}</p> : null}
 
       {artifactHref ? <Link className="ff-button-secondary mt-7 flex min-h-11 w-full items-center justify-center gap-2" href={artifactHref} prefetch={false}>Open this saved version<ArrowUpRight className="size-4" aria-hidden="true" /></Link> : onInspect ? (
         <button type="button" onClick={() => onInspect(node)} className="ff-button-secondary mt-7 min-h-11 w-full">

@@ -45,8 +45,18 @@ function check(label, callback) {
   }
 }
 
-const { WORKSPACE_SECTIONS, graphStateLabel, graphStateClass } = loadPureWorkspaceContracts();
+const { WORKSPACE_SECTIONS, graphNodeDetail, graphStateLabel, graphStateClass } = loadPureWorkspaceContracts();
 const friendlyState = loadPureFriendlyStateMapper();
+
+check('system descriptions use plain language without changing creator content', () => {
+  assert.equal(graphNodeDetail({kind:'productionVersion',detail:'Immutable approved production snapshot'}), 'Approved plan. Changes are saved as a new version.');
+  assert.equal(graphNodeDetail({kind:'shot',detail:'4s take'}), '4-second shot');
+  assert.equal(graphNodeDetail({kind:'timeline',detail:'4.5s timeline'}), '4.5-second edit');
+  const story = 'Immutable approved production snapshot';
+  assert.equal(graphNodeDetail({kind:'scene',detail:story}), story);
+  assert.equal(graphNodeDetail({kind:'shot',detail:'My scene is 4s take long'}), 'My scene is 4s take long');
+  assert.equal(graphNodeDetail({kind:'scene'}), undefined);
+});
 
 check('friendly state maps successful states to ready', () => {
   for (const status of ['COMPLETED', 'APPROVED', 'READY', 'ACTIVE']) {

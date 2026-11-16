@@ -1,32 +1,32 @@
 import type { VideoType } from '../ai/video-routing';
 export const CREATOR_PATHS = [
-    { id: 'CREATE_VIDEO', label: 'Create a video', description: 'Turn an idea, script, recording, images, or mixed media into a video.' },
-    { id: 'IMPROVE_FOOTAGE', label: 'Improve existing footage', description: 'Shape supplied clips, add scenes, captions, sound, or effects.' },
-    { id: 'FOCUSED_TOOL', label: 'Use a focused tool', description: 'Work on a selected image or take inside the same project.' },
+    { id: 'CREATE_VIDEO', label: 'Create a video', description: 'Start with an idea, script, recording, photos or video clips.' },
+    { id: 'IMPROVE_FOOTAGE', label: 'Edit my video', description: 'Edit your clips, add scenes, captions, sound or effects.' },
+    { id: 'FOCUSED_TOOL', label: 'Edit an image or clip', description: 'Change one image or video clip in a project.' },
 ] as const;
 export const CREATOR_INVOLVEMENT = [
-    { id: 'HANDLE_FOR_ME', label: 'Handle it for me', description: 'Use recommended filmmaking choices. References, costs and the final cut still need your decisions.' },
-    { id: 'KEY_STAGE_REVIEW', label: 'Review key stages', description: 'Inspect the script, creative guide, storyboard and final cut.' },
-    { id: 'DIRECT_EVERY_TAKE', label: 'Direct every take', description: 'Inspect each shot, reference, action, camera, lighting, timing and sound.' },
+    { id: 'HANDLE_FOR_ME', label: 'Handle it for me', description: 'Let FinalFrame suggest the details. You still review the references, costs and final edit.' },
+    { id: 'KEY_STAGE_REVIEW', label: 'Review each main step', description: 'Review the script, characters, scene images and final edit.' },
+    { id: 'DIRECT_EVERY_TAKE', label: 'Choose every detail', description: 'Choose the details for each shot, including movement, lighting, timing and sound.' },
 ] as const;
 export const CREATOR_VIDEO_KINDS = [
     { id: 'COMEDY_SKIT', label: 'Comedy skit' }, { id: 'ADVERTISEMENT', label: 'Advertisement' },
     { id: 'EXPLAINER', label: 'Explainer' }, { id: 'CINEMATIC', label: 'Cinematic short or film' },
     { id: 'PRODUCT_DEMO', label: 'Product demonstration' }, { id: 'MUSIC_VIDEO', label: 'Music video' },
-    { id: 'TALKING_HEAD', label: 'Talking-head video' }, { id: 'SOCIAL_CUTDOWN', label: 'Social cutdown' },
+    { id: 'TALKING_HEAD', label: 'A person speaking to camera' }, { id: 'SOCIAL_CUTDOWN', label: 'Short social clip' },
     { id: 'MOTION_GRAPHICS', label: 'Motion graphics' },
 ] as const;
 export const CREATOR_VISUAL_STYLES = [
     { id: '2D_CARTOON', label: '2D cartoon' }, { id: '3D_ANIMATION', label: '3D animation' },
-    { id: 'REALISTIC', label: 'Realistic' }, { id: 'ILLUSTRATED', label: 'Illustrated' }, { id: 'CUSTOM', label: 'Describe another treatment' },
+    { id: 'REALISTIC', label: 'Realistic' }, { id: 'ILLUSTRATED', label: 'Illustrated' }, { id: 'CUSTOM', label: 'Describe another look' },
 ] as const;
 export const CREATOR_TOOLS = [
-    { id: 'MOTION_TRANSFER', label: 'Motion guidance', description: 'Make a new interpretation using movement and an appearance reference; exact transfer is not guaranteed.' },
-    { id: 'CHARACTER_REPLACE', label: 'Character replacement', description: 'Choose the performer to change and what should remain consistent.' },
-    { id: 'OBJECT_REPLACE', label: 'Object or product replacement', description: 'Identify the target and provide its replacement reference.' },
-    { id: 'RELIGHT', label: 'Relighting', description: 'Describe a lighting change for a selected image or take.' },
-    { id: 'BACKGROUND_REPLACE', label: 'Background replacement', description: 'Describe the new environment and foreground to preserve.' },
-    { id: 'MULTI_ANGLE', label: 'Explore camera angles', description: 'Explore compositions from an approved visual reference.' },
+    { id: 'MOTION_TRANSFER', label: 'Use movement from a video', description: 'Use a video to guide movement and an image to guide appearance. Results may differ from the original.' },
+    { id: 'CHARACTER_REPLACE', label: 'Change a character', description: 'Choose the performer to change and what should remain consistent.' },
+    { id: 'OBJECT_REPLACE', label: 'Change an object or product', description: 'Identify the target and provide its replacement reference.' },
+    { id: 'RELIGHT', label: 'Change the lighting', description: 'Describe how the light should change in your image or clip.' },
+    { id: 'BACKGROUND_REPLACE', label: 'Change the background', description: 'Describe the new setting and what should stay in front.' },
+    { id: 'MULTI_ANGLE', label: 'Explore camera angles', description: 'Try different views of an approved image.' },
 ] as const;
 export type CreatorIntent = {
     version: 1;

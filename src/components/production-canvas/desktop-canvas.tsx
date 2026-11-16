@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { ChevronRight, CircleAlert, Clock3, Crosshair, Eye, Film, Grid2X2, Image, LayoutTemplate, Maximize2, Mic2, PlaySquare, RotateCcw, ScanLine, Settings2, Sparkles, StepForward, Volume2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ProductionGraphEdge, ProductionGraphNode } from '@/lib/production-graph/contracts';
-import { graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
+import { graphNodeDetail, graphStateClass, graphStateLabel } from '@/lib/production-graph/contracts';
 import { cn } from '@/lib/utils';
 import { NodeInspector } from './node-inspector';
 
@@ -66,7 +66,7 @@ const kindLabels: Record<string, string> = {
   productionVersion: 'Plan version',
   sequence: 'Chapter',
   scene: 'Scene',
-  shot: 'Shot brief',
+  shot: 'Shot',
   videoTake: 'Video take',
   image: 'Image',
   imageEdit: 'Image version',
@@ -202,7 +202,7 @@ export function DesktopCanvas({ nodes, edges, onSelect }: DesktopCanvasProps) {
                             </span>
                             <span className="mt-4 block text-sm font-semibold leading-5">{node.label}</span>
                             <span className="mt-1 block text-xs font-medium text-muted-foreground">{kindLabels[node.kind] ?? 'Production step'}</span>
-                            {node.detail ? <span className="mt-3 block line-clamp-2 text-xs leading-5 text-muted-foreground">{node.detail}</span> : null}
+                            {node.detail ? <span className="mt-3 block line-clamp-2 text-xs leading-5 text-muted-foreground">{graphNodeDetail(node)}</span> : null}
                             {(incoming > 0 || outgoing > 0) ? <span className="mt-4 flex items-center gap-2 border-t border-border/70 pt-3 text-xs font-semibold text-muted-foreground"><span>Uses {incoming}</span><span className="text-border">·</span><span>Used by {outgoing}</span></span> : null}
                           </button>
                         );

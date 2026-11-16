@@ -82,14 +82,14 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
                 variant="primary"
                 onClick={() => inputRef.current?.click()}
                 disabled={isUploading}
-                className="px-10 h-14 rounded-xl font-semibold text-metadata tracking-normal shadow-2xl shadow-primary/20 transition-all active:scale-95 flex items-center gap-3"
+                className="min-h-12 rounded-xl px-6 text-sm font-semibold flex items-center gap-3"
             >
                 {isUploading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                     <Upload className="w-5 h-5" />
                 )}
-                <span>{isUploading ? 'UPLOADING...' : 'UPLOAD_MATERIAL'}</span>
+                <span>{isUploading ? 'Uploading…' : 'Upload files'}</span>
             </Button>
 
             {/* Global Drop Zone Overlay */}
@@ -106,7 +106,7 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
                             <Upload className="w-12 h-12 text-primary animate-bounce" />
                         </div>
                         <h2 className="text-3xl font-semibold text-zinc-50 mb-6 tracking-normal ">Drop your files here</h2>
-                        <p className="text-metadata font-semibold text-muted-foreground tracking-widest leading-loose">Release to upload them to your library.</p>
+                        <p className="text-sm font-semibold text-muted-foreground tracking-normal leading-loose">Release to upload them to your library.</p>
                     </div>
                 </div>
             )}
@@ -115,15 +115,16 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
             {uploads.length > 0 && (
                 <div className="fixed bottom-4 left-4 right-4 z-[70] sm:left-auto sm:w-96 space-y-4 animate-in slide-in-from-right-10 fade-in duration-300">
                     {uploads.map((upload, i) => (
-                        <div key={i} className="p-6 bg-card border border-border rounded-xl shadow-3xl flex items-center gap-6 relative overflow-hidden group">
+                        <div key={i} role="status" aria-live="polite" className="p-6 bg-card border border-border rounded-xl shadow-3xl flex items-center gap-6 relative overflow-hidden group">
                             <div className="flex-1 min-w-0 z-10">
-                                <p className="text-metadata font-semibold text-zinc-50 truncate tracking-widest ">{upload.name}</p>
+                                <p className="text-sm font-semibold text-zinc-50 truncate tracking-normal ">{upload.name}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{upload.status === 'uploading' ? 'Uploading…' : upload.status === 'success' ? 'File added' : 'Upload failed. Choose the file again to retry.'}</p>
                                 <div className="h-1 bg-zinc-950 rounded-none mt-4 overflow-hidden shadow-inner">
                                     <div
                                         className={cn(
                                             "h-full transition-all duration-700",
                                             upload.status === 'success' ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]' :
-                                                upload.status === 'error' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-primary shadow-[0_0_15px_rgba(251,191,36,0.4)]'
+                                                upload.status === 'error' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-primary'
                                         )}
                                         style={{ width: `${upload.status === 'uploading' ? 50 : 100}%` }}
                                     />

@@ -1,4 +1,4 @@
-# Redesign integration — 16 November2026
+# Redesign integration — 16 November 2026
 
 ## Implemented presentation
 - Shared mobile-first black/white/lime tokens, readable forms/buttons/navigation, self-hosted licensed fonts.
@@ -18,13 +18,15 @@ Artifacts: /home/ashuboris/.codex/artifacts/finalframe/redesign-20261116 and red
 - Focused UI/navigation/admin/auth/account/team/media/project/movie/release tests passed. Workspace set includes105 groups plus template contracts; finishing/recovery and component matrices also passed. Exact test outputs retained rather than treating UI mocks as cloud/provider acceptance.
 - Actual public gallery:0 video elements before Play; one local four-second clip reaches readyState4 with no error; close unmounts the video and restores focus.
 - Actual homepage390px: no horizontal overflow, no broken images, one WebGL canvas,0 initial video elements. Desktop/mobile screenshots retained. Prior login screen measured16px fields and52px targets.
-- Current owner login attempt was rejected. Sign-in request remains pending. Private dashboard/admin/editor browser screenshots and current-auth acceptance are NOT certified by source/SSR tests.
+- The real-domain existing owner session works. Actual dashboard desktop/mobile, mobile menu including sign-out and Escape/focus return, retained project workspace, editor, platform overview/jobs, media library and settings were inspected. The inspected mobile dashboard/workspace/editor/admin and desktop admin/jobs/settings had no document-level horizontal overflow. Screenshots are retained. The separate localhost credential attempt was rejected; it did not block the production-session visual pass.
+- This pass found inherited system descriptions and an upload button labeled `UPLOAD_MATERIAL`. The follow-up release translates known system descriptions at the display boundary, uses “Scene” and “Shot”, changes the upload label to “Upload files”, and shows readable upload outcome messages. Creator-authored story text and persisted graph values stay untouched.
+- Reduced-motion browser emulation removed the canvas and motion controls while retaining the static gallery. Removing emulation restored the interactive path.
 
 ## Preserved boundaries
 No backend/schema/environment/role/AI routing/credit/payment/email changes. No paid calls, new cloud storage copies or renderer deployment. Retain all approvals, locked versions, project permissions, exact selected IDs, spending confirmations and on-demand private media. The original user changes stay outside the release commit.
 
 ## Remaining acceptance
-Owner sign-in for private visual pass, any corrections it identifies, and later full application acceptance after email/recovery and payments. Existing video fixes remain on the release checklist. This document is not whole-product launch certification.
+Full application acceptance after email/recovery and payments, including mutation/provider/recovery journeys. The representative browser checks above establish presentation and existing-session access; they do not certify every route, permission combination or paid workflow. Existing video fixes remain on the release checklist. This document is not whole-product launch certification.
 
 ## Rollback
-Frontend-only release. Restore preceding main revision52f9996 if needed; database and renderer remain compatible and unchanged. Preserve retained work and accepted jobs. Publication revision/status are recorded in the release artifact.
+Frontend-only release. Restore preceding main revision52f9996 if needed; database and renderer remain compatible and unchanged. Preserve retained work and accepted jobs. Initial published redesign revision: `8167fce`, Vercel deployment `98kJ9FPQKeq734jwMJzTRxGr9wZ9`, successful. Final follow-up revision/status are recorded in the release artifact.
