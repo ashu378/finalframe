@@ -180,7 +180,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
                                 <span className="text-xs font-bold text-zinc-400 tracking-widest">People in the video</span>
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-semibold text-zinc-400 tracking-widest leading-none">
-                                        {project.identity_presence?.replace(/_/g, ' ') || 'No People'}
+                                        {project.identity_presence?.replace(/_/g, ' ') || 'Not set yet'}
                                     </span>
                                     {project.actor_locked ? (
                                         <Lock className="w-3.5 h-3.5 text-primary" />
@@ -193,7 +193,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
                             <div className="flex flex-col gap-2">
                                 <span className="text-sm text-muted-foreground">Story type</span>
                                 <span className="text-sm font-semibold text-zinc-400 tracking-widest leading-none">
-                                    {project.context?.replace(/_/g, ' ') || 'Organic Content'}
+                                    {project.context?.replace(/_/g, ' ') || 'Original story'}
                                 </span>
                             </div>
 

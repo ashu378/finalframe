@@ -28,7 +28,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <div className="mt-7 min-h-0 flex-1 overflow-y-auto"><AdminNavigation items={permittedNavigation.map(([, label, href]) => ({ label, href }))} /></div>
       <Link href="/dashboard" className="mt-5 flex min-h-12 items-center gap-2 border-t border-border pt-5 text-sm font-semibold text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" aria-hidden="true" />Back to app</Link>
     </aside>
-    <main id="admin-content" className="min-h-dvh lg:ml-64">
+    <main id="main-content" className="min-h-dvh lg:ml-64">
       <div className="sticky top-0 z-30 border-b border-border bg-background lg:hidden"><div className="flex items-center justify-between px-4 py-3"><Link href="/dashboard" className="flex min-h-11 items-center gap-2 text-sm font-semibold"><ArrowLeft className="size-4" aria-hidden="true" />Back to app</Link><span className="text-sm text-muted-foreground">Platform admin</span></div><details className="border-t border-border"><summary className="flex min-h-12 cursor-pointer items-center gap-2 px-4 text-sm font-semibold"><Menu className="size-4" aria-hidden="true" />Admin menu</summary><AdminNavigation mobile items={permittedNavigation.map(([, label, href]) => ({ label, href }))} /></details></div>
       <div className="mx-auto max-w-7xl px-4 py-7 sm:px-8 sm:py-10 xl:px-12">{children}</div>
     </main>
