@@ -15,9 +15,9 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
   const project = await client.query(api.projects.accessSettings, { externalId: decodeProjectRouteId(id) });
   if (!project) notFound();
 
-  return <div className="mx-auto max-w-4xl space-y-7 py-5">
+  return <div className="mx-auto max-w-4xl space-y-7 py-3">
     <Link href="/dashboard/projects" className="ff-link inline-flex min-h-11 items-center text-sm">Project library</Link>
-    <header><p className="ff-eyebrow">Project settings</p><h1 className="ff-display mt-3 break-words text-3xl font-semibold">Project access for {project.name}</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Grant access to this project to people already in its workspace.</p></header>
+    <header><h1 className="ff-display mt-3 break-words text-3xl font-semibold">Who can use {project.name}?</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Choose which people in your workspace can open this project and what they can do.</p></header>
     <ProjectAccessSettings projectId={project.projectId} />
   </div>;
 }

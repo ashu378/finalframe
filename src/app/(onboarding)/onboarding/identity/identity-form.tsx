@@ -9,8 +9,8 @@ import { IdentityPresence } from '@/lib/onboarding/types';
 
 const OPTIONS = [
     { id: IdentityPresence.SELF, label: 'It\'s Me (Self)', description: 'You are the face/voice.' },
-    { id: IdentityPresence.AI_ACTOR, label: 'AI Actor', description: 'Choose a professional avatar.' },
-    { id: IdentityPresence.NO_PEOPLE, label: 'No People', description: 'Stock footage / Voice only.' },
+    { id: IdentityPresence.AI_ACTOR, label: 'AI character', description: 'Choose a character for this setup.' },
+    { id: IdentityPresence.NO_PEOPLE, label: 'No people', description: 'Use scenery, products or a voiceover.' },
 ];
 
 const AI_ACTORS = [
@@ -84,11 +84,11 @@ export function IdentityForm() {
             </div>
 
             {selectedPresence === IdentityPresence.SELF && (
-                <div className="border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl animate-in fade-in slide-in-from-top-2 relative overflow-hidden">
+                <div className="border border-white/5 p-8 rounded-xl bg-card  animate-in fade-in slide-in-from-top-2 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
-                    <h3 className="text-[12px] font-black text-white mb-6 flex items-center gap-4 uppercase tracking-[0.3em] italic">
-                        <span className="w-1.5 h-1.5 rounded-none bg-primary shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
-                        Master_Identity_Reference
+                    <h3 className="text-sm font-semibold text-white mb-6 flex items-center gap-4 normal-case tracking-normal not-italic">
+                        <span className="w-1.5 h-1.5 rounded-none bg-primary " />
+                        Your photo or video
                     </h3>
                     <div className="mt-4">
                         <div className={`${!uploadedPath ? 'block' : 'hidden'}`}>
@@ -102,31 +102,31 @@ export function IdentityForm() {
                             />
                         </div>
                         {uploadedPath && (
-                            <div className="flex items-center justify-between p-4 bg-black border border-primary/30 rounded-sm shadow-2xl">
-                                <span className="text-[11px] font-black text-primary uppercase tracking-widest italic truncate max-w-[240px]">{uploadedName}</span>
+                            <div className="flex items-center justify-between p-4 bg-background border border-primary/30 rounded-xl ">
+                                <span className="text-sm font-semibold text-primary normal-case tracking-normal not-italic truncate max-w-[240px]">{uploadedName}</span>
                                 <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => { setUploadedPath(''); setUploadedName(''); }}
-                                    className="text-[10px] font-black text-zinc-500 hover:text-white uppercase tracking-widest px-4 h-9 rounded-sm transition-all italic"
+                                    className="text-sm font-semibold text-muted-foreground hover:text-white normal-case tracking-normal px-4 h-9 rounded-xl transition-all not-italic"
                                 >
-                                    Purge_Reference
+                                    Remove reference
                                 </Button>
                             </div>
                         )}
                     </div>
-                    <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mt-4 italic leading-loose">
-                        Synchronize primary identity data for high-fidelity AI substitution.
+                    <p className="text-sm font-bold text-muted-foreground normal-case tracking-normal mt-4 not-italic leading-loose">
+                        Use a photo or video you have permission to use.
                     </p>
                 </div>
             )}
 
             {selectedPresence === IdentityPresence.AI_ACTOR && (
-                <div className="border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl animate-in fade-in slide-in-from-top-2 relative overflow-hidden">
+                <div className="border border-white/5 p-8 rounded-xl bg-card  animate-in fade-in slide-in-from-top-2 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
-                    <h3 className="text-[12px] font-black text-white mb-8 flex items-center gap-4 uppercase tracking-[0.3em] italic">
-                        <span className="w-1.5 h-1.5 rounded-none bg-primary shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
-                        Select_Synthetic_Representative
+                    <h3 className="text-sm font-semibold text-white mb-8 flex items-center gap-4 normal-case tracking-normal not-italic">
+                        <span className="w-1.5 h-1.5 rounded-none bg-primary " />
+                        Choose an AI character
                     </h3>
                     <div className="grid gap-3 sm:grid-cols-2">
                         {AI_ACTORS.map(actor => {
@@ -137,11 +137,11 @@ export function IdentityForm() {
                                     key={actor.id}
                                     onClick={() => setActorId(actor.id)}
                                     className={`
-                                        p-5 text-left rounded-sm text-[11px] font-black uppercase tracking-widest border transition-all duration-300 italic
+                                        p-5 text-left rounded-xl text-sm font-semibold normal-case tracking-normal border transition-all duration-300 not-italic
                                         outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black
                                         ${isSelected
-                                            ? 'bg-primary border-primary text-black shadow-[0_0_20px_rgba(251,191,36,0.3)]'
-                                            : 'bg-black border-white/5 text-zinc-500 hover:bg-white/5 hover:text-zinc-300 hover:border-white/20'
+                                            ? 'bg-primary border-primary text-black '
+                                            : 'bg-background border-white/5 text-muted-foreground hover:bg-white/5 hover:text-zinc-300 hover:border-white/20'
                                         }
                                     `}
                                 >
@@ -154,8 +154,8 @@ export function IdentityForm() {
             )}
 
             {error && (
-                <div className="text-red-500 text-[10px] font-black bg-red-500/5 border border-red-500/20 p-5 rounded-sm flex items-center gap-3 uppercase tracking-widest italic">
-                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                <div className="text-red-500 text-sm font-semibold bg-red-500/5 border border-red-500/20 p-5 rounded-xl flex items-center gap-3 normal-case tracking-normal not-italic">
+                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 " />
                     {error}
                 </div>
             )}
@@ -164,7 +164,7 @@ export function IdentityForm() {
                 type="submit"
                 disabled={loading || !selectedPresence}
                 size="lg"
-                className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
+                className="w-full min-h-12 text-sm font-semibold normal-case tracking-normal bg-primary text-black rounded-xl   hover:bg-white active:scale-[0.98] transition-all border-none not-italic"
             >
                 {loading ? 'Saving…' : 'Continue'}
             </Button>

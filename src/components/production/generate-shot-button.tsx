@@ -65,7 +65,7 @@ export function GenerateShotButton({ productionId, shotId, disabled, label = 'Ge
         <label className="block text-sm">Take finish<select aria-label="Take finish" className="mt-1 min-h-11 w-full rounded-lg border border-border bg-background p-2" disabled={loading||disabled||confirmationPending} value={qualityTier} onChange={event=>changeChoice(()=>setQualityTier(event.target.value as QualityTier))}>{GENERATION_FINISH_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         <label className="block text-sm">Generation resolution<select aria-label="Take generation resolution" className="mt-1 min-h-11 w-full rounded-lg border border-border bg-background p-2" disabled={loading||disabled||confirmationPending} value={resolution} onChange={event=>changeChoice(()=>setResolution(event.target.value as GenerationResolution|''))}><option value="">Use the approved shot / reviewed route</option>{GENERATION_RESOLUTIONS.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
         <p className="text-xs text-muted-foreground">For new footage and frame animation only. Preview plus 480p is a deliberate lower-cost choice. Final canvas, approved content and saved takes stay unchanged. Unsupported settings stop before purchase.</p>
-        <button type="button" onClick={() => run(false)} disabled={loading || disabled || confirmationPending} className="ff-button-quiet min-h-11 border border-border">
+        <button type="button" onClick={() => run(false)} disabled={loading || disabled || confirmationPending} className="min-w-11 ff-button-quiet min-h-11 border border-border">
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
             {quote ? 'Refresh estimate' : `${label} · Review cost`}
         </button>
@@ -77,8 +77,8 @@ export function GenerateShotButton({ productionId, shotId, disabled, label = 'Ge
             <p>Estimated provider cost ${quote.baseProviderUsd.toFixed(4)}. Budget hold ${(quote.providerHoldMicros / 1e6).toFixed(4)}.</p>
             <p className="text-xs text-muted-foreground">Estimate valid until {new Date(quote.expiresAt).toLocaleTimeString()}.</p>
             <div className="flex flex-wrap gap-2">
-                <button type="button" className="ff-button-primary min-h-11" disabled={loading || disabled} onClick={() => run(true)}>{confirmationPending?'Check the same confirmation':'Confirm and make take'}</button>
-                <button type="button" className="ff-button-quiet min-h-11" disabled={loading||confirmationPending} onClick={() => setQuote(undefined)}>Close estimate</button>
+                <button type="button" className="min-w-11 ff-button-primary min-h-11" disabled={loading || disabled} onClick={() => run(true)}>{confirmationPending?'Check the same confirmation':'Confirm and make take'}</button>
+                <button type="button" className="min-w-11 ff-button-quiet min-h-11" disabled={loading||confirmationPending} onClick={() => setQuote(undefined)}>Close estimate</button>
             </div>
         </div>}
     </div>;

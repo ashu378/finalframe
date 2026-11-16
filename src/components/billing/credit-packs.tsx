@@ -55,9 +55,9 @@ export function CreditPacks({ balance }: { balance: number }) {
 
     return (
         <div className="space-y-5" aria-busy={busy}>
-            <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-[#0f141c] p-5 sm:flex-row sm:items-center">
+            <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-card p-5 sm:flex-row sm:items-center">
                 <div className="flex items-center gap-3">
-                    <span className="grid size-10 place-items-center rounded-xl bg-[#86a7ff]">
+                    <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
                         <WalletCards className="size-5" aria-hidden="true" />
                     </span>
                     <div>
@@ -76,7 +76,7 @@ export function CreditPacks({ balance }: { balance: number }) {
                             setCurrency(event.target.value as SupportedCurrency);
                             setPurchaseState({ kind: 'idle' });
                         }}
-                        className="h-11 rounded-xl border border-border bg-background px-3 text-sm font-normal text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-11 rounded-xl border border-border bg-background px-3 text-base font-normal text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         <option value="USD">USD</option>
                         <option value="NGN">NGN</option>
@@ -108,7 +108,7 @@ export function CreditPacks({ balance }: { balance: number }) {
                 {CREDIT_PACKS.map((pack, index) => {
                     const isLoading = loading === pack.id;
                     return (
-                        <div key={pack.id} className={`rounded-[1.1rem] border p-5 ${index === 1 ? 'border-primary bg-[#151b25]' : 'border-border bg-card'}`}>
+                        <div key={pack.id} className={`rounded-[1.1rem] border p-5 ${index === 1 ? 'border-primary bg-card' : 'border-border bg-card'}`}>
                             <p className="ff-eyebrow">{pack.label}</p>
                             <p className="mt-4 text-xl font-semibold">{pack.credits.toLocaleString()} credits</p>
                             <p className="mt-1 text-sm text-muted-foreground">{pack.amounts[currency].toLocaleString()} {currency}</p>
@@ -116,7 +116,7 @@ export function CreditPacks({ balance }: { balance: number }) {
                                 type="button"
                                 onClick={() => void buy(pack.id)}
                                 disabled={busy}
-                                className="ff-button-primary mt-5 min-h-10 w-full px-3 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                                className="ff-button-primary mt-5 min-h-11 w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 {isLoading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-3.5" aria-hidden="true" />}
                                 {isLoading ? 'Opening checkout…' : 'Buy credits'}

@@ -3,10 +3,10 @@ export const customerTerminology = {
   project: 'video project',
   projects: 'video projects',
   plan: 'plan',
-  scene: 'part',
-  scenes: 'parts',
-  shot: 'take',
-  shots: 'takes',
+  scene: 'scene',
+  scenes: 'scenes',
+  shot: 'shot',
+  shots: 'shots',
   asset: 'media',
   assets: 'media library',
   productionGuide: 'creative guide',
@@ -59,12 +59,12 @@ export type CreationModeDefinition = {
 };
 
 export const creationModes = [
-  { id: 'IDEA', title: 'Start with an idea', description: 'Describe a story, ad, cartoon, or product video in your own words.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
-  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring dialogue or a rough outline and we will shape the visuals.', accent: 'bg-card border border-accent/35 shadow-[0_20px_55px_-38px_hsl(39_100%_67%_/_0.75)] hover:border-accent/75 hover:bg-secondary/80' },
-  { id: 'VOICE', title: 'Bring a voice recording', description: 'Use your performance as an optional timing and feeling guide.', accent: 'bg-card border border-[hsl(var(--success)/.45)] shadow-[0_20px_55px_-38px_hsl(var(--success)/.85)] hover:border-[hsl(var(--success)/.85)] hover:bg-secondary/80' },
-  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
-  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or references.', accent: 'bg-card border border-accent/35 shadow-[0_20px_55px_-38px_hsl(39_100%_67%_/_0.75)] hover:border-accent/75 hover:bg-secondary/80' },
-  { id: 'AD', title: 'Make an ad', description: 'Start with a product, service, audience, or offer.', accent: 'bg-card border border-primary/35 shadow-[0_20px_55px_-38px_hsl(222_100%_72%_/_0.85)] hover:border-primary/75 hover:bg-secondary/80' },
+  { id: 'IDEA', title: 'Start with an idea', description: 'Describe a story, ad, cartoon, or product video in your own words.', accent: 'bg-card border border-border hover:bg-secondary' },
+  { id: 'SCRIPT', title: 'Paste a script', description: 'Bring dialogue or a rough outline and we will shape the visuals.', accent: 'bg-card border border-border hover:bg-secondary' },
+  { id: 'VOICE', title: 'Bring a voice recording', description: 'Use your performance as an optional timing and feeling guide.', accent: 'bg-card border border-border hover:bg-secondary' },
+  { id: 'FOOTAGE', title: 'Use your footage', description: 'Upload clips and turn them into a clear, polished edit.', accent: 'bg-card border border-border hover:bg-secondary' },
+  { id: 'ASSETS', title: 'Bring your media', description: 'Add images, products, characters, logos, audio, or references.', accent: 'bg-card border border-border hover:bg-secondary' },
+  { id: 'AD', title: 'Make an ad', description: 'Start with a product, service, audience, or offer.', accent: 'bg-card border border-border hover:bg-secondary' },
 ] satisfies readonly CreationModeDefinition[];
 
 export function getCreationMode(mode: CreationMode): CreationModeDefinition {
@@ -112,15 +112,15 @@ export type FriendlyWorkflowStep = {
 };
 
 export const workflowSteps = [
-  { key: 'brief', label: 'Brief', description: 'Choose the outcome and starting point.' },
-  { key: 'performance', label: 'Performance', description: 'Add a script, voice, or footage.' },
+  { key: 'brief', label: 'Your idea', description: 'Tell us what you want to make.' },
+  { key: 'performance', label: 'Your starting material', description: 'Add a script, recording or video clips.' },
   { key: 'plan', label: 'Plan', description: 'Review the story, shots, and cost.' },
   { key: 'bible', label: 'Creative guide', description: 'Keep characters and details consistent.' },
-  { key: 'shots', label: 'Takes', description: 'Approve the visual anchors and versions.' },
+  { key: 'shots', label: 'Scenes and shots', description: 'Choose the images and video versions to use.' },
   { key: 'make', label: 'Make', description: 'Create the approved parts.' },
   { key: 'finish', label: 'Finish', description: 'Put sound, captions, and shots together.' },
   { key: 'review', label: 'Review', description: 'Give notes or approve the video.' },
-  { key: 'export', label: 'Export', description: 'Download a ready-to-share version.' },
+  { key: 'export', label: 'Download', description: 'Save your finished video.' },
 ] satisfies readonly FriendlyWorkflowStep[];
 
 export function getWorkflowStep(key: WorkflowStepKey): FriendlyWorkflowStep {

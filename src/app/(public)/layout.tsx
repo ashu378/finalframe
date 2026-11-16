@@ -16,10 +16,10 @@ export default function PublicLayout({
     return (
         <>
             <div className="border-b border-border/70 bg-secondary/60 px-4 py-2 text-center text-xs font-medium text-muted-foreground">
-                Early access is open — bring an idea and make your first video.
+                Your next video starts with an idea.
             </div>
             <Header />
-            <ScrollRevealRoot selector="#main-content > section, #main-content > div > section, #main-content > .legal-document-container, #main-content > div > .legal-document-container, #main-content > div > main" />
+            <ScrollRevealRoot selector="[data-reveal]" />
             <main id="main-content">{children}</main>
             <Footer />
         </>

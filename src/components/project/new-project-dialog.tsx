@@ -25,7 +25,7 @@ export function NewProjectDialog({ isOpen, studioId, onClose }: NewProjectDialog
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose}>
             <div
-                className="w-full max-w-[1020px] mx-4 glass-card border border-white/10 rounded-2xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-300"
+                className="w-full max-h-[92dvh] overflow-y-auto max-w-[1020px] mx-4 bg-card border border-white/10 rounded-2xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-300"
                 onClick={(e) => e.stopPropagation()}
             >
                 <CreateProjectWizard onClose={onClose} studioId={studioId} />

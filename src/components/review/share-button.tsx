@@ -16,7 +16,7 @@ export function ShareButton({ projectId }: ShareButtonProps) {
         <>
             <Button
                 variant="primary"
-                className="gap-3 h-11 px-8 rounded-sm font-black uppercase tracking-widest text-[10px]"
+                className="gap-3 h-11 px-8 rounded-xl font-semibold text-xs"
                 onClick={() => setOpen(true)}
             >
                 <Share2 className="w-3.5 h-3.5" />

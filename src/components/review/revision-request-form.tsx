@@ -35,7 +35,7 @@ export function RevisionRequestForm({ submitting = false, onCancel, onSubmit }: 
       <textarea id="revision-note" value={note} onChange={(event) => setNote(event.target.value)} rows={4} maxLength={1000} autoFocus placeholder="For example: make the ending shorter and let the product stay on screen for one more second." className="mt-4 min-h-28 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm leading-6 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" />
       <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">Your note will stay attached to this exact version.</p>
-        <button type="submit" disabled={!canSubmit} className="ff-button-primary min-h-11">
+        <button type="submit" disabled={!canSubmit} className="min-w-11 ff-button-primary min-h-11">
           {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <MessageSquare className="size-4" aria-hidden="true" />}
           Save revision note
         </button>

@@ -34,10 +34,10 @@ export default async function AdminVideoRoutingPage() {
   const catalog = [...config.catalog].sort((a, b) => String(a.modelId).localeCompare(String(b.modelId)));
 
   return <div className="space-y-8">
-    <header className="rounded-2xl border border-[#263143] bg-[#101722] p-7 sm:p-9">
-      <p className="text-xs font-semibold uppercase tracking-[.16em] text-[#91a0b8]">Model operations</p>
+    <header className="rounded-2xl border border-border bg-[#101722] p-7 sm:p-9">
+      <p className="text-xs font-semibold tracking-normal text-muted-foreground">Model operations</p>
       <h1 className="ff-display mt-3 text-4xl font-semibold">Video model routing</h1>
-      <p className="mt-3 max-w-3xl leading-7 text-[#91a0b8]">Refresh the live catalog, review the controls each model actually supports, then choose model preferences for each video style and finish level. New routes stay unavailable until a model has been reviewed.</p>
+      <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">Refresh the live catalog, review the controls each model actually supports, then choose model preferences for each video style and finish level. New routes stay unavailable until a model has been reviewed.</p>
       <form action={refreshVideoModelCatalog} className="mt-6"><button className="ff-button-primary min-h-11 px-5">Refresh OpenRouter video catalog</button></form>
     </header>
 

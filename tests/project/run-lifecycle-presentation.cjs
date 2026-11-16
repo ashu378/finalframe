@@ -17,7 +17,7 @@ const helper = load('src/lib/project/lifecycle-presentation.ts');
 const Link = ({ href, children, ...props }) => React.createElement('a', { ...props, href }, children);
 const DashboardClient = load('src/app/(dashboard)/dashboard/dashboard-client.tsx', {
   'next/link': Link, 'next/image': ({ src, alt }) => React.createElement('img', { src, alt }),
-  '@/lib/ui/labels': load('src/lib/ui/labels.ts'), '@/lib/project/lifecycle-presentation': helper,
+  '@/lib/ui/labels': load('src/lib/ui/labels.ts'), '@/lib/production/creator-intent': load('src/lib/production/creator-intent.ts'), '@/lib/project/lifecycle-presentation': helper,
   '@/components/threeui/ambient': { ThreeUIAmbient: () => null },
 }).DashboardClient;
 const api = { account: { ensureAccount: 'ensure-account' }, app: { dashboard: 'dashboard' } };
@@ -88,11 +88,11 @@ async function main() {
     assert.deepEqual(capturedCards.map(project => project.status), ['DRAFT', 'APPROVED', 'COMPLETED']);
     assert.equal((html.match(/Active project/g) || []).length, 3);
     assert.doesNotMatch(html, /Idea in progress|Ready to share|Ready to make|Making your video|Plan ready/);
-    assert.match(html, /3 projects shown; more projects remain in the library/);
-    assert.match(html, /Episode progress is shown inside each project/);
-    assert.match(html, /Summary covers recent records only/);
+    assert.match(html, /3 projects shown. Find the rest in your library/);
+    assert.match(html, /See episode progress inside each project/);
+    assert.match(html, /These counts cover recent work/);
     assert.match(html, /101/); assert.match(html, /13/); assert.match(html, /23/);
-    assert.match(html, /grid grid-cols-1 gap-5/); assert.match(html, /mt-7 grid grid-cols-1 gap-3/);
+    assert.match(html, /aria-labelledby="recent-projects"/); assert.match(html, /View all projects/);
     assert.match(html, /href="\/dashboard\/projects\/external-2"/);
   });
   await check('actual library page preserves lifecycle modes/search/cursors and does not present raw statuses as episode phases', async () => {

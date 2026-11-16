@@ -60,7 +60,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                             Finishing is not available yet
                         </h2>
                         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                            The making workflow is still behind a quality flag, so assembly and final export controls stay hidden until it is ready.
+                            Video finishing is not enabled here yet. Your saved clips remain available.
                         </p>
                     </div>
                 </div>
@@ -76,7 +76,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                 </span>
                 <h2 className="ff-display mt-6 text-2xl font-semibold">Your parts will appear here</h2>
                 <p className="mt-3 max-w-md leading-7 text-muted-foreground">
-                    Assembly becomes available after your approved plan has at least one take.
+                    Add a take to your approved plan before putting the video together.
                 </p>
             </section>
         );
@@ -86,7 +86,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
         return (
             <section className="ff-card p-6 sm:p-8" aria-labelledby="assembly-waiting-title">
                 <div className="flex items-start gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#86a7ff]">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary">
                         <PackageCheck className="size-5" aria-hidden="true" />
                     </span>
                     <div>
@@ -95,7 +95,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                             Finish the remaining takes first
                         </h2>
                         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                            Assembly waits until every part has a take to place in order. Nothing is discarded while you finish the missing parts.
+                            Each part needs a take before the video can be put together. Your saved work stays safe while you finish the missing parts.
                         </p>
                     </div>
                 </div>
@@ -104,7 +104,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                         <p className="font-semibold">{readyTakes} of {totalTakes} takes ready</p>
                         <p className="mt-1 text-sm text-muted-foreground">Return to the take cards above to make or retry the missing parts.</p>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-background sm:max-w-56" role="progressbar" aria-valuemin={0} aria-valuemax={totalTakes} aria-valuenow={readyTakes} aria-label="Takes ready for assembly">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-background sm:max-w-56" role="progressbar" aria-valuemin={0} aria-valuemax={totalTakes} aria-valuenow={readyTakes} aria-label="Clips ready for your edit">
                         <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(100, (readyTakes / totalTakes) * 100)}%` }} />
                     </div>
                 </div>
@@ -117,18 +117,18 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
         : state === 'BUILDING'
             ? 'Putting your parts together…'
             : state === 'UNAVAILABLE'
-                ? 'Assembly is not connected yet'
+                ? 'Video finishing is not connected yet'
                 : state === 'FAILED'
-                    ? 'Assembly needs attention'
+                    ? 'Your edit needs attention'
                     : 'Everything is ready to assemble.';
     const description = state === 'ASSEMBLED'
         ? `${manifestCount} ordered take${manifestCount === 1 ? '' : 's'} prepared for finishing.`
         : state === 'BUILDING'
             ? 'We are checking the order and preparing the finishing handoff.'
             : state === 'UNAVAILABLE'
-                ? 'This environment does not expose the assembly worker yet. No fake completion is shown.'
+                ? 'Video finishing is not available here yet. Your work has not been marked complete.'
                 : state === 'FAILED'
-                    ? error || 'The assembly step stopped before a manifest was ready.'
+                    ? error || 'The edit could not be prepared. Review its status and try again.'
                     : 'All approved takes are present and ready to place in sequence.';
 
     return (
@@ -136,7 +136,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
             <section className="ff-card p-6 sm:p-8" aria-labelledby="assembly-title" aria-live="polite">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-start gap-3">
-                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#9be3c3]">
+                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--success)/.15)]">
                             <Sparkles className="size-5 text-[hsl(var(--success))]" aria-hidden="true" />
                         </span>
                         <div>
@@ -146,14 +146,14 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                         </div>
                     </div>
                     {state === 'READY_TO_BUILD' && (
-                        <button type="button" onClick={buildAssembly} disabled={isBuilding} className="ff-button-primary min-h-11 shrink-0">
+                        <button type="button" onClick={buildAssembly} disabled={isBuilding} className="min-w-11 ff-button-primary min-h-11 shrink-0">
                             {isBuilding ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Layers3 className="size-4" aria-hidden="true" />}
                             Put it together
                         </button>
                     )}
                 </div>
                 {state === 'FAILED' && (
-                    <button type="button" onClick={() => { setState('READY_TO_BUILD'); setError(undefined); }} className="ff-button-quiet mt-5 border border-border">
+                    <button type="button" onClick={() => { setState('READY_TO_BUILD'); setError(undefined); }} className="min-w-11 min-h-11 ff-button-quiet mt-5 border border-border">
                         <RefreshCcw className="size-4" aria-hidden="true" /> Try assembly again
                     </button>
                 )}
@@ -163,7 +163,7 @@ export function AssemblyPanel({ productionId, totalTakes, readyTakes, enabled }:
                     </div>
                 )}
                 {state === 'ASSEMBLED' && (
-                    <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#9be3c3]/60 px-3 py-2 text-xs font-semibold text-[hsl(var(--success))]">
+                    <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--success)/.15)]/60 px-3 py-2 text-xs font-semibold text-[hsl(var(--success))]">
                         <Check className="size-4" aria-hidden="true" /> Ready for finishing
                     </div>
                 )}

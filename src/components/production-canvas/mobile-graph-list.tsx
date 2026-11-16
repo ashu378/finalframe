@@ -23,8 +23,8 @@ const kindLabels: Record<string, string> = {
   plan: 'Plan',
   productionVersion: 'Version',
   sequence: 'Chapter',
-  scene: 'Part',
-  shot: 'Take brief',
+  scene: 'Scene',
+  shot: 'Shot brief',
   videoTake: 'Video take',
   image: 'Media',
   imageEdit: 'Edited media',
@@ -120,7 +120,7 @@ export function MobileGraphList({
   onAction,
   className,
   title = 'Production steps',
-  description = 'Follow the production in order. Each step stays connected to the media and decisions that shape it.',
+  description = 'Follow your video from plan to download. Choose a step to see its saved media and progress.',
 }: MobileGraphListProps) {
   const orderedNodes = useMemo(() => stableDependencyOrder(nodes, edges), [nodes, edges]);
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
@@ -132,9 +132,8 @@ export function MobileGraphList({
           <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary/12 text-primary" aria-hidden="true">
             <GitBranch className="size-5" />
           </span>
-          <div>
-            <p className="ff-eyebrow">Mobile Canvas</p>
-            <h2 id="mobile-production-steps-heading" className="ff-display mt-2 text-2xl font-semibold">{title}</h2>
+          <div className="min-w-0">
+            <h2 id="mobile-production-steps-heading" className="ff-display text-2xl font-semibold">{title}</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
           </div>
         </div>
@@ -144,9 +143,9 @@ export function MobileGraphList({
         {isLoading ? <LoadingList /> : orderedNodes.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-secondary/35 px-6 py-10 text-center">
             <GitBranch className="mx-auto size-7 text-muted-foreground" aria-hidden="true" />
-            <h3 className="ff-display mt-4 text-xl font-semibold">Your production map is taking shape</h3>
+            <h3 className="ff-display mt-4 text-xl font-semibold">Your video steps will appear here</h3>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-              Once a plan is ready, its connected steps will appear here in the order they need to happen.
+              Create a plan first. Its scenes, shots, media and downloads will appear here in order.
             </p>
           </div>
         ) : (
@@ -158,7 +157,7 @@ export function MobileGraphList({
 
               return (
                 <li key={node.id} className="relative">
-                  <article className="rounded-2xl border border-border/70 bg-background/70 p-4 shadow-[0_12px_28px_-24px_hsl(24_30%_22%_/_0.7)]">
+                  <article className="rounded-2xl border border-border/70 bg-background/70 p-4">
                     <div className="flex items-start gap-3">
                       <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-secondary text-xs font-bold text-secondary-foreground" aria-label={`Step ${index + 1}`}>
                         {index + 1}
@@ -166,7 +165,7 @@ export function MobileGraphList({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold text-muted-foreground">{kindLabels[node.kind] ?? 'Production step'}</span>
-                          <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold', stateClass)}>
+                          <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold', stateClass)}>
                             <StateIcon state={node.state} />
                             {graphStateLabel(node.state)}
                           </span>
@@ -174,7 +173,7 @@ export function MobileGraphList({
                         {onSelect ? (
                           <button
                             type="button"
-                            className="mt-2 block max-w-full break-words text-left font-semibold text-foreground underline decoration-primary/40 underline-offset-4 transition hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="mt-1 block min-h-11 max-w-full break-words rounded-md py-2 text-left font-semibold text-foreground underline decoration-primary/40 underline-offset-4 transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => onSelect(node)}
                             aria-label={`Select ${node.label}`}
                           >
@@ -188,8 +187,8 @@ export function MobileGraphList({
                     </div>
 
                     <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
-                      <ConnectionGroup label="Connected from" values={connectedFrom} emptyLabel="Starts here" />
-                      <ConnectionGroup label="Connected to" values={connectedTo} emptyLabel="No next step yet" />
+                      <ConnectionGroup label="Uses" values={connectedFrom} emptyLabel="Starts here" />
+                      <ConnectionGroup label="Used by" values={connectedTo} emptyLabel="No next step yet" />
                     </div>
 
                     <GraphActionList node={node} onAction={onAction} />

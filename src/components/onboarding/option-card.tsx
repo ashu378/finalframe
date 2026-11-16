@@ -1,39 +1,5 @@
-interface OptionCardProps {
-    label: string;
-    description?: string;
-    selected: boolean;
-    onClick: () => void;
-    className?: string;
-}
-
-export function OptionCard({ label, description, selected, onClick }: OptionCardProps) {
-    return (
-        <button
-            type="button"
-            className={`
-                w-full text-left p-6 rounded-sm border transition-all duration-300 group relative overflow-hidden outline-none shadow-xl
-                ${selected
-                    ? 'bg-zinc-900 border-primary ring-1 ring-primary/20 shadow-primary/5'
-                    : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'
-                }
-            `}
-            onClick={onClick}
-        >
-            {/* Selection Glow Indicator */}
-            {selected && (
-                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary shadow-[0_0_15px_#fbbf24]" />
-            )}
-
-            <div className="pl-4">
-                <div className={`text-base font-black mb-1 transition-colors uppercase tracking-[0.1em] ${selected ? 'text-primary italic' : 'text-zinc-50 group-hover:text-primary'}`}>
-                    {label}
-                </div>
-                {description && (
-                    <div className={`text-metadata transition-colors normal-case leading-relaxed ${selected ? 'text-zinc-300' : 'text-zinc-500 group-hover:text-zinc-300'}`}>
-                        {description}
-                    </div>
-                )}
-            </div>
-        </button>
-    );
+import { Check } from 'lucide-react';
+interface OptionCardProps { label: string; description?: string; selected: boolean; onClick: () => void; className?: string; }
+export function OptionCard({ label, description, selected, onClick, className = '' }: OptionCardProps) {
+  return <button type="button" aria-pressed={selected} onClick={onClick} className={`flex min-h-16 w-full items-start gap-4 rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${selected ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-muted-foreground'} ${className}`}><span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>{selected ? <Check className="size-3" aria-hidden="true" /> : null}</span><span className="min-w-0"><span className={`block text-base font-semibold ${selected ? 'text-primary' : 'text-foreground'}`}>{label}</span>{description ? <span className="mt-1 block text-sm leading-6 text-muted-foreground">{description}</span> : null}</span></button>;
 }

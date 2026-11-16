@@ -26,11 +26,11 @@ export function RenderButton({ projectId, disabled }: RenderButtonProps) {
                 router.refresh();
             } else {
                 console.error('Render Authorization Failure:', JSON.stringify(result, null, 2));
-                toast.error(result.error || 'Failed to start rendering');
+                toast.error(result.error || 'Your video could not start. Please try again.');
             }
         } catch (error) {
             console.error(error);
-            toast.error('An unexpected error occurred');
+            toast.error('Your request could not be sent. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -41,12 +41,12 @@ export function RenderButton({ projectId, disabled }: RenderButtonProps) {
             onClick={handleRender}
             disabled={disabled || isLoading}
             variant="primary"
-            className="h-14 px-10 shadow-2xl shadow-primary/20 active:scale-[0.98] transition-all uppercase tracking-[0.2em] text-[11px]"
+            className="min-h-12 w-full px-5 py-3 text-sm font-semibold transition-colors sm:w-auto"
         >
             {isLoading ? (
                 <>
                     <Loader2 className="mr-3 h-4 w-4 animate-spin" />
-                    PROPAGATING...
+                    Sending your request…
                 </>
             ) : (
                 <>

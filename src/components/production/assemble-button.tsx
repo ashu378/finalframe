@@ -14,5 +14,5 @@ export function AssembleButton({ productionId }: { productionId: string }) {
         if (!result.success) toast.error(result.error || 'Unable to assemble production');
         else toast.success(`Assembly manifest ready for ${result.manifest?.items?.length || 0} shots.`);
     }
-    return <button onClick={handleClick} disabled={loading} className="primary-cta inline-flex h-12 items-center gap-2 px-6 disabled:opacity-40">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />} Assemble approved shots</button>;
+    return <button onClick={handleClick} disabled={loading} className="min-w-11 min-h-11 primary-cta inline-flex h-12 items-center gap-2 px-6 disabled:opacity-40">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />} Assemble approved shots</button>;
 }

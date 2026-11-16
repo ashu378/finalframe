@@ -23,11 +23,11 @@ const recovery = load('src/components/account/account-recovery-form.tsx', { 'nex
 (async () => {
   const profile = { userId: 'user-one', displayName: 'Current display', email: 'owner@example.test', latestExport: null };
   const markup = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile }));
-  assert(markup.includes('Account and project index')); assert(markup.includes('Media files and download URLs')); assert(markup.includes('Permanent deletion is not performed'));
+  assert(markup.includes('Download your account records')); assert(markup.includes('JSONL')); assert(markup.includes('Media files and download URLs')); assert(markup.includes('Permanent deletion is not performed'));
   assert(markup.includes('name="displayName"')); assert(!markup.includes('name="email"')); assert(!markup.includes('type="password"')); assert(!markup.includes('name="confirmation"'), 'Deactivation confirmation appears only after preflight');
   const resumed = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile: { ...profile, latestExport: { requestId: 'persisted-request', status: 'OPEN', nextOrdinal: 12, recordCount: 30, expiresAt: Date.now() + 10000, expired: false } } }));
   assert(resumed.includes('Download next part (12)')); assert(resumed.includes('Download a previous part'));
-  const completed = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile: { ...profile, latestExport: { requestId: 'persisted-request', status: 'COMPLETED', nextOrdinal: 12, recordCount: 30, expiresAt: Date.now() + 10000, expired: false } } })); assert(completed.includes('Download completed manifest'));
+  const completed = renderToStaticMarkup(React.createElement(settings.AccountSettings, { profile: { ...profile, latestExport: { requestId: 'persisted-request', status: 'COMPLETED', nextOrdinal: 12, recordCount: 30, expiresAt: Date.now() + 10000, expired: false } } })); assert(completed.includes('Download file list (manifest)'));
   await actions.saveAccountProfile('My name'); assert.deepEqual(mutations.at(-1), { name: 'accountLifecycle:updateProfile', args: { displayName: 'My name' } });
   refreshed.length = 0; await actions.requestAccountDeactivation({ requestId: 'stable-request', reason: 'Fixture request', confirmation: 'DEACTIVATE' }); assert.equal(refreshed.length, 0, 'Disabled dashboard must not rerender before receipt/sign-out');
   await actions.recoverDeactivatedAccount('specific-request', 'Reviewed recovery'); assert.deepEqual(mutations.at(-1), { name: 'accountLifecycle:recoverAccount', args: { requestId: 'specific-request', reason: 'Reviewed recovery' } }); assert(refreshed.includes('/admin/audit'));

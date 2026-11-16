@@ -7,7 +7,7 @@ export default async function StudioPage() {
 
     return (
         <div className="space-y-6">
-            <div className="space-y-2 text-center">
+            <div className="space-y-2 text-left">
                 <h1 className="ff-display text-3xl font-semibold tracking-tight">Give your studio a name</h1>
                 <p className="text-muted-foreground">
                     This is the friendly home for your video projects and media.

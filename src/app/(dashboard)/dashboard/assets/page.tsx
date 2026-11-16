@@ -2,7 +2,6 @@ import { requireAuth } from '@/lib/guards';
 import { getAssets, getStudioPresets } from '@/lib/assets/actions';
 import { AssetLibraryClient } from '@/components/assets/asset-library-client';
 import { UploadButton } from '@/components/assets/upload-button';
-import { FolderOpen, Sparkles } from 'lucide-react';
 import { getStudioContext } from '@/lib/project/actions';
 
 export default async function AssetsPage() {
@@ -18,7 +17,7 @@ export default async function AssetsPage() {
     if (!studioRes.success || !studioRes.studioId) {
         return (
             <div className="ff-card flex min-h-[400px] flex-col items-center justify-center p-8 text-center">
-                <p className="text-muted-foreground">We could not find your studio yet. Please finish onboarding first.</p>
+                <p className="text-muted-foreground">Your workspace could not be opened. Refresh the page or return to your dashboard.</p>
             </div>
         );
     }
@@ -29,35 +28,11 @@ export default async function AssetsPage() {
     const assets = await getAssets(studioId, '/');
 
     return (
-        <div className="flex flex-1 flex-col space-y-10 animate-in fade-in duration-700">
-            {/* Header */}
-            <div className="flex flex-col justify-between gap-8 rounded-[1.5rem] bg-[#0f141c] p-7 sm:p-10 md:flex-row md:items-end">
-                <div className="space-y-6">
-                    <div className="flex items-center gap-4">
-                        <div className="grid size-12 place-items-center rounded-2xl bg-[#86a7ff] text-foreground">
-                            <FolderOpen className="w-8 h-8" />
-                        </div>
-                        <div className="space-y-1">
-                            <h1 className="ff-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-                                Media library
-                                <div className="grid size-8 place-items-center rounded-xl bg-background/60">
-                                    <Sparkles className="size-4 text-accent" />
-                                </div>
-                            </h1>
-                            <p className="mt-2 text-sm text-muted-foreground">Keep the pieces that make your videos feel like yours.</p>
-                        </div>
-                    </div>
-                    <p className="max-w-xl text-base leading-7 text-muted-foreground">
-                        Upload logos, products, characters, voice notes, footage, backgrounds, and references. Add them to a project whenever they are useful.
-                    </p>
-                </div>
-
-                <div className="shrink-0 pt-4">
-                    <div className="[&_button]:min-h-11 [&_button]:rounded-full [&_button]:px-5 [&_button]:font-semibold">
-                        <UploadButton studioId={studioId} />
-                    </div>
-                </div>
-            </div>
+        <div className="flex flex-1 flex-col space-y-10 ">
+            <header className="flex flex-col gap-6 border-b border-border pb-8 sm:flex-row sm:items-end sm:justify-between">
+                <div><h1 className="ff-display text-4xl font-semibold sm:text-5xl">Your media</h1><p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">Keep photos, clips, recordings and brand files together. Add a file to a project when you want to use it there.</p></div>
+                <div className="shrink-0"><UploadButton studioId={studioId} /></div>
+            </header>
 
             {/* Main Content */}
             <div className="flex-1">

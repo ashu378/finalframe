@@ -23,7 +23,7 @@ export function ShotDirector({ direction, editable, pending, onSave }: { directi
   const [preserve, setPreserve] = useState(direction.preserve.join('\n'));
   const [error, setError] = useState('');
   return <details className="rounded-xl border border-border p-4">
-    <summary className="min-h-9 cursor-pointer font-medium">Direct this shot</summary>
+    <summary className="min-h-11  cursor-pointer font-medium">Direct this shot</summary>
     <p className="mt-2 text-sm text-muted-foreground">Describe the result in your own words. Expand the controls when you want precise direction. Saving changes the draft instructions; it does not generate or purchase media.</p>
     <form className="mt-4 space-y-4" onSubmit={async event => {
       event.preventDefault(); setError('');

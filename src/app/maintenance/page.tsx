@@ -1,31 +1,5 @@
-/**
- * FinalFrame — Maintenance Mode Page
- * Reference: MASTER_PRD.md § 11 — Maintenance mode
- * Reference: BUILD_PHASES.md — Phase 0 error handling
- * 
- * This page is shown when MAINTENANCE_MODE is enabled in environment.
- * The Next.js proxy redirects all traffic here during maintenance.
- */
-
-export const metadata = {
-    title: 'Maintenance',
-    description: 'FinalFrame is currently undergoing maintenance',
-};
-
+import { Wrench } from 'lucide-react';
+export const metadata = { title: 'Maintenance', description: 'FinalFrame is temporarily unavailable while we make updates.' };
 export default function MaintenancePage() {
-    return (
-        <main className="ff-noise grid min-h-dvh place-items-center bg-background px-5 py-16">
-            <div className="ff-card w-full max-w-xl p-8 text-center sm:p-12">
-                <p className="ff-eyebrow">A short pause</p>
-                <h1 className="ff-display mt-5 text-4xl font-semibold">We are tuning the studio.</h1>
-                <p className="mx-auto mt-4 max-w-md leading-7 text-muted-foreground">
-                    FinalFrame is currently undergoing scheduled maintenance.
-                    We&apos;ll be back shortly.
-                </p>
-                <p className="mt-6 text-sm font-semibold text-accent">
-                    Please check back soon.
-                </p>
-            </div>
-        </main>
-    );
+  return <main id="main-content" className="flex min-h-dvh flex-col justify-center bg-background px-6 py-16 text-foreground"><div className="mx-auto w-full max-w-lg"><Wrench className="size-8 text-primary" aria-hidden="true" /><h1 className="ff-display mt-7 text-4xl font-semibold sm:text-5xl">We’re making a few updates.</h1><p className="mt-5 max-w-md leading-7 text-muted-foreground">FinalFrame is temporarily unavailable. Please check back shortly.</p><p className="mt-8 border-t border-border pt-5 text-sm text-muted-foreground">Thanks for your patience.</p></div></main>;
 }

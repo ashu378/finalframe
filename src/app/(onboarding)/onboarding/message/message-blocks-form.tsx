@@ -22,7 +22,7 @@ export function MessageBlocksForm() {
         }
     }
 
-    const textareaClass = "flex min-h-[100px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200 ring-offset-background placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:border-violet-500 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200";
+    const textareaClass = "flex min-h-[100px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200 ring-offset-background placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200";
     const labelClass = "text-sm font-semibold text-slate-200 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 mb-1.5 block";
     const helpClass = "text-xs text-slate-400 mb-2 block";
 
@@ -30,37 +30,37 @@ export function MessageBlocksForm() {
         <form action={handleSubmit} className="space-y-6">
 
             <div className="space-y-1">
-                <label htmlFor="value_proposition" className={labelClass}>Value Proposition</label>
-                <span className={helpClass}>What exactly do you solve, and for whom?</span>
+                <label htmlFor="value_proposition" className={labelClass}>What you offer</label>
+                <span className={helpClass}>Who is this for, and how does it help them?</span>
                 <textarea
                     id="value_proposition"
                     name="value_proposition"
                     className={textareaClass}
-                    placeholder="e.g. We help creators scale their content w/o burnout by automating editing..."
+                    placeholder="e.g. We help busy shop owners make product videos."
                     required
                 />
             </div>
 
             <div className="space-y-1">
-                <label htmlFor="emotional_promise" className={labelClass}>Emotional Promise</label>
+                <label htmlFor="emotional_promise" className={labelClass}>How it should feel</label>
                 <span className={helpClass}>How should your audience feel after watching?</span>
                 <textarea
                     id="emotional_promise"
                     name="emotional_promise"
                     className={textareaClass}
-                    placeholder="e.g. Empowered, Relieved, Excited, Curios..."
+                    placeholder="e.g. Excited, reassured or curious."
                     required
                 />
             </div>
 
             <div className="space-y-1">
-                <label htmlFor="proof_point" className={labelClass}>Proof Point (Optional)</label>
-                <span className={helpClass}>Why should they believe you? (Stats, Logos, Years)</span>
+                <label htmlFor="proof_point" className={labelClass}>Why people should trust it (optional)</label>
+                <span className={helpClass}>Add a real example, result or customer quote.</span>
                 <textarea
                     id="proof_point"
                     name="proof_point"
                     className={textareaClass}
-                    placeholder="e.g. Trusted by 500+ agencies, As seen on Forbes..."
+                    placeholder="e.g. A real customer review or a result you can prove."
                 />
             </div>
 
@@ -75,7 +75,7 @@ export function MessageBlocksForm() {
                 type="submit"
                 disabled={loading}
                 size="lg"
-                className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:brightness-110 shadow-[0_0_20px_-5px_rgba(124,58,237,0.5)] transition-all"
+                className="w-full min-h-12 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/85  transition-all"
             >
                 {loading ? 'Saving…' : 'Continue'}
             </Button>

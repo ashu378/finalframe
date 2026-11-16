@@ -30,5 +30,20 @@ export interface ProductionReleaseViewProps {
 }
 
 export function ProductionReleaseView({ review, versions = [], warnings = [], timeline, renderer, download, savingDecision = false, lockingTimeline = false, retryingRender = false, onApprove, onRequestChanges, onSelectVersion, onCompareVersions, onLockTimeline, onRetryRender }: ProductionReleaseViewProps) {
-  return <div className="space-y-6" data-testid="production-release-view"><div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)] lg:items-start"><section className="space-y-4"><ReviewStateCard availability={review.availability} />{review.videoUrl ? <div className="overflow-hidden rounded-3xl bg-black shadow-[0_24px_70px_-34px_rgba(25,18,14,.7)]"><ReviewPlayer url={review.videoUrl} /></div> : null}<div className="rounded-2xl border border-border/70 bg-card p-5 sm:p-6"><ReviewDecisionPanel decision={review.decision} canDecide={review.canDecide} saving={savingDecision} onApprove={onApprove} onRequestChanges={onRequestChanges} /></div></section><aside className="space-y-4 lg:sticky lg:top-6"><StaleDependencyWarning warnings={warnings} />{renderer ? <RendererStatusCard {...renderer} retrying={retryingRender} onRetry={onRetryRender} /> : null}</aside></div>{versions.length > 0 ? <VersionHistory versions={versions} onSelect={(version) => onSelectVersion?.(version)} onCompare={onCompareVersions} /> : null}{timeline ? <RenderReadiness timelineStatus={timeline.status} checks={timeline.checks} locking={lockingTimeline} onLock={onLockTimeline} /> : null}{download ? <DownloadState {...download} /> : null}</div>;
+  return <div className="min-w-0 space-y-6 sm:space-y-8" data-testid="production-release-view">
+    <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)] xl:items-start">
+      <section className="min-w-0 space-y-4" aria-label="Video review">
+        <ReviewStateCard availability={review.availability} />
+        {review.videoUrl ? <div className="overflow-hidden rounded-2xl border border-border bg-black"><ReviewPlayer url={review.videoUrl} /></div> : null}
+        <div className="rounded-2xl border border-border bg-card p-4 sm:p-6"><ReviewDecisionPanel decision={review.decision} canDecide={review.canDecide} saving={savingDecision} onApprove={onApprove} onRequestChanges={onRequestChanges} /></div>
+      </section>
+      <aside className="min-w-0 space-y-4 xl:sticky xl:top-6" aria-label="Video processing status">
+        <StaleDependencyWarning warnings={warnings} />
+        {renderer ? <RendererStatusCard {...renderer} retrying={retryingRender} onRetry={onRetryRender} /> : null}
+      </aside>
+    </div>
+    {versions.length > 0 ? <VersionHistory versions={versions} onSelect={(version) => onSelectVersion?.(version)} onCompare={onCompareVersions} /> : null}
+    {timeline ? <RenderReadiness timelineStatus={timeline.status} checks={timeline.checks} locking={lockingTimeline} onLock={onLockTimeline} /> : null}
+    {download ? <DownloadState {...download} /> : null}
+  </div>;
 }

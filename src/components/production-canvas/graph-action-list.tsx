@@ -24,10 +24,10 @@ const actions: Array<{
   label: string;
   icon: typeof ScanSearch;
 }> = [
-  { action: 'inspect', label: 'Inspect', icon: ScanSearch },
+  { action: 'inspect', label: 'View details', icon: ScanSearch },
   { action: 'compare', label: 'Compare', icon: GitCompareArrows },
   { action: 'keepVersion', label: 'Keep version', icon: LockKeyhole },
-  { action: 'regenerate', label: 'Regenerate', icon: RefreshCw },
+  { action: 'regenerate', label: 'Create another take', icon: RefreshCw },
 ];
 
 const actionReason = 'This Canvas control is a preview event and is not connected to production commands yet.';
@@ -51,24 +51,24 @@ export function GraphActionList({ node, onAction, className }: GraphActionListPr
           <ScanSearch className="size-3.5" />
         </span>
         <div>
-          <p className="text-xs font-semibold text-foreground">Canvas controls</p>
+          <p className="text-xs font-semibold text-foreground">Preview controls</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground" id={`canvas-action-note-${node.id}`}>
-            Preview only for now. These actions do not generate video or use credits yet.
+            These controls show a preview message only. They do not change your video or use credits.
           </p>
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2" aria-describedby={`canvas-action-note-${node.id}`}>
+      <div className="mt-3 grid grid-cols-1 gap-2 min-[360px]:grid-cols-2" aria-describedby={`canvas-action-note-${node.id}`}>
         {actions.map(({ action, label, icon: Icon }) => (
           <button
             key={action}
             type="button"
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-left text-xs font-semibold text-foreground transition hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-left text-sm font-semibold text-foreground transition hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
             onClick={() => emit(action)}
             title={`${label} is not connected yet`}
           >
             <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="min-w-0 truncate">{label}</span>
+            <span className="min-w-0 break-words">{label}</span>
             <span className="sr-only">Not connected yet. This is a preview event only.</span>
           </button>
         ))}

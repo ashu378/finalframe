@@ -43,6 +43,9 @@ function ui(state, canEdit = true) {
     '../../../convex/_generated/api': { api },
     '@/components/ui/button': { Button },
     '@/components/production/generate-shot-button': { GenerateShotButton: () => null },
+    './draft-cast-binding-panel': { DraftCastBindingPanel: () => null },
+    './shot-assignment-controls': { ShotAssignmentControls: () => null },
+    '@/lib/production/workspace-controls': h.controls,
     './resource-approval-controls': { ApprovalControls: () => null, controlInput: '' },
     '@/lib/production/workspace-actions': { bindShotResources() { throw Error('Unrelated write forbidden'); }, saveShotOperationControls() { throw Error('Unrelated write forbidden'); } },
     '@/lib/ai/video-routing': h.routing,
@@ -65,7 +68,7 @@ function ui(state, canEdit = true) {
     return tree;
   }
   render();
-  return { calls, refreshes, renderShot, find: predicate => find(predicate, tree), render, text: () => text(tree), resume: () => find(node => node.type === Button && ['Resume accepted take', 'Requesting resume…'].includes(node.props.children), tree), refresh: () => find(node => node.type === Button && node.props.children === 'Refresh saved takes', tree), async flush() { await new Promise(resolve => setImmediate(resolve)); render(); }, pause() { let release; waiting = new Promise(resolve => { release = resolve; }); return () => { waiting = undefined; release(); }; } };
+  return { calls, refreshes, renderShot, find: predicate => find(predicate, tree), render, text: () => text(tree), resume: () => find(node => node.type === Button && ['Continue saved take', 'Requesting resume…'].includes(node.props.children), tree), refresh: () => find(node => node.type === Button && node.props.children === 'Refresh saved takes', tree), async flush() { await new Promise(resolve => setImmediate(resolve)); render(); }, pause() { let release; waiting = new Promise(resolve => { release = resolve; }); return () => { waiting = undefined; release(); }; } };
 }
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
@@ -133,19 +136,21 @@ async function check(name, run) { await run(); checks++; console.log('PASS ' + n
     const unrelated = { ...asset, id: 'other', url: 'https://example.test/other' };
     const data = { versionState: 'DRAFT', canEdit: true, boundResources: [], continuationSources: [], assets: [asset, unrelated] };
     const shot = { id: 'shot', title: 'Original clip', prompt: 'Change the scarf color.', state: 'DRAFT', durationSeconds: 4, resourceVersionIds: [], takes: [{ id: 'take', status: 'COMPLETED', state: 'APPROVED', versionNumber: 1 }], operationControls: { operation: 'GENERATE', audioPolicy: 'SILENT', referenceAssetIds: [] } };
+    // The source projection stays exact, but bytes are loaded only after opening its preview.
+    const preview = () => screen.find(node => node.type?.name === 'OnDemandVideo' && node.props.label === 'Original source footage');
     const video = () => screen.find(node => node.type === 'video' && node.props['aria-label'] === 'Original source footage');
     screen.renderShot(data, shot, true);
     screen.find(node => node.props?.['aria-label'] === 'Video operation').props.onChange({ target: { value: 'APPEARANCE_EDIT' } });
     screen.renderShot(data, shot);
     assert(screen.find(node => node.type === 'select' && node.props.value === 'KEEP_SOURCE'));
     assert(screen.text().includes('Choose one approved project video'));
-    assert.equal(video(), undefined, 'unsaved changes cannot present a comparison source');
+    assert.equal(preview(), undefined, 'unsaved changes cannot present a comparison source'); assert.equal(video(), undefined);
     shot.operationControls = { operation: 'APPEARANCE_EDIT', audioPolicy: 'KEEP_SOURCE', referenceAssetIds: ['source'] };
     screen.renderShot({ ...data, versionState: 'APPROVED' }, shot, true);
-    assert.equal(video().props.src, asset.url);
+    assert.equal(preview().props.url, asset.url); assert.equal(video(), undefined, 'saved comparison waits for an explicit preview before loading source bytes');
     asset.state = 'DRAFT';
     screen.renderShot({ ...data, versionState: 'APPROVED' }, shot, true);
-    assert.equal(video(), undefined, 'source approval withdrawal prevents playback here');
+    assert.equal(preview(), undefined, 'source approval withdrawal removes the exact-source preview'); assert.equal(video(), undefined);
     assert.equal(screen.calls.length, 0);
   });
   console.log(`Accepted take resume: ${checks} PASS; actual component/canonical retry/worker with isolated auth, database and GET seams. No network, provider POST or live DB calls.`);

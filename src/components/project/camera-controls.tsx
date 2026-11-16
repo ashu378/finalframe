@@ -26,12 +26,12 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                    <Camera className="w-4 h-4 text-violet-400" />
+                    <Camera className="w-4 h-4 text-primary" />
                     <span>Cinematography Control</span>
                 </div>
                 <button
                     onClick={onReset}
-                    className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                    className="flex items-center gap-1 text-xs text-primary hover:text-violet-300 transition-colors"
                 >
                     <RefreshCw className="w-3 h-3" />
                     Reset to AI Default
@@ -41,11 +41,11 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
             {/* Camera Parameters */}
             <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
-                    <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider ml-1">Angle</label>
+                    <label className="text-xs text-slate-500  font-bold tracking-normal ml-1">Angle</label>
                     <select
                         value={cameraConfig.angle || 'eye_level'}
                         onChange={(e) => handleCameraChange('angle', e.target.value)}
-                        className="w-full text-xs p-2 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-violet-500 focus:outline-none appearance-none cursor-pointer"
+                        className="w-full text-base min-h-11 p-3 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-primary focus:outline-none appearance-none cursor-pointer"
                     >
                         <option value="eye_level">Eye Level</option>
                         <option value="low_angle">Low Angle</option>
@@ -56,11 +56,11 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
                 </div>
 
                 <div className="space-y-1">
-                    <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider ml-1">Movement</label>
+                    <label className="text-xs text-slate-500  font-bold tracking-normal ml-1">Movement</label>
                     <select
                         value={cameraConfig.movement || 'static'}
                         onChange={(e) => handleCameraChange('movement', e.target.value)}
-                        className="w-full text-xs p-2 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-violet-500 focus:outline-none appearance-none cursor-pointer"
+                        className="w-full text-base min-h-11 p-3 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-primary focus:outline-none appearance-none cursor-pointer"
                     >
                         <option value="static">Static</option>
                         <option value="pan_left">Pan Left</option>
@@ -74,15 +74,15 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
                 </div>
 
                 <div className="space-y-1">
-                    <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider ml-1">Lens</label>
+                    <label className="text-xs text-slate-500  font-bold tracking-normal ml-1">Lens</label>
                     <select
                         value={cameraConfig.lens || 'standard'}
                         onChange={(e) => handleCameraChange('lens', e.target.value)}
-                        className="w-full text-xs p-2 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-violet-500 focus:outline-none appearance-none cursor-pointer"
+                        className="w-full text-base min-h-11 p-3 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-primary focus:outline-none appearance-none cursor-pointer"
                     >
                         <option value="standard">Standard</option>
-                        <option value="wide">Wide Angle</option>
-                        <option value="telephoto">Telephoto</option>
+                        <option value="wide">Wide view</option>
+                        <option value="telephoto">Close-up lens</option>
                     </select>
                 </div>
             </div>
@@ -92,17 +92,17 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
             {/* Motion Parameters */}
             <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                    <Zap className="w-4 h-4 text-violet-400" />
-                    <span>Motion Dynamics</span>
+                    <Zap className="w-4 h-4 text-primary" />
+                    <span>Movement</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                        <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider ml-1">Speed</label>
+                        <label className="text-xs text-slate-500  font-bold tracking-normal ml-1">Speed</label>
                         <select
                             value={motionConfig.speed || 'normal'}
                             onChange={(e) => handleMotionChange('speed', e.target.value)}
-                            className="w-full text-xs p-2 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-violet-500 focus:outline-none appearance-none cursor-pointer"
+                            className="w-full text-base min-h-11 p-3 rounded bg-black/40 border border-white/10 text-white focus:ring-1 focus:ring-primary focus:outline-none appearance-none cursor-pointer"
                         >
                             <option value="slow">Slow</option>
                             <option value="normal">Normal</option>
@@ -111,7 +111,7 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
                     </div>
 
                     <div className="space-y-1">
-                        <label className="text-xs text-gray-500 uppercase font-medium">
+                        <label className="text-xs text-gray-500  font-medium">
                             Stability ({(motionConfig.stability || 0.5) * 100}%)
                         </label>
                         <input
@@ -121,7 +121,7 @@ export function CameraControls({ cameraConfig, motionConfig, onChange, onReset }
                             step="0.1"
                             value={motionConfig.stability || 0.5}
                             onChange={(e) => handleMotionChange('stability', e.target.value)}
-                            className="w-full h-1.5 bg-black/40 rounded-lg appearance-none cursor-pointer accent-violet-500 border border-white/5"
+                            className="w-full h-1.5 bg-black/40 rounded-lg appearance-none cursor-pointer accent-primary border border-white/5"
                         />
                     </div>
                 </div>

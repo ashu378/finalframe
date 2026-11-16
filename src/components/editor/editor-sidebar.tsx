@@ -26,28 +26,28 @@ export function EditorSidebar({
     const [activeTab, setActiveTab] = useState<Tab>('chat');
 
     return (
-        <div className="flex flex-col h-full bg-zinc-950 border-l border-zinc-800 w-[400px] shadow-3xl">
+        <div className="flex flex-col min-h-[28rem] h-full min-w-0 w-full border-t border-border bg-card lg:w-[360px] lg:border-l lg:border-t-0">
             {/* Tab Header */}
-            <div className="flex items-center border-b border-zinc-800">
+            <div className="flex items-center border-b border-border">
                 <button
-                    onClick={() => setActiveTab('chat')}
+                    type="button" aria-pressed={activeTab === 'chat'} onClick={() => setActiveTab('chat')}
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-4 py-5 text-metadata font-black uppercase tracking-[0.2em] transition-all border-b",
+                        "flex-1 flex items-center justify-center min-h-12 gap-2 px-3 py-4 text-sm font-semibold transition-colors border-b",
                         activeTab === 'chat'
-                            ? "text-primary border-primary bg-primary/5 italic"
-                            : "text-zinc-600 border-zinc-800 hover:text-zinc-400 hover:bg-zinc-900"
+                            ? "text-primary border-primary bg-primary/10"
+                            : "text-muted-foreground border-border hover:text-muted-foreground hover:bg-card"
                     )}
                 >
                     <MessageSquare className="w-4 h-4" />
                     Video details
                 </button>
                 <button
-                    onClick={() => setActiveTab('assets')}
+                    type="button" aria-pressed={activeTab === 'assets'} onClick={() => setActiveTab('assets')}
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-4 py-5 text-metadata font-black uppercase tracking-[0.2em] transition-all border-b",
+                        "flex-1 flex items-center justify-center min-h-12 gap-2 px-3 py-4 text-sm font-semibold transition-colors border-b",
                         activeTab === 'assets'
-                            ? "text-primary border-primary bg-primary/5 italic"
-                            : "text-zinc-600 border-zinc-800 hover:text-zinc-400 hover:bg-zinc-900"
+                            ? "text-primary border-primary bg-primary/10"
+                            : "text-muted-foreground border-border hover:text-muted-foreground hover:bg-card"
                     )}
                 >
                     <FolderOpen className="w-4 h-4" />

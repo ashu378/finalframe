@@ -1,6 +1,6 @@
 # Whole-product release checklist
 
-Status: IN PROGRESS. The functional handoff precedes redesign, then email verification and recovery, then payments. No launch certification is implied by a passing mock, UI presence, or catalog entry.
+Status: IN PROGRESS. Owner-approved15November order: redesign, email verification/recovery, payments, then complete application acceptance. Remaining video fixes stay open below; focused regression checks continue during redesign. No launch certification is implied by a passing mock, UI presence, or catalog entry.
 
 Each row requires code revision, unit/contracts, online integration, browser evidence, paid receipt where applicable, saved output, and independent creative review. Record unavailable evidence as blocked, never passed. Preserve historic evidence and errors.
 
@@ -324,3 +324,21 @@ The required full recipe/browser/creative, advanced preservation, multi-session 
 - **Costs and limits:** no paid AI calls, key rotation, top-up, subscription or payment. The monthly transfer meter remains historical usage; cleanup cannot undo transferred bytes. These changes reduce unnecessary future downloads. Yafpay and other projects were not changed.
 
 The separate functional-acceptance checklist remains open for its listed creative, human-review and recovery cases. Publishing the current prelaunch app does not certify those cases. Redesign, email/recovery and payments remain deferred.
+
+## Mobile-first redesign — 15 November
+
+This inventory tracks presentation work, not whole-product certification. Preserve all existing backend actions, authorization, project data and accepted media. Email and payment activation remain deferred. No paid generation is needed for redesign.
+
+| Chunk | Deliverable | State |
+|---|---|---|
+| 1 | Black/white/lime tokens, locally hosted typography, shared buttons/forms, readable public navigation, mobile studio menu and authentication shell | Local implementation verified: typecheck, scoped lint, production build,6 actual-component navigation groups and existing platform-navigation matrix pass. Login inspected desktop and390px phone (no overflow,16px fields,52px controls). Full authenticated browser navigation and live rollout remain pending. |
+| 2 | Homepage reference, interactive storyboard/motion, public secondary pages/footer/policies | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+| 3 | Dashboard home, projects, templates, assets, creator entry paths/settings/team | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+| 4 | Project overview, script/blueprint, every workspace section, storyboard/takes/continuity | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+| 5 | Editor, audio/captions/graphics, review, movie/export/download states | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+| 6 | Platform/studio administration and operational tables/dialogs | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+| 7 | Remaining legacy/onboarding/utility states, cross-route responsive review and publication | Implemented source/component pass; integrated browser status in REDESIGN-INTEGRATION-2026-11-16.md |
+
+The full route inventory is in REDESIGN-ROUTE-INVENTORY.md. Shared token adoption alone never marks a screen redesigned. Every chunk needs desktop/mobile evidence and focused action regression checks. Full video-format, account/email/payment acceptance follows the later phases.
+
+16November redesign integration: all screen groups have presentation updates and plain-language changes. Public/login browser evidence and component/security regressions are recorded separately; the current earlier owner login was rejected, so authenticated visual acceptance remains OPEN pending owner sign-in. Existing video functional items remain unchanged. Email and payments remain deferred.

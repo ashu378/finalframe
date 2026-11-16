@@ -50,7 +50,7 @@ export function EditImpactSummary({ selectedNode, impact, loading = false, error
           <ArrowDownRight className="size-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Before you make a change</p>
+          <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground">Before you make a change</p>
           <h3 id={headingId} className="ff-display mt-1 text-lg font-semibold text-foreground">What this edit may change</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
             Starting from <span className="font-semibold text-foreground">{selectedNode.label}</span>. We will show the related parts before anything is made.

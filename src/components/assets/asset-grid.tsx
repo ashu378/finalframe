@@ -20,8 +20,8 @@ interface AssetGridProps {
 function LibraryVideoPreview({ url, name }: { url: string; name: string }) {
     const [open, setOpen] = useState(false);
     return <details className="border-t border-zinc-800 p-3" onClick={event => event.stopPropagation()} onToggle={event => setOpen(event.currentTarget.open)}>
-        <summary aria-label={`Preview video ${name}`} className="min-h-11 cursor-pointer rounded-sm px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Preview video</summary>
-        {open ? <video src={url} controls playsInline preload="metadata" aria-label={`Saved video ${name}`} className="mt-2 aspect-video w-full rounded-sm bg-black object-contain" /> : null}
+        <summary aria-label={`Preview video ${name}`} className="min-h-11 cursor-pointer rounded-xl px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Preview video</summary>
+        {open ? <video src={url} controls playsInline preload="metadata" aria-label={`Saved video ${name}`} className="mt-2 aspect-video w-full rounded-xl bg-black object-contain" /> : null}
     </details>;
 }
 
@@ -55,7 +55,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
     const handleBulkDelete = async () => {
         if (selectedIds.size === 0) return;
-        if (!confirm(`Are you sure you want to delete ${selectedIds.size} assets?`)) return;
+        if (!confirm(`Are you sure you want to delete ${selectedIds.size} files?`)) return;
 
         setIsDeleting(true);
         const idsToDelete = Array.from(selectedIds);
@@ -66,7 +66,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
         const res = await deleteAssets(idsToDelete);
         if (!res.success) {
-            alert('Failed to delete some assets: ' + res.error);
+            alert('Could not delete some files: ' + res.error);
         }
         setIsDeleting(false);
     };
@@ -79,19 +79,19 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
             setRecentStowed(presetId);
             setTimeout(() => setRecentStowed(null), 3000);
         } else {
-            alert('Failed to stow preset: ' + res.error);
+            alert('Could not add this saved item: ' + res.error);
         }
         setStowingId(null);
     };
 
     if (filteredAssets.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[500px] border border-zinc-800 bg-zinc-950/50 rounded-sm text-zinc-500 animate-in fade-in zoom-in duration-500 shadow-inner">
-                <div className="w-20 h-20 rounded-sm bg-zinc-900 flex items-center justify-center mb-8 border border-zinc-800 shadow-3xl">
+            <div className="flex flex-col items-center justify-center min-h-[280px] px-6 text-center border border-zinc-800 bg-zinc-950/50 rounded-xl text-zinc-500 animate-in fade-in zoom-in duration-500 shadow-inner">
+                <div className="w-20 h-20 rounded-xl bg-zinc-900 flex items-center justify-center mb-8 border border-zinc-800 shadow-3xl">
                     <FileImage className="w-8 h-8 opacity-20" />
                 </div>
-                <h3 className="text-sm font-black uppercase tracking-[0.3em] text-zinc-50 mb-4 italic">No Material Detected</h3>
-                <p className="text-metadata font-bold uppercase tracking-[0.2em] text-zinc-700 italic">Adjust index filters or initiate material staging.</p>
+                <h3 className="text-sm font-semibold tracking-normal text-zinc-50 mb-4 ">No matching media</h3>
+                <p className="text-metadata font-bold tracking-normal text-muted-foreground ">Upload a file, clear your search, or choose a different file type.</p>
             </div>
         );
     }
@@ -100,26 +100,26 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
         <div className="relative space-y-4 pb-24">
             {/* Bulk Actions Bar */}
             {!isPresetMode && selectedIds.size > 0 && (
-                <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-bottom-12 fade-in duration-300">
-                    <div className="flex items-center gap-8 px-10 py-5 bg-zinc-950 border border-primary/30 rounded-sm shadow-3xl backdrop-blur-2xl">
-                        <span className="text-metadata font-black text-zinc-50 uppercase tracking-[0.3em] italic">
-                            {selectedIds.size} {selectedIds.size === 1 ? 'MATERIAL' : 'MATERIALS'} SELECTED
+                <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-[60] animate-in slide-in-from-bottom-12 fade-in duration-300">
+                    <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 bg-zinc-950 border border-primary/30 rounded-xl shadow-3xl backdrop-blur-2xl">
+                        <span className="text-metadata font-semibold text-zinc-50 tracking-normal ">
+                            {selectedIds.size} {selectedIds.size === 1 ? 'file' : 'files'} selected
                         </span>
                         <div className="h-6 w-px bg-zinc-800" />
                         <Button
                             variant="danger"
                             size="sm"
-                            className="h-12 px-8 rounded-sm gap-3 font-black text-metadata uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-black transition-all shadow-2xl shadow-red-500/10 italic"
+                            className="h-12 px-8 rounded-xl gap-3 font-semibold text-metadata tracking-widest bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-black transition-all shadow-2xl shadow-red-500/10 "
                             onClick={handleBulkDelete}
                             disabled={isDeleting}
                         >
                             <Trash2 className="w-4 h-4" />
-                            Purge_Assets
+                            Delete selected
                         </Button>
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-12 px-8 rounded-sm text-zinc-500 hover:text-zinc-50 text-metadata font-black uppercase tracking-widest transition-colors"
+                            className="h-12 px-8 rounded-xl text-zinc-500 hover:text-zinc-50 text-metadata font-semibold tracking-widest transition-colors"
                             onClick={() => setSelectedIds(new Set())}
                         >
                             Cancel
@@ -128,7 +128,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                 </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-1 min-[380px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {filteredAssets.map(asset => {
                     const isSelected = selectedIds.has(asset.id);
                     const isStowed = recentStowed === asset.id;
@@ -139,24 +139,21 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                             key={asset.id}
                             onClick={() => toggleSelect(asset.id)}
                             className={cn(
-                                "group relative bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden transition-all duration-500 hover:border-primary/40 shadow-sm hover:shadow-2xl",
+                                "group relative overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50",
                                 !isPresetMode && "cursor-pointer",
-                                isSelected && "border-primary shadow-[0_0_30_px_rgba(251,191,36,0.15)] bg-primary/5"
+                                isSelected && "border-primary bg-primary/5"
                             )}
                         >
                             {/* Selection Checkbox (only in private mode) */}
                             {!isPresetMode && (
-                                <div className={cn(
-                                    "absolute top-4 left-4 z-20 w-5 h-5 rounded-sm border border-zinc-700 bg-zinc-950/80 flex items-center justify-center transition-all",
-                                    isSelected ? "bg-primary border-transparent shadow-2xl scale-110" : "opacity-0 group-hover:opacity-100"
-                                )}>
-                                    {isSelected && <div className="w-2.5 h-2.5 !bg-black rounded-[1px]" />}
-                                </div>
+                                <button type="button" aria-label={`Select ${asset.name}`} aria-pressed={isSelected} onClick={event => { event.stopPropagation(); toggleSelect(asset.id); }} className={`absolute left-2 top-2 z-20 grid size-11 place-items-center rounded-xl border bg-background/90 ${isSelected ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}>
+                                    {isSelected ? <Check className="size-5" /> : <span className="size-4 rounded border border-current" />}
+                                </button>
                             )}
 
                             {/* Preset Badge */}
                             {isPresetMode && (
-                                <div className="absolute top-4 left-4 z-20 px-2 py-1 bg-primary text-black text-[8px] font-black uppercase tracking-widest rounded-sm italic shadow-2xl">
+                                <div className="absolute top-4 left-4 z-20 px-2 py-1 bg-primary text-black text-[8px] font-semibold tracking-widest rounded-xl shadow-2xl">
                                     Preset
                                 </div>
                             )}
@@ -171,7 +168,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                                     <FileVideo className="h-12 w-12 text-zinc-500" aria-hidden="true" />
                                 ) : (
                                     <div className="flex flex-col items-center gap-2">
-                                        <div className="w-12 h-12 rounded-sm bg-primary/5 flex items-center justify-center border border-primary/20">
+                                        <div className="w-12 h-12 rounded-xl bg-primary/5 flex items-center justify-center border border-primary/20">
                                             <FileAudio className="w-5 h-5 text-primary" />
                                         </div>
                                     </div>
@@ -179,21 +176,21 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                                 {/* Hover Action (Stow to Studio) */}
                                 {isPresetMode && (
-                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px]">
+                                    <div className="absolute inset-0 bg-black/60 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity duration-300 flex items-center justify-center">
                                         <Button
                                             onClick={(e) => handleStow(e, asset.id)}
                                             disabled={isStowing || isStowed}
                                             className={cn(
-                                                "h-10 px-6 gap-2 rounded-sm font-black text-[9px] uppercase tracking-widest transition-all italic",
+                                                "h-10 px-6 gap-2 rounded-xl font-black text-sm transition-colors",
                                                 isStowed ? "bg-emerald-500 text-black" : "bg-primary text-black hover:scale-105 shadow-2xl shadow-primary/20"
                                             )}
                                         >
                                             {isStowed ? (
-                                                <><Check className="w-3.5 h-3.5" /> Stowed_Library</>
+                                                <><Check className="w-3.5 h-3.5" /> Added to library</>
                                             ) : isStowing ? (
-                                                "Staging..."
+                                                "Adding…"
                                             ) : (
-                                                <><Download className="w-3.5 h-3.5" /> Stow_To_Studio</>
+                                                <><Download className="w-3.5 h-3.5" /> Add to library</>
                                             )}
                                         </Button>
                                     </div>
@@ -201,7 +198,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                                 {/* Top right type icon (only in private mode) */}
                                 {!isPresetMode && (
-                                    <div className="absolute top-4 right-4 z-10 w-8 h-8 rounded-sm bg-zinc-950/90 backdrop-blur-md border border-zinc-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-2xl">
+                                    <div className="absolute top-4 right-4 z-10 w-8 h-8 rounded-xl bg-zinc-950/90 backdrop-blur-md border border-zinc-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-2xl">
                                         {asset.type === 'image' && <FileImage className="w-4 h-4 text-zinc-500" />}
                                         {asset.type === 'video' && <FileVideo className="w-4 h-4 text-zinc-500" />}
                                         {asset.type === 'audio' && <FileAudio className="w-4 h-4 text-zinc-500" />}
@@ -213,15 +210,15 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                             {/* Metadata */}
                             <div className="p-5 bg-zinc-950 border-t border-zinc-800">
-                                <p className="text-metadata font-black text-zinc-50 truncate group-hover:text-primary transition-colors uppercase tracking-[0.15em] italic" title={asset.name}>
+                                <p className="text-metadata font-semibold text-zinc-50 truncate group-hover:text-primary transition-colors tracking-normal " title={asset.name}>
                                     {asset.name}
                                 </p>
                                 <div className="flex items-center justify-between mt-3">
-                                    <p className="text-metadata text-zinc-700 uppercase tracking-[0.2em] font-black italic">
-                                        {asset.size > 0 ? `${(asset.size / 1024 / 1024).toFixed(1)} MB` : 'STUDIO_REF'}
+                                    <p className="text-metadata text-muted-foreground tracking-normal font-semibold ">
+                                        {asset.size > 0 ? `${(asset.size / 1024 / 1024).toFixed(1)} MB` : 'Saved reference'}
                                     </p>
                                     {!isPresetMode && (
-                                        <div className="p-1.5 opacity-0 group-hover:opacity-100 transition-all hover:bg-zinc-800 rounded-sm">
+                                        <div className="p-1.5 opacity-0 group-hover:opacity-100 transition-all hover:bg-zinc-800 rounded-xl">
                                             <MoreHorizontal className="w-4 h-4 text-zinc-600" />
                                         </div>
                                     )}

@@ -28,7 +28,7 @@ export function MobilePublicMenu({ authenticated }: { authenticated: boolean }) 
   }, [open]);
 
   return (
-    <div className="lg:hidden">
+    <div className="xl:hidden">
       <button
         ref={trigger}
         type="button"

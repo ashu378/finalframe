@@ -1,24 +1,9 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import { ArrowRight } from 'lucide-react';
 import { requireAuth } from '@/lib/guards';
 
-export default async function OnboardingLayout({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
-    await requireAuth();
-
-    return (
-        <div className="onboarding-theme ff-noise flex min-h-dvh items-center justify-center overflow-hidden bg-[#0f141c] py-10">
-            <main className="relative z-10 w-full max-w-2xl px-5 sm:px-6">
-                <div className="mb-10 flex items-center justify-between gap-4"><Link href="/" className="flex items-center gap-3"><span className="grid size-10 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={40} height={40} className="size-full object-cover" priority /></span><span className="ff-display text-xl font-semibold">FinalFrame</span></Link><span className="text-right text-sm text-muted-foreground">You can change this later</span></div>
-
-                {/* Card */}
-                <div className="ff-card w-full p-6 sm:p-10 animate-in zoom-in-95 fade-in duration-700 delay-200">
-                    {children}
-                </div>
-            </main>
-        </div>
-    );
+export default async function OnboardingLayout({ children }: { children: React.ReactNode }) {
+  await requireAuth();
+  return <div className="min-h-dvh bg-background text-foreground"><header className="border-b border-border"><div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-5 py-4"><Link href="/" className="flex min-h-11 items-center gap-3"><Image src="/brand/finalframe-mark-small.png" alt="" width={32} height={32} className="rounded-lg grayscale" priority /><span className="ff-display text-xl font-semibold">FinalFrame</span></Link><Link href="/dashboard" className="ff-button-quiet px-0 text-sm">Go to dashboard<ArrowRight className="size-4" aria-hidden="true" /></Link></div></header><main id="main-content" className="mx-auto w-full max-w-2xl px-5 py-10 sm:py-16"><p className="mb-8 text-sm leading-6 text-muted-foreground">Optional studio setup. You can change these choices later.</p><div className="onboarding-theme rounded-2xl border border-border bg-card p-5 sm:p-8">{children}</div></main></div>;
 }

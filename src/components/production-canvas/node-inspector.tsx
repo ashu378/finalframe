@@ -11,8 +11,8 @@ const kindLabels: Record<string, string> = {
   plan: 'Plan',
   productionVersion: 'Plan version',
   sequence: 'Chapter',
-  scene: 'Part',
-  shot: 'Take brief',
+  scene: 'Scene',
+  shot: 'Shot brief',
   videoTake: 'Video take',
   image: 'Image',
   imageEdit: 'Image version',
@@ -42,13 +42,12 @@ export type NodeInspectorProps = {
 export function NodeInspector({ node, onClose, onInspect, className }: NodeInspectorProps) {
   if (!node) {
     return (
-      <aside className={cn('flex min-h-[22rem] flex-col justify-center border-l border-border/70 bg-card/75 p-6 lg:p-7', className)} aria-label="Canvas inspector">
+      <aside className={cn('flex min-w-0 min-h-[16rem] flex-col justify-center border-t border-border/70 bg-card/75 p-5 lg:min-h-[22rem] lg:border-l lg:border-t-0 lg:p-7', className)} aria-label="Canvas inspector">
         <div className="grid size-11 place-items-center rounded-2xl bg-secondary text-muted-foreground">
           <ArrowUpRight className="size-5" aria-hidden="true" />
         </div>
-        <p className="ff-eyebrow mt-6">Node inspector</p>
-        <h2 className="ff-display mt-2 text-2xl font-semibold">Choose a production step.</h2>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">Select a card on the map to see its current state and place in the production.</p>
+        <h2 className="ff-display mt-4 text-2xl font-semibold">Choose a video step</h2>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">Select a step to see its progress, saved version and connected media.</p>
       </aside>
     );
   }
@@ -57,14 +56,14 @@ export function NodeInspector({ node, onClose, onInspect, className }: NodeInspe
   const artifactHref = node.artifactHref && (/^\/(?!\/)/.test(node.artifactHref) || /^https:\/\//.test(node.artifactHref)) ? node.artifactHref : undefined;
 
   return (
-    <aside className={cn('border-l border-border/70 bg-card/75 p-6 lg:p-7', className)} aria-label={`Inspector for ${node.label}`}>
+    <aside className={cn('min-w-0 border-t border-border/70 bg-card/75 p-5 lg:border-l lg:border-t-0 lg:p-7', className)} aria-label={`Inspector for ${node.label}`}>
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="ff-eyebrow">{kindLabel}</p>
-          <h2 className="ff-display mt-2 text-2xl font-semibold leading-tight">{node.label}</h2>
+        <div className="min-w-0">
+          <p className="text-sm text-muted-foreground">{kindLabel}</p>
+          <h2 className="ff-display mt-2 break-words text-2xl font-semibold leading-tight">{node.label}</h2>
         </div>
         {onClose ? (
-          <button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-foreground" aria-label="Close node inspector">
+          <button type="button" onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Close node inspector">
             <X className="size-4" aria-hidden="true" />
           </button>
         ) : null}
@@ -81,20 +80,20 @@ export function NodeInspector({ node, onClose, onInspect, className }: NodeInspe
           <dd className="text-sm font-medium">{kindLabel}</dd>
         </div>
         <div className="grid gap-1 p-4">
-          <dt className="text-xs font-semibold text-muted-foreground">Current state</dt>
+          <dt className="text-xs font-semibold text-muted-foreground">Progress</dt>
           <dd className="text-sm font-medium">{graphStateLabel(node.state)}</dd>
         </div>
         <div className="grid gap-1 p-4">
-          <dt className="text-xs font-semibold text-muted-foreground">Record</dt>
+          <dt className="text-xs font-semibold text-muted-foreground">Saved record ID</dt>
           <dd className="break-all font-mono text-xs text-muted-foreground">{node.resourceId}</dd>
         </div>
       </dl>
 
       {node.detail ? <p className="mt-5 text-sm leading-6 text-muted-foreground">{node.detail}</p> : null}
 
-      {artifactHref ? <Link className="ff-button-secondary mt-7 flex min-h-11 w-full items-center justify-center gap-2" href={artifactHref} prefetch={false}>Open this exact artifact<ArrowUpRight className="size-4" aria-hidden="true" /></Link> : onInspect ? (
-        <button type="button" onClick={() => onInspect(node)} className="ff-button-secondary mt-7 w-full">
-          Inspect this step
+      {artifactHref ? <Link className="ff-button-secondary mt-7 flex min-h-11 w-full items-center justify-center gap-2" href={artifactHref} prefetch={false}>Open this saved version<ArrowUpRight className="size-4" aria-hidden="true" /></Link> : onInspect ? (
+        <button type="button" onClick={() => onInspect(node)} className="ff-button-secondary mt-7 min-h-11 w-full">
+          View step details
           <ArrowUpRight className="size-4" aria-hidden="true" />
         </button>
       ) : null}

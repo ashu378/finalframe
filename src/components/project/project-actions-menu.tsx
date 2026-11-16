@@ -64,8 +64,8 @@ export function ProjectActionsMenu({ project }: ProjectActionsMenuProps) {
         <div onClick={(e) => e.stopPropagation()}>
             <DropdownMenu>
                 <DropdownMenuTrigger>
-                    <div className="p-1 hover:bg-white/10 rounded-full transition-colors">
-                        <MoreVertical className="w-4 h-4 text-zinc-400" />
+                    <div className="grid min-h-11 min-w-11 place-items-center rounded-xl transition-colors hover:bg-secondary">
+                        <MoreVertical className="w-4 h-4 text-muted-foreground" />
                     </div>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -87,33 +87,33 @@ export function ProjectActionsMenu({ project }: ProjectActionsMenuProps) {
             <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-3 text-zinc-50 uppercase tracking-widest italic">
+                        <DialogTitle className="flex items-center gap-3 text-zinc-50  tracking-normal ">
                             <Settings className="w-5 h-5 text-primary" />
-                            Project Specification
+                            Project details
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-4">
-                            <label className="text-metadata text-zinc-500 ml-1">Project Name</label>
+                            <label className="text-metadata text-muted-foreground ml-1">Project Name</label>
                             <Input
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 placeholder="Enter project name"
-                                className="bg-zinc-950 border-zinc-800 h-14 rounded-sm text-sm font-bold uppercase tracking-widest"
+                                className="bg-background border-border h-14 rounded-xl text-sm font-bold  tracking-normal"
                             />
                         </div>
                         <div className="space-y-4">
-                            <label className="text-metadata text-zinc-500 ml-1">Description (Optional)</label>
+                            <label className="text-metadata text-muted-foreground ml-1">Description (Optional)</label>
                             <textarea
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
                                 placeholder="Describe the project goal..."
-                                className="w-full bg-zinc-950 border border-zinc-800 rounded-sm p-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[120px] transition-all"
+                                className="w-full bg-background border border-border rounded-xl p-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[120px] transition-all"
                             />
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="secondary" onClick={() => setIsSettingsOpen(false)} className="h-12 px-6 rounded-sm border-zinc-800 text-zinc-400 font-bold uppercase tracking-widest text-metadata transition-colors">Cancel</Button>
+                        <Button variant="secondary" onClick={() => setIsSettingsOpen(false)} className="h-12 px-6 rounded-xl border-border text-muted-foreground font-bold  tracking-normal text-metadata transition-colors">Cancel</Button>
                         <Button
                             variant="primary"
                             onClick={handleUpdate}
@@ -121,7 +121,7 @@ export function ProjectActionsMenu({ project }: ProjectActionsMenuProps) {
                             disabled={!name.trim() || (name === project.name && (description === (project.project_description || '')))}
                             className="primary-cta h-12 px-8"
                         >
-                            Save Specification
+                            Save changes
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -131,19 +131,19 @@ export function ProjectActionsMenu({ project }: ProjectActionsMenuProps) {
             <Dialog open={isArchiveOpen} onOpenChange={setIsArchiveOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-3 text-orange-500 uppercase tracking-widest italic">
+                        <DialogTitle className="flex items-center gap-3 text-orange-500  tracking-normal ">
                             <Archive className="w-5 h-5" />
-                            Archive Project Registry?
+                            Archive this project?
                         </DialogTitle>
-                        <DialogDescription className="text-zinc-500 text-sm mt-4 leading-relaxed normal-case">
+                        <DialogDescription className="text-muted-foreground text-sm mt-4 leading-relaxed normal-case">
                             This project will be hidden from your active studio list. All metadata, scenes, and render history for <strong className="text-zinc-300">"{project.name}"</strong> will be preserved in the archive.
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter className="mt-8 gap-4">
-                        <Button variant="secondary" onClick={() => setIsArchiveOpen(false)} className="h-12 px-6 rounded-sm border-zinc-800 text-zinc-400 font-bold uppercase tracking-widest text-metadata transition-colors">Cancel</Button>
+                        <Button variant="secondary" onClick={() => setIsArchiveOpen(false)} className="h-12 px-6 rounded-xl border-border text-muted-foreground font-bold  tracking-normal text-metadata transition-colors">Cancel</Button>
                         <Button
                             variant="primary"
-                            className="h-12 px-8 rounded-sm bg-orange-600 text-white hover:bg-orange-500 border-none font-bold uppercase tracking-widest text-metadata transition-colors shadow-2xl shadow-orange-600/20"
+                            className="h-12 px-8 rounded-xl bg-orange-600 text-white hover:bg-orange-500 border-none font-bold  tracking-normal text-metadata transition-colors shadow-2xl shadow-orange-600/20"
                             onClick={handleArchive}
                             loading={isArchiving}
                         >

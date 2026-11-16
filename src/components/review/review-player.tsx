@@ -75,14 +75,14 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
 
     if (!url) {
         return (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-6 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-sm">
-                <div className="w-20 h-20 rounded-sm bg-black/60 flex items-center justify-center border border-white/5 shadow-2xl relative">
-                    <div className="absolute inset-0 border border-primary/20 animate-pulse rounded-sm" />
-                    <Film className="w-8 h-8 text-zinc-800" />
+            <div className="w-full h-full flex flex-col items-center justify-center gap-6 bg-card backdrop-blur-3xl border border-border rounded-xl">
+                <div className="w-20 h-20 rounded-xl bg-background/60 flex items-center justify-center border border-border shadow-2xl relative">
+                    <div className="absolute inset-0 border border-primary/20 animate-pulse rounded-xl" />
+                    <Film className="w-8 h-8 text-muted-foreground" />
                 </div>
                 <div className="text-center">
-                    <p className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.3em] mb-2 italic">Awaiting Master Output</p>
-                    <p className="text-[9px] font-black text-zinc-700 uppercase tracking-widest">Preparing your preview...</p>
+                    <p className="text-sm font-semibold text-muted-foreground mb-2 italic">Your video is not ready yet</p>
+                    <p className="text-xs font-semibold text-muted-foreground">Your preview will appear here.</p>
                 </div>
             </div>
         );
@@ -98,7 +98,7 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
                 aria-label="Finished video preview"
                 tabIndex={0}
                 onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); togglePlay(); } }}
-                className="w-full h-full object-contain bg-black"
+                className="w-full h-full object-contain bg-background"
                 onClick={togglePlay}
             />
 
@@ -107,7 +107,7 @@ export const ReviewPlayer = forwardRef(({ url, onTimeUpdate }: ReviewPlayerProps
                 {/* Progress Bar */}
                 <div className="h-0.5 w-full bg-white/5 rounded-none mb-8 relative cursor-pointer overflow-hidden group/bar">
                     <div
-                        className="absolute h-full bg-primary shadow-[0_0_15px_rgba(251,191,36,0.5)] transition-all duration-100"
+                        className="absolute h-full bg-primary  transition-all duration-100"
                         style={{ width: `${progress}%` }}
                     />
                 </div>

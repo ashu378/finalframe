@@ -82,7 +82,7 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
                 variant="primary"
                 onClick={() => inputRef.current?.click()}
                 disabled={isUploading}
-                className="px-10 h-14 rounded-sm font-black text-metadata uppercase tracking-[0.2em] shadow-2xl shadow-primary/20 transition-all active:scale-95 flex items-center gap-3"
+                className="px-10 h-14 rounded-xl font-semibold text-metadata tracking-normal shadow-2xl shadow-primary/20 transition-all active:scale-95 flex items-center gap-3"
             >
                 {isUploading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -101,23 +101,23 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
                     onDragOver={handleDrag}
                     onDrop={handleDrop}
                 >
-                    <div className="bg-zinc-900 p-20 rounded-sm border border-primary/30 shadow-3xl text-center pointer-events-none">
-                        <div className="w-24 h-24 rounded-sm bg-primary/10 flex items-center justify-center mx-auto mb-10 border border-primary/20 shadow-2xl">
+                    <div className="bg-card p-6 sm:p-10 rounded-xl border border-primary/30 shadow-3xl text-center pointer-events-none">
+                        <div className="w-24 h-24 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-10 border border-primary/20 shadow-2xl">
                             <Upload className="w-12 h-12 text-primary animate-bounce" />
                         </div>
-                        <h2 className="text-3xl font-black text-zinc-50 mb-6 uppercase tracking-[0.2em] italic">DEPOSIT_MANIFEST</h2>
-                        <p className="text-metadata font-black text-zinc-500 uppercase tracking-widest leading-loose">RELEASE_FILES_TO_AUTHORIZE_STAGING_Registry</p>
+                        <h2 className="text-3xl font-semibold text-zinc-50 mb-6 tracking-normal ">Drop your files here</h2>
+                        <p className="text-metadata font-semibold text-muted-foreground tracking-widest leading-loose">Release to upload them to your library.</p>
                     </div>
                 </div>
             )}
 
             {/* Progress Toast-style UI (Bottom Right) */}
             {uploads.length > 0 && (
-                <div className="fixed bottom-10 right-10 z-[70] w-96 space-y-4 animate-in slide-in-from-right-10 fade-in duration-300">
+                <div className="fixed bottom-4 left-4 right-4 z-[70] sm:left-auto sm:w-96 space-y-4 animate-in slide-in-from-right-10 fade-in duration-300">
                     {uploads.map((upload, i) => (
-                        <div key={i} className="p-6 bg-zinc-900 border border-zinc-800 rounded-sm shadow-3xl flex items-center gap-6 relative overflow-hidden group">
+                        <div key={i} className="p-6 bg-card border border-border rounded-xl shadow-3xl flex items-center gap-6 relative overflow-hidden group">
                             <div className="flex-1 min-w-0 z-10">
-                                <p className="text-metadata font-black text-zinc-50 truncate uppercase tracking-widest italic">{upload.name}</p>
+                                <p className="text-metadata font-semibold text-zinc-50 truncate tracking-widest ">{upload.name}</p>
                                 <div className="h-1 bg-zinc-950 rounded-none mt-4 overflow-hidden shadow-inner">
                                     <div
                                         className={cn(

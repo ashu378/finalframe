@@ -22,28 +22,30 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
         <div className="space-y-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 {/* Tabs */}
-                <div className="flex items-center gap-1 p-1 bg-zinc-900 border border-zinc-800 rounded-sm">
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                     <button
+                        aria-pressed={activeTab === 'my_materials'}
                         onClick={() => setActiveTab('my_materials')}
                         className={cn(
-                            "px-6 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] transition-all rounded-sm italic",
+                            "min-h-12 rounded-xl px-5 py-3 text-sm font-semibold transition-colors",
                             activeTab === 'my_materials'
-                                ? "bg-primary text-black shadow-2xl shadow-primary/20"
-                                : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-secondary text-muted-foreground hover:text-foreground"
                         )}
                     >
                         My media
                     </button>
                     <button
+                        aria-pressed={activeTab === 'studio_presets'}
                         onClick={() => setActiveTab('studio_presets')}
                         className={cn(
-                            "px-6 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] transition-all rounded-sm italic",
+                            "min-h-12 rounded-xl px-5 py-3 text-sm font-semibold transition-colors",
                             activeTab === 'studio_presets'
-                                ? "bg-primary text-black shadow-2xl shadow-primary/20"
-                                : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-secondary text-muted-foreground hover:text-foreground"
                         )}
                     >
-                        Studio presets
+                        Saved starting points
                     </button>
                 </div>
 
@@ -52,7 +54,7 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
                     onQueryChange={setSearchQuery}
                     selectedType={filterType}
                     onTypeChange={setFilterType}
-                /> : <label className="text-sm font-medium">Search presets<input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="ml-3 min-h-11 rounded-xl border border-border bg-background px-3" /></label>}
+                /> : <label className="flex w-full flex-col gap-2 text-sm font-medium">Search saved starting points<input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="min-h-12 w-full rounded-xl border border-input bg-background px-3 text-base" /></label>}
             </div>
 
             {activeTab === 'my_materials' ? <AssetGrid

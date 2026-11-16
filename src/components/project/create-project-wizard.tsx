@@ -30,16 +30,16 @@ interface CreateProjectWizardProps {
 }
 
 const STEPS = [
-    { title: 'Project Core', description: 'Technical name and segment' },
-    { title: 'Production Intent', description: 'Narrative vision and goal' },
-    { title: 'Visual Material', description: 'Technical reference layers' },
-    { title: 'Studio Directives', description: 'Inherited brand identity' },
-    { title: 'Final Review', description: 'Finalize and start' }
+    { title: 'Project details', description: 'Name and video type' },
+    { title: 'Your idea', description: 'Story and purpose' },
+    { title: 'Your media', description: 'Images, clips and recordings' },
+    { title: 'Saved settings', description: 'Check your starting settings' },
+    { title: 'Review', description: 'Check the details and start' }
 ];
 
 const CONTENT_TYPES: { id: ProjectContentType; label: string; icon: any; description: string }[] = [
     { id: 'commercial', label: 'Commercial', icon: Video, description: 'High-energy storytelling' },
-    { id: 'saas_demo', label: 'Product Demo', icon: MonitorSmartphone, description: 'Showcase software UI' },
+    { id: 'saas_demo', label: 'Product Demo', icon: MonitorSmartphone, description: 'Show how an app works' },
     { id: 'ugc', label: 'UGC Style', icon: User, description: 'Authentic creator content' },
     { id: 'motion_graphics', label: 'Motion Graphics', icon: Zap, description: 'Dynamic text & shapes' },
 ];
@@ -191,9 +191,9 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
     // RENDER
     // =====================================================
     return (
-        <div className="flex flex-col lg:flex-row h-full lg:h-[620px] max-h-[90vh] w-full max-w-[1050px] bg-black text-white rounded-sm overflow-hidden border border-white/5 shadow-2xl relative">
+        <div className="flex flex-col lg:flex-row h-full lg:h-[620px] max-h-[90vh] w-full max-w-[1050px] bg-black text-white rounded-xl overflow-hidden border border-white/5 shadow-2xl relative">
             {/* Left Column: Vision & Progress */}
-            <div className="w-full lg:w-1/3 p-6 lg:p-12 bg-zinc-950 relative overflow-hidden flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-white/5">
+            <div className="w-full lg:w-1/3 p-6 lg:p-5 sm:p-8 bg-background relative overflow-hidden flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-white/5">
                 <div className="absolute top-[-80px] left-[-80px] w-[300px] h-[300px] bg-primary/5 blur-[80px] rounded-full" />
 
                 <div className="relative z-10">
@@ -202,26 +202,26 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                             <div
                                 key={i}
                                 className={cn(
-                                    "h-0.5 rounded-sm transition-all duration-700",
+                                    "h-0.5 rounded-xl transition-all duration-700",
                                     i === currentStep ? "w-10 bg-primary shadow-[0_0_10px_rgba(251,191,36,0.3)]" : i < currentStep ? "w-2 bg-primary/40" : "w-1 bg-zinc-800"
                                 )}
                             />
                         ))}
                     </div>
 
-                    <h1 className="text-[22px] font-black text-white uppercase tracking-[0.1em] mb-4 italic">
+                    <h1 className="text-[22px] font-semibold text-white  tracking-normal mb-4 ">
                         {STEPS[currentStep].title}
                     </h1>
-                    <p className="text-zinc-400 font-bold text-[10px] uppercase tracking-widest leading-loose">
+                    <p className="text-muted-foreground font-bold text-xs  tracking-normal leading-loose">
                         {STEPS[currentStep].description}
                     </p>
                 </div>
 
                 <div className="relative z-10">
-                    <div className="flex items-center gap-3 text-zinc-500 text-[9px] uppercase font-black tracking-[0.2em]">
-                        <span>Registry</span>
+                    <div className="flex items-center gap-3 text-muted-foreground text-xs  font-semibold tracking-normal">
+                        <span>Project setup</span>
                         <div className="w-1 h-1 rounded-full bg-primary/30" />
-                        <span>Production Mastering</span>
+                        <span>Finish the video</span>
                     </div>
                 </div>
             </div>
@@ -231,43 +231,43 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                 <Button
                     variant="ghost"
                     onClick={onClose}
-                    className="absolute top-3 right-3 lg:top-5 lg:right-5 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full h-8 w-8 !p-0 z-50"
+                    className="absolute top-3 right-3 lg:top-5 lg:right-5 text-muted-foreground hover:text-white hover:bg-card rounded-full h-8 w-8 !p-0 z-50"
                 >
                     <X className="w-4 h-4" />
                 </Button>
 
-                <div className="flex-1 overflow-y-auto p-6 lg:p-12 flex flex-col">
+                <div className="flex-1 overflow-y-auto p-6 lg:p-5 sm:p-8 flex flex-col">
                     {/* STEP 1: PROJECT BASICS */}
                     {currentStep === 0 && (
                         <div className="space-y-10 animate-in slide-in-from-bottom-4 duration-500">
                             <div className="space-y-3">
-                                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] px-1">Project Name</label>
+                                <label className="text-xs font-bold text-muted-foreground  tracking-normal px-1">Project Name</label>
                                 <Input
                                     placeholder="Enter project name..."
                                     value={name}
                                     onChange={e => setName(e.target.value)}
-                                    className="bg-black/60 border-zinc-800 border-x-0 border-t-0 border-b rounded-none px-1 py-4 h-auto text-[18px] font-black tracking-tight focus:ring-0 focus:border-primary/50 transition-all placeholder:text-zinc-600 uppercase"
+                                    className="bg-black/60 border-border border-x-0 border-t-0 border-b rounded-none px-1 py-4 h-auto text-[18px] font-semibold tracking-tight focus:ring-0 focus:border-primary/50 transition-all placeholder:text-muted-foreground "
                                     autoFocus
                                 />
                             </div>
                             <div className="space-y-3">
-                                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] px-1">Content Type</label>
+                                <label className="text-xs font-bold text-muted-foreground  tracking-normal px-1">Video type</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     {CONTENT_TYPES.map(type => (
                                         <div
                                             key={type.id}
                                             onClick={() => setContentType(type.id)}
                                             className={cn(
-                                                "p-5 rounded-sm border transition-all duration-300 cursor-pointer flex flex-col items-start gap-4",
+                                                "p-5 rounded-xl border transition-all duration-300 cursor-pointer flex flex-col items-start gap-4",
                                                 contentType === type.id
                                                     ? "bg-primary/5 border-primary shadow-[0_0_20px_rgba(251,191,36,0.1)]"
                                                     : "bg-black/40 border-white/5 hover:border-white/10"
                                             )}
                                         >
-                                            <type.icon className={cn("w-4 h-4", contentType === type.id ? "text-primary" : "text-zinc-500")} />
+                                            <type.icon className={cn("w-4 h-4", contentType === type.id ? "text-primary" : "text-muted-foreground")} />
                                             <div>
-                                                <div className="text-[11px] font-black text-white mb-1 uppercase tracking-widest">{type.label}</div>
-                                                <div className="text-[9px] font-bold text-zinc-400 leading-tight uppercase tracking-tight">{type.description}</div>
+                                                <div className="text-xs font-semibold text-white mb-1  tracking-normal">{type.label}</div>
+                                                <div className="text-xs font-bold text-muted-foreground leading-tight  tracking-tight">{type.description}</div>
                                             </div>
                                         </div>
                                     ))}
@@ -281,8 +281,8 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                         <div className="space-y-10 animate-in slide-in-from-bottom-4 duration-500">
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center px-1">
-                                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">Description / Vision</label>
-                                    <span className={cn("text-[9px] font-mono", description.length >= 10 ? "text-green-500" : "text-zinc-500")}>
+                                    <label className="text-xs font-bold text-muted-foreground  tracking-normal">What is this video about?</label>
+                                    <span className={cn("text-xs font-mono", description.length >= 10 ? "text-green-500" : "text-muted-foreground")}>
                                         {description.length} / 10
                                     </span>
                                 </div>
@@ -290,21 +290,21 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                     placeholder="What is your video about?"
                                     value={description}
                                     onChange={e => setDescription(e.target.value)}
-                                    className="w-full h-[180px] bg-black/60 border border-white/5 rounded-sm p-5 text-[14px] font-bold text-white resize-none focus:outline-none focus:border-primary/40 transition-all placeholder:text-zinc-600 uppercase tracking-tight leading-relaxed"
+                                    className="w-full h-[180px] bg-black/60 border border-white/5 rounded-xl p-5 text-[14px] font-bold text-white resize-none focus:outline-none focus:border-primary/40 transition-all placeholder:text-muted-foreground  tracking-tight leading-relaxed"
                                 />
                             </div>
                             <div className="space-y-3">
-                                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] px-1">Primary Goal</label>
+                                <label className="text-xs font-bold text-muted-foreground  tracking-normal px-1">What you want this video to do</label>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                     {GOALS.map((g) => (
                                         <button
                                             key={g.id}
                                             onClick={() => setGoal(g.id)}
                                             className={cn(
-                                                "py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.15em] transition-all duration-300",
+                                                "py-4 rounded-xl border text-xs font-semibold  tracking-normal transition-all duration-300",
                                                 goal === g.id
                                                     ? "bg-primary border-primary text-black shadow-lg shadow-primary/20"
-                                                    : "bg-black/40 border-white/5 text-zinc-500 hover:border-white/10 hover:text-zinc-300"
+                                                    : "bg-black/40 border-white/5 text-muted-foreground hover:border-white/10 hover:text-zinc-300"
                                             )}
                                         >
                                             <span className="text-base mr-2">{g.emoji}</span>
@@ -322,19 +322,19 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
                                 {/* Left Side: Dropzone */}
                                 <div className={cn(
-                                    "border-2 border-dashed rounded-sm p-8 flex flex-col items-center justify-center text-center transition-all",
+                                    "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all",
                                     stagedFiles.length > 0 ? "border-primary/20 bg-primary/5" : "border-white/5 bg-black/40"
                                 )}>
-                                    <div className="w-12 h-12 rounded-sm bg-black flex items-center justify-center mb-6 border border-white/5 shadow-xl">
-                                        <Upload className="w-5 h-5 text-zinc-500" />
+                                    <div className="w-12 h-12 rounded-xl bg-black flex items-center justify-center mb-6 border border-white/5 shadow-xl">
+                                        <Upload className="w-5 h-5 text-muted-foreground" />
                                     </div>
-                                    <h3 className="text-[12px] font-black uppercase tracking-widest mb-3">Upload Assets</h3>
-                                    <p className="text-[9px] font-bold text-zinc-400 mb-8 max-w-[200px] uppercase tracking-widest leading-loose">
+                                    <h3 className="text-[12px] font-semibold  tracking-normal mb-3">Upload media</h3>
+                                    <p className="text-xs font-bold text-muted-foreground mb-8 max-w-[200px]  tracking-normal leading-loose">
                                         Upload technical references or skip to use studio defaults.
                                     </p>
 
                                     <div className="relative">
-                                        <Button variant="secondary" className="bg-primary text-black hover:bg-white h-10 text-[10px] font-black uppercase tracking-[0.2em] px-8 rounded-sm pointer-events-none">
+                                        <Button variant="secondary" className="bg-primary text-black hover:bg-white h-10 text-xs font-semibold  tracking-normal px-8 rounded-xl pointer-events-none">
                                             Upload Files
                                         </Button>
                                         <input
@@ -348,23 +348,23 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
 
                                 {/* Right Side: Staged List */}
                                 <div className="flex flex-col min-h-0">
-                                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-4">
+                                    <label className="text-xs font-bold text-muted-foreground  tracking-normal mb-4">
                                         Staging Area {stagedFiles.length > 0 && `(${stagedFiles.length})`}
                                     </label>
 
                                     {stagedFiles.length > 0 ? (
                                         <div className="space-y-2 overflow-y-auto pr-2 custom-scrollbar flex-1">
                                             {stagedFiles.map((file, i) => (
-                                                <div key={`${file.name}-${i}`} className="flex items-center justify-between p-4 rounded-sm bg-black/60 border border-white/5 animate-in fade-in slide-in-from-right-2 duration-300">
+                                                <div key={`${file.name}-${i}`} className="flex items-center justify-between p-4 rounded-xl bg-black/60 border border-white/5 animate-in fade-in slide-in-from-right-2 duration-300">
                                                     <div className="flex items-center gap-4">
-                                                        <div className="w-8 h-8 bg-primary/10 rounded-sm flex items-center justify-center border border-primary/20">
+                                                        <div className="w-8 h-8 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20">
                                                             <Check className="w-4 h-4 text-primary" />
                                                         </div>
-                                                        <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-widest truncate max-w-[140px]">{file.name}</span>
+                                                        <span className="text-xs font-bold text-zinc-300  tracking-normal truncate max-w-[140px]">{file.name}</span>
                                                     </div>
                                                     <button
                                                         onClick={() => removeStagedFile(i)}
-                                                        className="text-zinc-600 hover:text-primary transition-colors p-1"
+                                                        className="text-muted-foreground hover:text-primary transition-colors p-1"
                                                     >
                                                         <X className="w-3.5 h-3.5" />
                                                     </button>
@@ -372,8 +372,8 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                             ))}
                                         </div>
                                     ) : (
-                                        <div className="flex-1 flex flex-col items-center justify-center border border-zinc-900 rounded-2xl bg-zinc-950/20 text-center p-6">
-                                            <p className="text-xs text-zinc-500 italic">No files staged yet.</p>
+                                        <div className="flex-1 flex flex-col items-center justify-center border border-zinc-900 rounded-2xl bg-background/20 text-center p-6">
+                                            <p className="text-xs text-muted-foreground ">No files uploaded yet.</p>
                                         </div>
                                     )}
                                 </div>
@@ -385,27 +385,27 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                     {currentStep === 3 && (
                         <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-2xl mx-auto w-full">
                             <div className="text-center mb-4">
-                                <h2 className="text-xl font-light">Studio Identity & Context</h2>
-                                <p className="text-xs text-zinc-400 mt-1">AI uses these defaults from your onboarding to ensure brand consistency.</p>
+                                <h2 className="text-xl font-light">Saved workspace settings</h2>
+                                <p className="text-xs text-muted-foreground mt-1">Review the saved settings below before using them for this project.</p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="p-8 rounded-sm bg-black/40 border border-white/5 flex flex-col items-center text-center gap-6 relative overflow-hidden group hover:border-primary/30 transition-all">
-                                    <div className="w-14 h-14 bg-primary/10 rounded-sm flex items-center justify-center border border-primary/20 group-hover:scale-105 transition-transform shadow-2xl">
+                                <div className="p-8 rounded-xl bg-black/40 border border-white/5 flex flex-col items-center text-center gap-6 relative overflow-hidden group hover:border-primary/30 transition-all">
+                                    <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20 group-hover:scale-105 transition-transform shadow-2xl">
                                         <MonitorSmartphone className="w-6 h-6 text-primary" />
                                     </div>
                                     <div>
-                                        <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-400 font-black mb-2">Target Platform</div>
-                                        <div className="text-[12px] font-black text-white uppercase tracking-widest">{studioContext?.defaults?.platform?.replace('_', ' ') || 'No Default Set'}</div>
+                                        <div className="text-xs  tracking-normal text-muted-foreground font-semibold mb-2">Where you will share it</div>
+                                        <div className="text-[12px] font-semibold text-white  tracking-normal">{studioContext?.defaults?.platform?.replace('_', ' ') || 'No Default Set'}</div>
                                     </div>
                                 </div>
-                                <div className="p-8 rounded-sm bg-black/40 border border-white/5 flex flex-col items-center text-center gap-6 relative overflow-hidden group hover:border-primary/30 transition-all">
-                                    <div className="w-14 h-14 bg-primary/10 rounded-sm flex items-center justify-center border border-primary/20 group-hover:scale-105 transition-transform shadow-2xl">
+                                <div className="p-8 rounded-xl bg-black/40 border border-white/5 flex flex-col items-center text-center gap-6 relative overflow-hidden group hover:border-primary/30 transition-all">
+                                    <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20 group-hover:scale-105 transition-transform shadow-2xl">
                                         <User className="w-6 h-6 text-primary" />
                                     </div>
                                     <div>
-                                        <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 font-black mb-2">Identity Presence</div>
-                                        <div className="text-[12px] font-black text-white uppercase tracking-widest">{studioContext?.defaults?.identity_presence?.replace('_', ' ') || 'No Default Set'}</div>
+                                        <div className="text-xs  tracking-normal text-muted-foreground font-semibold mb-2">Who appears</div>
+                                        <div className="text-[12px] font-semibold text-white  tracking-normal">{studioContext?.defaults?.identity_presence?.replace('_', ' ') || 'No Default Set'}</div>
                                     </div>
                                 </div>
                             </div>
@@ -413,20 +413,20 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                             <div className="space-y-4">
                                 <button
                                     onClick={() => setShowOverrides(!showOverrides)}
-                                    className="w-full py-4 rounded-xl border border-zinc-900 bg-zinc-900/20 text-zinc-400 text-xs font-bold uppercase tracking-widest hover:bg-zinc-900/40 hover:text-zinc-300 transition-all flex items-center justify-center gap-2"
+                                    className="w-full py-4 rounded-xl border border-zinc-900 bg-card/20 text-muted-foreground text-xs font-bold  tracking-normal hover:bg-card/40 hover:text-zinc-300 transition-all flex items-center justify-center gap-2"
                                 >
                                     {showOverrides ? 'Hide Customization' : 'Customize for this Project'}
                                     <ChevronRight className={cn("w-4 h-4 transition-transform", showOverrides ? "rotate-90" : "")} />
                                 </button>
 
                                 {showOverrides && (
-                                    <div className="grid grid-cols-2 gap-6 p-8 rounded-sm bg-black/60 border border-primary/20 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <div className="grid grid-cols-2 gap-6 p-8 rounded-xl bg-black/60 border border-primary/20 animate-in fade-in slide-in-from-top-2 duration-300">
                                         <div className="space-y-4">
-                                            <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1">Overwrite Platform</label>
+                                            <label className="text-xs font-semibold text-muted-foreground  tracking-normal px-1">Change platform</label>
                                             <select
                                                 value={platformOverride}
                                                 onChange={e => setPlatformOverride(e.target.value)}
-                                                className="w-full h-11 bg-black border border-white/5 text-[10px] font-black uppercase tracking-widest px-4 rounded-sm focus:outline-none focus:border-primary/40 text-zinc-300"
+                                                className="w-full h-11 bg-black border border-white/5 text-xs font-semibold  tracking-normal px-4 rounded-xl focus:outline-none focus:border-primary/40 text-zinc-300"
                                             >
                                                 <option value="">(Inherit Studio Default)</option>
                                                 <option value="tiktok_reels">TikTok / Reels</option>
@@ -436,11 +436,11 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                             </select>
                                         </div>
                                         <div className="space-y-4">
-                                            <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-1">Overwrite Presence</label>
+                                            <label className="text-xs font-semibold text-muted-foreground  tracking-normal px-1">Change who appears</label>
                                             <select
                                                 value={identityOverride}
                                                 onChange={e => setIdentityOverride(e.target.value)}
-                                                className="w-full h-11 bg-black border border-white/5 text-[10px] font-black uppercase tracking-widest px-4 rounded-sm focus:outline-none focus:border-primary/40 text-zinc-300"
+                                                className="w-full h-11 bg-black border border-white/5 text-xs font-semibold  tracking-normal px-4 rounded-xl focus:outline-none focus:border-primary/40 text-zinc-300"
                                             >
                                                 <option value="">(Inherit Studio Default)</option>
                                                 <option value="self">Self (Creator)</option>
@@ -449,34 +449,34 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                             </select>
                                         </div>
                                         <div className="space-y-4">
-                                            <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-1">Brand Energy Directive</label>
+                                            <label className="text-xs font-semibold text-muted-foreground  tracking-normal px-1">Brand feel</label>
                                             <Input
-                                                placeholder={studioContext?.dna?.brand_energy || "Inherit Studio Energy"}
+                                                placeholder={studioContext?.dna?.brand_energy || "Use the saved brand feel"}
                                                 value={dnaOverrides.brand_energy || ''}
                                                 onChange={e => setDnaOverrides(prev => ({ ...prev, brand_energy: e.target.value }))}
-                                                className="bg-black border-white/5 text-[10px] font-black uppercase tracking-widest py-3 h-11 rounded-sm"
+                                                className="bg-black border-white/5 text-xs font-semibold  tracking-normal py-3 h-11 rounded-xl"
                                             />
                                         </div>
                                         <div className="space-y-4">
-                                            <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-1">Value Proposition Directive</label>
+                                            <label className="text-xs font-semibold text-muted-foreground  tracking-normal px-1">What makes it useful</label>
                                             <Input
-                                                placeholder={studioContext?.blocks?.value_proposition || "Inherit Studio Value Prop"}
+                                                placeholder={studioContext?.blocks?.value_proposition || "Use the saved product description"}
                                                 value={blocksOverrides.value_proposition || ''}
                                                 onChange={e => setBlocksOverrides(prev => ({ ...prev, value_proposition: e.target.value }))}
-                                                className="bg-black border-white/5 text-[10px] font-black uppercase tracking-widest py-3 h-11 rounded-sm"
+                                                className="bg-black border-white/5 text-xs font-semibold  tracking-normal py-3 h-11 rounded-xl"
                                             />
                                         </div>
                                     </div>
                                 )}
 
                                 {!showOverrides && (
-                                    <div className="p-6 rounded-sm bg-black border border-white/5 flex items-center gap-6">
-                                        <div className="w-10 h-10 rounded-sm bg-primary/10 flex items-center justify-center border border-primary/20">
+                                    <div className="p-6 rounded-xl bg-black border border-white/5 flex items-center gap-6">
+                                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20">
                                             <ShieldCheck className="w-5 h-5 text-primary/60" />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] font-black text-zinc-400 uppercase tracking-widest">Studio Defaults Active</div>
-                                            <div className="text-[9px] font-bold text-zinc-500 mt-1 uppercase tracking-widest leading-loose">
+                                            <div className="text-xs font-semibold text-muted-foreground  tracking-normal">Using saved settings</div>
+                                            <div className="text-xs font-bold text-muted-foreground mt-1  tracking-normal leading-loose">
                                                 Branding settings applied.
                                             </div>
                                         </div>
@@ -491,7 +491,7 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                         <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 max-w-2xl mx-auto w-full">
                             <div className="text-center mb-8">
                                 <h2 className="text-2xl font-light">Ready to create?</h2>
-                                <p className="text-sm text-zinc-500 mt-2">Review your project details before launching.</p>
+                                <p className="text-sm text-muted-foreground mt-2">Review your project details before launching.</p>
                             </div>
 
                             <div className="grid gap-2">
@@ -501,10 +501,10 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                     { label: 'Goal', value: GOALS.find(g => g.id === goal)?.label || goal },
                                     { label: 'Vision', value: description, truncate: true },
                                     { label: 'Directives', value: dnaOverrides.brand_energy ? 'Modified' : 'Standard', status: dnaOverrides.brand_energy ? 'warning' : 'success' },
-                                    { label: 'Output', value: `${stagedFiles.length} Material Layers` }
+                                    { label: 'Output', value: `${stagedFiles.length} files` }
                                 ].map((row, i) => (
-                                    <div key={i} className="p-5 rounded-sm bg-black/40 border border-white/5 flex justify-between items-center group/row hover:border-primary/20 transition-all">
-                                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{row.label}</span>
+                                    <div key={i} className="p-5 rounded-xl bg-black/40 border border-white/5 flex justify-between items-center group/row hover:border-primary/20 transition-all">
+                                        <span className="text-xs font-semibold text-muted-foreground  tracking-normal">{row.label}</span>
                                         <div className="flex items-center gap-3">
                                             {row.status && (
                                                 <div className={cn(
@@ -513,8 +513,8 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                                 )} />
                                             )}
                                             <span className={cn(
-                                                "text-[11px] font-black text-white uppercase tracking-widest",
-                                                row.truncate && "max-w-[240px] truncate text-zinc-400 font-bold"
+                                                "text-xs font-semibold text-white  tracking-normal",
+                                                row.truncate && "max-w-[240px] truncate text-muted-foreground font-bold"
                                             )}>
                                                 {row.value}
                                             </span>
@@ -523,8 +523,8 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                                 ))}
                             </div>
 
-                            <div className="bg-black border border-white/5 rounded-sm p-4 text-center">
-                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest leading-loose">
+                            <div className="bg-black border border-white/5 rounded-xl p-4 text-center">
+                                <p className="text-xs font-semibold text-muted-foreground  tracking-normal leading-loose">
                                     All set! Click below to start.
                                 </p>
                             </div>
@@ -552,7 +552,7 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                         <Button
                             onClick={handleCreateProject}
                             disabled={isLoading}
-                            className="px-12 lg:px-14 h-12 text-[10px] font-black uppercase tracking-[0.2em] rounded-sm bg-primary text-black transition-all group shadow-2xl shadow-primary/20"
+                            className="px-12 lg:px-14 h-12 text-xs font-semibold  tracking-normal rounded-xl bg-primary text-black transition-all group shadow-2xl shadow-primary/20"
                         >
                             {isLoading ? (
                                 <Loader2 className="w-4 h-4 animate-spin mr-3" />
@@ -564,7 +564,7 @@ export function CreateProjectWizard({ onClose, studioId }: CreateProjectWizardPr
                     ) : (
                         <Button
                             onClick={handleNext}
-                            className="px-12 lg:px-14 h-12 text-[10px] font-black uppercase tracking-[0.2em] rounded-sm bg-primary text-black transition-all group shadow-2xl shadow-primary/20"
+                            className="px-12 lg:px-14 h-12 text-xs font-semibold  tracking-normal rounded-xl bg-primary text-black transition-all group shadow-2xl shadow-primary/20"
                         >
                             {currentStep === 2 && stagedFiles.length === 0 ? 'Skip for now' : 'Next Step'}
                             <ChevronRight className="w-4 h-4 ml-3 group-hover:translate-x-1 transition-transform" />

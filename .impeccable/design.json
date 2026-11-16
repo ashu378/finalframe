@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "name": "FinalFrame",
+  "colors": {
+    "background": "#0B0B0C",
+    "panel": "#161618",
+    "primary": "#C6F432",
+    "text": "#FFFFFF",
+    "muted": "#A6A6AE"
+  },
+  "typography": {
+    "body": "Manrope",
+    "display": "Bricolage Grotesque"
+  },
+  "components": {
+    "button": {
+      "selector": "button",
+      "minHeight": 44
+    },
+    "input": {
+      "selector": ".ff-auth-form input",
+      "minHeight": 52,
+      "fontSize": 16
+    },
+    "navigation": {
+      "selector": "[aria-label=\"Studio navigation\"]"
+    }
+  },
+  "extensions": {
+    "motion": "Public showcase motion only; reduced-motion fallback.",
+    "coverage": "Chunk1 foundation/auth/navigation; individual remaining routes pending."
+  }
+}

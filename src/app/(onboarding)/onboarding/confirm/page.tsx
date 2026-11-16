@@ -6,7 +6,7 @@ export default async function ConfirmPage() {
     await ensureOnboardingStep(OnboardingStep.CONFIRM);
 
     return (
-        <div className="space-y-6 text-center">
+        <div className="space-y-6 text-left">
             <div className="space-y-2">
                 <h1 className="ff-display text-3xl font-semibold tracking-tight">Your studio is ready.</h1>
                 <p className="text-muted-foreground">

@@ -65,8 +65,8 @@ const kindLabels: Record<string, string> = {
   plan: 'Plan',
   productionVersion: 'Plan version',
   sequence: 'Chapter',
-  scene: 'Part',
-  shot: 'Take brief',
+  scene: 'Scene',
+  shot: 'Shot brief',
   videoTake: 'Video take',
   image: 'Image',
   imageEdit: 'Image version',
@@ -148,21 +148,20 @@ export function DesktopCanvas({ nodes, edges, onSelect }: DesktopCanvasProps) {
       <div className="flex flex-col gap-5 border-b border-border/70 p-5 sm:p-7 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-2xl bg-[#86a7ff] text-foreground">
+            <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground">
               <Crosshair className="size-5" aria-hidden="true" />
             </span>
             <div>
-              <p className="ff-eyebrow">Production Canvas</p>
-              <h2 id="desktop-canvas-heading" className="ff-display mt-1 text-2xl font-semibold">See every part of the video in context.</h2>
+              <h2 id="desktop-canvas-heading" className="ff-display text-2xl font-semibold">Your video at a glance</h2>
             </div>
           </div>
-          <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">The map is generated from your production plan. Select a step to inspect where it sits and what state it is in.</p>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">Follow the connections from your plan to the final download. Select a step to see its progress and saved version.</p>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Canvas view controls">
-          <button type="button" onClick={fitView} className="ff-button-quiet min-h-10 px-3 text-xs" title="Fit the production map in view">
+          <button type="button" onClick={fitView} className="ff-button-quiet min-h-11 px-3 text-sm" title="Fit the production map in view">
             <Maximize2 className="size-4" aria-hidden="true" /> Fit map
           </button>
-          <button type="button" onClick={resetView} className="ff-button-quiet min-h-10 px-3 text-xs" title="Reset map position and selection">
+          <button type="button" onClick={resetView} className="ff-button-quiet min-h-11 px-3 text-sm" title="Reset map position and selection">
             <RotateCcw className="size-4" aria-hidden="true" /> Reset
           </button>
         </div>
@@ -174,8 +173,8 @@ export function DesktopCanvas({ nodes, edges, onSelect }: DesktopCanvasProps) {
             <div className="flex min-h-[34rem] items-center justify-center rounded-2xl border border-dashed border-border/80 bg-card/60 p-8 text-center">
               <div className="max-w-sm">
                 <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Sparkles className="size-5" aria-hidden="true" /></div>
-                <h3 className="ff-display mt-5 text-2xl font-semibold">Your production map will appear here.</h3>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">Create a plan first, then use the Canvas to follow its connected parts.</p>
+                <h3 className="ff-display mt-5 text-2xl font-semibold">Your video map will appear here</h3>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">Create a plan first, then follow its scenes, shots, media and downloads here.</p>
               </div>
             </div>
           ) : (
@@ -195,16 +194,16 @@ export function DesktopCanvas({ nodes, edges, onSelect }: DesktopCanvasProps) {
                         const incoming = incomingCount.get(node.id) ?? 0;
                         const outgoing = outgoingCount.get(node.id) ?? 0;
                         return (
-                          <button key={node.id} type="button" onClick={() => selectNode(node)} aria-pressed={isSelected} className={cn('group relative block w-full rounded-2xl border bg-card p-4 text-left shadow-[0_16px_34px_-26px_hsl(24_30%_22%_/_0.6)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/60 focus-visible:-translate-y-0.5', isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-border/70')}>
+                          <button key={node.id} type="button" onClick={() => selectNode(node)} aria-pressed={isSelected} className={cn('group relative block w-full rounded-2xl border bg-card p-4 text-left transition-colors duration-200 hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-border/70')}>
                             {columnIndex < columns.length - 1 ? <span className="pointer-events-none absolute -right-5 top-1/2 hidden h-px w-5 bg-border lg:block" aria-hidden="true" /> : null}
                             <span className="flex items-start justify-between gap-3">
                               <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-secondary text-foreground"><Icon className="size-4" aria-hidden="true" /></span>
-                              <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold leading-none', graphStateClass(node.state))}><StateIcon state={node.state} />{graphStateLabel(node.state)}</span>
+                              <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold leading-none', graphStateClass(node.state))}><StateIcon state={node.state} />{graphStateLabel(node.state)}</span>
                             </span>
                             <span className="mt-4 block text-sm font-semibold leading-5">{node.label}</span>
                             <span className="mt-1 block text-xs font-medium text-muted-foreground">{kindLabels[node.kind] ?? 'Production step'}</span>
                             {node.detail ? <span className="mt-3 block line-clamp-2 text-xs leading-5 text-muted-foreground">{node.detail}</span> : null}
-                            {(incoming > 0 || outgoing > 0) ? <span className="mt-4 flex items-center gap-2 border-t border-border/70 pt-3 text-[11px] font-semibold text-muted-foreground"><span>{incoming} in</span><span className="text-border">·</span><span>{outgoing} out</span></span> : null}
+                            {(incoming > 0 || outgoing > 0) ? <span className="mt-4 flex items-center gap-2 border-t border-border/70 pt-3 text-xs font-semibold text-muted-foreground"><span>Uses {incoming}</span><span className="text-border">·</span><span>Used by {outgoing}</span></span> : null}
                           </button>
                         );
                       })}

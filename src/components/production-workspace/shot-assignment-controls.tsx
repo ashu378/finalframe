@@ -32,9 +32,9 @@ export function ShotAssignmentControls({ data, shot, editable }: { data: Workspa
         });
     }
     return <details className="rounded-xl border border-border p-4" open={editable}>
-        <summary className="min-h-8 cursor-pointer text-sm font-semibold">Exact continuity references</summary>
+        <summary className="min-h-11  cursor-pointer text-sm font-semibold">Exact continuity references</summary>
         <div className="mt-3 space-y-4">
-            {!candidates.length ? <p className="text-sm text-muted-foreground">This plan has no approved continuity resources. Create and approve project references and a bible, then include that bible in a new plan.</p> : null}
+            {!candidates.length ? <p className="text-sm text-muted-foreground">This plan has no approved continuity resources. Create and approve project references and a guide, then include that guide in a new plan.</p> : null}
             {unavailable.map(id => { const resource = data.boundResources.find(item => item.id === id); const hasDependencies = dialogue.some(segment => segment.speakerResourceVersionId === id) || bindings.some(binding => binding.characterResourceVersionId === id); return <div key={id} className="space-y-2 rounded-lg border border-destructive/50 p-3"><p className="text-sm">{resource?.name || 'Saved reference'} needs approval or is no longer available.</p>{editable ? <><Button size="sm" variant="secondary" disabled={pending || hasDependencies} onClick={() => { setBindings(previous => previous.filter(binding => binding.resourceVersionId !== id)); setSelected(previous => previous.filter(value => value !== id)); }}>Remove unavailable reference</Button>{hasDependencies ? <p className="text-xs text-muted-foreground">Remove its dialogue and dependent assignments first.</p> : null}</> : null}</div>; })}
             {candidates.map(resource => {
                 const binding = bindings.find(item => item.resourceVersionId === resource.id);

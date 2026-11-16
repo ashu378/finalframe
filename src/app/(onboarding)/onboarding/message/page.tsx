@@ -7,7 +7,7 @@ export default async function MessagePage() {
 
     return (
         <div className="space-y-6">
-            <div className="space-y-2 text-center">
+            <div className="space-y-2 text-left">
                 <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">What do you want people to remember?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
                     A few plain-language notes help us keep the video focused.

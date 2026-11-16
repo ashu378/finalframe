@@ -185,7 +185,7 @@ export function SceneCard({
     return (
         <div
             className={cn(
-                "group relative bg-zinc-900 border border-zinc-800 rounded-sm p-8 transition-all duration-300 shadow-xl",
+                "group relative bg-card border border-border rounded-xl p-8 transition-all duration-300 shadow-xl",
                 isDragging && "opacity-50 border-primary ring-2 ring-primary/20 scale-[1.01] bg-primary/5 z-50 shadow-2xl"
             )}
             draggable={!!onDragStart}
@@ -197,10 +197,10 @@ export function SceneCard({
             <div className="flex gap-8">
                 {/* Drag Handle & Index */}
                 <div className="flex flex-col items-center gap-4 pt-1">
-                    <div className="cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-50 p-1.5 transition-colors">
+                    <div className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-zinc-50 p-1.5 transition-colors">
                         <GripVertical className="w-5 h-5" />
                     </div>
-                    <span className="text-metadata font-black text-zinc-50 bg-zinc-950 w-8 h-8 flex items-center justify-center rounded-none border border-zinc-800 uppercase tracking-widest shadow-inner">
+                    <span className="text-metadata font-semibold text-zinc-50 bg-background w-8 h-8 flex items-center justify-center rounded-none border border-border  tracking-normal shadow-inner">
                         {index + 1}
                     </span>
                 </div>
@@ -212,55 +212,55 @@ export function SceneCard({
                             {/* Technical Meta Row */}
                             <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <label className="text-metadata text-zinc-500 ml-1">Segment Title</label>
+                                    <label className="text-metadata text-muted-foreground ml-1">Segment Title</label>
                                     <input
                                         type="text"
-                                        className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-3 text-sm font-bold text-zinc-50 focus:outline-none focus:border-primary/50 transition-all uppercase tracking-widest"
+                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-zinc-50 focus:outline-none focus:border-primary/50 transition-all  tracking-normal"
                                         value={titleValue}
                                         onChange={(e) => setTitleValue(e.target.value)}
-                                        placeholder="SCENE_ID_0XX"
+                                        placeholder="Give this scene a name"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-metadata text-zinc-500 ml-1">Production Objective</label>
+                                    <label className="text-metadata text-muted-foreground ml-1">Production Objective</label>
                                     <input
                                         type="text"
-                                        className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-3 text-sm font-bold text-zinc-50 focus:outline-none focus:border-primary/50 transition-all"
+                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-zinc-50 focus:outline-none focus:border-primary/50 transition-all"
                                         value={goalValue}
                                         onChange={(e) => setGoalValue(e.target.value)}
-                                        placeholder="Identify the value prop..."
+                                        placeholder="What should this scene do?"
                                     />
                                 </div>
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-metadata text-zinc-500 ml-1">Scene Goal (Strategic Rationale)</label>
+                                <label className="text-metadata text-muted-foreground ml-1">Scene Goal (Strategic Rationale)</label>
                                 <textarea
-                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[80px] transition-all resize-none leading-relaxed"
+                                    className="w-full bg-background border border-border rounded-xl px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[80px] transition-all resize-none leading-relaxed"
                                     value={rationaleValue}
                                     onChange={(e) => setRationaleValue(e.target.value)}
-                                    placeholder="Explain why this scene is critical for the project goal..."
+                                    placeholder="Why does this scene belong in your video?"
                                 />
                             </div>
 
                             {/* Core Description Area */}
                             <div className="space-y-2">
-                                <label className="text-metadata text-zinc-500 ml-1">Script & Text Content</label>
+                                <label className="text-metadata text-muted-foreground ml-1">Script & Text Content</label>
                                 <textarea
-                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[100px] transition-all resize-none leading-relaxed"
+                                    className="w-full bg-background border border-border rounded-xl px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[100px] transition-all resize-none leading-relaxed"
                                     value={textValue}
                                     onChange={(e) => setTextValue(e.target.value)}
-                                    placeholder="Input script or creative intent..."
+                                    placeholder="Write the dialogue or describe what happens."
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-metadata text-zinc-500 ml-1">Visual Directives</label>
+                                <label className="text-metadata text-muted-foreground ml-1">What we should see</label>
                                 <textarea
-                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[100px] transition-all resize-none leading-relaxed"
+                                    className="w-full bg-background border border-border rounded-xl px-4 py-4 text-sm font-medium text-zinc-300 focus:outline-none focus:border-primary/50 min-h-[100px] transition-all resize-none leading-relaxed"
                                     value={visualValue}
                                     onChange={(e) => setVisualValue(e.target.value)}
-                                    placeholder="Define visual composition and requirements..."
+                                    placeholder="Describe what people should see."
                                 />
                             </div>
 
@@ -281,20 +281,20 @@ export function SceneCard({
                             </div>
 
                             {/* Asset Binding Section (NEW) */}
-                            <div className="space-y-4 pt-4 border-t border-zinc-800">
+                            <div className="space-y-4 pt-4 border-t border-border">
                                 <div className="flex items-center justify-between px-1">
-                                    <span className="text-metadata font-black uppercase tracking-widest text-zinc-500">Attached Media</span>
+                                    <span className="text-metadata font-semibold  tracking-normal text-muted-foreground">Attached Media</span>
                                     <DropdownMenu>
                                         <DropdownMenuTrigger>
-                                            <Button variant="secondary" size="md" className="h-10 text-metadata font-bold uppercase tracking-widest gap-2 bg-zinc-950 border-zinc-800 hover:bg-zinc-800 transition-colors rounded-sm">
+                                            <Button variant="secondary" size="md" className="h-10 text-metadata font-bold  tracking-normal gap-2 bg-background border-border hover:bg-zinc-800 transition-colors rounded-xl">
                                                 <ImageIcon className="w-4 h-4" />
                                                 Attach Media
-                                                <ChevronDown className="w-3.5 h-3.5 text-zinc-600" />
+                                                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-80 bg-zinc-900 border-zinc-800 p-3 shadow-3xl">
-                                            <div className="p-2 border-b border-zinc-800 mb-3 space-y-2">
-                                                <p className="text-metadata font-black uppercase tracking-widest text-zinc-500 text-center">Studio Library</p>
+                                        <DropdownMenuContent align="end" className="w-80 bg-card border-border p-3 shadow-3xl">
+                                            <div className="p-2 border-b border-border mb-3 space-y-2">
+                                                <p className="text-metadata font-semibold  tracking-normal text-muted-foreground text-center">Studio Library</p>
                                                 <div className="relative">
                                                     <input
                                                         type="file"
@@ -306,7 +306,7 @@ export function SceneCard({
                                                     />
                                                     <Button
                                                         variant="ghost"
-                                                        className="w-full h-10 text-metadata font-bold uppercase tracking-widest gap-2 bg-zinc-950 border border-zinc-800 hover:bg-zinc-800 transition-colors rounded-sm"
+                                                        className="w-full h-10 text-metadata font-bold  tracking-normal gap-2 bg-background border border-border hover:bg-zinc-800 transition-colors rounded-xl"
                                                         disabled={isUploading}
                                                         onClick={() => document.getElementById(`file-upload-${scene.id}`)?.click()}
                                                     >
@@ -318,25 +318,25 @@ export function SceneCard({
                                             <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
                                                 {studioAssets.length === 0 ? (
                                                     <div className="p-8 text-center">
-                                                        <p className="text-sm text-zinc-500 font-light italic">No assets uploaded yet</p>
+                                                        <p className="text-sm text-muted-foreground font-light ">No assets uploaded yet</p>
                                                     </div>
                                                 ) : (
                                                     studioAssets.map(asset => (
                                                         <DropdownMenuItem
                                                             key={asset.id}
                                                             onClick={() => addAsset(asset.id)}
-                                                            className="flex items-center gap-4 p-3 rounded-sm hover:bg-zinc-800 focus:bg-zinc-800 cursor-pointer group/item transition-all"
+                                                            className="flex items-center gap-4 p-3 rounded-xl hover:bg-zinc-800 focus:bg-zinc-800 cursor-pointer group/item transition-all"
                                                         >
-                                                            <div className="relative w-12 h-12 rounded-sm bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0">
+                                                            <div className="relative w-12 h-12 rounded-xl bg-background border border-border overflow-hidden shrink-0">
                                                                 {asset.type === 'image' ? (
                                                                     <Image src={asset.url} alt="Scene media" fill unoptimized sizes="48px" className="object-cover" />
                                                                 ) : (
-                                                                    <Film className="w-5 h-5 text-zinc-600 m-3.5" />
+                                                                    <Film className="w-5 h-5 text-muted-foreground m-3.5" />
                                                                 )}
                                                             </div>
                                                             <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-black text-zinc-300 truncate group-hover/item:text-primary transition-colors">{asset.name}</p>
-                                                                <p className="text-metadata text-zinc-600 uppercase font-black tracking-widest">{asset.type}</p>
+                                                                <p className="text-sm font-semibold text-zinc-300 truncate group-hover/item:text-primary transition-colors">{asset.name}</p>
+                                                                <p className="text-metadata text-muted-foreground  font-semibold tracking-normal">{asset.type}</p>
                                                             </div>
                                                         </DropdownMenuItem>
                                                     ))
@@ -351,8 +351,8 @@ export function SceneCard({
                                         {sceneAssets.map(binding => {
                                             const asset = studioAssets.find(a => a.id === binding.asset_id);
                                             return (
-                                                <div key={binding.asset_id} className="flex items-center gap-5 p-4 rounded-sm bg-zinc-950 border border-zinc-800 group/asset hover:border-primary/30 transition-all shadow-inner">
-                                                    <div className="relative w-12 h-12 rounded-none bg-black border border-zinc-800 overflow-hidden shadow-2xl">
+                                                <div key={binding.asset_id} className="flex items-center gap-5 p-4 rounded-xl bg-background border border-border group/asset hover:border-primary/30 transition-all shadow-inner">
+                                                    <div className="relative w-12 h-12 rounded-none bg-black border border-border overflow-hidden shadow-2xl">
                                                         {asset?.type === 'image' ? (
                                                             <Image src={asset.url} alt="Bound scene media" fill unoptimized sizes="48px" className="object-cover" />
                                                         ) : (
@@ -360,9 +360,9 @@ export function SceneCard({
                                                         )}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-metadata font-black text-zinc-500 truncate uppercase tracking-widest mb-1">{asset?.name || 'Missing Asset'}</p>
+                                                        <p className="text-metadata font-semibold text-muted-foreground truncate  tracking-normal mb-1">{asset?.name || 'Missing Asset'}</p>
                                                         <select
-                                                            className="bg-transparent text-metadata font-black uppercase tracking-widest text-primary focus:outline-none cursor-pointer hover:text-zinc-50 transition-colors"
+                                                            className="bg-transparent text-metadata font-semibold  tracking-normal text-primary focus:outline-none cursor-pointer hover:text-zinc-50 transition-colors"
                                                             value={binding.role}
                                                             onChange={(e) => updateAssetRole(binding.asset_id, e.target.value as any)}
                                                         >
@@ -374,7 +374,7 @@ export function SceneCard({
                                                     </div>
                                                     <button
                                                         onClick={() => removeAsset(binding.asset_id)}
-                                                        className="p-2.5 rounded-sm hover:bg-red-500/10 text-zinc-600 hover:text-red-500 transition-all"
+                                                        className="p-2.5 rounded-xl hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all"
                                                     >
                                                         <X className="w-4 h-4" />
                                                     </button>
@@ -383,21 +383,21 @@ export function SceneCard({
                                         })}
                                     </div>
                                 ) : (
-                                    <div className="px-6 py-4 rounded-sm border border-dashed border-zinc-800 flex items-center justify-center bg-zinc-950/50">
-                                        <p className="text-metadata text-zinc-600 uppercase tracking-widest italic">No media attached. AI will generate visuals from scratch.</p>
+                                    <div className="px-6 py-4 rounded-xl border border-dashed border-border flex items-center justify-center bg-background/50">
+                                        <p className="text-metadata text-muted-foreground  tracking-normal ">No media attached. AI will generate visuals from scratch.</p>
                                     </div>
                                 )}
                             </div>
 
                             {/* Actions Footer */}
-                            {error && <p className="text-red-500 text-metadata font-black uppercase tracking-widest text-center italic">{error}</p>}
-                            <div className="flex justify-end gap-4 pt-6 border-t border-zinc-800">
+                            {error && <p className="text-red-500 text-metadata font-semibold  tracking-normal text-center ">{error}</p>}
+                            <div className="flex justify-end gap-4 pt-6 border-t border-border">
                                 <Button
                                     variant="ghost"
                                     size="md"
                                     onClick={handleCancel}
                                     disabled={isPending}
-                                    className="text-metadata font-bold uppercase tracking-widest rounded-sm text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 h-12 px-6"
+                                    className="text-metadata font-bold  tracking-normal rounded-xl text-muted-foreground hover:text-zinc-50 hover:bg-zinc-800 h-12 px-6"
                                 >
                                     Cancel
                                 </Button>
@@ -408,22 +408,22 @@ export function SceneCard({
                                     className="primary-cta px-10 h-12"
                                 >
                                     {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                                    Save Specification
+                                    Save changes
                                 </Button>
                             </div>
                         </div>
                     ) : (
                         <div className="space-y-6 animate-in fade-in duration-500">
                             {/* Static Header Row */}
-                            <div className="flex items-start justify-between gap-6 pb-6 border-b border-zinc-800">
+                            <div className="flex items-start justify-between gap-6 pb-6 border-b border-border">
                                 <div className="space-y-2">
-                                    <h4 className="text-zinc-50 font-black text-lg uppercase tracking-widest italic">{scene.scene_title || `SEGMENT_${(index + 1).toString().padStart(3, '0')}`}</h4>
+                                    <h4 className="text-zinc-50 font-semibold text-lg  tracking-normal ">{scene.scene_title || `SEGMENT_${(index + 1).toString().padStart(3, '0')}`}</h4>
                                     <div className="flex items-center gap-4">
-                                        <p className="text-metadata text-zinc-600 font-black uppercase tracking-widest">
-                                            Objective: <span className="text-zinc-400 font-bold">{scene.scene_goal}</span>
+                                        <p className="text-metadata text-muted-foreground font-semibold  tracking-normal">
+                                            Objective: <span className="text-muted-foreground font-bold">{scene.scene_goal}</span>
                                         </p>
                                         <div className="h-4 w-px bg-zinc-800" />
-                                        <span className="text-metadata px-3 py-1.5 rounded-sm bg-primary/10 text-primary border border-primary/20 font-black uppercase tracking-widest">
+                                        <span className="text-metadata px-3 py-1.5 rounded-xl bg-primary/10 text-primary border border-primary/20 font-semibold  tracking-normal">
                                             {scene.emotional_beat || 'STUDIO BALANCED'}
                                         </span>
                                     </div>
@@ -431,10 +431,10 @@ export function SceneCard({
                                 <div className="flex items-center gap-2">
                                     <button
                                         className={cn(
-                                            "p-2.5 rounded-sm transition-all border border-zinc-800 shadow-sm",
+                                            "p-2.5 rounded-xl transition-all border border-border shadow-sm",
                                             isReadOnly
-                                                ? "text-zinc-700 bg-zinc-900 cursor-not-allowed border-zinc-900"
-                                                : "text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 hover:border-zinc-700"
+                                                ? "text-muted-foreground bg-card cursor-not-allowed border-zinc-900"
+                                                : "text-muted-foreground hover:text-zinc-50 hover:bg-zinc-800 hover:border-zinc-700"
                                         )}
                                         onClick={() => setIsEditing(true)}
                                         disabled={isPending || isReadOnly}
@@ -444,10 +444,10 @@ export function SceneCard({
                                     </button>
                                     <button
                                         className={cn(
-                                            "p-2.5 rounded-sm transition-all border border-zinc-800 shadow-sm",
+                                            "p-2.5 rounded-xl transition-all border border-border shadow-sm",
                                             isReadOnly
-                                                ? "text-zinc-700 bg-zinc-900 cursor-not-allowed border-zinc-900"
-                                                : "text-zinc-500 hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/20"
+                                                ? "text-muted-foreground bg-card cursor-not-allowed border-zinc-900"
+                                                : "text-muted-foreground hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/20"
                                         )}
                                         onClick={handleDeleteClick}
                                         disabled={isPending || isReadOnly}
@@ -460,15 +460,15 @@ export function SceneCard({
 
                             {/* Script & Action Box */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="p-6 rounded-sm bg-zinc-950 border border-zinc-800 relative shadow-inner">
-                                    <span className="absolute -top-3 left-6 px-3 py-1 bg-zinc-900 border border-zinc-800 rounded-sm text-metadata font-black uppercase tracking-widest text-zinc-500">Script & Text</span>
-                                    <p className="text-zinc-400 text-sm leading-relaxed font-medium pt-2">
+                                <div className="p-6 rounded-xl bg-background border border-border relative shadow-inner">
+                                    <span className="absolute -top-3 left-6 px-3 py-1 bg-card border border-border rounded-xl text-metadata font-semibold  tracking-normal text-muted-foreground">Script & Text</span>
+                                    <p className="text-muted-foreground text-sm leading-relaxed font-medium pt-2">
                                         &quot;{scene.scene_text}&quot;
                                     </p>
                                 </div>
-                                <div className="p-6 rounded-sm bg-primary/5 border border-primary/10 relative shadow-inner">
-                                    <span className="absolute -top-3 left-6 px-3 py-1 bg-zinc-900 border border-zinc-800 rounded-sm text-metadata font-black uppercase tracking-widest text-primary">Action & Movement</span>
-                                    <p className="text-zinc-300 text-sm leading-relaxed font-medium pt-2 italic">
+                                <div className="p-6 rounded-xl bg-primary/5 border border-primary/10 relative shadow-inner">
+                                    <span className="absolute -top-3 left-6 px-3 py-1 bg-card border border-border rounded-xl text-metadata font-semibold  tracking-normal text-primary">Action & Movement</span>
+                                    <p className="text-zinc-300 text-sm leading-relaxed font-medium pt-2 ">
                                         {scene.action_sequence || 'Awaiting cinematic execution...'}
                                     </p>
                                 </div>
@@ -476,13 +476,13 @@ export function SceneCard({
 
                             {/* Strategic Rationale (Gap Group B) */}
                             {scene.why_this_scene_exists && (
-                                <div className="p-6 rounded-sm bg-zinc-950 border border-zinc-800 flex items-center gap-6 shadow-inner">
-                                    <div className="w-10 h-10 rounded-none bg-zinc-900 flex items-center justify-center shrink-0 border border-zinc-800">
-                                        <Plus className="w-5 h-5 text-zinc-600 rotate-45" />
+                                <div className="p-6 rounded-xl bg-background border border-border flex items-center gap-6 shadow-inner">
+                                    <div className="w-10 h-10 rounded-none bg-card flex items-center justify-center shrink-0 border border-border">
+                                        <Plus className="w-5 h-5 text-muted-foreground rotate-45" />
                                     </div>
                                     <div className="space-y-1">
-                                        <p className="text-metadata font-black uppercase tracking-widest text-zinc-500">Scene Goal</p>
-                                        <p className="text-sm text-zinc-400 font-medium italic">"{scene.why_this_scene_exists}"</p>
+                                        <p className="text-metadata font-semibold  tracking-normal text-muted-foreground">Scene Goal</p>
+                                        <p className="text-sm text-muted-foreground font-medium ">"{scene.why_this_scene_exists}"</p>
                                     </div>
                                 </div>
                             )}
@@ -490,20 +490,20 @@ export function SceneCard({
                             {/* Media Binding Preview */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-4">
-                                    <span className="text-metadata font-black uppercase tracking-widest text-zinc-500 ml-1">Visual Directives</span>
+                                    <span className="text-metadata font-semibold  tracking-normal text-muted-foreground ml-1">What we should see</span>
                                     <div className="space-y-3">
-                                        <div className="text-sm text-zinc-400 font-medium leading-relaxed p-4 rounded-sm bg-zinc-950 border border-zinc-800 shadow-inner">
+                                        <div className="text-sm text-muted-foreground font-medium leading-relaxed p-4 rounded-xl bg-background border border-border shadow-inner">
                                             {scene.visual_description}
                                         </div>
                                         {/* Camera Summary */}
                                         <div className="flex flex-wrap gap-2 mt-4">
                                             {scene.camera_config?.angle && (
-                                                <span className="text-metadata px-3 py-1.5 rounded-sm bg-zinc-900 text-zinc-500 border border-zinc-800 uppercase font-black tracking-widest">
+                                                <span className="text-metadata px-3 py-1.5 rounded-xl bg-card text-muted-foreground border border-border  font-semibold tracking-normal">
                                                     Angle: {scene.camera_config.angle.replace('_', ' ')}
                                                 </span>
                                             )}
                                             {scene.camera_config?.movement && (
-                                                <span className="text-metadata px-3 py-1.5 rounded-sm bg-zinc-900 text-zinc-500 border border-zinc-800 uppercase font-black tracking-widest">
+                                                <span className="text-metadata px-3 py-1.5 rounded-xl bg-card text-muted-foreground border border-border  font-semibold tracking-normal">
                                                     Move: {scene.camera_config.movement.replace('_', ' ')}
                                                 </span>
                                             )}
@@ -512,21 +512,21 @@ export function SceneCard({
                                 </div>
 
                                 <div className="space-y-4">
-                                    <span className="text-metadata font-black uppercase tracking-widest text-zinc-500 ml-1">Media Attachments</span>
+                                    <span className="text-metadata font-semibold  tracking-normal text-muted-foreground ml-1">Media Attachments</span>
                                     {scene.scene_assets && scene.scene_assets.length > 0 ? (
                                         <div className="flex flex-wrap gap-3">
                                             {scene.scene_assets.map(binding => {
                                                 const asset = studioAssets.find(a => a.id === binding.asset_id);
                                                 return (
-                                                    <div key={binding.asset_id} className="flex items-center gap-3 pl-1 pr-4 py-1.5 rounded-sm bg-primary/10 border border-primary/20 group/tag">
-                                                        <div className="relative w-8 h-8 rounded-none overflow-hidden bg-black flex items-center justify-center shrink-0 border border-zinc-800 shadow-2xl">
+                                                    <div key={binding.asset_id} className="flex items-center gap-3 pl-1 pr-4 py-1.5 rounded-xl bg-primary/10 border border-primary/20 group/tag">
+                                                        <div className="relative w-8 h-8 rounded-none overflow-hidden bg-black flex items-center justify-center shrink-0 border border-border shadow-2xl">
                                                             {asset?.type === 'image' ? (
                                                                 <Image src={asset.url} alt="Bound scene media" fill unoptimized sizes="32px" className="object-cover" />
                                                             ) : (
                                                                 <Film className="w-4 h-4 text-primary" />
                                                             )}
                                                         </div>
-                                                        <span className="text-metadata font-black uppercase tracking-widest text-primary italic">
+                                                        <span className="text-metadata font-semibold  tracking-normal text-primary ">
                                                             {binding.role}: {asset?.name.split('.')[0] || 'STATION ASSET'}
                                                         </span>
                                                     </div>
@@ -534,15 +534,15 @@ export function SceneCard({
                                             })}
                                         </div>
                                     ) : (
-                                        <div className="h-[60px] rounded-sm border border-dashed border-zinc-800 flex items-center justify-center bg-zinc-950/30">
-                                            <span className="text-metadata text-zinc-600 uppercase font-black tracking-[0.3em] italic">AI Generative Mode</span>
+                                        <div className="h-[60px] rounded-xl border border-dashed border-border flex items-center justify-center bg-background/30">
+                                            <span className="text-metadata text-muted-foreground  font-semibold tracking-normal ">AI Generative Mode</span>
                                         </div>
                                     )}
                                 </div>
                             </div>
 
                             {scene.differentiation_note && (
-                                <div className="flex items-start gap-2 pt-2 text-[10px] text-zinc-400">
+                                <div className="flex items-start gap-2 pt-2 text-xs text-muted-foreground">
                                     <AlertCircle className="w-3 h-3 shrink-0" />
                                     <p className="font-medium">Continuity Note: {scene.differentiation_note}</p>
                                 </div>
@@ -555,10 +555,10 @@ export function SceneCard({
             {/* Float Actions */}
             {/* Delete Confirmation Dialog */}
             <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-                <DialogContent className="sm:max-w-md border-zinc-800 bg-zinc-950/90 backdrop-blur-xl shadow-2xl">
+                <DialogContent className="sm:max-w-md border-border bg-background/90 backdrop-blur-xl shadow-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-zinc-50">Delete Scene {index + 1}?</DialogTitle>
-                        <DialogDescription className="text-zinc-400">
+                        <DialogDescription className="text-muted-foreground">
                             This action cannot be undone. This scene will be permanently removed from the blueprint.
                         </DialogDescription>
                     </DialogHeader>
@@ -566,7 +566,7 @@ export function SceneCard({
                         <Button
                             variant="ghost"
                             onClick={() => setIsDeleteDialogOpen(false)}
-                            className="h-10 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
+                            className="h-10 text-muted-foreground hover:text-zinc-50 hover:bg-zinc-800"
                         >
                             Cancel
                         </Button>

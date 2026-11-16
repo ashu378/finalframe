@@ -36,7 +36,7 @@ export function StudioForm() {
             <div className="space-y-4">
                 <label
                     htmlFor="studioName"
-                    className="text-metadata text-zinc-500 ml-1"
+                    className="text-sm text-muted-foreground ml-1"
                 >
                     Studio name
                 </label>
@@ -48,16 +48,16 @@ export function StudioForm() {
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Maya’s kitchen studio"
                     required
-                    className="w-full h-16 rounded-sm border border-zinc-800 bg-zinc-950 px-6 text-sm font-black uppercase tracking-widest text-white placeholder:text-zinc-800 transition-all focus:border-primary/50 outline-none shadow-2xl"
+                    className="w-full min-h-12 rounded-xl border border-border bg-background px-4 text-base font-medium normal-case tracking-normal text-white placeholder:text-muted-foreground transition-all focus:border-primary/50 outline-none "
                 />
-                <p className="text-metadata text-zinc-600 pl-1 italic normal-case">
+                <p className="text-sm text-muted-foreground pl-1 not-italic normal-case">
                     You can change this later. It is just the name you will see in your studio.
                 </p>
             </div>
 
             {error && (
-                <div className="text-red-500 text-metadata bg-red-500/5 border border-red-500/20 p-5 rounded-sm flex items-center gap-4 uppercase tracking-widest italic">
-                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                <div className="text-red-500 text-sm bg-red-500/5 border border-red-500/20 p-5 rounded-xl flex items-center gap-4 normal-case tracking-normal not-italic">
+                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 " />
                     {error}
                 </div>
             )}

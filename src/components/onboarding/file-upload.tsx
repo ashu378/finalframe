@@ -1,9 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 interface FileUploadProps {
@@ -17,8 +16,9 @@ export function FileUpload({
     bucketName = 'studio-assets',
     onUploadComplete,
     accept = 'image/*,video/*',
-    label = 'Upload File'
+    label = 'Upload a file'
 }: FileUploadProps) {
+    const inputId = useId();
     const [uploading, setUploading] = useState(false);
     const [fileUrl, setFileUrl] = useState<string | null>(null);
     const account = useQuery(api.account.current, {});
@@ -50,16 +50,18 @@ export function FileUpload({
 
     return (
         <div className="space-y-2">
-            <div className="flex items-center gap-4">
+            <div className="flex min-w-0 flex-col items-start gap-3">
                 <Input
+                    id={inputId}
+                    label={label}
                     type="file"
                     accept={accept}
                     onChange={handleFileChange}
                     disabled={uploading}
-                    className="max-w-xs"
+                    className="min-h-12 w-full min-w-0 max-w-full text-base"
                 />
-                {uploading && <span className="text-sm text-muted-foreground">Uploading...</span>}
-                {fileUrl && !uploading && <span className="text-sm text-green-600 font-medium">Uploaded</span>}
+                {uploading && <span className="text-sm text-muted-foreground">Uploading…</span>}
+                {fileUrl && !uploading && <span className="text-sm text-[hsl(var(--success))] font-medium">Uploaded</span>}
             </div>
             {/* Visual preview could go here */}
         </div>

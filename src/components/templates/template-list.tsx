@@ -46,14 +46,14 @@ export function TemplateList({ templates, studioId }: { templates: Template[]; s
 
   if (!templates.length) return <div className="ff-card p-8 text-center"><LayoutTemplate className="mx-auto size-8 text-muted-foreground" /><h2 className="mt-4 text-xl font-semibold">No matching templates</h2><p className="mt-2 text-sm text-muted-foreground">Try another search or choose a new starting point.</p></div>;
   return <div className="space-y-5">
-    <p className="text-sm leading-6 text-muted-foreground">Templates provide an editable brief and format. Review your plan and its estimate before starting generation. Save a preset to keep it handy across your studio.</p>
+    <p className="text-sm leading-6 text-muted-foreground">Each template gives you a starting idea and video shape. Change it, review the plan and cost, then decide what to make. Save useful templates to find them again.</p>
     {error ? <p role="alert" className="rounded-xl border border-destructive p-4 text-sm text-destructive">{error}</p> : null}
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{templates.map((template) => <article key={template.id} className="ff-card flex flex-col p-6">
+    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{templates.map((template) => <article key={template.id} className="flex min-w-0 flex-col rounded-2xl border border-border bg-card p-6 transition-colors hover:border-primary/50">
       <div className="flex items-center justify-between gap-3"><LayoutTemplate className="size-6 text-primary" /><span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">{template.blueprint_data.durationSeconds} seconds</span></div>
-      <h2 className="mt-7 text-xl font-semibold">{template.name}</h2>
+      <h2 className="ff-display mt-7 text-2xl font-semibold">{template.name}</h2>
       <p className="mt-3 flex-1 text-sm leading-6 text-muted-foreground">{template.description}</p>
-      <p className="mt-4 text-xs text-muted-foreground">{String(template.blueprint_data.outputPreset).toLowerCase().replaceAll('_', ' ')} · Editable starting brief</p>
-      <div className="mt-6 flex flex-wrap gap-3"><Button disabled={pending !== null} onClick={() => void startTemplate(template)}><Plus className="size-4" />{pending === template.id ? 'Working…' : 'Use template'}</Button><Button variant="secondary" disabled={pending !== null} aria-pressed={saved.has(template.id)} aria-label={`${saved.has(template.id) ? 'Remove saved preset' : 'Save preset'}: ${template.name}`} onClick={() => void toggleSaved(template)}>{saved.has(template.id) ? <Check className="size-4" /> : <Bookmark className="size-4" />}{saved.has(template.id) ? 'Saved' : 'Save preset'}</Button></div>
+      <p className="mt-4 text-xs text-muted-foreground">{String(template.blueprint_data.outputPreset).toLowerCase().replaceAll('_', ' ')} · Change it to fit your idea</p>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2"><Button disabled={pending !== null} onClick={() => void startTemplate(template)}><Plus className="size-4" />{pending === template.id ? 'Working…' : 'Use template'}</Button><Button variant="secondary" disabled={pending !== null} aria-pressed={saved.has(template.id)} aria-label={`${saved.has(template.id) ? 'Remove saved template' : 'Save template'}: ${template.name}`} onClick={() => void toggleSaved(template)}>{saved.has(template.id) ? <Check className="size-4" /> : <Bookmark className="size-4" />}{saved.has(template.id) ? 'Saved' : 'Save template'}</Button></div>
     </article>)}</div>
   </div>;
 }

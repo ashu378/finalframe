@@ -37,18 +37,18 @@ export function ScopedReview({ token, data }: { token: string; data: ReviewData 
     }
     return <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         <section className="space-y-5">
-            <video ref={player} controls preload="metadata" src={data.videoUrl ?? undefined} className="max-h-[80vh] w-full rounded-2xl border border-border bg-black object-contain" aria-label="Video under review" onTimeUpdate={event => setTimeSeconds(Math.min(data.durationSeconds, Math.round(event.currentTarget.currentTime * 10) / 10))} />
-            <div className="rounded-2xl border border-border bg-card p-6"><h2 className="text-xl font-semibold">Timeline version {data.timelineVersionNumber}</h2><p className="mt-2 text-sm text-muted-foreground">Feedback and decisions apply to this exact export. New edits require a new review link.</p><p className="mt-3 text-sm">Status: {data.status.replaceAll('_', ' ').toLowerCase()}</p></div>
+            <video ref={player} controls preload="metadata" src={data.videoUrl ?? undefined} className="max-h-[80vh] w-full rounded-2xl border border-border bg-background object-contain" aria-label="Video under review" onTimeUpdate={event => setTimeSeconds(Math.min(data.durationSeconds, Math.round(event.currentTarget.currentTime * 10) / 10))} />
+            <div className="rounded-2xl border border-border bg-card p-6"><h2 className="text-xl font-semibold">Edit version {data.timelineVersionNumber}</h2><p className="mt-2 text-sm text-muted-foreground">Your comments and approval apply to this video only. A new edit needs a new review link.</p><p className="mt-3 text-sm">Status: {data.status.replaceAll('_', ' ').toLowerCase()}</p></div>
             <div className="flex flex-wrap gap-3"><Button disabled={pending || decided || !authorName.trim()} onClick={() => decide('APPROVED')}>Approve this version</Button><Button variant="secondary" disabled={pending || decided || !authorName.trim() || !body.trim()} onClick={() => decide('CHANGES_REQUESTED')}>Request changes</Button></div>
         </section>
         <aside className="space-y-5 rounded-2xl border border-border bg-card p-6">
-            <h2 className="text-lg font-semibold">Version feedback</h2>
+            <h2 className="text-lg font-semibold">Your feedback</h2>
             <label className="block space-y-2 text-sm">Your name<input value={authorName} maxLength={100} disabled={pending} onChange={event => setAuthorName(event.target.value)} className="w-full rounded-lg border border-border bg-background p-3" autoComplete="name" /></label>
-            <label className="block space-y-2 text-sm">Note or revision reason<textarea value={body} maxLength={10000} disabled={pending} onChange={event => setBody(event.target.value)} className="min-h-28 w-full rounded-lg border border-border bg-background p-3" /></label>
+            <label className="block space-y-2 text-sm">Your comment or requested change<textarea value={body} maxLength={10000} disabled={pending} onChange={event => setBody(event.target.value)} className="min-h-28 w-full rounded-lg border border-border bg-background p-3" /></label>
             <p className="text-sm text-muted-foreground">At {timeSeconds.toFixed(1)} seconds. Pause the video at the moment you want to discuss.</p>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            <Button disabled={pending || data.status === 'APPROVED' || !authorName.trim() || !body.trim()} onClick={comment}>{pending ? 'Saving…' : 'Add timestamped comment'}</Button>
-            <ul className="space-y-4 border-t border-border pt-5">{data.comments.map(item => <li key={item.id} className="space-y-1"><button className="text-sm font-medium text-primary underline" onClick={() => { if (player.current) player.current.currentTime = item.timeSeconds; }}>{item.timeSeconds.toFixed(1)}s · {item.authorName}</button><p className="whitespace-pre-wrap break-words text-sm">{item.body}</p>{item.resolved && <span className="text-xs text-muted-foreground">Resolved</span>}</li>)}</ul>
+            <Button disabled={pending || data.status === 'APPROVED' || !authorName.trim() || !body.trim()} onClick={comment}>{pending ? 'Saving…' : 'Add comment at this time'}</Button>
+            <ul className="space-y-4 border-t border-border pt-5">{data.comments.map(item => <li key={item.id} className="space-y-1"><button className="min-w-11 min-h-11 text-sm font-medium text-primary underline" onClick={() => { if (player.current) player.current.currentTime = item.timeSeconds; }}>{item.timeSeconds.toFixed(1)}s · {item.authorName}</button><p className="whitespace-pre-wrap break-words text-sm">{item.body}</p>{item.resolved && <span className="text-xs text-muted-foreground">Resolved</span>}</li>)}</ul>
         </aside>
     </div>;
 }

@@ -9,40 +9,40 @@ export function Footer() {
         <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Link href="/" className="flex items-center gap-3">
-              <span className="grid size-9 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={36} height={36} className="size-full object-cover" /></span>
+              <span className="grid size-9 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={36} height={36} className="size-full object-cover grayscale" /></span>
               <span className="ff-display text-lg font-semibold">FinalFrame</span>
             </Link>
-            <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">A friendly production studio for turning ideas, scripts, footage, and brand assets into finished video.</p>
+            <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">A place for your ideas, scenes and next stories. Make videos with your own words and media.</p>
             <Link href="/contact" className="ff-link mt-6 inline-flex items-center gap-2 text-sm"><Mail className="size-4" /> Talk to us</Link>
           </div>
           <div>
-            <p className="ff-eyebrow">Make</p>
-            <nav className="mt-4 flex flex-col gap-3 text-sm text-muted-foreground">
-              <Link href="/methodology" className="transition hover:text-foreground">How it works</Link>
-              <Link href="/case-studies" className="transition hover:text-foreground">What you can make</Link>
-              <Link href="/pricing" className="transition hover:text-foreground">Credits</Link>
-              <Link href="/signup" className="transition hover:text-foreground">Start creating</Link>
+            <p className="text-sm font-semibold">Make</p>
+            <nav className="mt-4 flex flex-col gap-1 text-sm text-muted-foreground">
+              <Link href="/methodology" className="flex min-h-11 items-center transition hover:text-foreground">How it works</Link>
+              <Link href="/case-studies" className="flex min-h-11 items-center transition hover:text-foreground">What you can make</Link>
+              <Link href="/pricing" className="flex min-h-11 items-center transition hover:text-foreground">Credits</Link>
+              <Link href="/signup" className="flex min-h-11 items-center transition hover:text-foreground">Start creating</Link>
             </nav>
           </div>
           <div>
-            <p className="ff-eyebrow">Company</p>
-            <nav className="mt-4 flex flex-col gap-3 text-sm text-muted-foreground">
-              <Link href="/about" className="transition hover:text-foreground">About FinalFrame</Link>
-              <Link href="/contact" className="transition hover:text-foreground">Contact</Link>
-              <Link href="/login" className="transition hover:text-foreground">Log in</Link>
+            <p className="text-sm font-semibold">Company</p>
+            <nav className="mt-4 flex flex-col gap-1 text-sm text-muted-foreground">
+              <Link href="/about" className="flex min-h-11 items-center transition hover:text-foreground">About FinalFrame</Link>
+              <Link href="/contact" className="flex min-h-11 items-center transition hover:text-foreground">Contact</Link>
+              <Link href="/login" className="flex min-h-11 items-center transition hover:text-foreground">Log in</Link>
             </nav>
           </div>
           <div>
-            <p className="ff-eyebrow">Good to know</p>
-            <nav className="mt-4 flex flex-col gap-3 text-sm text-muted-foreground">
-              <Link href="/legal/terms" className="transition hover:text-foreground">Terms</Link>
-              <Link href="/legal/privacy" className="transition hover:text-foreground">Privacy</Link>
-              <Link href="/legal/cookies" className="transition hover:text-foreground">Cookies</Link>
-              <Link href="/legal/gdpr" className="transition hover:text-foreground">GDPR</Link>
+            <p className="text-sm font-semibold">Good to know</p>
+            <nav className="mt-4 flex flex-col gap-1 text-sm text-muted-foreground">
+              <Link href="/legal/terms" className="flex min-h-11 items-center transition hover:text-foreground">Terms</Link>
+              <Link href="/legal/privacy" className="flex min-h-11 items-center transition hover:text-foreground">Privacy</Link>
+              <Link href="/legal/cookies" className="flex min-h-11 items-center transition hover:text-foreground">Cookies</Link>
+              <Link href="/legal/gdpr" className="flex min-h-11 items-center transition hover:text-foreground">GDPR</Link>
             </nav>
           </div>
         </div>
-        <div className="mt-14 flex flex-col gap-3 border-t border-border/70 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-8 flex flex-col gap-3 border-t border-border/70 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>© {new Date().getFullYear()} FinalFrame. Make something worth watching.</p>
         </div>
       </div>

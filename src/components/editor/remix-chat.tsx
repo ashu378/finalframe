@@ -19,7 +19,7 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
     const [isRemixing, setIsRemixing] = useState(initialIsRemixing);
 
     // Default welcome message
-    const welcomeMsg = { role: 'assistant' as const, content: 'Production Assistant online. Define adjustments for specific layers, technical timing, or visual execution.' };
+    const welcomeMsg = { role: 'assistant' as const, content: 'Tell the assistant what you want to change: a clip, the timing, text or the look of your video.' };
 
     // Merge initial history with welcome message if empty
     const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>(
@@ -37,7 +37,7 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
                 setIsRemixing(false);
                 clearInterval(interval);
                 router.refresh(); // Refresh to see new layers
-                setMessages(prev => [...prev, { role: 'assistant', content: 'Execution completed. Manifest updated with new layers.' }]);
+                setMessages(prev => [...prev, { role: 'assistant', content: 'Your changes are saved in the edit.' }]);
             }
         }, 3000);
 
@@ -81,16 +81,16 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
     }
 
     return (
-        <div className="flex flex-col h-full bg-zinc-950 border-l border-zinc-800 shadow-3xl">
+        <div className="flex flex-col h-full bg-background border-l border-border shadow-3xl">
             {/* Header */}
-            <div className="p-8 border-b border-zinc-800 flex items-center justify-between">
+            <div className="p-8 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <Terminal className="w-5 h-5 text-primary italic" />
-                    <span className="text-metadata font-black uppercase tracking-[0.4em] text-zinc-50 italic">Director_Command</span>
+                    <span className="text-metadata font-semibold tracking-[0.4em] text-zinc-50 italic">Director_Command</span>
                 </div>
                 <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-primary shadow-[0_0_10px_rgba(251,191,36,0.6)] animate-pulse" />
-                    <span className="text-metadata font-black text-primary uppercase tracking-[0.4em] italic leading-none">Status: Linked</span>
+                    <div className="w-2 h-2 rounded-full bg-primary  animate-pulse" />
+                    <span className="text-metadata font-semibold text-primary tracking-[0.4em] italic leading-none">Status: Linked</span>
                 </div>
             </div>
 
@@ -98,12 +98,12 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
             <div className="flex-1 overflow-y-auto p-8 space-y-10 scrollbar-hide">
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[95%] rounded-sm p-6 text-sm font-bold leading-relaxed tracking-wide uppercase italic shadow-lg ${msg.role === 'user'
-                            ? 'bg-zinc-900 text-zinc-50 border border-zinc-800'
+                        <div className={`max-w-[95%] rounded-xl p-6 text-sm font-bold leading-relaxed tracking-wide italic shadow-lg ${msg.role === 'user'
+                            ? 'bg-card text-zinc-50 border border-border'
                             : 'bg-primary/5 text-primary border border-primary/20'
                             }`}>
-                            <span className="block text-metadata font-black text-zinc-600 mb-4 tracking-[0.2em]">
-                                {msg.role === 'user' ? 'OPERATOR_SIGNAL' : 'ASSISTANT_RESONANCE'}
+                            <span className="block text-metadata font-semibold text-muted-foreground mb-4">
+                                {msg.role === 'user' ? 'You' : 'FinalFrame assistant'}
                             </span>
                             {msg.content}
                         </div>
@@ -112,7 +112,7 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
             </div>
 
             {/* Input */}
-            <div className="p-8 border-t border-zinc-800 bg-zinc-950">
+            <div className="p-8 border-t border-border bg-background">
                 <div className="relative group">
                     <input
                         type="text"
@@ -120,13 +120,13 @@ export function RemixChat({ projectId, renderJobId, isRemixing: initialIsRemixin
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                         placeholder="ENTER DIRECTIVE Command..."
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-sm py-5 pl-8 pr-16 text-sm font-black text-zinc-50 focus:outline-none focus:border-primary/50 placeholder:text-zinc-700 transition-all uppercase tracking-[0.2em] italic"
+                        className="w-full bg-card border border-border rounded-xl py-5 pl-8 pr-16 text-sm font-semibold text-zinc-50 focus:outline-none focus:border-primary/50 placeholder:text-muted-foreground transition-all italic"
                         disabled={loading || isRemixing}
                     />
                     <button
                         onClick={handleSend}
                         disabled={loading || isRemixing || !input.trim()}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 p-3.5 rounded-sm bg-primary/10 text-primary hover:bg-primary hover:text-black transition-all disabled:opacity-20 shadow-2xl"
+                        className="min-w-11 min-h-11 absolute right-4 top-1/2 -translate-y-1/2 p-3.5 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-black transition-all disabled:opacity-20 shadow-2xl"
                     >
                         {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                     </button>

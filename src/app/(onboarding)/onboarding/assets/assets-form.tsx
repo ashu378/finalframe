@@ -35,7 +35,7 @@ export function AssetsForm() {
     return (
         <form action={handleSubmit} className="space-y-8">
             {/* Section 1: Logo */}
-            <div className="space-y-6 border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl relative overflow-hidden">
+            <div className="space-y-6 border border-white/5 p-8 rounded-xl bg-card  relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
                 <div className="flex justify-between items-start">
                     <h2 className="text-[14px] font-semibold text-foreground">01. Your logo <span className="font-normal text-muted-foreground">(optional)</span></h2>
@@ -49,14 +49,14 @@ export function AssetsForm() {
                         accept="image/*"
                     />
                 ) : (
-                    <div className="flex items-center justify-between bg-black border border-primary/30 p-4 rounded-sm shadow-2xl">
-                        <span className="text-[11px] font-black text-primary uppercase tracking-widest italic">{logo.name}</span>
+                    <div className="flex items-center justify-between bg-background border border-primary/30 p-4 rounded-xl ">
+                        <span className="text-sm font-semibold text-primary normal-case tracking-normal not-italic">{logo.name}</span>
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => setLogo(null)}
                             type="button"
-                            className="text-[10px] font-black text-red-500 uppercase tracking-widest hover:text-red-400 hover:bg-red-500/5 px-4 h-9 rounded-sm transition-all italic"
+                            className="text-sm font-semibold text-red-500 normal-case tracking-normal hover:text-red-400 hover:bg-red-500/5 px-4 h-9 rounded-xl transition-all not-italic"
                         >
                             Purge_Data
                         </Button>
@@ -65,7 +65,7 @@ export function AssetsForm() {
             </div>
 
             {/* Section 2: Visuals */}
-            <div className="space-y-6 border border-white/5 p-8 rounded-sm bg-black/40 shadow-2xl relative overflow-hidden">
+            <div className="space-y-6 border border-white/5 p-8 rounded-xl bg-card  relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-[1px] bg-primary/20" />
                 <div className="flex justify-between items-start">
                     <h2 className="text-[14px] font-semibold text-foreground">02. Your images and clips <span className="font-normal text-muted-foreground">(optional)</span></h2>
@@ -75,14 +75,14 @@ export function AssetsForm() {
 
                 <div className="space-y-2">
                     {visuals.map((v, i) => (
-                        <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-4 rounded-sm">
-                            <span className="text-[11px] font-black text-zinc-400 uppercase tracking-widest italic">{v.name}</span>
+                        <div key={i} className="flex items-center justify-between bg-background border border-white/5 p-4 rounded-xl">
+                            <span className="text-sm font-semibold text-muted-foreground normal-case tracking-normal not-italic">{v.name}</span>
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setVisuals(prev => prev.filter((_, idx) => idx !== i))}
                                 type="button"
-                                className="text-[10px] font-black text-zinc-500 hover:text-white uppercase tracking-widest px-4 h-9 rounded-sm transition-all italic"
+                                className="text-sm font-semibold text-muted-foreground hover:text-white normal-case tracking-normal px-4 h-9 rounded-xl transition-all not-italic"
                             >
                                 Purge
                             </Button>
@@ -100,8 +100,8 @@ export function AssetsForm() {
             </div>
 
             {error && (
-                <div className="text-red-500 text-[10px] font-black bg-red-500/5 border border-red-500/20 p-5 rounded-sm flex items-center gap-3 uppercase tracking-widest italic">
-                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                <div className="text-red-500 text-sm font-semibold bg-red-500/5 border border-red-500/20 p-5 rounded-xl flex items-center gap-3 normal-case tracking-normal not-italic">
+                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 " />
                     {error}
                 </div>
             )}
@@ -110,7 +110,7 @@ export function AssetsForm() {
                 type="submit"
                 disabled={loading}
                 size="lg"
-                className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
+                className="w-full min-h-12 text-sm font-semibold normal-case tracking-normal bg-primary text-black rounded-xl   hover:bg-white active:scale-[0.98] transition-all border-none not-italic"
             >
                 {loading ? 'Saving…' : logo || visuals.length ? 'Save media and continue' : 'Skip for now'}
             </Button>

@@ -100,13 +100,18 @@ const ctx = { db: {
   assert.equal(rows.projects.find((row) => row._id === regular.projectId).metadata.outcomeGoal, 'get_attention');
   assert.equal(rows.projectMembers.length, 2);
 
+  const creatorIntent = load('src/lib/production/creator-intent.ts');
+  const creationControls = load('src/components/production/creation-intent-controls.tsx', { '@/lib/production/creator-intent': creatorIntent });
   const { CreateProductionForm } = load('src/components/production/create-production-form.tsx', {
     '../../../renderer/src/output-presets': load('renderer/src/output-presets.ts'),
+    './creation-intent-controls': creationControls, '@/lib/production/creator-intent': creatorIntent, '@/lib/production/episode-actions': { saveProjectCreatorPreference() { throw Error('No preference write on render'); } },
     'next/navigation': { useRouter: () => ({}) }, '@/lib/project/actions': {}, '@/lib/production/actions': {}, '@/lib/assets/actions': {}, '@/components/production/planning': {},
     '@/lib/ai/video-routing': { VIDEO_TYPES: catalog.STARTER_TEMPLATES.map((entry) => entry.videoType), VIDEO_TYPE_LABELS: {} },
   });
   const script = renderToStaticMarkup(React.createElement(CreateProductionForm, { initialMode: catalog.parseStartingMode('SCRIPT') }));
-  assert.match(script.match(/<button(?=[^>]*aria-pressed="true")[^>]*>([\s\S]*?)<\/button>/)[1], /Paste a script/);
+  // Creation-path and source-mode choices are separate; assert the selected script source, not the first pressed button.
+  const selectedSourceButtons = [...script.matchAll(/<button(?=[^>]*aria-pressed="true")[^>]*>([\s\S]*?)<\/button>/g)].map(match => match[1]);
+  assert.equal(selectedSourceButtons.filter(text => /Paste a script/.test(text)).length, 1);
   assert.match(script, /<label[^>]*>Paste your script<\/label>/);
   const initial = catalog.getStarterTemplate('product-launch');
   const defaults = renderToStaticMarkup(React.createElement(CreateProductionForm, { templateDefaults: initial }));
@@ -120,7 +125,8 @@ const ctx = { db: {
     '@/lib/guards': { requireAuth: async () => {} },
     '@/components/production/create-production-form': { CreateProductionForm: FormStub },
     '@/lib/project/actions': { getStudioContext: async () => ({ studioId: 'workspace-a' }) },
-    '@/lib/production/episode-actions': { getPlanningContinuityOptions: async () => undefined },
+    '@/lib/production/episode-actions': { getPlanningContinuityOptions: async () => undefined, getProjectCreatorPreference: async () => undefined },
+    '@/lib/production/creator-intent': creatorIntent,
     '@/lib/templates/actions': { getTemplateDefaultsForProject: async () => initial },
     '@/lib/templates/catalog': catalog,
   }).default;

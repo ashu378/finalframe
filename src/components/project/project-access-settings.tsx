@@ -23,7 +23,7 @@ export function ProjectAccessSettings({ projectId }: { projectId: Id<'projects'>
     try {
       if (role) await setMember({ projectId, userId, role });
       else await removeMember({ projectId, userId });
-      setMessage({ failed: false, text: role ? 'Project role saved.' : 'Project access revoked.' });
+      setMessage({ failed: false, text: role ? 'Project role saved.' : 'Project access removed.' });
     } catch {
       setMessage({ failed: true, text: 'Access could not be changed. Check workspace membership and confirm that the project has an owner.' });
     } finally { setPending(false); }
@@ -35,7 +35,7 @@ export function ProjectAccessSettings({ projectId }: { projectId: Id<'projects'>
     {([['Assigned access', assigned], ['Add a workspace member', available]] as const).map(([title, roster]) => <section key={title} className="ff-card space-y-4 p-5" aria-label={title}>
       <h2 className="text-lg font-semibold">{title}</h2>
       {roster.status === 'LoadingFirstPage' && <p role="status" className="text-sm text-muted-foreground">Loading people…</p>}
-      {roster.status === 'Exhausted' && !roster.results.length && <p className="text-sm text-muted-foreground">{title === 'Assigned access' ? 'There are no explicit role assignments to show.' : 'No additional active workspace members found.'}</p>}
+      {roster.status === 'Exhausted' && !roster.results.length && <p className="text-sm text-muted-foreground">{title === 'Assigned access' ? 'Nobody has been added to this project yet.' : 'Nobody else is available to add.'}</p>}
       <ul className="space-y-3">{roster.results.map(person => <li key={`${person.userId}:${person.role}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
         <div className="min-w-0"><p className="break-words text-sm font-semibold">{person.name}{person.self ? ' (you)' : ''}</p><p className="text-xs text-muted-foreground">{person.role ? `${person.role.toLowerCase()} · ` : ''}Member ID ending in {person.userId.slice(-6)}</p></div>
         {!person.self && <div className="flex flex-wrap gap-2">
@@ -48,7 +48,7 @@ export function ProjectAccessSettings({ projectId }: { projectId: Id<'projects'>
             </select>
             <button type="submit" disabled={pending} className="ff-button-primary min-h-11">{person.role ? 'Save role' : 'Grant access'}</button>
           </form>}
-          {person.role && <details className="rounded-xl border border-border px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm">Revoke access</summary><button type="button" onClick={() => change(person.userId, null)} disabled={pending} className="ff-button-quiet min-h-11 text-destructive">Confirm revoke</button></details>}
+          {person.role && <details className="rounded-xl border border-border px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm">Remove access</summary><button type="button" onClick={() => change(person.userId, null)} disabled={pending} className="ff-button-quiet min-h-11 text-destructive">Confirm removal</button></details>}
         </div>}
       </li>)}</ul>
       {(roster.status === 'CanLoadMore' || roster.status === 'LoadingMore') && <button type="button" className="ff-button-quiet min-h-11" disabled={roster.status === 'LoadingMore'} onClick={() => roster.loadMore(PAGE_SIZE)}>Load more people</button>}

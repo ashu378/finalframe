@@ -92,7 +92,7 @@ export function PromptEditPanel({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-3">
-        <button type="button" onClick={handlePreview} disabled={!canPreview} className="ff-button-secondary min-w-44">
+        <button type="button" onClick={handlePreview} disabled={!canPreview} className="min-h-11 ff-button-secondary min-w-44">
           {impactLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Sparkles className="size-4" aria-hidden="true" />}
           {impactLoading ? 'Checking…' : 'Check what changes'}
         </button>
@@ -122,7 +122,7 @@ export function PromptEditPanel({
               I have reviewed what may change and want to save this request for the next approved video step.
             </span>
           </label>
-          <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="ff-button-primary mt-4 w-full sm:w-auto">
+          <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="min-w-11 min-h-11 ff-button-primary mt-4 w-full sm:w-auto">
             {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Check className="size-4" aria-hidden="true" />}
             {submitting ? 'Saving change…' : 'Save this change'}
           </button>

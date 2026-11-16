@@ -50,8 +50,8 @@ export function GoalForm() {
             </div>
 
             {error && (
-                <div className="text-red-500 text-metadata bg-red-500/5 border border-red-500/20 p-5 rounded-sm flex items-center gap-4 uppercase tracking-widest italic leading-loose">
-                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                <div className="text-red-500 text-sm bg-red-500/5 border border-red-500/20 p-5 rounded-xl flex items-center gap-4 normal-case tracking-normal not-italic leading-loose">
+                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 " />
                     {error}
                 </div>
             )}

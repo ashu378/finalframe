@@ -10,9 +10,8 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { requireOnboardingComplete } from '@/lib/guards';
 import Link from 'next/link';
 import Image from 'next/image';
-import { FolderOpen, Library, Plus, Settings } from 'lucide-react';
-import { SignOutButton } from '@/components/auth/sign-out-button';
-import { ScrollRevealRoot } from '@/components/threeui/scroll-reveal-root';
+import { Plus } from 'lucide-react';
+import { MobileStudioMenu } from '@/components/layout/mobile-studio-menu';
 import { api } from '@/../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
@@ -42,15 +41,11 @@ export default async function DashboardLayout({
             </div>
             <nav className="sticky top-0 z-20 flex items-center justify-between border-b border-border/70 bg-background/95 px-4 py-3 backdrop-blur-xl md:hidden" aria-label="Mobile studio navigation">
                 <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold"><span className="grid size-8 place-items-center overflow-hidden rounded-lg border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={32} height={32} className="size-full object-cover" priority /></span><span className="hidden min-[380px]:inline">FinalFrame</span></Link>
-                <div className="flex items-center gap-1">
-                    <Link href="/dashboard/projects" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Project library"><Library className="size-4" /></Link>
-                    <Link href="/dashboard/create" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground" aria-label="Create a video"><Plus className="size-4" /></Link>
-                    <Link href="/dashboard/assets" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Media library"><FolderOpen className="size-4" /></Link>
-                    <Link href="/dashboard/settings" className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Settings and credits"><Settings className="size-4" /></Link>
-                    <div className="ml-1"><SignOutButton compact /></div>
+                <div className="flex items-center gap-2">
+                    <Link href="/dashboard/create" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground" aria-label="Create a video"><Plus className="size-5" /></Link>
+                    <MobileStudioMenu />
                 </div>
             </nav>
-            <ScrollRevealRoot selector="#main-content > div > *" />
             <main id="main-content" className="min-h-dvh md:ml-64">
                 <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-8 sm:py-8">
                     {children}

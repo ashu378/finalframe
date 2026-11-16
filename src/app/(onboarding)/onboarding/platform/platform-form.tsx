@@ -39,7 +39,7 @@ export function PlatformForm() {
     return (
         <form action={handleSubmit} className="space-y-8">
             <div className="space-y-6">
-                <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400 pl-1 italic">01. Distribution_Target (Platform)</h2>
+                <h2 className="text-sm font-semibold normal-case tracking-normal text-muted-foreground pl-1 not-italic">Where you will share it</h2>
                 <div className="grid gap-3">
                     {PLATFORMS.map((platform) => (
                         <OptionCard
@@ -53,7 +53,7 @@ export function PlatformForm() {
             </div>
 
             <div className="space-y-6">
-                <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400 pl-1 italic">02. Signal_Context</h2>
+                <h2 className="text-sm font-semibold normal-case tracking-normal text-muted-foreground pl-1 not-italic">How it will be watched</h2>
                 <div className="grid gap-3">
                     {CONTEXTS.map((context) => (
                         <OptionCard
@@ -70,8 +70,8 @@ export function PlatformForm() {
             <input type="hidden" name="context" value={selectedContext} />
 
             {error && (
-                <div className="text-red-500 text-[10px] font-black bg-red-500/5 border border-red-500/20 p-5 rounded-sm flex items-center gap-3 uppercase tracking-widest italic leading-loose">
-                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                <div className="text-red-500 text-sm font-semibold bg-red-500/5 border border-red-500/20 p-5 rounded-xl flex items-center gap-3 normal-case tracking-normal not-italic leading-loose">
+                    <span className="w-1.5 h-1.5 rounded-none bg-red-500 " />
                     {error}
                 </div>
             )}
@@ -80,7 +80,7 @@ export function PlatformForm() {
                 type="submit"
                 disabled={loading || !selectedPlatform || !selectedContext}
                 size="lg"
-                className="w-full h-16 text-[11px] font-black uppercase tracking-[0.3em] bg-primary text-black rounded-sm shadow-2xl shadow-primary/20 hover:bg-white active:scale-[0.98] transition-all border-none italic"
+                className="w-full min-h-12 text-sm font-semibold normal-case tracking-normal bg-primary text-black rounded-xl   hover:bg-white active:scale-[0.98] transition-all border-none not-italic"
             >
                 {loading ? 'Saving…' : 'Continue'}
             </Button>

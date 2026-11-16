@@ -7,7 +7,7 @@ export default async function GoalPage() {
 
     return (
         <div className="space-y-8">
-            <div className="space-y-2 text-center">
+            <div className="space-y-2 text-left">
                 <h1 className="ff-display text-3xl font-semibold tracking-tight text-foreground mb-2">What should your video help you do?</h1>
                 <p className="text-muted-foreground text-sm max-w-sm mx-auto">
                     Choose the outcome that matters most for the work you make.

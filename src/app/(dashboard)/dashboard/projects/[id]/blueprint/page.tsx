@@ -1,6 +1,6 @@
 import { decodeProjectRouteId } from '@/lib/project/route-id';
 /**
- * FinalFrame — Blueprint Editor Page
+ * FinalFrame — Video plan Page
  * Reference: MASTER_PRD.md § 5.II — AI Director Blueprint
  * Reference: BUILD_PHASES.md — Phase 2 Blueprint editing, Scene reordering
  */
@@ -16,8 +16,8 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { makeFunctionReference } from 'convex/server';
 
 export const metadata = {
-    title: 'Blueprint Editor',
-    description: 'Edit your project blueprint',
+    title: 'Video plan',
+    description: 'Review and edit your video plan',
 };
 
 interface BlueprintPageProps {
@@ -67,7 +67,7 @@ export default async function BlueprintPage({ params, searchParams }: BlueprintP
     const canEdit = ['OWNER', 'EDITOR'].includes(access.projectRole);
     return <div className="mx-auto max-w-6xl space-y-6 py-5 sm:py-8">{picker}<section className="ff-card space-y-4 p-6">
         <h1 className="text-2xl font-semibold">No production plan yet</h1>
-        <p className="text-sm leading-6 text-muted-foreground">Start this project's canonical plan from an idea, script or supplied media. Existing project records stay retained; no studio identity, minimum scene count or global brand is imposed.</p>
+        <p className="text-sm leading-6 text-muted-foreground">Start this project's plan with an idea, script or uploaded media. Your earlier work stays saved, and you choose this project's characters, brand and number of scenes.</p>
         {canEdit ? <Link className="ff-button-primary min-h-11" href={`/dashboard/create?project=${encodeURIComponent(id)}`}>Create this project's plan</Link> : <p className="text-sm text-muted-foreground">A project owner or editor can create its first plan.</p>}
         <Link className="ff-link inline-flex min-h-11 items-center" href={`/dashboard/projects/${encodeURIComponent(id)}`}>Back to project</Link>
     </section></div>;

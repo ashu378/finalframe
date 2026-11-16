@@ -144,7 +144,7 @@ await check('renderer-unavailable state is explicit and safe', () => {
   sourceHas(finishPanel, /render service is not available|not connected yet/i, 'unavailable renderer must be explained to the user');
   sourceHas(finishPanel, /downloadUrl/, 'download must depend on a verified output URL');
   sourceHas(assemblyPanel, /UNAVAILABLE/, 'assembly must expose unavailable worker state');
-  sourceHas(assemblyPanel, /No fake completion is shown/i, 'assembly must not present fake completion');
+  sourceHas(assemblyPanel, /Your work has not been marked complete\./i, 'assembly must not present fake completion');
 });
 
 if (failures.length > 0) {
