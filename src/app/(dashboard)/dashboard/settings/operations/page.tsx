@@ -6,7 +6,7 @@ import { TestCreditGrantForm } from '@/components/admin/test-credit-grant-form';
 import { api } from '@/../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
-export const metadata = { title: 'Studio operations | FinalFrame' };
+export const metadata = { title: 'Studio operations' };
 export default async function StudioOperationsPage() {
   const access = await requireStudioAdmin();
   const client = await getAuthenticatedConvexClient();

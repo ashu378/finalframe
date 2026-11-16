@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireAuth } from '@/lib/guards';
 import { getTeamContext, getTeamInvitations, getTeamRoster, getTeamWorkspaces } from '@/lib/teams/actions';
 import { WorkspacePicker, TeamInviteForm, TeamMemberControls, RevokeInvitationForm, WorkspaceTransferForm } from '@/components/team/team-controls';
-export const metadata = { title: 'People and workspaces | FinalFrame' };
+export const metadata = { title: 'People and workspaces' };
 export default async function TeamSettingsPage({ searchParams }: { searchParams: Promise<{ studioId?: string; membersCursor?: string; invitationsCursor?: string; workspacesCursor?: string; status?: string }> }) {
   await requireAuth(); const params = await searchParams; const context = await getTeamContext(params.studioId); const canManage = context.role === 'owner' || context.role === 'admin'; const status = params.status === 'ACCEPTED' || params.status === 'REVOKED' ? params.status : 'PENDING';
   const [workspaces, members, invitations] = await Promise.all([getTeamWorkspaces(params.workspacesCursor), canManage ? getTeamRoster(context.studioId, params.membersCursor) : null, canManage ? getTeamInvitations(context.studioId, status, params.invitationsCursor) : null]);

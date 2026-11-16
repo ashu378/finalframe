@@ -36,7 +36,7 @@ export default async function WorkspaceSectionPage({ params, searchParams }: { p
   const selectedProductionId = query.production || (navigation.options.length === 1 ? navigation.options[0].productionId : undefined);
   if (selectedProductionId && !navigation.options.some((option) => option.productionId === selectedProductionId)) notFound();
   const picker = <EpisodePicker projectExternalId={id} options={navigation.options} selectedProductionId={selectedProductionId} nextEpisodeNumber={navigation.nextEpisodeNumber} />;
-  if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6">{picker}<p className="text-sm text-muted-foreground">Choose the video or episode you want to work on.</p></div>;
+  if (!selectedProductionId && navigation.options.length > 1) return <div className="space-y-6"><header><h1 className="ff-display text-3xl font-semibold sm:text-4xl">Choose a video or episode</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Pick up your saved work, or start the next part of your story.</p></header>{picker}</div>;
   const convex = await getAuthenticatedConvexClient();
   const authoring = ['overview','plan','storyboard','canvas','media','takes'].includes(active);
   const graph = await convex.query(api.productionGraph.getByProject, { projectExternalId: id, productionId: selectedProductionId as Id<'productions'> | undefined, ...(authoring?{preferDraft:true}:{}), ...(!authoring&&typeof query.timeline==='string'?{timelineId:query.timeline as Id<'timelines'>}:{}) });

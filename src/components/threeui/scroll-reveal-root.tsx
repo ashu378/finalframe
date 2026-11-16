@@ -29,9 +29,9 @@ export function ScrollRevealRoot({ selector = '#main-content > *' }: ScrollRevea
       // An unsupported animation API leaves the original static content intact.
       if (typeof node.animate !== 'function') continue;
       const animation = node.animate([
-        { opacity: 0, transform: 'translate3d(0, 36px, 0)' },
+        { opacity: 0, transform: 'translate3d(0, 24px, 0)' },
         { opacity: 1, transform: 'none' },
-      ], { duration: 800, delay: (index % 4) * 85, easing: 'cubic-bezier(.2,.75,.2,1)', fill: 'both' });
+      ], { duration: 500, delay: (index % 4) * 50, easing: 'cubic-bezier(.2,.75,.2,1)', fill: 'both' });
       animation.pause();
       animation.onfinish = () => { animation.cancel(); animations.delete(node); };
       animations.set(node, animation);

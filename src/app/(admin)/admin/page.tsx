@@ -5,7 +5,7 @@ import { PLATFORM_READ_ROLES, type PlatformInventoryKind } from '@/lib/platform-
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { api } from '../../../../convex/_generated/api';
 
-export const metadata = { title: 'Platform admin | FinalFrame' };
+export const metadata = { title: 'Platform admin' };
 const sections: Array<{ href: string; kind: PlatformInventoryKind; label: string; description: string }> = [
   { href: '/admin/users', kind: 'users', label: 'Accounts', description: 'Find accounts and review changes to their access.' },
   { href: '/admin/account-requests', kind: 'roles', label: 'Account requests', description: 'Review requests to close an account or restore access. Saved work is kept.' },

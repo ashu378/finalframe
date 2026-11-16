@@ -4,7 +4,7 @@ import { decodeProjectRouteId } from '@/lib/project/route-id';
 import { getReportContext } from '@/lib/platform-admin/actions';
 import { ModerationReportForm } from '@/components/project/moderation-report-form';
 
-export const metadata = { title: 'Report a content concern | FinalFrame' };
+export const metadata = { title: 'Report a content concern' };
 export default async function ProjectReportPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAuth();
   const { id } = await params;

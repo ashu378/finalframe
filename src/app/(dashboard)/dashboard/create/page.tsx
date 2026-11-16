@@ -9,7 +9,7 @@ import { getTemplateDefaultsForProject } from '@/lib/templates/actions';
 import { parseStartingMode } from '@/lib/templates/catalog';
 import { CREATOR_PATHS, CREATOR_INVOLVEMENT, parseCreatorIntent } from '@/lib/production/creator-intent';
 
-export const metadata = { title: 'Create | FinalFrame', description: 'Create a video from an idea, script, voice, images, or footage.' };
+export const metadata = { title: 'Create', description: 'Create a video from an idea, script, voice, images, or footage.' };
 
 export default async function CreatePage({ searchParams }: { searchParams: Promise<{ project?: string; production?: string; mode?: string; intent?: string; involvement?: string }> }) {
     await requireAuth();

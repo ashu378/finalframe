@@ -6,7 +6,7 @@ import { requireAuth } from '@/lib/guards';
 import { decodeProjectRouteId } from '@/lib/project/route-id';
 import { ProjectAccessSettings } from '@/components/project/project-access-settings';
 
-export const metadata = { title: 'Project access | FinalFrame' };
+export const metadata = { title: 'Project access' };
 
 export default async function ProjectSettingsPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAuth();

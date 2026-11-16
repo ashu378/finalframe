@@ -5,7 +5,7 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { VIDEO_TYPE_LABELS, VIDEO_TYPES, VIDEO_OPERATIONS } from '@/lib/ai/video-routing';
 import type { VideoType } from '@/lib/ai/video-routing';
 
-export const metadata = { title: 'Studio video routing | FinalFrame', description: 'Manage verified video model capabilities and routes.' };
+export const metadata = { title: 'Studio video routing', description: 'Manage verified video model capabilities and routes.' };
 
 const capabilityFields = [
   ['supportsTextToVideo', 'Text to video'],

@@ -50,7 +50,7 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
     function run(action: () => Promise<{ success: boolean; error?: string }>, success: string) {
         start(async () => { setError(''); setMessage(''); try { const result = await action(); if (!result.success) setError(result.error || 'The timeline could not be saved.'); else { setMessage(success); router.refresh(); } } catch { setError('The timeline could not be saved. Please try again.'); } });
     }
-    return <section className="ff-card space-y-6 p-5 sm:p-7" aria-label="Compose a timeline"><div><h2 className="text-2xl font-semibold">Build the first timeline</h2><p className="mt-2 text-sm text-muted-foreground">Explicitly choose approved takes, your project media, or designed titles. Reorder the list, then save a draft for review. This does not purchase AI generation or start a render.</p></div>
+    return <section className="ff-card space-y-6 p-5 sm:p-7" aria-label="Compose a timeline"><div><h2 className="text-2xl font-semibold">{data.timelines.length ? 'Build another edit' : 'Build your first edit'}</h2><p className="mt-2 text-sm text-muted-foreground">Choose approved clips, your project media or designed titles. Put them in order, then save a draft for review. Saving a draft does not buy new media or export a video.</p></div>
         {!editable ? <p role="status" className="text-sm text-amber-300">Approve the current production plan before creating its timeline. Reviewers can inspect and approve existing timeline drafts below.</p> : <div className="space-y-5">
             <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-3 rounded-xl border border-border p-4">

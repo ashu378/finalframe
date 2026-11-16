@@ -16,7 +16,7 @@ import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { toLifecycleProjectCard } from '@/lib/project/lifecycle-presentation';
 
 export const metadata = {
-    title: 'Productions | FinalFrame',
+    title: 'Productions',
     description: 'Manage and create your studio productions',
 };
 

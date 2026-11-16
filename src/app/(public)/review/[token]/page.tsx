@@ -3,7 +3,7 @@ import { getPublicReviewData } from '@/lib/review/actions';
 import { ScopedReview } from '@/components/review/scoped-review';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Private video review · FinalFrame', robots: { index: false, follow: false }, referrer: 'no-referrer' };
+export const metadata = { title: 'Private video review', robots: { index: false, follow: false }, referrer: 'no-referrer' };
 export default async function ReviewPage({ params }: { params: Promise<{ token: string }> }) {
     const { token } = await params;
     const data = await getPublicReviewData(token);

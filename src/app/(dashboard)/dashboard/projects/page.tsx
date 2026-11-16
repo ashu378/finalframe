@@ -6,7 +6,7 @@ import { parseProjectLibraryMode, type ProjectLibraryMode } from '@/lib/project/
 import { ProjectLibraryControls } from '@/components/project/project-library-controls';
 import { countProjectLifecycles, projectLifecyclePresentation } from '@/lib/project/lifecycle-presentation';
 
-export const metadata = { title: 'Project library | FinalFrame', description: 'Find, organize, archive, and restore your video projects.' };
+export const metadata = { title: 'Project library', description: 'Find, organize, archive, and restore your video projects.' };
 
 function libraryHref(mode: ProjectLibraryMode, search: string, cursor?: string | null) {
   const query = new URLSearchParams({ mode });

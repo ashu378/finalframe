@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireAuth } from '@/lib/guards';
 import { getMyModerationReports } from '@/lib/platform-admin/actions';
 
-export const metadata = { title: 'Your content reports | FinalFrame' };
+export const metadata = { title: 'Your content reports' };
 export default async function MyReportsPage({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
   await requireAuth();
   const query = await searchParams;
