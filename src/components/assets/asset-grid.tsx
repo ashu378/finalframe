@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { type StudioAsset, type AssetType } from '@/lib/types/database';
 import { deleteAssets, stowPreset } from '@/lib/assets/actions';
-import { FileImage, FileVideo, FileAudio, Trash2, MoreHorizontal, Download, Check } from 'lucide-react';
+import { FileImage, FileVideo, FileAudio, Trash2, Download, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
@@ -19,7 +19,7 @@ interface AssetGridProps {
 
 function LibraryVideoPreview({ url, name }: { url: string; name: string }) {
     const [open, setOpen] = useState(false);
-    return <details className="border-t border-zinc-800 p-3" onClick={event => event.stopPropagation()} onToggle={event => setOpen(event.currentTarget.open)}>
+    return <details className="border-t border-border p-3" onClick={event => event.stopPropagation()} onToggle={event => setOpen(event.currentTarget.open)}>
         <summary aria-label={`Preview video ${name}`} className="min-h-11 cursor-pointer rounded-xl px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Preview video</summary>
         {open ? <video src={url} controls playsInline preload="metadata" aria-label={`Saved video ${name}`} className="mt-2 aspect-video w-full rounded-xl bg-black object-contain" /> : null}
     </details>;
@@ -86,11 +86,11 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
     if (filteredAssets.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[280px] px-6 text-center border border-zinc-800 bg-zinc-950/50 rounded-xl text-zinc-500 animate-in fade-in zoom-in duration-500 shadow-inner">
-                <div className="w-20 h-20 rounded-xl bg-zinc-900 flex items-center justify-center mb-8 border border-zinc-800 shadow-3xl">
-                    <FileImage className="w-8 h-8 opacity-20" />
+            <div className="flex flex-col items-center justify-center min-h-[280px] px-6 text-center border border-border bg-background/50 rounded-xl text-foreground0 animate-in fade-in zoom-in duration-500 shadow-inner">
+                <div className="size-14 rounded-2xl bg-secondary flex items-center justify-center mb-5">
+                    <FileImage className="size-6" />
                 </div>
-                <h3 className="text-sm font-semibold tracking-normal text-zinc-50 mb-4 ">No matching media</h3>
+                <h3 className="text-lg font-semibold text-foreground mb-2 ">No matching media</h3>
                 <p className="text-sm font-normal leading-6 text-muted-foreground ">Upload a file, clear your search, or choose a different file type.</p>
             </div>
         );
@@ -101,15 +101,15 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
             {/* Bulk Actions Bar */}
             {!isPresetMode && selectedIds.size > 0 && (
                 <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-[60] animate-in slide-in-from-bottom-12 fade-in duration-300">
-                    <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 bg-zinc-950 border border-primary/30 rounded-xl shadow-3xl backdrop-blur-2xl">
-                        <span className="text-sm font-semibold text-zinc-50 tracking-normal ">
+                    <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 bg-card border border-border rounded-2xl shadow-xl">
+                        <span className="text-sm font-semibold text-foreground tracking-normal ">
                             {selectedIds.size} {selectedIds.size === 1 ? 'file' : 'files'} selected
                         </span>
-                        <div className="h-6 w-px bg-zinc-800" />
+                        <div className="h-6 w-px bg-secondary" />
                         <Button
                             variant="danger"
                             size="sm"
-                            className="h-12 px-8 rounded-xl gap-3 font-semibold text-sm tracking-widest bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-black transition-all shadow-2xl shadow-red-500/10 "
+                            className="min-h-11 px-4 rounded-xl gap-2 font-semibold text-sm bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive hover:text-destructive-foreground transition-colors "
                             onClick={handleBulkDelete}
                             disabled={isDeleting}
                         >
@@ -119,7 +119,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-12 px-8 rounded-xl text-zinc-500 hover:text-zinc-50 text-sm font-semibold tracking-widest transition-colors"
+                            className="h-12 px-8 rounded-xl text-foreground0 hover:text-foreground text-sm font-semibold tracking-widest transition-colors"
                             onClick={() => setSelectedIds(new Set())}
                         >
                             Cancel
@@ -128,7 +128,8 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                 </div>
             )}
 
-            <div className="grid grid-cols-1 min-[380px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <p className="text-sm text-muted-foreground" aria-live="polite">{filteredAssets.length} {filteredAssets.length === 1 ? 'file' : 'files'}{searchQuery || filterType !== 'all' ? ' match your filters' : ' in your library'}. {isPresetMode ? 'Add a saved item to use it in your library.' : 'Choose a file to select it.'}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {filteredAssets.map(asset => {
                     const isSelected = selectedIds.has(asset.id);
                     const isStowed = recentStowed === asset.id;
@@ -153,19 +154,19 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                             {/* Preset Badge */}
                             {isPresetMode && (
-                                <div className="absolute top-4 left-4 z-20 px-2 py-1 bg-primary text-black text-[8px] font-semibold tracking-widest rounded-xl shadow-2xl">
+                                <div className="absolute top-4 left-4 z-20 px-2 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-lg">
                                     Preset
                                 </div>
                             )}
 
                             {/* Preview */}
-                            <div className="aspect-square bg-zinc-950/50 relative flex items-center justify-center">
+                            <div className="aspect-[4/3] bg-background/50 relative flex items-center justify-center">
                                 {asset.type === 'image' ? (
                                     <div className="relative w-full h-full">
-                                        <Image src={asset.url} alt={asset.name} fill className="object-cover transition-transform duration-500 group-hover:scale-110" />
+                                        <Image src={asset.url} alt={asset.name} fill className="object-cover" />
                                     </div>
                                 ) : asset.type === 'video' ? (
-                                    <FileVideo className="h-12 w-12 text-zinc-500" aria-hidden="true" />
+                                    <FileVideo className="h-12 w-12 text-foreground0" aria-hidden="true" />
                                 ) : (
                                     <div className="flex flex-col items-center gap-2">
                                         <div className="w-12 h-12 rounded-xl bg-primary/5 flex items-center justify-center border border-primary/20">
@@ -181,8 +182,8 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                                             onClick={(e) => handleStow(e, asset.id)}
                                             disabled={isStowing || isStowed}
                                             className={cn(
-                                                "h-10 px-6 gap-2 rounded-xl font-black text-sm transition-colors",
-                                                isStowed ? "bg-emerald-500 text-black" : "bg-primary text-black hover:scale-105 shadow-2xl shadow-primary/20"
+                                                "min-h-11 px-4 gap-2 rounded-xl font-semibold text-sm transition-colors",
+                                                isStowed ? "bg-[hsl(var(--success))] text-background" : "bg-primary text-primary-foreground"
                                             )}
                                         >
                                             {isStowed ? (
@@ -198,10 +199,10 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
 
                                 {/* Top right type icon (only in private mode) */}
                                 {!isPresetMode && (
-                                    <div className="absolute top-4 right-4 z-10 w-8 h-8 rounded-xl bg-zinc-950/90 backdrop-blur-md border border-zinc-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-2xl">
-                                        {asset.type === 'image' && <FileImage className="w-4 h-4 text-zinc-500" />}
-                                        {asset.type === 'video' && <FileVideo className="w-4 h-4 text-zinc-500" />}
-                                        {asset.type === 'audio' && <FileAudio className="w-4 h-4 text-zinc-500" />}
+                                    <div className="absolute top-4 right-4 z-10 w-8 h-8 rounded-xl bg-background/90 backdrop-blur-md border border-border flex items-center justify-center transition-colors">
+                                        {asset.type === 'image' && <FileImage className="w-4 h-4 text-foreground0" />}
+                                        {asset.type === 'video' && <FileVideo className="w-4 h-4 text-foreground0" />}
+                                        {asset.type === 'audio' && <FileAudio className="w-4 h-4 text-foreground0" />}
                                     </div>
                                 )}
                             </div>
@@ -209,19 +210,15 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                             {asset.type === 'video' ? <LibraryVideoPreview key={`${asset.id}:${asset.url}`} url={asset.url} name={asset.name} /> : null}
 
                             {/* Metadata */}
-                            <div className="p-5 bg-zinc-950 border-t border-zinc-800">
-                                <p className="text-sm font-semibold text-zinc-50 truncate group-hover:text-primary transition-colors tracking-normal " title={asset.name}>
+                            <div className="p-5 bg-background border-t border-border">
+                                <p className="break-words text-sm font-semibold text-foreground group-hover:text-primary transition-colors " title={asset.name}>
                                     {asset.name}
                                 </p>
                                 <div className="flex items-center justify-between mt-3">
                                     <p className="text-sm text-muted-foreground tracking-normal font-semibold ">
                                         {asset.size > 0 ? `${(asset.size / 1024 / 1024).toFixed(1)} MB` : 'Saved reference'}
                                     </p>
-                                    {!isPresetMode && (
-                                        <div className="p-1.5 opacity-0 group-hover:opacity-100 transition-all hover:bg-zinc-800 rounded-xl">
-                                            <MoreHorizontal className="w-4 h-4 text-zinc-600" />
-                                        </div>
-                                    )}
+
                                 </div>
                             </div>
                         </div>

@@ -26,9 +26,9 @@ function getStateStyles(state: ProjectState) {
         case 'rendered':
             return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
         case 'rendering':
-            return 'bg-zinc-800 text-zinc-100 border-zinc-700 animate-pulse';
+            return 'bg-secondary text-foreground border-border';
         default:
-            return 'bg-background text-muted-foreground border-zinc-900';
+            return 'bg-background text-muted-foreground border-border';
     }
 }
 
@@ -44,40 +44,40 @@ export function ProjectCard({ project }: ProjectCardProps) {
     });
 
     return (
-        <div className="group relative rounded-xl border border-border bg-card hover:border-primary/50 p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/5">
+        <div className="group relative rounded-xl border border-border bg-card hover:border-primary/50 p-5 transition-colors">
             <div className="flex justify-between items-start mb-6">
-                <div className={`px-2.5 py-1 rounded-xl text-metadata border ${stateStyles}`}>
+                <div className={`px-2.5 py-1 rounded-xl text-sm border ${stateStyles}`}>
                     {stateLabel}
                 </div>
-                <div className="flex items-center gap-1 -mr-2 -mt-1 scale-90">
+                <div className="flex items-center gap-1 -mr-2 -mt-1">
                     <ProjectActionsMenu project={project} />
                 </div>
             </div>
 
             <Link
                 href={`/dashboard/projects/${project.id}`}
-                className="block"
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-                <h3 className="text-sm font-semibold  tracking-normal mb-4 text-zinc-50 group-hover:text-primary transition-colors leading-relaxed">
+                <h3 className="break-words text-lg font-semibold mb-4 text-foreground group-hover:text-primary transition-colors leading-relaxed">
                     {project.name}
                 </h3>
 
                 <div className="flex flex-wrap gap-2 mb-8">
                     {project.outcome_goal && (
-                        <span className="text-metadata font-semibold  tracking-normal px-3 py-1 rounded-xl bg-background text-muted-foreground border border-border group-hover:border-primary/40 group-hover:text-zinc-50 transition-colors">
+                        <span className="text-sm font-semibold  tracking-normal px-3 py-1 rounded-xl bg-background text-muted-foreground border border-border group-hover:border-primary/40 group-hover:text-foreground transition-colors">
                             {project.outcome_goal.replace(/_/g, ' ')}
                         </span>
                     )}
                     {project.platform && (
-                        <span className="text-metadata font-semibold  tracking-normal px-3 py-1 rounded-xl bg-background text-muted-foreground border border-border group-hover:border-primary/40 group-hover:text-zinc-50 transition-colors">
+                        <span className="text-sm font-semibold  tracking-normal px-3 py-1 rounded-xl bg-background text-muted-foreground border border-border group-hover:border-primary/40 group-hover:text-foreground transition-colors">
                             {project.platform.replace(/_/g, ' ')}
                         </span>
                     )}
                 </div>
 
-                <div className="flex items-center text-metadata font-semibold  tracking-normal text-muted-foreground border-t border-border pt-5 group-hover:border-primary/40 transition-colors">
+                <div className="flex items-center text-sm font-semibold  tracking-normal text-muted-foreground border-t border-border pt-5 group-hover:border-primary/40 transition-colors">
                     <Clock className="w-4 h-4 mr-2 opacity-80" />
-                    INIT: {createdDate}
+                    Created {createdDate}
                     <div className="ml-auto opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
                         <ArrowRight className="w-4 h-4 text-primary" />
                     </div>

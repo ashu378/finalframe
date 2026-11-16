@@ -19,18 +19,18 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
     const [activeTab, setActiveTab] = useState<'my_materials' | 'studio_presets'>('my_materials');
 
     return (
-        <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-6">
+            <div className="space-y-5 rounded-2xl border border-border bg-card p-4 sm:p-5">
                 {/* Tabs */}
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <div className="flex w-fit max-w-full flex-wrap items-center gap-1 rounded-xl bg-background p-1">
                     <button
                         aria-pressed={activeTab === 'my_materials'}
                         onClick={() => setActiveTab('my_materials')}
                         className={cn(
-                            "min-h-12 rounded-xl px-5 py-3 text-sm font-semibold transition-colors",
+                            "min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                             activeTab === 'my_materials'
                                 ? "bg-primary text-primary-foreground"
-                                : "bg-secondary text-muted-foreground hover:text-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                         )}
                     >
                         My media
@@ -39,10 +39,10 @@ export function AssetLibraryClient({ initialAssets, presets, studioId }: AssetLi
                         aria-pressed={activeTab === 'studio_presets'}
                         onClick={() => setActiveTab('studio_presets')}
                         className={cn(
-                            "min-h-12 rounded-xl px-5 py-3 text-sm font-semibold transition-colors",
+                            "min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                             activeTab === 'studio_presets'
                                 ? "bg-primary text-primary-foreground"
-                                : "bg-secondary text-muted-foreground hover:text-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                         )}
                     >
                         Saved starting points

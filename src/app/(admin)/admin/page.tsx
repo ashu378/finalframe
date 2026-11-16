@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ArrowUpRight, ShieldCheck } from 'lucide-react';
 import { requirePlatformRole } from '@/lib/guards/platform';
 import { PLATFORM_READ_ROLES, type PlatformInventoryKind } from '@/lib/platform-admin/contracts';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
@@ -19,5 +20,18 @@ export default async function AdminDashboardPage() {
   const access = await requirePlatformRole();
   const current = await (await getAuthenticatedConvexClient()).query(api.account.current, {});
   const canManageStudio = !!current.studio && (current.role === 'owner' || current.role === 'admin');
-  return <div className="space-y-8"><header><h1 className="ff-display mt-4 text-4xl font-semibold">Manage FinalFrame.</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-muted-foreground">Your platform role is {access.role.toLowerCase()}. Changes are recorded. Your studio team has separate settings.</p></header><div className="divide-y divide-border border-y border-border">{sections.filter((section) => PLATFORM_READ_ROLES[section.kind].includes(access.role)).map((section) => <Link key={section.href} href={section.href} className="group grid gap-2 py-6 transition-colors hover:text-primary sm:grid-cols-[.45fr_1fr] sm:gap-8"><h2 className="text-xl font-semibold">{section.label}</h2><p className="text-sm leading-7 text-muted-foreground">{section.description}</p></Link>)}</div>{canManageStudio ? <Link href="/dashboard/settings/operations" className="ff-link inline-flex min-h-11 items-center text-sm">Open your studio settings</Link> : null}</div>;
+  const permitted = sections.filter((section) => PLATFORM_READ_ROLES[section.kind].includes(access.role));
+  const groups = [
+    { title: 'People & access', description: 'Help people use their accounts safely.', kinds: ['users', 'roles'] },
+    { title: 'Production & support', description: 'Find a failed job or review reported content.', kinds: ['jobs', 'reports'] },
+    { title: 'Records & AI settings', description: 'Trace changes and check how models are used.', kinds: ['credits', 'audit', 'routing'] },
+  ];
+  return <div className="space-y-9 sm:space-y-12">
+    <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border pb-8">
+      <div className="max-w-2xl"><p className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><ShieldCheck className="size-4 text-primary" aria-hidden="true" />Private platform administration</p><h1 className="ff-display mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">Manage FinalFrame.</h1><p className="mt-4 text-sm leading-7 text-muted-foreground">Review accounts, support video production and keep a clear record of changes. Choose an area below to get started.</p></div>
+      <div className="rounded-xl border border-border bg-card px-4 py-3"><p className="text-xs text-muted-foreground">Your platform role</p><p className="mt-1 text-sm font-semibold capitalize">{access.role.toLowerCase()}</p></div>
+    </header>
+    {groups.map((group) => { const items = permitted.filter((section) => group.kinds.includes(section.kind)); return items.length ? <section key={group.title} className="grid gap-5 xl:grid-cols-[220px_1fr] xl:gap-8"><div><h2 className="text-lg font-semibold">{group.title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{group.description}</p></div><div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">{items.map((section) => <Link key={section.href} href={section.href} className="group flex min-h-24 items-start gap-4 p-5 transition-colors hover:bg-secondary/50 sm:p-6"><div className="min-w-0 flex-1"><h3 className="font-semibold group-hover:text-primary">{section.label}</h3><p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{section.description}</p></div><ArrowUpRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:text-primary" aria-hidden="true" /></Link>)}</div></section> : null; })}
+    {canManageStudio ? <aside className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-secondary/40 p-5"><div><h2 className="text-sm font-semibold">Looking for your own studio?</h2><p className="mt-2 text-sm text-muted-foreground">Your studio’s team and settings are separate from platform administration.</p></div><Link href="/dashboard/settings/operations" className="ff-button-quiet min-h-11 border border-border">Open your studio settings<ArrowUpRight className="size-4" aria-hidden="true" /></Link></aside> : null}
+  </div>;
 }

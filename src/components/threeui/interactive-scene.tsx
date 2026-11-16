@@ -50,9 +50,9 @@ export function InteractiveShowcase() {
     scene.add(amberLight);
 
     const cardData = [
-      { src: '/showcase/comedy.webp', x: -2.55, y: 0.05, z: -0.1, ry: -0.22, rz: -0.08, color: 0xc6f432 },
-      { src: '/showcase/cinema.webp', x: 0, y: 0.35, z: 0.9, ry: 0, rz: 0, color: 0xffffff },
-      { src: '/showcase/ugc.webp', x: 2.55, y: 0.05, z: -0.1, ry: 0.22, rz: 0.08, color: 0xc6f432 },
+      { src: '/showcase/comedy.webp', x: -2.2, y: 0, z: -0.8, ry: 0.42, rz: 0, color: 0x555555 },
+      { src: '/showcase/cinema.webp', x: 0, y: 0, z: 0, ry: 0, rz: 0, color: 0xc6f432 },
+      { src: '/showcase/ugc.webp', x: 2.2, y: 0, z: -0.8, ry: -0.42, rz: 0, color: 0x555555 },
     ];
     const cards: { group: THREE.Group; baseY: number; phase: number; baseRy: number }[] = [];
     let disposed = false;
@@ -66,18 +66,18 @@ export function InteractiveShowcase() {
       card.scale.setScalar(index === 1 ? 1.08 : 0.92);
 
       const shell = new THREE.Mesh(
-        new THREE.BoxGeometry(3.2, 2.1, 0.16),
+        new THREE.BoxGeometry(2.2, 3.3, 0.12),
         new THREE.MeshStandardMaterial({ color: 0x161618, metalness: 0.78, roughness: 0.24 }),
       );
       card.add(shell);
 
       const imageMaterial = new THREE.MeshBasicMaterial({ color: 0x222225 });
-      const image = new THREE.Mesh(new THREE.PlaneGeometry(2.95, 1.85), imageMaterial);
+      const image = new THREE.Mesh(new THREE.PlaneGeometry(2.05, 3.15), imageMaterial);
       image.position.z = 0.1;
       card.add(image);
 
       const edge = new THREE.LineSegments(
-        new THREE.EdgesGeometry(new THREE.BoxGeometry(3.25, 2.15, 0.18)),
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(2.24, 3.34, 0.14)),
         new THREE.LineBasicMaterial({ color: data.color, transparent: true, opacity: 0.85 }),
       );
       card.add(edge);
@@ -86,15 +86,16 @@ export function InteractiveShowcase() {
         new THREE.SphereGeometry(0.065, 12, 12),
         new THREE.MeshBasicMaterial({ color: data.color, transparent: true, opacity: 0.95 }),
       );
-      beacon.position.set(1.48, .93, .16);
+      beacon.position.set(.97, 1.5, .16);
       card.add(beacon);
 
       textureLoader.load(data.src, (texture) => {
         if (disposed) { texture.dispose(); return; }
         textures.push(texture);
         const ratio = texture.image.width / texture.image.height;
-        if (ratio > 2.95 / 1.85) image.scale.y = (2.95 / ratio) / 1.85;
-        else image.scale.x = (1.85 * ratio) / 2.95;
+        const targetRatio = 2.05 / 3.15;
+        if (ratio > targetRatio) { texture.repeat.x = targetRatio / ratio; texture.offset.x = (1 - texture.repeat.x) / 2; }
+        else { texture.repeat.y = ratio / targetRatio; texture.offset.y = (1 - texture.repeat.y) / 2; }
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
         imageMaterial.map = texture;
@@ -106,36 +107,6 @@ export function InteractiveShowcase() {
       cards.push({ group: card, baseY: data.y, phase: index * 1.8, baseRy: data.ry });
     });
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(3.75, 0.018, 10, 180),
-      new THREE.MeshBasicMaterial({ color: 0xc6f432, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending }),
-    );
-    ring.rotation.set(1.2, 0.2, 0.1);
-    ring.position.z = -1.35;
-    stage.add(ring);
-
-    const ringWarm = new THREE.Mesh(
-      new THREE.TorusGeometry(3.25, 0.012, 10, 160),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending }),
-    );
-    ringWarm.rotation.set(1.2, -0.35, 0.8);
-    ringWarm.position.z = -1.15;
-    stage.add(ringWarm);
-
-    const particlePositions = new Float32Array(240 * 3);
-    for (let index = 0; index < particlePositions.length; index += 3) {
-      particlePositions[index] = (Math.random() - 0.5) * 11;
-      particlePositions[index + 1] = (Math.random() - 0.5) * 7;
-      particlePositions[index + 2] = (Math.random() - 0.5) * 5 - 1;
-    }
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-    const particles = new THREE.Points(
-      particleGeometry,
-      new THREE.PointsMaterial({ color: 0xffffff, size: 0.026, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }),
-    );
-    scene.add(particles);
-
     const resize = () => {
       const bounds = host.getBoundingClientRect();
       const width = Math.max(1, bounds.width);
@@ -144,9 +115,9 @@ export function InteractiveShowcase() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
-      camera.zoom = isNarrow ? 1.7 : 1.4;
-      camera.fov = isNarrow ? 48 : 34;
-      camera.position.z = isNarrow ? 9 : 9.2;
+      camera.zoom = 1;
+      camera.fov = 38;
+      camera.position.z = isNarrow ? 7.2 : 7.8;
       camera.updateProjectionMatrix();
       stage.scale.setScalar(isNarrow ? .9 : 1);
     };
@@ -161,23 +132,18 @@ export function InteractiveShowcase() {
     let frame = 0;
     const animate = () => {
       if (!visible || document.hidden || media.matches) { frame = 0; return; }
-      const elapsed = clock.getElapsedTime();
+      const delta = Math.min(clock.getDelta(), .05);
+      const follow = 1 - Math.exp(-5 * delta);
       const targetX = pointerTarget.current.x;
       const targetY = pointerTarget.current.y;
-      camera.position.x += (targetX * 0.52 - camera.position.x) * 0.045;
-      camera.position.y += (-targetY * 0.3 + 0.15 - camera.position.y) * 0.045;
-      camera.lookAt(0, 0.15, 0);
-      stage.rotation.y += ((targetX * 0.18 + Math.sin(elapsed * 0.22) * 0.035) - stage.rotation.y) * 0.04;
-      stage.rotation.x += ((targetY * -0.12 + Math.cos(elapsed * 0.2) * 0.018) - stage.rotation.x) * 0.04;
-      cards.forEach(({ group, baseY, phase, baseRy }) => {
-        group.position.y = baseY + Math.sin(elapsed * 0.8 + phase) * 0.09;
-        group.rotation.y = baseRy + targetX * 0.16 + Math.sin(elapsed * 0.45 + phase) * 0.018;
-        group.rotation.x = targetY * -0.08 + Math.cos(elapsed * 0.5 + phase) * 0.012;
+      camera.position.x += (targetX * 2.8 - camera.position.x) * follow;
+      camera.position.y += (-targetY * .45 + .15 - camera.position.y) * follow;
+      camera.lookAt(targetX * 1.1, 0, 0);
+      stage.rotation.y += (targetX * -.12 - stage.rotation.y) * follow;
+      cards.forEach(({ group, baseY, baseRy }) => {
+        group.position.y += (baseY - targetY * .15 - group.position.y) * follow;
+        group.rotation.y += (baseRy + targetX * .1 - group.rotation.y) * follow;
       });
-      ring.rotation.z += 0.0018;
-      ringWarm.rotation.z -= 0.0022;
-      particles.rotation.y = elapsed * 0.018 + targetX * 0.06;
-      particles.rotation.x = targetY * -0.04;
       renderer.render(scene, camera);
       frame = window.requestAnimationFrame(animate);
     };
@@ -198,8 +164,7 @@ export function InteractiveShowcase() {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       renderer.dispose();
-      particleGeometry.dispose();
-      (particles.material as THREE.Material).dispose();
+
       cards.forEach(({ group }) => group.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
           object.geometry.dispose();
@@ -207,10 +172,6 @@ export function InteractiveShowcase() {
           else object.material.dispose();
         }
       }));
-      ring.geometry.dispose();
-      (ring.material as THREE.Material).dispose();
-      ringWarm.geometry.dispose();
-      (ringWarm.material as THREE.Material).dispose();
       setWebglReady(false);
     };
   }, []);
@@ -271,7 +232,7 @@ export function InteractiveShowcase() {
         ))}
         <div className="ff-reel-status">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/15 text-accent"><Sparkles className="size-4" /></span>
-          <span><strong>A world in the making</strong><small>Move across the scenes</small></span>
+          <span><strong>Your next scene starts here</strong><small>Three stories. One creative space.</small></span>
         </div>
       </div>
       <div className="ff-reel-hint">

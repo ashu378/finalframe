@@ -15,11 +15,13 @@ function load(file, stubs = {}) {
 }
 const Link = ({ children, ...props }) => React.createElement('a', props, children);
 const contracts = load('src/lib/platform-admin/contracts.ts');
+let selectedPath = '/admin';
 let platformRole = 'ADMIN', studioRole = 'member', hasStudio = true, authorized = true, reads = 0;
 const guards = { requirePlatformRole: async () => { if (!authorized) throw Error('platform denied'); return { role: platformRole }; } };
 const client = { getAuthenticatedConvexClient: async () => ({ query: async () => { reads++; return { role: studioRole, studio: hasStudio ? { name: 'Fixture studio', externalId: 'fixture' } : null }; } }) };
 const common = { 'next/link': Link, '@/lib/guards/platform': guards, '@/lib/platform-admin/contracts': contracts, '@/lib/convex/server': client };
-const layout = load('src/app/(admin)/layout.tsx', { ...common, 'next/image': ({ priority, ...props }) => { void priority; return React.createElement('img', props); }, '@/components/threeui/scroll-reveal-root': { ScrollRevealRoot: () => null } });
+const adminNavigation = load('src/components/admin/admin-navigation.tsx', { 'next/link': Link, 'next/navigation': { usePathname: () => selectedPath } });
+const layout = load('src/app/(admin)/layout.tsx', { ...common, '@/components/admin/admin-navigation': adminNavigation, 'next/image': ({ priority, ...props }) => { void priority; return React.createElement('img', props); }, '@/components/threeui/scroll-reveal-root': { ScrollRevealRoot: () => null } });
 const overview = load('src/app/(admin)/admin/page.tsx', common);
 const settings = load('src/app/(dashboard)/dashboard/settings/page.tsx', { ...common, '@/lib/guards': { requireAuth: async () => { if (!authorized) throw Error('account denied'); return { user: { email: 'fixture@example.test' } }; } }, '@/components/billing/credit-packs': { CreditPacks: () => null }, '@/lib/credits/service': { getStudioCreditBalance: async () => 0 } });
 const html = async (component, args) => renderToStaticMarkup(await component(args));
@@ -44,6 +46,10 @@ const html = async (component, args) => renderToStaticMarkup(await component(arg
       }
     }
   }
+  selectedPath = '/admin/jobs/details';
+  const activeMarkup = renderToStaticMarkup(React.createElement(adminNavigation.AdminNavigation, { items: [{href:'/admin',label:'Overview'},{href:'/admin/jobs',label:'Video jobs'}] }));
+  assert.equal((activeMarkup.match(/aria-current="page"/g)||[]).length,1);
+  assert(activeMarkup.includes('href="/admin/jobs" aria-current="page"'));
   authorized = false; const before = reads;
   await assert.rejects(layout.default({ children: null }), /platform denied/);
   await assert.rejects(overview.default(), /platform denied/);

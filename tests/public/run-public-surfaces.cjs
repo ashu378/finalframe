@@ -15,24 +15,30 @@ function load(file, stubs = {}) {
 }
 const Link = ({ children, ...props }) => React.createElement('a', props, children);
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props));
+const publicGuide = load('src/components/finalframe/public-guide.tsx', {
+  'next/link': Link,
+  'next/image': ({ src, alt, className }) => React.createElement('img', { src, alt, className }),
+});
 const pricing = load('src/app/(public)/pricing/page.tsx', {
   'next/link': Link,
   '@/lib/payments/config': load('src/lib/payments/config.ts'),
-  '@/components/finalframe/section-heading': { SectionHeading: ({ title, description }) => React.createElement('div', null, React.createElement('h2', null, title), description) },
+  '@/components/finalframe/public-guide': publicGuide,
 }).default;
 const html = render(pricing);
-assert(html.includes('Credit purchases and checkout are disabled'));
-assert.equal((html.match(/A planned pack for future purchases/g) || []).length, 3);
-assert.equal((html.match(/It is not available to buy today/g) || []).length, 3);
-assert(html.includes('Pack sizes are planned and may change'));
+assert(html.includes('Purchases are disabled'));
+assert(html.includes('There is no active checkout on this page'));
+assert.equal((html.match(/planned credits/g) || []).length, 3);
+assert.equal((html.match(/Not available to purchase/g) || []).length, 3);
+assert(html.includes('Pack sizes are shown for context'));
+assert(html.includes('Final prices, currencies, expiry and purchase terms need to be confirmed'));
 assert(html.includes('Expiry terms for future purchased credits have not been published'));
 assert(html.includes('Accepted or uncertain provider work keeps its hold'));
-assert(html.includes('Workspace membership and access to individual projects remain separate'));
+assert(html.includes('Being a workspace member does not automatically give someone access to every project'));
 const answers = [...html.matchAll(/<details\b[^>]*>.*?<\/summary><p[^>]*>(.*?)<\/p><\/details>/g)].map(match => match[1]);
-assert.equal(answers.length, 4); assert.equal(new Set(answers).size, 4);
+assert.equal(answers.length, 5); assert.equal(new Set(answers).size, 5);
 assert(!/Local currency checkout is shown|Failed work releases its reservation|applicable answer|Start with starter|>Popular</.test(html));
 assert(!/<form|<button|href="[^\"]*(checkout|payment)/.test(html), 'Pricing is information and signup links only');
-assert.equal((html.match(/href="\/signup"/g) || []).length, 4);
+assert.equal((html.match(/href="\/signup"/g) || []).length, 2);
 const footer = load('src/components/layout/footer.tsx', { 'next/link': Link, 'next/image': props => React.createElement('img', props) });
 const footerHtml = render(footer.Footer);
 assert(!footerHtml.includes('systems online'));
@@ -58,4 +64,4 @@ try {
   keydown({ key: 'Escape' }); assert.equal(closedState, false); assert.equal(focused, 1);
   cleanup(); assert.equal(removed, 1);
 } finally { if (previousDocument === undefined) delete global.document; else global.document = previousDocument; }
-console.log('PASS public pricing disabled/planned copy and four specific FAQ answers, no purchase controls, policy links, disclosure/auth destinations and Escape focus handler (SSR only; no browser/DB/provider calls)');
+console.log('PASS public pricing disabled/planned copy and five specific FAQ answers, no purchase controls, policy links, disclosure/auth destinations and Escape focus handler (SSR only; no browser/DB/provider calls)');

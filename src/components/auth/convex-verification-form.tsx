@@ -36,13 +36,13 @@ export function ConvexVerificationForm() {
   return <form onSubmit={submit} className="space-y-5" aria-busy={pending}>
     <div>
       <label htmlFor="verification-email" className="text-sm font-semibold">Email address</label>
-      <input id="verification-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" required autoComplete="email" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition focus:border-primary" />
+      <input id="verification-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" required autoComplete="email" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-base outline-none transition focus:border-primary" />
     </div>
     <div>
       <label htmlFor="verification-code" className="text-sm font-semibold">Verification code</label>
-      <input id="verification-code" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" required placeholder="Enter the code from your email" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-sm tracking-[.25em] outline-none transition focus:border-primary" />
+      <input id="verification-code" value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" required placeholder="Enter the code from your email" className="mt-2 h-12 w-full rounded-xl border border-border bg-background px-4 text-base tracking-[.25em] outline-none transition focus:border-primary" />
     </div>
-    {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
-    <button type="submit" disabled={pending} className="ff-button-primary w-full">{pending ? 'Verifying…' : 'Verify email'}</button>
+    {error && <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm leading-6 text-destructive">{error}</p>}
+    <button type="submit" disabled={pending} className="ff-button-primary min-h-12 w-full">{pending ? 'Verifying…' : 'Verify email'}</button>
   </form>;
 }
