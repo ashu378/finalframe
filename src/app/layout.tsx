@@ -36,23 +36,24 @@ export const metadata: Metadata = {
         description: 'Turn an idea, script, or your own media into a finished video with FinalFrame.',
         images: [
             {
-                url: '/og-image.png',
+                url: '/brand/social-preview-v1.png',
                 width: 1200,
                 height: 630,
-                alt: 'FinalFrame — Studio-Grade Creative Production',
+                alt: 'FinalFrame - Imagine it. Make it a film.',
             },
         ],
     },
     twitter: {
         card: 'summary_large_image',
-        title: 'FinalFrame — Studio-Grade Creative Production',
-        description: 'A studio-grade creative operating system for Hollywood-standard content.',
-        images: ['/og-image.png'],
+        title: 'FinalFrame - Imagine it. Make it a film.',
+        description: 'Turn an idea, script, or your own media into a video with FinalFrame.',
+        images: ['/brand/social-preview-v1.png'],
     },
     icons: {
-        icon: '/brand/finalframe-mark-small.png',
-        apple: '/brand/finalframe-mark-small.png',
+        icon: [{ url: '/brand/favicon-v1.svg', type: 'image/svg+xml' }, { url: '/brand/favicon-32-v1.png', sizes: '32x32', type: 'image/png' }],
+        apple: '/brand/apple-touch-icon-v1.png',
     },
+    manifest: '/site.webmanifest',
     robots: {
         index: true,
         follow: true,

@@ -9,8 +9,8 @@ export function Footer() {
         <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Link href="/" className="flex items-center gap-3">
-              <span className="grid size-9 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-mark-small.png" alt="" width={36} height={36} className="size-full object-cover grayscale" /></span>
-              <span className="ff-display text-lg font-semibold">FinalFrame</span>
+              <span className="grid size-9 place-items-center overflow-hidden rounded-xl border border-border/70 bg-card"><Image src="/brand/finalframe-icon-v1.png" alt="" width={36} height={36} className="size-full object-cover" /></span>
+              <span className="text-lg font-bold tracking-tight">FinalFrame</span>
             </Link>
             <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">A place for your ideas, scenes and next stories. Make videos with your own words and media.</p>
             <Link href="/contact" className="ff-link mt-6 inline-flex items-center gap-2 text-sm"><Mail className="size-4" /> Talk to us</Link>

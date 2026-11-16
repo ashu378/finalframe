@@ -23,7 +23,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const permittedNavigation = navigation.filter(([, , href]) => href === '/admin' || PLATFORM_READ_ROLES[kinds[href]].includes(role.role));
   return <div className="min-h-dvh bg-background text-foreground">
     <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-card p-5 lg:flex">
-      <Link href="/admin" className="flex min-h-11 items-center gap-3"><Image src="/brand/finalframe-mark-small.png" alt="" width={32} height={32} className="rounded-lg grayscale" priority /><span className="ff-display text-xl font-semibold">FinalFrame<span className="text-primary">.</span></span></Link>
+      <Link href="/admin" className="flex min-h-11 items-center gap-3"><Image src="/brand/finalframe-icon-v1.png" alt="" width={32} height={32} className="rounded-lg" priority /><span className="text-xl font-bold tracking-tight">FinalFrame</span></Link>
       <p className="mt-6 rounded-xl border border-border bg-background px-3 py-3 text-xs leading-5 text-muted-foreground">Private platform admin<br /><span className="font-semibold text-foreground">{role.role.toLowerCase()}</span></p>
       <div className="mt-7 min-h-0 flex-1 overflow-y-auto"><AdminNavigation items={permittedNavigation.map(([, label, href]) => ({ label, href }))} /></div>
       <Link href="/dashboard" className="mt-5 flex min-h-12 items-center gap-2 border-t border-border pt-5 text-sm font-semibold text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" aria-hidden="true" />Back to app</Link>

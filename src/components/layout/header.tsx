@@ -12,9 +12,9 @@ export async function Header() {
       <div className="ff-container flex min-h-16 items-center justify-between gap-3">
         <Link href="/" className="group flex shrink-0 items-center gap-2" aria-label="FinalFrame home">
           <span className="grid size-10 place-items-center overflow-hidden rounded-[.8rem] bg-card">
-            <Image src="/brand/finalframe-mark-small.png" alt="" width={40} height={40} className="size-full object-cover grayscale" priority />
+            <Image src="/brand/finalframe-icon-v1.png" alt="" width={40} height={40} className="size-full object-cover" priority />
           </span>
-          <span className="ff-display text-lg font-semibold tracking-[-.03em] sm:text-xl">FinalFrame</span>
+          <span className="text-lg font-bold tracking-tight sm:text-xl">FinalFrame</span>
         </Link>
 
         <nav className="hidden min-w-0 items-center justify-center xl:flex" aria-label="Main navigation">

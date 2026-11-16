@@ -1,17 +1,1 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="4" y1="3" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#18253A"/>
-      <stop offset="1" stop-color="#0B0D12"/>
-    </linearGradient>
-    <linearGradient id="frame" x1="5" y1="7" x2="27" y2="25" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#86A7FF"/>
-      <stop offset=".56" stop-color="#DCE6FF"/>
-      <stop offset="1" stop-color="#FFC766"/>
-    </linearGradient>
-  </defs>
-  <rect width="32" height="32" rx="8" fill="url(#bg)"/>
-  <path d="M8 11.25A3.25 3.25 0 0 1 11.25 8h9.5A3.25 3.25 0 0 1 24 11.25v9.5A3.25 3.25 0 0 1 20.75 24h-9.5A3.25 3.25 0 0 1 8 20.75v-9.5Z" stroke="url(#frame)" stroke-width="2.2"/>
-  <path d="m11.2 20.8 9.6-9.6M11.2 11.2l9.6 9.6" stroke="#9BE3C3" stroke-width="1.55" stroke-linecap="round" opacity=".95"/>
-  <circle cx="24.3" cy="8.2" r="1.45" fill="#FFC766"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="FinalFrame"><rect x="0" y="0" width="512" height="512" rx="106" fill="#C6F432"/><path d="M40 228 L304 164 L304 312 L196 339 L196 398 L140 412 L140 304 L256 275 L256 228 L98 268 L98 422 L40 436 Z M186 112 L450 48 L450 196 L382 213 L382 288 L326 302 L326 176 L402 157 L402 109 L186 162 Z" fill="#0B0B0C" transform="translate(65 65) scale(0.74609375)"/></svg>
