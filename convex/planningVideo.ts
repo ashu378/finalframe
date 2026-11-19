@@ -1,3 +1,5 @@
+import { resolveAudioSourceCertificate } from './audioCertificates';
+import { resolvePortraitSourceCertificate } from './imageCertificates';
 import { query } from './_generated/server';
 import { v, ConvexError } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
@@ -86,6 +88,14 @@ async function validateAutomaticVideoPlanImpl(ctx:ReadCtx,project:Doc<'projects'
         if((metadata.requiresFirstFrame===true||scope.request.requiresFirstFrame)&&!first||(metadata.requiresLastFrame===true||scope.request.requiresLastFrame)&&!last)throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED','Select each required project frame before approving its shot.');
         const referenceAssets=assets.filter(asset=>asset._id!==first&&asset._id!==last);
         const audioPolicy=metadata.audioPolicy??(metadata.generateAudio===true?'GENERATE':'SILENT');
+        if(metadata.operation==='LIP_SYNC'){
+            const images=referenceAssets.filter(asset=>asset.mimeType?.startsWith('image/')),audio=referenceAssets.filter(asset=>asset.mimeType?.startsWith('audio/'));
+            if(first||last||metadata.requiresMask||audioPolicy!=='USE_RECORDING'||assets.length!==2||images.length!==1||audio.length!==1)throw new Error('Lip sync needs one approved portrait and one complete recording.');
+            const lipSyncSource=await resolveAudioSourceCertificate(ctx,{projectId:project._id,assetId:audio[0]._id});
+            const lipSyncPortrait=await resolvePortraitSourceCertificate(ctx,{projectId:project._id,assetId:images[0]._id});
+            if(Math.abs(lipSyncSource.durationSeconds-Number(shot.durationSeconds))>1/30)throw new Error('Match the talking shot to the complete measured recording before approval.');
+            shots.push({durationSeconds:Number(shot.durationSeconds),request:{...scope.request,operation:'LIP_SYNC' as const,task:'EDIT' as const,aspectRatio,audioPolicy:'USE_RECORDING' as const,hasImageReferences:true,imageReferenceCount:1,hasAudioReference:true,hasVideoReference:false,requiresAudio:false,requiresFirstFrame:false,requiresLastFrame:false,durationBridgeAllowed:false,lipSyncSource,lipSyncPortrait}});continue;
+        }
         if(![undefined,'GENERATE','FRAME_TO_VIDEO'].includes(metadata.operation)||![undefined,'GENERATE','FRAME_TO_VIDEO'].includes(metadata.videoTask))throw new Error('Plan source edits or continuation through their certified operation workflow.');
         if(audioPolicy==='KEEP_SOURCE'&&!referenceAssets.some(asset=>asset.mimeType?.startsWith('video/')))throw new ShotDurationPlanningError('SHOT_NOT_SUPPORTED','Preserving source audio requires an explicit project video. Revise the shot source before approval.');
         const request:PlanningVideoRequest={...scope.request,aspectRatio,resolution:metadata.resolution,operation:metadata.operation??'GENERATE',task:metadata.videoTask??'GENERATE',

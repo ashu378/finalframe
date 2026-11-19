@@ -36,6 +36,12 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   if (recipe.videoType === 'EXPLAINER_STORY') assert(recipe.narrationStepKey, 'Narrated explainers need an explicitly approved narration step.');
   if (recipe.videoType === 'MUSIC_VIDEO') assert(recipe.musicStepKey, 'Music videos need a supplied approved soundtrack and reviewed beat map.');
   if (recipe.videoType === 'SOCIAL_CUTDOWN') assert(recipe.steps.some(step => step.operation === 'SOURCE_RANGE'), 'Social cutdowns need explicit measured source ranges.');
+  if (context.speechMode === 'ON_CAMERA') {
+    const selectedShots = recipe.steps.filter(step => step.operation === 'GENERATION').map(step => context.shots.find(shot => shot.id === (step as {shotId:string}).shotId));
+    assert(selectedShots.some(shot => shot?.operation === 'LIP_SYNC'), 'RECIPE_ON_CAMERA_SETUP_REQUIRED');
+    assert(selectedShots.every(shot => !shot?.dialogueSegments?.length || shot.operation === 'LIP_SYNC'), 'RECIPE_ON_CAMERA_SETUP_REQUIRED');
+  }
+  if (context.speechMode === 'KEEP_ORIGINAL') assert(!recipe.steps.some(step => step.operation === 'NARRATION' && step.mode === 'GENERATE') && recipe.steps.some(step => step.operation === 'SOURCE_RANGE' && step.audioPolicy === 'KEEP_SOURCE' || step.operation === 'NARRATION' && step.mode === 'RECORDING'), 'RECIPE_ORIGINAL_AUDIO_REQUIRED');
   const usedAssets = new Map<string, unknown>();
   const asset = (id: string, kind?: 'audio' | 'image' | 'visual') => {
     const row = context.assets.find(value => value.id === id);
@@ -75,7 +81,13 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
       const direct = step.references.filter(ref => 'assetId' in ref).map(ref => 'assetId' in ref ? ref.assetId : '');
       const slots = step.references.filter(ref => 'stepKey' in ref).map(ref => 'stepKey' in ref ? ref.stepKey : '');
       assert(new Set([...direct, ...slots]).size === direct.length + slots.length && same(direct, shot.referenceAssetIds) && same(slots, shot.approvedRecipeReferenceSlots), 'Recipe cannot rewrite approved shot references or invent dynamic reference slots. Create a revised plan.');
-      for (const id of direct) { const source = asset(id); assert(!source.mimeType.startsWith('video/'), 'Generic video references lack a bounded input billing certificate.'); }
+      assert(!shot.operation || ['GENERATE', 'LIP_SYNC'].includes(shot.operation), 'Use the dedicated reviewed operation for this shot.');
+      const sources = direct.map(id => asset(id));
+      if (shot.operation === 'LIP_SYNC') {
+        assert(shot.nativeAudioPolicy === 'USE_RECORDING' && slots.length === 0 && sources.length === 2 && sources.filter(source => source.mimeType.startsWith('image/')).length === 1 && sources.filter(source => source.mimeType.startsWith('audio/')).length === 1, 'Lip sync needs one approved portrait and one complete approved recording.');
+        const recording = sources.find(source => source.mimeType.startsWith('audio/'))!;
+        assert(Number.isFinite(recording.durationSeconds) && Math.abs(recording.durationSeconds! * recipe.fps - shot.durationFrames) <= 1, 'Match the talking shot length to the complete measured recording before approval.');
+      } else for (const source of sources) assert(!source.mimeType.startsWith('video/'), 'Generic video references lack a bounded input billing certificate.');
       for (const key of slots) { const reference = steps.get(key); assert(reference?.operation === 'PREPARATION' && reference.kind === 'CHARACTER_REFERENCE', 'Dynamic shot slots must refer to approved reference-image preparation.'); deps.push(approvalId(key)); }
       durations.set(step.key, shot.durationFrames); request = { ...request, shot };
     }

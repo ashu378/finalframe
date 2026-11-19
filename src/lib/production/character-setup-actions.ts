@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 
-type CharacterInput = { projectId: string; productionId: string; projectExternalId: string; name: string; description: string; imageAssetId: string; voiceId?: string; voiceVersionId?: string; idempotencyKey: string };
+type CharacterInput = { projectId: string; productionId: string; projectExternalId: string; name: string; description: string; imageAssetId: string; additionalImageAssetIds?: string[]; voiceId?: string; voiceVersionId?: string; idempotencyKey: string };
 type BibleInput = { projectId: string; productionId: string; projectExternalId: string; characterVersionId: string; sourceBibleId?: string; rules: string[]; story: string; visualStyle: string; idempotencyKey: string };
 function safe(error: unknown) {
   const text = error instanceof Error ? error.message : '';
@@ -16,8 +16,8 @@ function safe(error: unknown) {
 export async function createGuidedCharacter(input: CharacterInput) {
   try {
     const client = await getAuthenticatedConvexClient();
-    const ref = makeFunctionReference<'mutation', { projectId: Id<'projects'>; productionId: Id<'productions'>; name: string; description: string; imageAssetId: Id<'assets'>; voiceId?: Id<'voices'>; voiceVersionId?: Id<'voiceVersions'>; idempotencyKey: string }, { resourceId: Id<'projectResources'>; resourceVersionId: Id<'projectResourceVersions'>; voiceVersionId: Id<'voiceVersions'> | null; replayed: boolean }>('characterSetup:create');
-    const saved = await client.mutation(ref, { projectId: input.projectId as Id<'projects'>, productionId: input.productionId as Id<'productions'>, name: input.name, description: input.description, imageAssetId: input.imageAssetId as Id<'assets'>, ...(input.voiceId ? { voiceId: input.voiceId as Id<'voices'>, ...(input.voiceVersionId ? { voiceVersionId: input.voiceVersionId as Id<'voiceVersions'> } : {}) } : {}), idempotencyKey: input.idempotencyKey });
+    const ref = makeFunctionReference<'mutation', { projectId: Id<'projects'>; productionId: Id<'productions'>; name: string; description: string; imageAssetId: Id<'assets'>; additionalImageAssetIds?: Id<'assets'>[]; voiceId?: Id<'voices'>; voiceVersionId?: Id<'voiceVersions'>; idempotencyKey: string }, { resourceId: Id<'projectResources'>; resourceVersionId: Id<'projectResourceVersions'>; voiceVersionId: Id<'voiceVersions'> | null; replayed: boolean }>('characterSetup:create');
+    const saved = await client.mutation(ref, { projectId: input.projectId as Id<'projects'>, productionId: input.productionId as Id<'productions'>, name: input.name, description: input.description, imageAssetId: input.imageAssetId as Id<'assets'>, ...(input.additionalImageAssetIds?.length ? { additionalImageAssetIds: input.additionalImageAssetIds as Id<'assets'>[] } : {}), ...(input.voiceId ? { voiceId: input.voiceId as Id<'voices'>, ...(input.voiceVersionId ? { voiceVersionId: input.voiceVersionId as Id<'voiceVersions'> } : {}) } : {}), idempotencyKey: input.idempotencyKey });
     revalidatePath(`/dashboard/projects/${input.projectExternalId}`);
     return { success: true as const, ...saved };
   } catch (error) { return { success: false as const, error: safe(error) }; }

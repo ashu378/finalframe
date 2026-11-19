@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const ts = require('typescript');
 const root = path.resolve(__dirname, '../..'); const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'finalframe-recipes-'));
 for (const name of ['contract','schema','compiler']) { const input = `src/lib/production/recipes/${name}.ts`; const target = path.join(temp,input.replace(/\.ts$/,'.js')); fs.mkdirSync(path.dirname(target),{recursive:true}); fs.writeFileSync(target,ts.transpileModule(fs.readFileSync(path.join(root,input),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText); }
+const ugc='src/lib/production/ugc-brief.ts';fs.writeFileSync(path.join(temp,ugc.replace('.ts','.js')),ts.transpileModule(fs.readFileSync(path.join(root,ugc),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText);
 const sha = 'renderer/src/media/sha256.ts'; fs.mkdirSync(path.join(temp,'renderer/src/media'),{recursive:true}); fs.writeFileSync(path.join(temp,sha.replace('.ts','.js')),ts.transpileModule(fs.readFileSync(path.join(root,sha),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText);
 const {compileRecipe, recipeNodeActions, recipeHash} = require(path.join(temp,'src/lib/production/recipes/compiler.js'));
 const {parseRecipeDocument} = require(path.join(temp,'src/lib/production/recipes/schema.js'));

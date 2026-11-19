@@ -1,5 +1,6 @@
 'use client';
 
+import { SpeakingShotSetup } from './speaking-shot-setup';
 import { DraftCastBindingPanel } from './draft-cast-binding-panel';
 
 import { useRef, useState, useTransition } from 'react';
@@ -51,6 +52,7 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
             <p className="text-xs leading-5 text-muted-foreground">Review these assignments before approving the plan. Dialogue preparation and lip sync require their own reviewed stages.</p>
         </section> : null}
         <ShotAssignmentControls data={data} shot={shot} editable={editable} />
+        <SpeakingShotSetup data={data} shot={shot} disabled={!editable || pending} onSelect={next => { setControls(next); start(() => save(() => saveShotOperationControls({ projectExternalId: data.projectExternalId, productionId: data.productionId, shotId: shot.id, controls: next }))); }}/>
         <details className="rounded-xl border border-border p-4" open={editable}><summary className="min-h-11  cursor-pointer text-sm font-semibold">Operation and source media</summary><form className="mt-3 grid gap-4 md:grid-cols-2" onSubmit={(event) => { event.preventDefault(); start(() => save(() => saveShotOperationControls({ projectExternalId: data.projectExternalId, productionId: data.productionId, shotId: shot.id, controls }))); }}>
             <label className="text-sm font-medium">Operation<select aria-label="Video operation" className={controlInput} disabled={!editable || pending} value={controls.operation} onChange={(event) => { const operation = event.target.value as VideoOperation; setControls((previous) => ({ ...previous, operation, audioPolicy: operation === 'LIP_SYNC' ? 'USE_RECORDING' : isSourceVideoEdit(operation) ? 'KEEP_SOURCE' : previous.audioPolicy, previousJobId: operation === 'EXTEND' ? previous.previousJobId : '', upscaleFactor: operation === 'UPSCALE' ? previous.upscaleFactor ?? 2 : undefined, upscaleMode: operation === 'UPSCALE' ? previous.upscaleMode ?? 'PRECISE' : undefined })); }}>{VIDEO_OPERATIONS.map((operation) => <option key={operation} value={operation}>{operationLabels[operation]}</option>)}</select></label>
             <label className="text-sm font-medium">Audio policy<select className={controlInput} disabled={!editable || pending} value={controls.audioPolicy} onChange={(event) => setControls((previous) => ({ ...previous, audioPolicy: event.target.value as typeof previous.audioPolicy }))}><option value="SILENT">Silent footage</option><option value="KEEP_SOURCE">Keep original source audio</option><option value="USE_RECORDING">Use selected voice or music recording</option><option value="GENERATE">Generate audio · supported models only</option></select></label>

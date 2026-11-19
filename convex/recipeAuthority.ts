@@ -1,3 +1,4 @@
+import { parseUgcBrief } from '../src/lib/production/ugc-brief';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { requireProjectRole, resolveProjectAccessForActor, type AuthorizedProject, type AuthorizedProjectActor } from './authorization';
@@ -80,10 +81,13 @@ export async function canonicalRecipeContext(ctx: RecipeReadCtx, recipe: RecipeD
       if (!Array.isArray(slots) || slots.length > 12 || slots.some(value => typeof value !== 'string')) throw new Error('RECIPE_REFERENCE_SLOTS_INVALID');
       const continuity = await resolveGenerationContinuity(ctx, { projectId: production.projectId, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: shot.requiredAssetIds ?? [], shotMetadata:metadata,durationSeconds:shot.durationSeconds });
       for (const assetId of continuity.referenceAssetIds) await addAsset(assetId);
-      if (!shots.some(value => value.id === shot._id)) shots.push({ id: shot._id, productionVersionId: version._id, prompt: shot.prompt, durationFrames: Math.round(shot.durationSeconds * recipe.fps), referenceAssetIds: continuity.referenceAssetIds, approvedRecipeReferenceSlots: slots, ...(continuity.dialogueSegments.length?{dialogueSegments:continuity.dialogueSegments,nativeAudioPolicy:metadata.audioPolicy??null}:{}) });
+      if (!shots.some(value => value.id === shot._id)) shots.push({ id: shot._id, productionVersionId: version._id, prompt: shot.prompt, ...(metadata.operation?{operation:metadata.operation}:{}), durationFrames: Math.round(shot.durationSeconds * recipe.fps), referenceAssetIds: continuity.referenceAssetIds, approvedRecipeReferenceSlots: slots, nativeAudioPolicy:metadata.audioPolicy??null,...(continuity.dialogueSegments.length?{dialogueSegments:continuity.dialogueSegments}:{}) });
     }
   }
-  const context = { binding: recipe.binding, fps: recipe.fps, productionVersionState: 'APPROVED' as const, continuityApproved: true, assets: [...assets.values()], shots, voices, quotes: {}, rawSourceBindings: [...raw.values()] };
+  const sourcePlan = await ctx.db.get(version.sourcePlanId);
+  if (!sourcePlan || sourcePlan.productionId !== production._id) throw new Error('RECIPE_BINDING_INVALID');
+  const speechMode = parseUgcBrief(recipeObject(sourcePlan.input).ugcBrief)?.speechMode;
+  const context = { ...(speechMode ? { speechMode } : {}), binding: recipe.binding, fps: recipe.fps, productionVersionState: 'APPROVED' as const, continuityApproved: true, assets: [...assets.values()], shots, voices, quotes: {}, rawSourceBindings: [...raw.values()] };
   return boundedRecipeJson(context, 512 * 1024);
 }
 export async function assertRecipeSourcesCurrent(ctx: RecipeReadCtx, run: Doc<'recipeRuns'>) {

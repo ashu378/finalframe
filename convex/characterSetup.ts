@@ -39,26 +39,29 @@ const created = v.object({ resourceId: v.id('projectResources'), resourceVersion
 /** One explicit click, one stable project character. Canonical resource creation
  * stays shared with the professional editor; no approval transition is run. */
 export const create = mutation({
-  args: { projectId: v.id('projects'), productionId: v.id('productions'), name: v.string(), description: v.string(), imageAssetId: v.id('assets'), voiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), idempotencyKey: v.string() },
+  args: { projectId: v.id('projects'), productionId: v.id('productions'), name: v.string(), description: v.string(), imageAssetId: v.id('assets'), additionalImageAssetIds: v.optional(v.array(v.id('assets'))), voiceId: v.optional(v.id('voices')), voiceVersionId: v.optional(v.id('voiceVersions')), idempotencyKey: v.string() },
   returns: created,
   handler: async (ctx, args) => {
     const access = await context(ctx, args.projectId, args.productionId);
     const name = boundedText(args.name, 'Character name', 160), description = boundedText(args.description, 'Character description', 10000);
-    await approvedAsset(ctx, args.projectId, args.imageAssetId, true);
+    const extra = args.additionalImageAssetIds ?? [];
+    const imageIds = [args.imageAssetId, ...extra];
+    if (extra.length > 3 || new Set(imageIds).size !== imageIds.length) throw new Error('CHARACTER_SETUP_REFERENCE_UNAVAILABLE');
+    for (const id of imageIds) await approvedAsset(ctx, args.projectId, id, true);
     const key = requestKey(args.projectId, args.idempotencyKey);
-    const input = { name, description, imageAssetId: args.imageAssetId, voiceId: args.voiceId ?? null, voiceVersionId: args.voiceVersionId ?? null };
+    const input = { name, description, imageAssetId: args.imageAssetId, ...(extra.length ? { additionalImageAssetIds: extra } : {}), voiceId: args.voiceId ?? null, voiceVersionId: args.voiceVersionId ?? null };
     const previous = await ctx.db.query('productionOperations').withIndex('by_idempotency', q => q.eq('idempotencyKey', key)).unique();
     if (previous) {
       if (previous.kind !== 'GUIDED_CHARACTER_CREATE' || previous.productionId !== args.productionId || previous.actorUserId !== access.user._id || stable(previous.input) !== stable(input)) throw new Error('CHARACTER_SETUP_REQUEST_CHANGED');
       const resourceId = ctx.db.normalizeId('projectResources', previous.outputResourceIds[0]), versionId = ctx.db.normalizeId('projectResourceVersions', previous.outputResourceIds[1]);
       const resource = resourceId ? await ctx.db.get(resourceId) : null, version = versionId ? await ctx.db.get(versionId) : null;
-      if (!resource || resource.projectId !== args.projectId || resource.archivedAt || !version || version.projectId !== args.projectId || version.resourceId !== resource._id || version.assetIds.length !== 1 || version.assetIds[0] !== args.imageAssetId) throw new Error('CHARACTER_SETUP_REQUEST_CHANGED');
+      if (!resource || resource.projectId !== args.projectId || resource.archivedAt || !version || version.projectId !== args.projectId || version.resourceId !== resource._id || stable(version.assetIds) !== stable(imageIds)) throw new Error('CHARACTER_SETUP_REQUEST_CHANGED');
       await checkedVoice(ctx, args.projectId, version.voiceId, version.voiceVersionId);
       return { resourceId: resource._id, resourceVersionId: version._id, voiceVersionId: version.voiceVersionId ?? null, replayed: true };
     }
     const voice = await checkedVoice(ctx, args.projectId, args.voiceId, args.voiceVersionId);
     const voiceVersionId = voice ? await freezeVoiceVersion(ctx, voice, access.user._id) : undefined;
-    const saved = await createProjectResource(ctx, { projectId: args.projectId, kind: 'CHARACTER', name, profile: { description }, assetIds: [args.imageAssetId], ...(args.voiceId ? { voiceId: args.voiceId, voiceVersionId } : {}) });
+    const saved = await createProjectResource(ctx, { projectId: args.projectId, kind: 'CHARACTER', name, profile: { description }, assetIds: imageIds, ...(args.voiceId ? { voiceId: args.voiceId, voiceVersionId } : {}) });
     const timestamp = Date.now();
     await ctx.db.insert('productionOperations', { productionId: args.productionId, studioExternalId: access.project.studioExternalId, ...(access.project.studioId ? { studioId: access.project.studioId } : {}), kind: 'GUIDED_CHARACTER_CREATE', targetType: 'projectResourceVersion', targetId: saved.resourceVersionId, input, idempotencyKey: key, status: 'COMPLETED', actorUserId: access.user._id, outputResourceIds: [saved.resourceId, saved.resourceVersionId], createdAt: timestamp, updatedAt: timestamp, completedAt: timestamp });
     return { resourceId: saved.resourceId, resourceVersionId: saved.resourceVersionId, voiceVersionId: voiceVersionId ?? null, replayed: false };

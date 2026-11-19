@@ -51,12 +51,12 @@ export async function resolveAudioSourceCertificate(ctx: ReadCtx, args: { projec
 }
 async function context(ctx: ReadCtx, args: { productionId: Id<'productions'>; shotId: Id<'shots'> }) {
   const production = await ctx.db.get(args.productionId); const shot = await ctx.db.get(args.shotId);
-  if (!production?.projectId || !shot || shot.projectId !== production.projectId || shot.productionId !== production._id || shot.productionVersionId !== production.currentVersionId || object(shot.metadata).operation !== 'LIP_SYNC') throw new Error('Choose a lip-sync shot in the current project production.');
+  if (!production?.projectId || !shot || shot.projectId !== production.projectId || shot.productionId !== production._id || !shot.productionVersionId || object(shot.metadata).operation !== 'LIP_SYNC') throw new Error('Choose a lip-sync shot in the current project production.');
   const access = await requireProjectRole(ctx, production.projectId, ['OWNER', 'EDITOR']);
   if (access.project.archivedAt || access.project.deletedAt || access.project.moderationStatus === 'RESTRICTED') throw new Error('Restore access to the project before measuring its media.');
-  const version = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
-  if (!version || version.productionId !== production._id || version.status !== 'APPROVED') throw new Error('Approve the current production before measuring its recording.');
-  const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: object(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds || [] });
+  const version = await ctx.db.get(shot.productionVersionId);
+  if (!version || version.productionId !== production._id || !(version.status === 'APPROVED' && production.currentVersionId === version._id || version.status === 'DRAFT' && !!version.sourcePlanId && production.currentPlanId === version.sourcePlanId)) throw new Error('Choose the current draft or approved production before measuring its media.');
+  const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: object(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds || [], shotMetadata: shot.metadata, durationSeconds: shot.durationSeconds });
   const sources = [];
   for (const raw of continuity.referenceAssetIds) {
     const id = ctx.db.normalizeId('assets', raw); const asset = id ? await ctx.db.get(id) : null;

@@ -51,5 +51,10 @@ assert.doesNotMatch(readonly, /Save shot bindings|Add spoken line|Remove role as
 assert.match(readonly, /disabled=""[^>]*value="lead_actor"/);
 const noVoice = render({ data: { ...data, boundResources: data.boundResources.map(resource => ({ ...resource, voiceVersionId: undefined })) } });
 assert.match(noVoice, /disabled="">Add spoken line/);
+const visualOnlyShot={...shot,resourceBindings:shot.resourceBindings.map(({voiceVersionId,...binding})=>binding),dialogueSegments:[]};
+const visualOnly=render({shot:visualOnlyShot});
+assert.match(visualOnly,/Use Ada’s approved voice for this shot/);
+assert.match(visualOnly,/Choose it for this shot before adding new spoken lines/);
+assert.doesNotMatch(render({shot:visualOnlyShot,editable:false}),/Use Ada’s approved voice for this shot/);
 assert.equal(mutations, 0);
 console.log('PASS assignment UI: independent character roles, frozen voice speakers, costume association, draft exclusion, read-only approval and zero writes on render.');

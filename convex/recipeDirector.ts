@@ -43,10 +43,17 @@ async function cut(ctx:ReadCtx,runId:Id<'recipeRuns'>){
       if(!source.asset.mimeType?.startsWith('video/')||object(source.asset.provenance).generationJobId!==job._id)throw new Error('DIRECTOR_CUT_BINDING_CHANGED');
       const nativePolicy=object(job.request).audioPolicy;
       if(shotInput.nativeAudioPolicy!==undefined&&shotInput.nativeAudioPolicy!==nativePolicy)throw new Error('DIRECTOR_CUT_BINDING_CHANGED');
-      if(['GENERATE','KEEP_SOURCE'].includes(String(nativePolicy))&&object(object(job.response).technicalProbe).hasAudio!==true){blocked.push({nodeId:node.nodeId,code:'NATIVE_AUDIO_REVIEW_REQUIRED'});continue;}
+      const probe=object(object(job.response).technicalProbe);
+      const suppliedSpeech=object(job.request).operation==='LIP_SYNC'&&nativePolicy==='USE_RECORDING';
+      const keepNative=['GENERATE','KEEP_SOURCE'].includes(String(nativePolicy))||suppliedSpeech;
+      if(keepNative&&probe.hasAudio!==true){blocked.push({nodeId:node.nodeId,code:'NATIVE_AUDIO_REVIEW_REQUIRED'});continue;}
+      // The existing timeline accepts at most 50ms of provider frame rounding.
+      // Permit that same bounded tail only for certified supplied-speech output;
+      // longer mismatches still stop review, and ordinary footage stays strict.
+      if(suppliedSpeech&&(!Number.isFinite(probe.durationSeconds)||Math.abs(Number(probe.durationSeconds)-durationSeconds)>.05||Math.abs(Number(object(object(job.request).lipSyncSource).durationSeconds)-durationSeconds)>1/fps)){blocked.push({nodeId:node.nodeId,code:'PICTURE_TIMING_UNAVAILABLE'});continue;}
       proofs.push({nodeId:node.nodeId,requestHash:node.requestHash,resolvedRequestHash:node.resolvedRequestHash,takeId:take._id,contextSnapshot:take.contextSnapshot,jobId:job._id});
       targets.push({type:'shotVersion',id:take._id,productionId:run.productionId});
-      clips.push({nodeId:node.nodeId,shotId:take.shotId,shotVersionId:take._id,assetId:take.assetId,url:source.url,mimeType:source.asset.mimeType,startSeconds,trimStartSeconds:0,durationSeconds,audioPolicy:['GENERATE','KEEP_SOURCE'].includes(String(nativePolicy))?'KEEP_SOURCE':'MUTE'});
+      clips.push({nodeId:node.nodeId,shotId:take.shotId,shotVersionId:take._id,assetId:take.assetId,url:source.url,mimeType:source.asset.mimeType,startSeconds,trimStartSeconds:0,durationSeconds,audioPolicy:keepNative?'KEEP_SOURCE':'MUTE',...(suppliedSpeech?{endToleranceSeconds:.05}:{})});
     }else if(node.operation==='SOURCE_RANGE'){
       if(node.resultId!==request.sourceAssetId)throw new Error('DIRECTOR_CUT_BINDING_CHANGED');
       const source=await media(request.sourceAssetId);

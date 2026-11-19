@@ -1,5 +1,7 @@
 'use server';
 
+import { parseUgcBrief, type UgcBrief } from './ugc-brief';
+
 import { revalidatePath } from 'next/cache';
 import { makeFunctionReference } from 'convex/server';
 import { parseCreatorIntent, type CreatorIntent } from './creator-intent';
@@ -36,6 +38,7 @@ export interface SelectedProductionDefaults {
     outputPreset: OutputPreset;
     videoType: VideoType;
     brief: string;
+    ugcBrief?: UgcBrief;
     creatorIntent?: CreatorIntent;
     inputAssets?: Array<{id:string;name:string;mimeType:string}>;
     inputSourcesError?: string;
@@ -89,7 +92,7 @@ export async function getSelectedProductionDefaults(projectExternalId: string, p
         projectExternalId: project.externalId, productionId, studioExternalId: production.studioExternalId,
         durationSeconds: settings.requestedDurationSeconds, mode, workflow, language: settings.language,
         outputPreset, videoType: draftVideoType ?? normalizeVideoType(production.projectType ?? project.projectType), brief: typeof brief === 'string' ? brief : '',
-        creatorIntent: parseCreatorIntent(savedInput.creatorIntent), inputAssets, ...(inputSourcesError?{inputSourcesError}:{}),
+        ugcBrief: parseUgcBrief(savedInput.ugcBrief), creatorIntent: parseCreatorIntent(savedInput.creatorIntent), inputAssets, ...(inputSourcesError?{inputSourcesError}:{}),
     };
 }
 

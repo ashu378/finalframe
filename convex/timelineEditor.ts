@@ -256,7 +256,10 @@ async function replacementAsset(ctx: ReadCtx, projectId: Id<'projects'>, studioE
   if (!storage || storage.size < 1 || storage.contentType !== asset.mimeType || !sha256Equal(asset.checksum, storage.sha256)) throw new Error('The replacement media bytes or type changed.');
   const restoration=record(clip.metadata.sourceAudioRestoration),hold=record(clip.metadata.renderItem).holdAfterFrame;
   const playbackDuration=asset._id===clip.assetId&&typeof hold==='number'&&typeof restoration.fps==='number'?(hold-1)/restoration.fps:clip.durationSeconds;
-  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + playbackDuration > asset.durationSeconds! + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
+  // Canonical take composition permits 50ms of container/frame rounding. Keep
+  // that existing take viewable; a different replacement still needs full coverage.
+  const existingTakeRounding = clip.kind === 'VIDEO' && asset._id === clip.assetId && !!clip.shotVersionId && (clip.trimStartSeconds ?? 0) === 0 ? 0.05 : 0;
+  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + playbackDuration > asset.durationSeconds! + existingTakeRounding + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
   await requireApprovedResource(ctx, projectId, 'asset', asset._id);
   return asset;
 }

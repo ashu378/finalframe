@@ -41,6 +41,7 @@ export async function resolveGenerationContinuity(ctx: ReadCtx, args: {
   const selectedIds = new Set<string>([...(Array.isArray(requested) ? requested as string[] : []),...structured.resourceBindings.map(binding=>binding.resourceVersionId)]);
   const initialAssetIds = new Set(args.referenceAssetIds);
   const selectedAssets = new Set(args.referenceAssetIds);
+  const portraitSpeech = object(args.shotMetadata).operation === 'LIP_SYNC';
   const selectedResources: Record<string, unknown>[] = [];
   const selectedVoices = new Set<string>();
   const selectedVoiceVersions=new Set<string>();
@@ -59,10 +60,14 @@ export async function resolveGenerationContinuity(ctx: ReadCtx, args: {
     const state = await ctx.db.query('resourceStates').withIndex('by_project_resource', (q) => q.eq('projectId', args.projectId).eq('resourceType', 'projectResourceVersion').eq('resourceId', version._id)).unique();
     if (!state || !['APPROVED', 'LOCKED'].includes(state.state)) throw new Error('Approve selected resource versions before generating.');
     if (JSON.stringify(resourceSnapshot.profile) !== JSON.stringify(version.profile) || JSON.stringify(resourceSnapshot.assetIds) !== JSON.stringify(version.assetIds) || object(resourceSnapshot.voice).voiceId !== version.voiceId) throw new Error('A selected continuity binding no longer matches its approved snapshot.');
+    // A supplied-audio portrait endpoint accepts one chosen view, not the
+    // character's entire multi-angle pack. Keep the approved version in context
+    // and validate its assets; never silently pick or drop a different actor.
+    if (portraitSpeech && (resource.kind !== 'CHARACTER' || version.assetIds.filter(id => initialAssetIds.has(id)).length !== 1 || selectedResources.length > 0)) throw new Error('Choose exactly one approved character portrait for this talking shot.');
     for (const assetId of version.assetIds) {
       const asset = await ctx.db.get(assetId);
       if (!asset || asset.projectId !== args.projectId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId) throw new Error('Import every continuity reference into this project before generating.');
-      selectedAssets.add(asset._id);
+      if (!portraitSpeech || initialAssetIds.has(asset._id)) selectedAssets.add(asset._id);
     }
     if (version.voiceId) {
       const voice = await ctx.db.get(version.voiceId);

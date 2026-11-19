@@ -1,5 +1,7 @@
 'use client';
 
+import { UgcBriefControls } from './ugc-brief-controls';
+import { parseUgcBrief, type UgcBrief } from '@/lib/production/ugc-brief';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -32,6 +34,7 @@ type SuccessfulPlan = Extract<CreateDirectorPlanResult, { success: true }> & { p
 
 export function CreateProductionForm({ studioId, existingProjectId, productionId, continuityOptions, initialMode, templateDefaults, productionDefaults, initialCreatorIntent }: { initialCreatorIntent?: CreatorIntent; studioId?: string; existingProjectId?: string; productionId?: string; initialMode?: ProductionInputMode; templateDefaults?: TemplateDefaults; productionDefaults?: SelectedProductionDefaults; continuityOptions?: PlanningContinuityOptions }) {
     const router = useRouter();
+    const [ugcBrief, setUgcBrief] = useState<UgcBrief | undefined>(productionDefaults?.ugcBrief);
     const [creatorIntent,setCreatorIntent]=useState<CreatorIntent>(initialCreatorIntent??productionDefaults?.creatorIntent??{version:1,path:'CREATE_VIDEO',involvement:'KEY_STAGE_REVIEW',videoKind:'CINEMATIC',visualStyle:{id:'REALISTIC'}});
     const [useCreatorIntent,setUseCreatorIntent]=useState(Boolean(initialCreatorIntent||productionDefaults?.creatorIntent||!productionDefaults&&!templateDefaults));
     function changeCreatorIntent(value:CreatorIntent){setCreatorIntent(value);setUseCreatorIntent(true);setVideoType(legacyVideoTypeForCreatorIntent(value));if(value.path==='IMPROVE_FOOTAGE')setMode('FOOTAGE');}
@@ -93,6 +96,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
 
             if(useCreatorIntent){const preference=await saveProjectCreatorPreference(projectId,parseCreatorIntent(creatorIntent)!);if(!preference.success){safeFailure=preference.error;throw new Error('Preference save failed');}}
             const intent: CreateIntent = {
+                ...(ugcBrief ? { ugcBrief: parseUgcBrief(ugcBrief) } : {}),
                 ...(useCreatorIntent?{creatorIntent:parseCreatorIntent(creatorIntent)}:{}),
                 projectId,
                 productionId: plan?.productionId || productionId,
@@ -143,6 +147,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
         <div className="space-y-8">
             <div className="rounded-2xl border border-border/70 bg-secondary/35 px-4 py-3 text-sm leading-6 text-muted-foreground"><span className="font-semibold text-foreground">Start your way.</span> An idea or script is enough. Voice, images, footage, and other media are optional ways to give the plan more to work with.</div>
             <CreationIntentControls value={creatorIntent} onChange={changeCreatorIntent} disabled={isSubmitting}/>{!useCreatorIntent?<p className="text-sm text-muted-foreground">This saved production keeps its existing workflow until you deliberately change the creation choices above.</p>:null}
+            <UgcBriefControls value={ugcBrief} onChange={setUgcBrief} disabled={isSubmitting}/>
             <details open={!useCreatorIntent}><summary className="min-h-11 cursor-pointer text-sm font-semibold">Starting material · {MODES.find(item=>item.id===mode)?.label}</summary><p className="mb-3 text-sm text-muted-foreground">Ideas, scripts and supplied media are inputs to the same project, rather than separate products.</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{MODES.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} onClick={() => setMode(item.id)} aria-pressed={mode === item.id} className={`rounded-[1.15rem] border p-5 text-left transition hover:-translate-y-0.5 ${mode === item.id ? 'border-primary bg-card shadow-[0_15px_35px_-25px_hsl(38_86%_48%_/_0.9)]' : 'border-border bg-card hover:bg-secondary/45'}`}><span className={`grid size-10 place-items-center rounded-xl ${mode === item.id ? 'bg-primary' : 'bg-secondary'}`}><Icon className="size-5" aria-hidden="true" /></span><span className="mt-8 block font-semibold">{item.label}</span><span className="mt-2 block text-sm leading-6 text-muted-foreground">{item.description}</span></button>; })}</div></details>
             <div className="ff-card space-y-7 p-6 sm:p-8">
                 {productionDefaults?.inputAssets?.length?<fieldset className="space-y-3 rounded-xl border border-border p-4"><legend className="px-1 text-sm font-semibold">Retained production inputs</legend><p className="text-xs leading-5 text-muted-foreground">These exact inputs were saved on this production. Keep them or deliberately remove them from the new draft. Originals and approved versions remain retained; availability and approval are checked before generation.</p>{productionDefaults.inputAssets.map(asset=><label key={asset.id} className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" aria-label={`Retain ${asset.name}`} checked={retainedInputIds.includes(asset.id)} onChange={event=>setRetainedInputIds(current=>event.target.checked?[...current,asset.id]:current.filter(id=>id!==asset.id))}/><span>{asset.name} · {asset.mimeType}</span></label>)}</fieldset>:null}

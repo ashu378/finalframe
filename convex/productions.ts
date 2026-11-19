@@ -1,3 +1,6 @@
+import { parseUgcBrief } from '../src/lib/production/ugc-brief';
+import { resolveAudioSourceCertificate } from './audioCertificates';
+import { makeFunctionReference } from 'convex/server';
 import { resolveStoryboardSelection, cloneStoryboardSelection } from './storyboard';
 import { parseCreatorIntent } from '../src/lib/production/creator-intent';
 import { freezePlanSettings, readPlanSettings, requirePlanDuration } from '../src/lib/production/plan-settings';
@@ -18,6 +21,31 @@ import {validateShotBindings} from './continuityContracts';
 import {automaticPlanningReceipt,validateAutomaticVideoPlan,plannedShotMetadata,planningVideoType} from './planningVideo';
 
 const canonicalShotMetadata=plannedShotMetadata;
+
+/** Explicit draft-only timing edit. Uses decoded source bytes, never a client
+ * supplied duration, and preserves every approved snapshot and prior take. */
+export const fitTalkingShotToRecording = mutation({
+  args: { productionId: v.id('productions'), shotId: v.id('shots'), expectedAudioAssetId: v.id('assets') },
+  returns: v.object({ shotSeconds: v.number(), productionSeconds: v.number() }),
+  handler: async (ctx, args) => {
+    const scope = await castDraftInfo(ctx, args.productionId);
+    const access = await requireProjectRole(ctx, scope.production.projectId!, ['OWNER','EDITOR']);
+    const shot = scope.shots.find(row => row._id === args.shotId);
+    if (scope.version.status !== 'DRAFT' || !['DRAFT','READY'].includes(scope.plan.status) || !shot || record(shot.metadata).operation !== 'LIP_SYNC' || record(shot.metadata).audioPolicy !== 'USE_RECORDING' || !shot.requiredAssetIds?.includes(args.expectedAudioAssetId)) throw new Error('SPEECH_TIMING_DRAFT_REQUIRED');
+    const source = await resolveAudioSourceCertificate(ctx, { projectId: access.project._id, assetId: args.expectedAudioAssetId });
+    const shotSeconds = Math.ceil(source.durationSeconds * 30) / 30;
+    const productionSeconds = scope.shots.reduce((sum, row) => sum + (row._id === shot._id ? shotSeconds : row.durationSeconds), 0);
+    if (productionSeconds > 60 || productionSeconds <= 0) throw new Error('SPEECH_TIMING_LIMIT');
+    if (shot.durationSeconds === shotSeconds && readPlanSettings(scope.plan.input, scope.production).requestedDurationSeconds === productionSeconds) return { shotSeconds, productionSeconds };
+    await ctx.runMutation(makeFunctionReference<'mutation'>('scenes:updateShot'), { shotId: shot._id, expectedMetadata: shot.metadata ?? null, durationSeconds: shotSeconds });
+    const input = record(scope.plan.input);
+    const settings = readPlanSettings(input, scope.production);
+    await ctx.db.patch(scope.plan._id, { input: { ...input, requestedDurationSeconds: productionSeconds, ...(input.durationSeconds !== undefined ? { durationSeconds: productionSeconds } : {}), canonicalPlanSettings: { ...settings, requestedDurationSeconds: productionSeconds } }, updatedAt: now() });
+    await ctx.db.patch(scope.version._id, { updatedAt: now() });
+    await ctx.db.insert('audit', { studioExternalId: scope.production.studioExternalId, studioId: scope.production.studioId, actorUserId: access.user._id, action: 'DRAFT_SPEECH_TIMING_MATCHED', entityType: 'shot', entityId: shot._id, metadata: { productionId: args.productionId, assetId: source.assetId, checksum: source.checksum, previousSeconds: shot.durationSeconds, shotSeconds, productionSeconds }, createdAt: now() });
+    return { shotSeconds, productionSeconds };
+  },
+});
 
 type ReadCtx = QueryCtx | MutationCtx;
 type PlanRecord = Doc<"directorPlans">;
@@ -258,6 +286,8 @@ export async function createCanonicalPlan(ctx: MutationCtx, args: Infer<typeof c
 
     const sourceInput = freezePlanSettings(args.input,args);
     const creatorIntent = parseCreatorIntent(sourceInput.creatorIntent);
+    const ugcBrief = parseUgcBrief(sourceInput.ugcBrief);
+    if (ugcBrief) sourceInput.ugcBrief = ugcBrief;
     if (creatorIntent) sourceInput.creatorIntent = creatorIntent;
     if (sourceInput.castBindingReview && !privateBinding) throw new Error("RECIPE_CAST_BINDING_CHANGED");
     let production = await selectProjectProduction(ctx, project, args.productionId);

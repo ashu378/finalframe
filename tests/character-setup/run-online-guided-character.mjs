@@ -8,7 +8,7 @@ import { makeFunctionReference } from 'convex/server';
 assert.equal(process.env.FINALFRAME_RUN_GUIDED_CHARACTER_ONLINE, 'true', 'Run only after the coordinator deploys checkpoint34.');
 assert.equal(process.env.NEXT_PUBLIC_CONVEX_URL, 'https://knowing-snail-785.convex.cloud');
 const root = process.cwd(), { api } = await import(pathToFileURL(root + '/convex/_generated/api.js'));
-const { createAuthenticatedClient } = await import(pathToFileURL(root + '/scripts/dev-fixture/client.mjs'));
+const { createAuthenticatedClient } = await import(pathToFileURL(root + (process.env.FINALFRAME_FIXTURE_CLI_IDENTITY ? '/scripts/dev-fixture/cli-client.mjs' : '/scripts/dev-fixture/client.mjs')));
 const { client } = await createAuthenticatedClient(), projects = [], checks = [], marker = 'guided-character-' + randomUUID();
 const ref = name => makeFunctionReference(name), pass = name => { checks.push(name); console.log('PASS ' + name); };
 async function approve(projectId, resourceType, resourceId) { for (const method of ['submitForReview', 'approve', 'lock']) await client.mutation(api.approvals[method], { projectId, resourceType, resourceId }); }
@@ -34,7 +34,9 @@ try {
   const sound = await upload(project, wav, 'audio/wav', ['VOICE_REFERENCE']); await approve(projectId, 'asset', sound.assetId);
   const voice = await client.mutation(api.voices.create, { projectId, kind: 'RECORDED', name: 'Synthetic silence; not a personal voice', idempotencyKey: marker + ':voice' });
   await client.mutation(api.voices.attachSample, { projectId, voiceId: voice.voiceId, assetId: sound.assetId }); await approve(projectId, 'voice', voice.voiceId);
-  const create = { ...request, voiceId: voice.voiceId }, made = await client.mutation(ref('characterSetup:create'), create), replay = await client.mutation(ref('characterSetup:create'), create);
+  const additional = await upload(project, pixel, 'image/png', ['IMAGE']); await approve(projectId, 'asset', additional.assetId);
+  await assert.rejects(client.mutation(ref('characterSetup:create'), { ...request, additionalImageAssetIds: [otherImage.assetId] }));
+  const create = { ...request, additionalImageAssetIds: [additional.assetId], voiceId: voice.voiceId }, made = await client.mutation(ref('characterSetup:create'), create), replay = await client.mutation(ref('characterSetup:create'), create);
   assert.equal(made.resourceId, replay.resourceId); assert.equal(replay.replayed, true); assert(made.voiceVersionId);
   const state = await client.query(api.resourceStates.get, { projectId, resourceType: 'projectResourceVersion', resourceId: made.resourceVersionId }); assert.equal(state.state, 'DRAFT');
   pass('online duplicate click returns one stable draft and exact frozen voice version without approval');

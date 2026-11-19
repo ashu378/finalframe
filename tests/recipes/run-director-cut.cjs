@@ -50,6 +50,15 @@ const approve=(ctx,runId,contentHash)=>ctx.call('recipeDirector','approveCutMedi
   const{ctx,runId}=await setup('GENERATE');const missing=await view(ctx,runId);assert.equal(missing.ready,false);assert(missing.blocked.some(row=>row.code==='NATIVE_AUDIO_REVIEW_REQUIRED'));ctx.rows.get('retained-job').response.technicalProbe.hasAudio=true;const present=await view(ctx,runId);assert.equal(present.ready,true);assert.equal(present.clips[0].audioPolicy,'KEEP_SOURCE');
   const silent=await setup();silent.ctx.nodes(silent.runId).find(row=>row.operation==='GENERATION').request.shot.nativeAudioPolicy='SILENT';silent.ctx.rows.get('retained-job').request.audioPolicy='GENERATE';silent.ctx.rows.get('retained-job').response.technicalProbe.hasAudio=true;await assert.rejects(view(silent.ctx,silent.runId),/BINDING_CHANGED/);
  });
+ await test('supplied-speech preview retains its native audio and accepts only the bounded measured frame tail',async()=>{
+  const{ctx,runId}=await setup('USE_RECORDING');
+  Object.assign(ctx.rows.get('retained-job').request,{operation:'LIP_SYNC',lipSyncSource:{durationSeconds:4}});
+  Object.assign(ctx.rows.get('retained-job').response.technicalProbe,{hasAudio:true,durationSeconds:3.96});
+  const cut=await view(ctx,runId);assert.equal(cut.ready,true);assert.equal(cut.clips[0].audioPolicy,'KEEP_SOURCE');assert.equal(cut.clips[0].endToleranceSeconds,.05);
+  ctx.rows.get('retained-job').response.technicalProbe.durationSeconds=3.8;assert.equal((await view(ctx,runId)).ready,false);
+  ctx.rows.get('retained-job').response.technicalProbe.durationSeconds=3.96;ctx.rows.get('retained-job').request.lipSyncSource.durationSeconds=5;assert.equal((await view(ctx,runId)).ready,false);
+  ctx.rows.get('retained-job').request.lipSyncSource.durationSeconds=4;ctx.rows.get('retained-job').response.technicalProbe.hasAudio=false;assert.equal((await view(ctx,runId)).ready,false);
+ });
  await test('review-only measurement of exact saved draft narration records timing without approval or financial changes',async()=>{
   const{ctx,runId}=await setup();addNarration(ctx,runId);const missing=await view(ctx,runId);assert.deepEqual(missing.pendingAudio,[{nodeId:'narration-node',assetId:'audio'}]);
   const before={jobs:ctx.count('generationJobs'),approvals:ctx.count('approvals'),reservations:ctx.count('reservations'),budget:structuredClone(ctx.rows.get('budget')),audio:structuredClone(ctx.rows.get('audio'))};
