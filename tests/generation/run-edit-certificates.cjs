@@ -80,6 +80,13 @@ async function main() {
     assert.equal(h.contracts.validateMediaProbe(valid, input).hasAudio, true);
     for (const patch of [{ durationSeconds: 6 }, { width: 1920, height: 1080 }, { hasAudio: false }, { width: 720, height: 1280 }]) assert.throws(() => h.contracts.validateMediaProbe({ ...valid, ...patch }, input), /MEDIA_VALIDATION_FAILED/);
   });
+  await check('small source edits allow one codec-grid block but reject changed canvases and retain exact generation certificates', () => {
+    const input = { ...request, duration: 8.096, ratio: '864:496', editSource: {...source,width:864,height:496,durationSeconds:8.096},editQuote:{version:'FLUX_SOURCE_VIDEO_EDIT_V1'} };
+    const result={width:864,height:480,durationSeconds:8.042,videoCodec:'h264',hasAudio:true};
+    assert.equal(h.contracts.validateMediaProbe(result,input).height,480);
+    for(const patch of [{height:464},{width:832,height:496},{width:884},{hasAudio:false},{durationSeconds:7}])assert.throws(()=>h.contracts.validateMediaProbe({...result,...patch},input),/MEDIA_VALIDATION_FAILED/);
+    assert.throws(()=>h.contracts.validateMediaProbe(result,{...input,expectedNativeOutput:{version:'NATIVE_VIDEO_OUTPUT_V1'}}),/MEDIA_VALIDATION_FAILED/);
+  });
   console.log(`Source video edit certificates: PASS (${checks}); actual policy/actions/handlers/worker in isolated memory only, no database/provider/renderer calls.`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(h.cleanup);

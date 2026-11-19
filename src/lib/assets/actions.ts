@@ -21,7 +21,7 @@ function toStudioAsset(asset: any): StudioAsset {
             : 'image';
 
     return {
-        id: String(asset?._id ?? asset?.id ?? asset?.externalId ?? ''),
+        id: String(asset?._id ?? asset?.assetId ?? asset?.id ?? asset?.externalId ?? ''),
         studio_id: String(asset?.studioExternalId ?? asset?.studioId ?? ''),
         name: asset?.name || 'Untitled media',
         url: asset?.storageUrl || '',

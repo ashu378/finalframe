@@ -15,6 +15,7 @@ export function DraftCastBindingPanel({ data }: { data: WorkspaceControlData }) 
   const info=useQuery(api.productions.draftCastOptions,data.versionId?{productionId:data.productionId as Id<'productions'>,...(bibleId?{continuityBibleId:bibleId as Id<'continuityBibles'>}:{})}:'skip');
   const bind=useMutation(api.productions.rebindDraftContinuity),approve=useMutation(api.productions.approvePlan);
   if(!info?.cast.length)return null;
+  if(info.sourceCast)return <section aria-label="People from your source video" className="ff-card space-y-2 p-5"><h3 className="font-semibold">Keep the people already in your video</h3><p className="text-sm text-muted-foreground">This edit uses your approved source video and keeps its original recording. You do not need to create new characters or voices. Review the edited picture against the source before approving the take.</p></section>;
   const setup=`/dashboard/projects/${encodeURIComponent(data.projectExternalId)}/workspace/media?production=${encodeURIComponent(data.productionId)}#guided-character-setup`;
   const complete=Boolean(bibleId)&&info.cast.every((item:any)=>mapping[item.key])&&info.shots.every((shot:any)=>coverage[shot.id]!==undefined)&&info.cast.every((item:any)=>info.shots.some((shot:any)=>coverage[shot.id]?.includes(item.key)));
   async function save(){if(!info||!complete||busy)return;setBusy(true);setError('');try{

@@ -6,11 +6,39 @@ import { sha256Equal } from '../renderer/src/media/sha256';
 export { proposedCast, castPlanShots };
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 function fail(code = 'RECIPE_CAST_REFERENCES_REQUIRED'): never { throw new ConvexError({ code }); }
+/** Existing performers may be described by the planner without inventing a
+ * reusable character identity. This narrowly covers source-only restyling;
+ * mixed/new generation, replacement speech and additional references still
+ * require the ordinary immutable character bindings. */
+export async function hasApprovedSourceCast(ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, plan: unknown) {
+  const shots = castPlanShots(plan);
+  if (!shots.length || shots.length > 200) return false;
+  const checked = new Set<string>();
+  for (const shot of shots) {
+    const metadata = object(shot.metadata);
+    if (metadata.operation !== 'EDIT' || metadata.audioPolicy !== 'KEEP_SOURCE'
+      || [shot.dialogueSegments, metadata.dialogueSegments, shot.resourceBindings, metadata.resourceBindings, metadata.resourceVersionIds].some(value => value !== undefined && (!Array.isArray(value) || value.length > 0))
+      || metadata.firstFrameAssetId || metadata.lastFrameAssetId || metadata.maskAssetId
+      || !Array.isArray(shot.requiredAssetIds) || shot.requiredAssetIds.length !== 1) return false;
+    const sourceId = shot.requiredAssetIds[0];
+    if (typeof sourceId !== 'string' || metadata.referenceAssetIds !== undefined && (!Array.isArray(metadata.referenceAssetIds) || metadata.referenceAssetIds.some(id => id !== sourceId))) return false;
+    if (checked.has(sourceId)) continue;
+    const id = ctx.db.normalizeId('assets', sourceId), asset = id ? await ctx.db.get(id) : null;
+    if (!asset || asset.projectId !== projectId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith('video/')) return false;
+    const stored = await ctx.db.system.get('_storage', asset.storageId);
+    const state = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', projectId).eq('resourceType', 'asset').eq('resourceId', sourceId)).unique();
+    if (!stored || stored.size < 1 || stored.contentType !== asset.mimeType || !sha256Equal(stored.sha256, asset.checksum) || !state || !['APPROVED','LOCKED'].includes(state.state)) return false;
+    if ([asset.rights, asset.provenance, asset.moderation].some(value => { const row = object(value); return row.approved === false || row.consent === false || ['DENIED','REJECTED','REVOKED','EXPIRED'].includes(String(row.status ?? row.state ?? '').toUpperCase()); })) return false;
+    checked.add(sourceId);
+  }
+  return true;
+}
 /** Called only after canonical caller authorization, and only for approval or
  * NEW video purchases. Never put this gate in read/poll/completion helpers. */
 export async function requireCastReadiness(ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, plan: unknown, continuity: unknown) {
   let cast; try { cast = proposedCast(plan); } catch { fail(); }
   if (!cast.length) return;
+  if (await hasApprovedSourceCast(ctx, projectId, plan)) return;
   const context = object(continuity), known = new Map((Array.isArray(context.resources) ? context.resources : []).map((value: unknown) => { const row = object(value); return [String(row.resourceVersionId), row] as const; }));
   if (context.projectId !== projectId) fail();
   const used = new Set<string>(), versions = new Map<string, string>();

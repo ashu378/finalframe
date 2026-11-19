@@ -2,7 +2,7 @@
 
 import { UgcBriefControls } from './ugc-brief-controls';
 import { parseUgcBrief, type UgcBrief } from '@/lib/production/ugc-brief';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -34,6 +34,9 @@ type SuccessfulPlan = Extract<CreateDirectorPlanResult, { success: true }> & { p
 
 export function CreateProductionForm({ studioId, existingProjectId, productionId, continuityOptions, initialMode, templateDefaults, productionDefaults, initialCreatorIntent }: { initialCreatorIntent?: CreatorIntent; studioId?: string; existingProjectId?: string; productionId?: string; initialMode?: ProductionInputMode; templateDefaults?: TemplateDefaults; productionDefaults?: SelectedProductionDefaults; continuityOptions?: PlanningContinuityOptions }) {
     const router = useRouter();
+    const pendingProjectId = useRef<string | undefined>(existingProjectId);
+    const uploadedFiles = useRef(new Map<File, string>());
+    const planningPending = useRef(false);
     const [ugcBrief, setUgcBrief] = useState<UgcBrief | undefined>(productionDefaults?.ugcBrief);
     const [creatorIntent,setCreatorIntent]=useState<CreatorIntent>(initialCreatorIntent??productionDefaults?.creatorIntent??{version:1,path:'CREATE_VIDEO',involvement:'KEY_STAGE_REVIEW',videoKind:'CINEMATIC',visualStyle:{id:'REALISTIC'}});
     const [useCreatorIntent,setUseCreatorIntent]=useState(Boolean(initialCreatorIntent||productionDefaults?.creatorIntent||!productionDefaults&&!templateDefaults));
@@ -56,6 +59,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
     function reportPlanError(message: string) { setPlanError(message); toast.error(message); }
 
     async function requestPlan(options?: { existingProjectId?: string; inputAssetIds?: string[]; revision?: string }) {
+        if (planningPending.current) return;
         if (continuityOptions?.selectionError) { reportPlanError(continuityOptions.selectionError); return; }
         if (continuityOptions?.requiresBible && !continuityChoice && !plan?.continuityBibleId) { reportPlanError('Choose an approved continuity bible or explicitly start blank for this episode.'); return; }
         if(useCreatorIntent&&creatorIntent.path==='FOCUSED_TOOL'&&!creatorIntent.tool){reportPlanError('Choose a focused operation before preparing its plan.');return;}
@@ -72,24 +76,29 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
             return;
         }
 
+        planningPending.current = true;
         setIsSubmitting(true);
         setPlanError('');
         let safeFailure: string | undefined;
         try {
-            let projectId = options?.existingProjectId || existingProjectId;
+            let projectId = options?.existingProjectId || existingProjectId || pendingProjectId.current;
             let inputAssetIds = [...(options?.inputAssetIds ?? retainedInputIds)];
             if (!projectId) {
                 const contentType: ProjectContentType = mode === 'AD' ? 'commercial' : mode === 'FOOTAGE' ? 'ugc' : mode === 'SCRIPT' ? 'explainer' : 'commercial';
                 const project = await createProject({ name: name.trim() || 'Untitled video', contentType, videoType, description: brief || 'A video shaped around the media you supplied.', outcomeGoal: mode === 'AD' ? 'convert_sales' : 'get_attention' });
                 if (!project.success || !project.projectId) { safeFailure = project.error || 'Could not create your project'; throw new Error('Project creation failed'); }
                 projectId = project.projectId;
+                pendingProjectId.current = projectId;
             }
             if (files.length > 0 && studioId && !options?.inputAssetIds) {
                     for (const file of files) {
+                        const retainedUpload = uploadedFiles.current.get(file);
+                        if (retainedUpload) { inputAssetIds.push(retainedUpload); continue; }
                         const formData = new FormData();
                         formData.append('file', file);
                         const upload = await uploadAsset(studioId, formData, `/productions/${projectId}`);
-                        if (!upload.success || !upload.asset) { safeFailure = upload.error || 'Could not upload the selected media'; throw new Error('Media upload failed'); }
+                        if (!upload.success || !upload.asset?.id) { safeFailure = upload.error || 'Could not upload the selected media'; throw new Error('Media upload failed'); }
+                        uploadedFiles.current.set(file, upload.asset.id);
                         inputAssetIds.push(upload.asset.id);
                     }
             }
@@ -122,6 +131,7 @@ export function CreateProductionForm({ studioId, existingProjectId, productionId
         } catch {
             reportPlanError(safeFailure || 'We could not prepare your plan. Your brief and selected references are still here. Check the connection and try again when ready.');
         } finally {
+            planningPending.current = false;
             setIsSubmitting(false);
         }
     }

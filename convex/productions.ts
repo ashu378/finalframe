@@ -6,7 +6,7 @@ import { parseCreatorIntent } from '../src/lib/production/creator-intent';
 import { freezePlanSettings, readPlanSettings, requirePlanDuration } from '../src/lib/production/plan-settings';
 import { mutation, query } from "./_generated/server";
 import { v, type Infer } from "convex/values";
-import { requireCastReadiness, proposedCast, castPlanShots } from "./castReadiness";
+import { requireCastReadiness, hasApprovedSourceCast, proposedCast, castPlanShots } from "./castReadiness";
 import { recipeHash } from "../src/lib/production/recipes/compiler";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -557,7 +557,7 @@ export const draftCastOptions = query({
       const context=await resolvePlanningContinuity(ctx,projectId,args.productionId,args.continuityBibleId,String(record(scope.plan.input).prompt??record(scope.plan.input).script??'').slice(0,256));
       for(const raw of Array.isArray(record(context).resources)?record(context).resources as unknown[]:[]){const row=record(raw);if(row.kind==='CHARACTER')characters.push({id:String(row.resourceVersionId),name:String(row.name),assetCount:Array.isArray(row.assetIds)?row.assetIds.length:0});}
     }catch{selectedBibleAvailable=false;}}
-    return { selectedBibleAvailable,projectId, planId:scope.plan._id,versionId:scope.version._id,versionState:scope.version.status,updatedAt:scope.version.updatedAt ?? scope.version.createdAt, snapshotHash:await recipeHash(scope.snapshot),cast:proposedCast(scope.snapshot),shots:scope.shots.map(shot=>({id:shot._id,title:shot.title})),characters,ready,canEdit:['OWNER','EDITOR'].includes(access.projectRole) };
+    return { sourceCast:await hasApprovedSourceCast(ctx,projectId,scope.snapshot),selectedBibleAvailable,projectId, planId:scope.plan._id,versionId:scope.version._id,versionState:scope.version.status,updatedAt:scope.version.updatedAt ?? scope.version.createdAt, snapshotHash:await recipeHash(scope.snapshot),cast:proposedCast(scope.snapshot),shots:scope.shots.map(shot=>({id:shot._id,title:shot.title})),characters,ready,canEdit:['OWNER','EDITOR'].includes(access.projectRole) };
   },
 });
 export const rebindDraftContinuity = mutation({

@@ -44,6 +44,7 @@ function ui(state, canEdit = true) {
     '@/components/ui/button': { Button },
     '@/components/production/generate-shot-button': { GenerateShotButton: () => null },
     './draft-cast-binding-panel': { DraftCastBindingPanel: () => null },
+    './speaking-shot-setup': { SpeakingShotSetup: () => null },
     './shot-assignment-controls': { ShotAssignmentControls: () => null },
     '@/lib/production/workspace-controls': h.controls,
     './resource-approval-controls': { ApprovalControls: () => null, controlInput: '' },

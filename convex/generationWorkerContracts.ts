@@ -115,9 +115,17 @@ export function validateMediaProbe(value: unknown, request: Record<string, unkno
   if (object(request.editQuote).version === 'FLUX_SOURCE_VIDEO_EDIT_V1') {
     const source = object(request.editSource);
     const sourceWidth = Number(source.width); const sourceHeight = Number(source.height); const sourceDuration = Number(source.durationSeconds);
+    // Some source edits normalize an already-small input by one 16px codec
+    // block (observed 864x496 -> 864x480). Admit that bounded normalization,
+    // retaining actual dimensions for review; do not permit a different canvas
+    // or weaken exact native-generation certificates above.
+    const smallGridNormalization = Math.min(sourceWidth, sourceHeight) >= 480
+      && Math.min(sourceWidth, sourceHeight) <= 720
+      && width % 16 === 0 && height % 16 === 0
+      && Math.abs(width - sourceWidth) <= 16 && Math.abs(height - sourceHeight) <= 16;
     // Source aspect ratio/duration are preserved. 720p is an output ceiling,
     // not an exact dimension promise for already smaller source media.
-    if (!sourceWidth || !sourceHeight || !Number.isFinite(sourceDuration) || Math.min(width, height) > 736 || width > sourceWidth + 16 || height > sourceHeight + 16 || Math.abs(width / height - sourceWidth / sourceHeight) > .03 || Math.abs(duration - sourceDuration) > Math.max(.25, sourceDuration * .02) || (source.hasAudio === true && probe.hasAudio !== true)) throw new Error('MEDIA_VALIDATION_FAILED');
+    if (!sourceWidth || !sourceHeight || !Number.isFinite(sourceDuration) || Math.min(width, height) > 736 || width > sourceWidth + 16 || height > sourceHeight + 16 || (!smallGridNormalization && Math.abs(width / height - sourceWidth / sourceHeight) > .03) || Math.abs(duration - sourceDuration) > Math.max(.25, sourceDuration * .02) || (source.hasAudio === true && probe.hasAudio !== true)) throw new Error('MEDIA_VALIDATION_FAILED');
   }
   if ((constraints.requiresAudio === true || constraints.requiresSourceAudioPreservation === true) && probe.hasAudio !== true) throw new Error('MEDIA_VALIDATION_FAILED');
   return { durationSeconds: duration, width, height, videoCodec: probe.videoCodec, hasAudio: probe.hasAudio === true, ...(typeof probe.audioCodec === 'string' ? { audioCodec: probe.audioCodec } : {}) };

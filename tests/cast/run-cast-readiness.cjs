@@ -10,6 +10,29 @@ async function setup(named=true){const ctx=fixture();const query=ctx.db.query;ct
 async function rebindArgs(ctx){const info=await ctx.call('productions','draftCastOptions',{productionId:'production',continuityBibleId:'bound'});return{projectId:'project',productionId:'production',sourcePlanId:info.planId,sourceVersionId:info.versionId,expectedUpdatedAt:info.updatedAt,expectedSnapshotHash:info.snapshotHash,continuityBibleId:'bound',castAssignments:[{proposalKey:'cast_0',characterVersionId:'character-v1'}],shotAssignments:info.shots.map(shot=>({shotId:shot.id,castKeys:['cast_0'],noNamedCast:false})),idempotencyKey:'deliberate-cast-fixture'};}
 function generation(ctx,made,key='new-video-fixture'){const shot=[...ctx.rows.values()].find(r=>r._table==='shots'&&r.productionVersionId===made.versionId);return{productionId:'production',shotId:shot._id,provider:'openrouter',model:'test/reviewed',estimatedCost:1,estimatedProviderCostUsd:.04,idempotencyKey:key,request:{qualityTier:'STANDARD',ratio:'16:9',audioPolicy:'SILENT'}};}
 (async()=>{
+ await check('source-only cartoon edit uses approved same-project video without inventing recurring identities',async()=>{
+  const ctx=fixture(),p=plan();
+  ctx.put('assets',{_id:'source',projectId:'project',scope:'PROJECT',storageId:'source-storage',mimeType:'video/mp4',checksum:'b'.repeat(64),rights:{approved:true}});
+  ctx.storageObjects.set('source-storage',{size:100,contentType:'video/mp4',sha256:'b'.repeat(64)});
+  ctx.put('resourceStates',{_id:'source-state',projectId:'project',resourceType:'asset',resourceId:'source',state:'APPROVED'});
+  for(const shot of p.sequences[0].scenes[0].shots){shot.requiredAssetIds=['source'];shot.metadata={operation:'EDIT',audioPolicy:'KEEP_SOURCE',referenceAssetIds:['source']};}
+  await requireCastReadiness(ctx,'project',p,{});
+  for(const change of [
+   (c,p)=>c.rows.get('source').projectId='foreign',
+   (c,p)=>c.rows.get('source').scope='GLOBAL',
+   (c,p)=>c.rows.get('source').deletedAt=1,
+   (c,p)=>c.rows.get('source').rights.consent=false,
+   (c,p)=>c.rows.get('source-state').state='DRAFT',
+   (c,p)=>c.storageObjects.get('source-storage').sha256='c'.repeat(64),
+   (c,p)=>p.sequences[0].scenes[0].shots[0].metadata.operation='GENERATE',
+   (c,p)=>p.sequences[0].scenes[0].shots[0].metadata.audioPolicy='GENERATE',
+   (c,p)=>p.sequences[0].scenes[0].shots[0].metadata.dialogueSegments=[{text:'replacement'}],
+   (c,p)=>p.sequences[0].scenes[0].shots[0].metadata.referenceAssetIds=['foreign'],
+   (c,p)=>p.sequences[0].scenes[0].shots[0].requiredAssetIds.push('reference'),
+   (c,p)=>p.sequences[0].scenes[0].shots[0].metadata.resourceBindings=[{role:'cast_0'}],
+  ]) {const rows=structuredClone([...ctx.rows]),storage=structuredClone([...ctx.storageObjects]),copy=structuredClone(p);change(ctx,copy);await assert.rejects(requireCastReadiness(ctx,'project',copy,{}),code('RECIPE_CAST_REFERENCES_REQUIRED'));ctx.rows.clear();for(const row of rows)ctx.rows.set(...row);ctx.storageObjects.clear();for(const row of storage)ctx.storageObjects.set(...row);}
+ });
+
  await check('named cast remains a saved draft but cannot approve unbound; characterless landscape remains approvable',async()=>{for(const named of[true,false]){const{ctx,made}=await setup(named);if(named)await assert.rejects(ctx.call('productions','approvePlan',{planId:made.planId}),code('RECIPE_CAST_REFERENCES_REQUIRED'));else await ctx.call('productions','approvePlan',{planId:made.planId});assert.equal(ctx.rows.get(made.versionId).status,named?'DRAFT':'APPROVED');assert.equal(ctx.count('generationJobs'),0);}});
  await check('explicit rebind creates a new canonical draft, retains paid source text and graph, then permits deliberate approval and exact idempotent replay',async()=>{const{ctx,made}=await setup(),input=await rebindArgs(ctx),oldPlan=JSON.stringify(ctx.rows.get(made.planId).plan),oldSnapshot=JSON.stringify(ctx.rows.get(made.versionId).snapshot),receipt=JSON.stringify(ctx.rows.get('receipt'));const bound=await ctx.call('productions','rebindDraftContinuity',input);assert.notEqual(bound.planId,made.planId);assert.notEqual(bound.versionId,made.versionId);assert.equal(JSON.stringify(ctx.rows.get(made.planId).plan),oldPlan);assert.equal(JSON.stringify(ctx.rows.get(made.versionId).snapshot),oldSnapshot);assert.equal(JSON.stringify(ctx.rows.get('receipt')),receipt);assert.equal(ctx.rows.get(made.versionId).status,'SUPERSEDED');assert.equal(ctx.rows.get(bound.versionId).status,'DRAFT');assert.equal(ctx.count('directorPlans'),2);assert.equal(ctx.count('providerTextRequests'),1);assert.equal(ctx.count('audit'),1);assert.equal(ctx.count('voiceVersions'),0);const info=await ctx.call('productions','draftCastOptions',{productionId:'production'});assert.equal(info.ready,true);const replay=await ctx.call('productions','rebindDraftContinuity',input);assert.equal(replay.planId,bound.planId);assert.equal(replay.replayed,true);assert.equal(ctx.count('directorPlans'),2);await assert.rejects(ctx.call('productions','rebindDraftContinuity',{...input,shotAssignments:input.shotAssignments.map(s=>({...s,noNamedCast:true,castKeys:[]}))}),/BINDING_CHANGED/);await ctx.call('productions','approvePlan',{planId:bound.planId});assert.equal(ctx.rows.get(bound.versionId).status,'APPROVED');assert.equal(ctx.rows.get(bound.planId).input.planningReceipt.requestId,'receipt');assert.equal(ctx.count('generationJobs'),0);});
  await check('wrong project/bible, stale graph/OCC, duplicate mapping, missing coverage and unapproved/foreign images deny atomically',async()=>{
