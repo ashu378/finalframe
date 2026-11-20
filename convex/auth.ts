@@ -4,15 +4,9 @@ import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { currentStudioForUser } from "./studioMemberships";
+import { sendTransactionalEmail } from "../src/lib/auth/transactional-email";
 
 const emailDeliveryEnabled = process.env.CONVEX_AUTH_EMAIL_ENABLED === "true";
-
-function parseSender(value: string) {
-  const match = value.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
-  return match
-    ? { name: match[1] || "FinalFrame", address: match[2] }
-    : { name: "FinalFrame", address: value.trim() };
-}
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -28,31 +22,14 @@ const emailProvider = Email({
   id: "email",
   maxAge: 60 * 60,
   async sendVerificationRequest({ identifier, url, expires, token }) {
-    const apiKey = process.env.CONVEX_AUTH_ZEPTOMAIL_TOKEN;
-    const from = process.env.CONVEX_AUTH_FROM_EMAIL;
-    if (!apiKey || !from) {
-      throw new Error("Email delivery is enabled but ZeptoMail is not configured.");
-    }
-
-    const sender = parseSender(from);
     const safeUrl = escapeHtml(url);
     const safeToken = escapeHtml(token);
-
-    const response = await fetch("https://api.zeptomail.com/v1.1/email", {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-enczapikey ${apiKey}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: sender,
-        to: [{ email_address: { address: identifier } }],
-        subject: "Your FinalFrame verification link",
-        htmlbody: `<p>Continue to FinalFrame:</p><p><a href="${safeUrl}">Verify your email</a></p><p>Or enter this verification code: <strong>${safeToken}</strong></p><p>This code expires at ${escapeHtml(expires.toISOString())}.</p>`,
-      }),
+    await sendTransactionalEmail({
+      to: identifier,
+      subject: "Your FinalFrame verification link",
+      html: `<p>Continue to FinalFrame:</p><p><a href="${safeUrl}">Verify your email</a></p><p>Or enter this verification code: <strong>${safeToken}</strong></p><p>This code expires at ${escapeHtml(expires.toISOString())}.</p>`,
+      text: `Continue to FinalFrame: ${url}\nVerification code: ${token}\nExpires: ${expires.toISOString()}`,
     });
-    if (!response.ok) throw new Error("We couldn't send the authentication email. Please try again.");
   },
 });
 

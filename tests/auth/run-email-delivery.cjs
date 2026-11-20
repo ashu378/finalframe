@@ -1,0 +1,27 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+const vm = require('node:vm');
+const code = ts.transpileModule(fs.readFileSync('src/lib/auth/transactional-email.ts','utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const mod={exports:{}};
+vm.runInNewContext(code,{exports:mod.exports,module:mod,process,fetch,AbortSignal,Set,Error});
+const {emailConfiguration,sendTransactionalEmail}=mod.exports;
+const env={CONVEX_AUTH_ZEPTOMAIL_TOKEN:'test-token',CONVEX_AUTH_FROM_EMAIL:'FinalFrame <support@usefinalframe.com>',CONVEX_AUTH_EMAIL_API_URL:'https://cpaas.zoho.com/v1.1/email'};
+(async()=>{
+ assert.equal(emailConfiguration(env).endpoint,env.CONVEX_AUTH_EMAIL_API_URL);
+ assert.equal(emailConfiguration({...env,CONVEX_AUTH_EMAIL_API_URL:undefined}).endpoint,'https://api.zeptomail.com/v1.1/email');
+ assert.equal(emailConfiguration({...env,CONVEX_AUTH_ZEPTOMAIL_TOKEN:'Zoho-enczapikey test-token'}).token,'test-token');
+ console.log('PASS CPaaS and legacy endpoints, sender and credential normalization');
+ for(const changed of [{CONVEX_AUTH_EMAIL_API_URL:'http://cpaas.zoho.com/v1.1/email'},{CONVEX_AUTH_EMAIL_API_URL:'https://attacker.invalid/email'},{CONVEX_AUTH_ZEPTOMAIL_TOKEN:''},{CONVEX_AUTH_FROM_EMAIL:'invalid'}]) assert.throws(()=>emailConfiguration({...env,...changed}));
+ console.log('PASS missing credentials, invalid sender and untrusted endpoint denial');
+ let captured;
+ await sendTransactionalEmail({to:'controlled@example.com',subject:'Test',html:'<p>Code</p>',text:'Code'},env,async(url,options)=>{captured={url,options};return {ok:true};});
+ assert.equal(captured.url,env.CONVEX_AUTH_EMAIL_API_URL);assert.equal(captured.options.redirect,'error');assert.ok(captured.options.signal);assert.equal(captured.options.headers.Authorization,'Zoho-enczapikey test-token');
+ const body=JSON.parse(captured.options.body);assert.equal(body.to[0].email_address.address,'controlled@example.com');assert.equal(body.from.address,'support@usefinalframe.com');assert.equal(body.track_clicks,false);assert.equal(body.track_opens,false);assert.equal(body.textbody,'Code');
+ console.log('PASS sender, recipient, timeout, no redirects or authentication-link tracking');
+ let attempts=0;
+ await assert.rejects(sendTransactionalEmail({to:'controlled@example.com',subject:'Test',html:'',text:''},env,async()=>{attempts++;return {ok:false};}),/We couldn't send/);assert.equal(attempts,1);
+ console.log('PASS provider rejection does not cause a duplicate send');
+ await assert.rejects(sendTransactionalEmail({to:'controlled@example.com',subject:'Test',html:'',text:''},env,async()=>{throw new Error('private-provider-details');}),error=>!error.message.includes('private-provider-details')&&error.message.includes("couldn't send"));
+ console.log('PASS safe timeout/network error without provider or credential disclosure');
+})().catch(e=>{console.error(e);process.exitCode=1;});
