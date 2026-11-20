@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+const mod={exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/auth/email-policy.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:mod,exports:mod.exports,crypto:require('node:crypto').webcrypto,URL,Uint32Array});
+const p=mod.exports;
+assert.equal(p.EMAIL_CODE_TTL_SECONDS,600);
+for(let i=0;i<200;i++)assert.match(p.sixDigitCode(),/^\d{6}$/);
+console.log('PASS six-digit codes and ten-minute lifetime');
+assert.equal(p.normalizeAuthEmail(' Test@Example.com '),'test@example.com');for(const v of ['',null,'x@x','a\nb@example.com'])assert.throws(()=>p.normalizeAuthEmail(v));
+assert.equal(p.emailEnabledFor('a@example.com',{CONVEX_AUTH_EMAIL_TEST_ALLOWLIST:' a@example.com '}),true);assert.equal(p.emailEnabledFor('b@example.com',{CONVEX_AUTH_EMAIL_TEST_ALLOWLIST:' a@example.com '}),false);assert.equal(p.emailEnabledFor('b@example.com',{CONVEX_AUTH_EMAIL_ENABLED:'true'}),true);
+console.log('PASS email normalization and isolated staged activation');
+const first=p.checkSendLimit(null,1000);assert.throws(()=>p.checkSendLimit(first,60000));assert.equal(p.checkSendLimit(first,61000).count,2);assert.throws(()=>p.checkSendLimit({count:5,windowStart:1000,lastSentAt:1000},100000));assert.equal(p.checkSendLimit({count:5,windowStart:1000,lastSentAt:1000},3601000).count,1);assert.throws(()=>p.checkSendLimit({count:100,windowStart:1000,lastSentAt:1000},100000,true));
+console.log('PASS resend cooldown, hourly recipient/global limits and window recovery');
+const v=p.authEmailMessage('verify','test@example.com','012345','https://www.usefinalframe.xyz');const r=p.authEmailMessage('reset','test@example.com','012345','https://www.usefinalframe.xyz');assert.match(v.text,/verify-email\?email=/);assert.match(r.text,/reset-password\?email=/);assert.notEqual(v.subject,r.subject);assert.ok(!v.html.includes('code='));assert.match(v.text,/10 minutes/);assert.throws(()=>p.authEmailMessage('reset','test@example.com','123456','http://unsafe.test'));
+console.log('PASS separate verification/recovery copy and no credential in email links');
+const schema=fs.readFileSync('convex/schema.ts','utf8');assert.match(schema,/\.index\("email", \["email"\]\)/);assert.match(schema,/\.index\("phone", \["phone"\]\)/);
+console.log('PASS required Convex Auth indexes survive custom users schema');

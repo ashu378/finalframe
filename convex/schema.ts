@@ -134,6 +134,7 @@ const moviePartVerification = v.object({
 
 export default defineSchema({
   ...authTables,
+  authEmailSendLimits: defineTable({ key: v.string(), count: v.number(), windowStart: v.number(), lastSentAt: v.number() }).index("by_key", ["key"]),
 
   users: defineTable({
     name: v.optional(v.string()), image: v.optional(v.string()), email: v.optional(v.string()),
@@ -143,7 +144,7 @@ export default defineSchema({
     status: v.optional(status), metadata: v.optional(json), createdAt: v.optional(timestamp),
     updatedAt: v.optional(timestamp), displayName: v.optional(v.string()),
     deactivationRequestId: v.optional(v.id('accountDeactivationRequests')), currentStudioId: v.optional(v.id('studios')),
-  }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]),
+  }).index("by_external_id", ["externalId"]).index("by_auth_subject", ["authSubject"]).index("email", ["email"]).index("phone", ["phone"]),
 
   accountDeactivationRequests: defineTable({
     userId: v.id('users'), status: v.union(v.literal('REQUESTED'), v.literal('CANCELED')), reason: v.string(), idempotencyKey: v.string(),

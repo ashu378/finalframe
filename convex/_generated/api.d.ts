@@ -17,6 +17,8 @@ import type * as assembly from "../assembly.js";
 import type * as assetStorage from "../assetStorage.js";
 import type * as audioCertificates from "../audioCertificates.js";
 import type * as auth from "../auth.js";
+import type * as authEmailLimits from "../authEmailLimits.js";
+import type * as authSession from "../authSession.js";
 import type * as authorization from "../authorization.js";
 import type * as beatAnalysis from "../beatAnalysis.js";
 import type * as beatCutContracts from "../beatCutContracts.js";
@@ -138,6 +140,8 @@ declare const fullApi: ApiFromModules<{
   assetStorage: typeof assetStorage;
   audioCertificates: typeof audioCertificates;
   auth: typeof auth;
+  authEmailLimits: typeof authEmailLimits;
+  authSession: typeof authSession;
   authorization: typeof authorization;
   beatAnalysis: typeof beatAnalysis;
   beatCutContracts: typeof beatCutContracts;

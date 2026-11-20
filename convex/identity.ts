@@ -1,8 +1,9 @@
 import type { UserIdentity } from "convex/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { ConvexAuthError } from "./auth";
+import { hasActiveSession } from './authSession';
 
-export type IdentityCtx = Pick<QueryCtx | MutationCtx, "auth">;
+export type IdentityCtx = Pick<QueryCtx | MutationCtx, "auth" | "db">;
 
 /**
  * Identity normalized from a verified Convex JWT.
@@ -54,6 +55,7 @@ export async function getIdentity(ctx: IdentityCtx): Promise<FinalFrameIdentity 
   }
 
   if (!isUsableIdentity(identity)) return null;
+  if (!(await hasActiveSession(ctx))) return null;
 
   return {
     tokenIdentifier: identity.tokenIdentifier,

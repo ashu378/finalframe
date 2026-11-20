@@ -1,51 +1,66 @@
 import { Password } from "@convex-dev/auth/providers/Password";
 import { Email } from "@convex-dev/auth/providers/Email";
-import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
+import { convexAuth, getAuthUserId, retrieveAccount } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { currentStudioForUser } from "./studioMemberships";
 import { sendTransactionalEmail } from "../src/lib/auth/transactional-email";
+import { hasActiveSession } from './authSession';
+
+import { internal } from "./_generated/api";
+import { EMAIL_CODE_TTL_SECONDS, normalizeAuthEmail, emailEnabledFor, sixDigitCode, authEmailMessage } from "../src/lib/auth/email-policy";
 
 const emailDeliveryEnabled = process.env.CONVEX_AUTH_EMAIL_ENABLED === "true";
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character] ?? character);
-}
-
-const emailProvider = Email({
-  id: "email",
-  maxAge: 60 * 60,
-  async sendVerificationRequest({ identifier, url, expires, token }) {
-    const safeUrl = escapeHtml(url);
-    const safeToken = escapeHtml(token);
-    await sendTransactionalEmail({
-      to: identifier,
-      subject: "Your FinalFrame verification link",
-      html: `<p>Continue to FinalFrame:</p><p><a href="${safeUrl}">Verify your email</a></p><p>Or enter this verification code: <strong>${safeToken}</strong></p><p>This code expires at ${escapeHtml(expires.toISOString())}.</p>`,
-      text: `Continue to FinalFrame: ${url}\nVerification code: ${token}\nExpires: ${expires.toISOString()}`,
-    });
+const makeEmailProvider = (purpose: 'verify' | 'reset') => Email({
+  id: purpose === 'reset' ? 'password-reset' : 'email-verification',
+  maxAge: EMAIL_CODE_TTL_SECONDS,
+  generateVerificationToken: async () => sixDigitCode(),
+  async sendVerificationRequest({ identifier, token }) {
+    await sendTransactionalEmail(authEmailMessage(purpose, identifier, token, process.env.SITE_URL || ''));
   },
 });
-
-const passwordProvider = Password({
-  profile: (params) => {
-    const email = typeof params.email === "string" ? params.email.trim().toLowerCase() : "";
-    if (!email) throw new Error("A valid email address is required.");
-
-    const name = typeof params.name === "string" ? params.name.trim() : "";
-    return { email, name };
+const profile = (params: Record<string, unknown>) => ({
+  email: normalizeAuthEmail(params.email),
+  ...(typeof params.name === 'string' && params.name.trim() ? { name: params.name.trim() } : {}),
+});
+const legacyPassword = Password({ profile });
+const verifiedPassword = Password({ profile, reset: makeEmailProvider('reset'), verify: makeEmailProvider('verify') });
+const passwordProvider = {
+  ...verifiedPassword,
+  authorize: async (params: Parameters<typeof verifiedPassword.authorize>[0], ctx: Parameters<typeof verifiedPassword.authorize>[1]) => {
+    const email = normalizeAuthEmail(params.email);
+    const normalized = { ...params, email };
+    if (!emailEnabledFor(email, process.env)) return legacyPassword.authorize(normalized, ctx);
+    const flow = params.flow;
+    if (params.code !== undefined && (typeof params.code !== 'string' || !/^\d{6}$/.test(params.code))) throw new Error('Enter the six-digit code from your email.');
+    let sends = flow === 'signUp' || flow === 'reset' || (flow === 'email-verification' && params.code === undefined);
+    if (flow === 'signIn') {
+      const found = await retrieveAccount(ctx, { provider: 'password', account: { id: email, secret: String(params.password || '') } });
+      if (!found) throw new Error('Invalid credentials.');
+      sends = !found.account.emailVerified;
+    }
+    try {
+    if (sends) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email));
+      const identifierHash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+      await ctx.runMutation(internal.authEmailLimits.consume, { identifierHash });
+    }
+    return await verifiedPassword.authorize(normalized, ctx);
+    } catch (error) {
+      if (flow === 'reset') return null; // Avoid disclosing account existence.
+      throw error;
+    }
   },
-  ...(emailDeliveryEnabled ? { reset: emailProvider, verify: emailProvider } : {}),
+};
+
+export const emailAvailability = query({
+  args: {}, returns: v.object({ enabled: v.boolean() }),
+  handler: async () => ({ enabled: emailDeliveryEnabled }),
 });
 
-export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
+export const { auth, signIn, signOut, store } = convexAuth({
   providers: [passwordProvider],
+  signIn: { maxFailedAttempsPerHour: 5 },
   callbacks: {
     // Keep the application user keyed to Convex Auth's verified user id. This
     // is metadata derived from the auth lifecycle, never from request args.
@@ -53,7 +68,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       await ctx.db.patch(userId, {
         externalId: userId.toString(),
         authSubject: userId.toString(),
-        name: typeof profile.name === "string" ? profile.name : undefined,
+        ...(typeof profile.name === "string" ? { name: profile.name } : {}),
         email: typeof profile.email === "string" ? profile.email : undefined,
         updatedAt: Date.now(),
       });
@@ -65,6 +80,11 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       }
     },
   },
+});
+
+export const isAuthenticated = query({
+  args: {}, returns: v.boolean(),
+  handler: hasActiveSession,
 });
 
 export const AUTH_INTEGRATION = {
@@ -132,6 +152,7 @@ export const currentUser = query({
   args: {},
   returns: v.union(v.null(), v.object({ id: v.string(), email: v.string(), name: v.union(v.string(), v.null()), onboardingCompleted: v.boolean(), isAdmin: v.boolean(), role: v.union(v.null(), v.literal('owner'), v.literal('admin'), v.literal('member')), studioExternalId: v.union(v.string(), v.null()), createdAt: v.number() })),
   handler: async (ctx) => {
+    if (!(await hasActiveSession(ctx))) return null;
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
 
