@@ -59,3 +59,7 @@ PASS for this three-person upload-to-download restyle: ordinary browser source u
 
 Lip-sync scope: source mouth movement and its three speaking turns were visually compared with the cartoon frames; the complete original sound was restored at zero offset. Precise phoneme-level quality and repair of imperfections already in the original synthetic source are not certified. No new synthesized voices replaced the recording.
 
+
+## Subsequent story-action correction
+
+The owner identified missing chewing before the punchline. Source preservation had passed; that story action had not. A separate localized animation repair and explicit action-review gates are documented in [Chewing-shot repair](CHEWING-SHOT-REPAIR-2026-11-20.md). The earlier export is retained.
