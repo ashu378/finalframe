@@ -6,6 +6,7 @@ import { ConvexError, v } from "convex/values";
 import { currentStudioForUser } from "./studioMemberships";
 import { sendTransactionalEmail } from "../src/lib/auth/transactional-email";
 import { hasActiveSession } from './authSession';
+import { materializePassword } from '../src/lib/auth/password-provider';
 
 import { internal } from "./_generated/api";
 import { EMAIL_CODE_TTL_SECONDS, normalizeAuthEmail, emailEnabledFor, sixDigitCode, authEmailMessage } from "../src/lib/auth/email-policy";
@@ -23,8 +24,8 @@ const profile = (params: Record<string, unknown>) => ({
   email: normalizeAuthEmail(params.email),
   ...(typeof params.name === 'string' && params.name.trim() ? { name: params.name.trim() } : {}),
 });
-const legacyPassword = Password({ profile });
-const verifiedPassword = Password({ profile, reset: makeEmailProvider('reset'), verify: makeEmailProvider('verify') });
+const legacyPassword = materializePassword(Password({ profile }));
+const verifiedPassword = materializePassword(Password({ profile, reset: makeEmailProvider('reset'), verify: makeEmailProvider('verify') }));
 const passwordProvider = {
   ...verifiedPassword,
   authorize: async (params: Parameters<typeof verifiedPassword.authorize>[0], ctx: Parameters<typeof verifiedPassword.authorize>[1]) => {
