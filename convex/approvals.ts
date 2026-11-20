@@ -1,3 +1,4 @@
+import { requireStoryActionsPassed } from './storyActionReviews';
 import { validateBeatVersionForApproval } from './beatAnalysis';
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
@@ -96,6 +97,7 @@ export async function transitionResourceState(
   const effective = await getEffectiveResourceState(ctx, args.projectId, args.resourceType, args.resourceId, args.productionId,actorId);
   if (args.resourceType === "voice" && ["APPROVED", "LOCKED"].includes(args.targetState)) await validateVoiceForApproval(ctx, args.projectId, (effective.resource as Doc<"voices">)._id);
   if(args.resourceType==='beatAnalysisVersion'&&['APPROVED','LOCKED'].includes(args.targetState))await validateBeatVersionForApproval(ctx,args.projectId,(effective.resource as Doc<'beatAnalysisVersions'>)._id);
+  if(args.resourceType==='shotVersion'&&['APPROVED','LOCKED'].includes(args.targetState))await requireStoryActionsPassed(ctx,(effective.resource as Doc<'shotVersions'>)._id);
   const productionId = args.productionId ?? effective.productionId;
   if (!productionId && !["asset", "voice", "projectResourceVersion", "continuityBible", "movieVersion", "movieReview", "movieExport", "beatAnalysisVersion"].includes(args.resourceType)) throw new Error("Approval requires a production-owned or supported project-owned resource.");
   if (['APPROVED','LOCKED'].includes(args.targetState) && args.resourceType === 'movieVersion') {

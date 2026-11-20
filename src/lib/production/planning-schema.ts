@@ -22,7 +22,7 @@ const camera = {
 const shot = {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera', 'resourceBindings', 'dialogueSegments', 'audioPolicy', 'aspectRatio', 'operation'],
+    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera', 'resourceBindings', 'dialogueSegments', 'audioPolicy', 'aspectRatio', 'operation', 'storyActions'],
     properties: {
         title: { type: 'string', minLength: 1 },
         prompt: { type: 'string', minLength: 1 },
@@ -38,6 +38,9 @@ const shot = {
         audioPolicy:{type:'string',enum:['SILENT','GENERATE','KEEP_SOURCE']},
         dialogueSegments:{type:'array',maxItems:32,items:{type:'object',additionalProperties:false,required:['speakerResourceVersionId','voiceVersionId','startSeconds','durationSeconds','text','delivery'],properties:{
             speakerResourceVersionId:{type:'string',minLength:1},voiceVersionId:{type:'string',minLength:1},startSeconds:{type:'number',minimum:0},durationSeconds:{type:'number',exclusiveMinimum:0},text:{type:'string',minLength:1,maxLength:1000},delivery:{type:'string',maxLength:400},
+        }}},
+        storyActions: {type:'array',maxItems:16,items:{type:'object',additionalProperties:false,required:['id','subject','action','startSeconds','endSeconds','beforeSeconds'],properties:{
+            id:{type:'string',minLength:1,maxLength:64},subject:{type:'string',minLength:1,maxLength:200},action:{type:'string',minLength:1,maxLength:1000},startSeconds:{type:'number',minimum:0},endSeconds:{type:'number',exclusiveMinimum:0},beforeSeconds:{anyOf:[{type:'number',exclusiveMinimum:0},{type:'null'}]},
         }}},
         camera,
     },

@@ -1,9 +1,10 @@
+import { parseStoryActions } from '../src/lib/production/story-actions';
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireProjectAccess, requireProjectRole } from "./authorization";
-import { ensureResourceState, requireEditable } from "./resourceStates";
+import { ensureResourceState, requireEditable, requireApprovedResource } from "./resourceStates";
 import { resolveGenerationContinuity } from "./generationContinuity";
 
 type ReadCtx = QueryCtx | MutationCtx;
@@ -149,6 +150,7 @@ async function assertProjectAssetReferences(ctx: ReadCtx, projectId: Id<"project
 
 async function validateResourceBindings(ctx: MutationCtx, production: Doc<"productions">, versionId: Id<"productionVersions">, metadata: unknown, referenceAssetIds: string[], durationSeconds: number) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return;
+  parseStoryActions((metadata as Record<string,unknown>).storyActions, durationSeconds);
   if (!["resourceVersionIds", "resourceBindings", "dialogueSegments"].some((key) => key in metadata)) return;
   const version = await ctx.db.get(versionId);
   await resolveGenerationContinuity(ctx, {
@@ -669,6 +671,43 @@ export const createTake = mutation({
       status: "DRAFT", promptSnapshot: text(args.promptSnapshot ?? shot.prompt, "Prompt snapshot", 20_000, true),
       contextSnapshot: args.contextSnapshot ?? {}, model: text(args.model, "Model", 200) || undefined,
       provider: text(args.provider, "Provider", 200) || undefined, createdAt: timestamp(),
+    });
+    await stateForNewResource(ctx, production.projectId!, production._id, "shotVersion", takeId.toString());
+    return await ctx.db.get(takeId);
+  },
+});
+
+/** A deliberate, externally edited take; never impersonates a provider job. */
+export const importEditedTake = mutation({
+  args: { shotId: v.id("shots"), assetId: v.id("assets"), idempotencyKey: v.string(), note: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const { production, version, shot } = await shotFor(ctx, args.shotId);
+    await requireProjectRole(ctx, production.projectId!, ["OWNER", "EDITOR"]);
+    if (production.currentVersionId !== version._id || version.status !== "APPROVED") throw new Error("Import into the current approved shot plan.");
+    await resourceEditable(ctx, production.projectId!, production._id, "shot", shot._id.toString());
+    const key = text(args.idempotencyKey, "Import key", 200, true);
+    if (key.length < 8) throw new Error("Import key is too short.");
+    const explanation = text(args.note, "Edit note", 2000, true);
+    const asset = await ctx.db.get(args.assetId);
+    if (!asset || asset.projectId !== production.projectId || asset.scope !== "PROJECT" || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith("video/") || !asset.checksum) throw new Error("Choose uploaded video from this project.");
+    const storage = await ctx.db.system.get("_storage", asset.storageId);
+    if (!storage || !storage.contentType?.startsWith("video/")) throw new Error("Uploaded video is unavailable.");
+    await requireApprovedResource(ctx, production.projectId!, "asset", asset._id);
+    const takes = await ctx.db.query("shotVersions").withIndex("by_shot", q => q.eq("shotId", shot._id)).take(201);
+    if (takes.length > 200) throw new Error("This shot has reached its take import limit.");
+    const prior = takes.find(take => take.contextSnapshot?.editedImportKey === key);
+    if (prior) {
+      if (prior.assetId !== asset._id || prior.contextSnapshot?.editNote !== explanation) throw new Error("Import key belongs to another edit.");
+      return prior;
+    }
+    const takeId = await ctx.db.insert("shotVersions", {
+      studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: production.projectId,
+      productionId: production._id, productionVersionId: version._id, shotId: shot._id,
+      versionNumber: Math.max(0, ...takes.map(take => take.versionNumber)) + 1,
+      status: "COMPLETED", assetId: asset._id, promptSnapshot: shot.prompt,
+      contextSnapshot: { editedImportKey: key, editNote: explanation, source: "UPLOADED_EDIT", assetChecksum: asset.checksum },
+      createdAt: timestamp(),
     });
     await stateForNewResource(ctx, production.projectId!, production._id, "shotVersion", takeId.toString());
     return await ctx.db.get(takeId);

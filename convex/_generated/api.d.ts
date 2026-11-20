@@ -106,6 +106,7 @@ import type * as sourceAudio from "../sourceAudio.js";
 import type * as sourceAudioContracts from "../sourceAudioContracts.js";
 import type * as stockVoiceVerification from "../stockVoiceVerification.js";
 import type * as stockVoices from "../stockVoices.js";
+import type * as storyActionReviews from "../storyActionReviews.js";
 import type * as storyboard from "../storyboard.js";
 import type * as storyboardImageInputs from "../storyboardImageInputs.js";
 import type * as storyboardImages from "../storyboardImages.js";
@@ -223,6 +224,7 @@ declare const fullApi: ApiFromModules<{
   sourceAudioContracts: typeof sourceAudioContracts;
   stockVoiceVerification: typeof stockVoiceVerification;
   stockVoices: typeof stockVoices;
+  storyActionReviews: typeof storyActionReviews;
   storyboard: typeof storyboard;
   storyboardImageInputs: typeof storyboardImageInputs;
   storyboardImages: typeof storyboardImages;

@@ -1,3 +1,4 @@
+import { requireStoryActionsPassed } from './storyActionReviews';
 import { dependencyIsCurrent, dependencyIsSuperseded } from "./productionDependencies";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -313,6 +314,7 @@ async function buildSourceItems(ctx: ReadCtx, production: Production, timeline: 
       const scene = shot ? await ctx.db.get(shot.sceneId) : null;
       const sequence = scene ? await ctx.db.get(scene.sequenceId) : null;
       if (!shot || !scene || !sequence || sequence.productionVersionId !== production.currentVersionId) throw new Error("Assembly is blocked because a take belongs to an outdated production version.");
+      await requireStoryActionsPassed(ctx, shotVersion._id);
       const approvals = await ctx.db.query("approvals").withIndex("by_resource", (q) => q.eq("resourceType", "shotVersion").eq("resourceId", shotVersion._id.toString())).collect();
       // Retain the first Director review event spelling. New reviews use the
       // canonical APPROVED decision; the owned current state is required above.

@@ -1,3 +1,4 @@
+import { parseStoryActions, storyActionPrompt } from '../src/lib/production/story-actions';
 import { resolveShotDependencyProof, synchronizeShotDependencies } from './productionDependencies';
 import { validateStoryboardImageInput } from './storyboardImageInputs';
 import { sameStoryboardImageQuote } from '../src/lib/ai/storyboard-image';
@@ -314,6 +315,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.requiresSourceAudioPreservation = source.hasAudio;
       normalizedRequest.resolution = undefined;
     }
+    normalizedRequest.prompt = String(normalizedRequest.prompt) + storyActionPrompt(parseStoryActions(metadata.storyActions, shot.durationSeconds));
     if (Object.values(directing).some(value=>Array.isArray(value)?value.length>0:typeof value==='string'&&value.length>0)) normalizedRequest.prompt = `${normalizedRequest.prompt}\nCreator's shot direction (preserve the approved project references): ${JSON.stringify(directing)}`;
     if (operation === 'PERFORMANCE_TRANSFER') {
       normalizedRequest.motionSource = await resolveMotionSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, referenceBindings: references.referenceBindings, ...(execution ? {actorId:access.user._id} : {}) });

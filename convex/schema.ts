@@ -400,6 +400,12 @@ export default defineSchema({
     name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
 
+  storyActionReviews: defineTable({
+    projectId: v.id('projects'), productionId: v.id('productions'), takeId: v.id('shotVersions'), assetId: v.id('assets'),
+    requirementKey: v.string(), observations: v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()})),
+    passed: v.boolean(), reviewerUserId: v.id('users'), createdAt: timestamp,
+  }).index('by_take', ['takeId']),
+
   speakerSegments: defineTable({
     ...studioOwned, productionId: v.id("productions"), audioId: v.optional(v.id("audio")), characterId: v.optional(v.id("characters")),
     speakerLabel: v.string(), startSeconds: v.number(), endSeconds: v.number(), text: v.string(), confidence: v.optional(v.number()),
