@@ -47,6 +47,7 @@ import type * as http from "../http.js";
 import type * as identity from "../identity.js";
 import type * as imageCertificates from "../imageCertificates.js";
 import type * as imageOutputRecovery from "../imageOutputRecovery.js";
+import type * as maintenanceOrphanFiles20261120 from "../maintenanceOrphanFiles20261120.js";
 import type * as mediaDerivations from "../mediaDerivations.js";
 import type * as migrations_projectOwnership from "../migrations/projectOwnership.js";
 import type * as movieAuthority from "../movieAuthority.js";
@@ -170,6 +171,7 @@ declare const fullApi: ApiFromModules<{
   identity: typeof identity;
   imageCertificates: typeof imageCertificates;
   imageOutputRecovery: typeof imageOutputRecovery;
+  maintenanceOrphanFiles20261120: typeof maintenanceOrphanFiles20261120;
   mediaDerivations: typeof mediaDerivations;
   "migrations/projectOwnership": typeof migrations_projectOwnership;
   movieAuthority: typeof movieAuthority;
