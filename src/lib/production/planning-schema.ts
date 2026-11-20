@@ -22,7 +22,7 @@ const camera = {
 const shot = {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera', 'resourceBindings', 'dialogueSegments', 'audioPolicy', 'aspectRatio'],
+    required: ['title', 'prompt', 'durationSeconds', 'orderIndex', 'requiredAssetIds', 'camera', 'resourceBindings', 'dialogueSegments', 'audioPolicy', 'aspectRatio', 'operation'],
     properties: {
         title: { type: 'string', minLength: 1 },
         prompt: { type: 'string', minLength: 1 },
@@ -34,6 +34,7 @@ const shot = {
             voiceVersionId:{anyOf:[{type:'string',minLength:1},{type:'null'}]},characterResourceVersionId:{anyOf:[{type:'string',minLength:1},{type:'null'}]},
         }}},
         aspectRatio:{type:'string',enum:['9:16','16:9','1:1','4:5','4:3','3:4','21:9']},
+        operation:{type:'string',enum:['GENERATE','EDIT']},
         audioPolicy:{type:'string',enum:['SILENT','GENERATE','KEEP_SOURCE']},
         dialogueSegments:{type:'array',maxItems:32,items:{type:'object',additionalProperties:false,required:['speakerResourceVersionId','voiceVersionId','startSeconds','durationSeconds','text','delivery'],properties:{
             speakerResourceVersionId:{type:'string',minLength:1},voiceVersionId:{type:'string',minLength:1},startSeconds:{type:'number',minimum:0},durationSeconds:{type:'number',exclusiveMinimum:0},text:{type:'string',minLength:1,maxLength:1000},delivery:{type:'string',maxLength:400},

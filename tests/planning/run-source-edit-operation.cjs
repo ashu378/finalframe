@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const {load, fixture} = require('../recipes/backend-fixture.cjs');
+const {plannedShotMetadata} = load('convex/planningVideo.ts');
+const {LEGACY_DIRECTOR_PLAN_SCHEMA} = load('src/lib/production/planning-schema.ts');
+(async () => {
+ const shotSchema = LEGACY_DIRECTOR_PLAN_SCHEMA.schema.properties.sequences.items.properties.scenes.items.properties.shots.items;
+ assert(shotSchema.required.includes('operation'));
+ assert.deepEqual(shotSchema.properties.operation.enum, ['GENERATE', 'EDIT']);
+ console.log('PASS structured planner can explicitly request source editing');
+ assert.deepEqual(plannedShotMetadata({operation:'EDIT',audioPolicy:'KEEP_SOURCE'}), {operation:'EDIT',audioPolicy:'KEEP_SOURCE'});
+ assert.throws(() => plannedShotMetadata({operation:'EDIT',metadata:{operation:'GENERATE'}}), /conflict/);
+ assert.equal(plannedShotMetadata({metadata:{operation:'LIP_SYNC',audioPolicy:'USE_RECORDING'}}).operation,'LIP_SYNC');
+ assert.equal(plannedShotMetadata({metadata:{operation:'GENERATE'}}).operation,'GENERATE');
+ console.log('PASS edit operation is retained, conflicting values rejected and existing speech plans remain readable');
+ const ctx=fixture();ctx.rows.get('project').externalId='external-project';
+ const plan={summary:'Retain original speakers',workflow:'FOOTAGE_TRANSFORM',bible:{characters:[]},sequences:[{title:'Scene',orderIndex:0,scenes:[{title:'Conversation',purpose:'Restyle source',orderIndex:0,shots:[{title:'All speakers',prompt:'Convert source to cartoon, retaining all original speech.',durationSeconds:8,orderIndex:0,requiredAssetIds:[],operation:'EDIT',audioPolicy:'KEEP_SOURCE'}]}]}]};
+ const created=await ctx.call('productions','createPlan',{studioExternalId:'studio',projectExternalId:'external-project',workflow:'FOOTAGE_TRANSFORM',inputMode:'FOOTAGE',durationSeconds:8,language:'en',outputPreset:'LANDSCAPE',input:{mode:'FOOTAGE'},plan,estimate:{},idempotencyKey:'source-edit-contract'});
+ const shots=[...ctx.rows.values()].filter(row=>row._table==='shots'&&row.productionVersionId===created.versionId);
+ assert.equal(shots.length,1);assert.equal(shots[0].metadata.operation,'EDIT');assert.equal(shots[0].metadata.audioPolicy,'KEEP_SOURCE');
+ assert.equal(ctx.count('generationJobs'),0);assert.equal(ctx.count('providerBudgetReservations'),0);
+ console.log('PASS canonical draft persistence keeps source edit intent without purchasing media');
+})().catch(error=>{console.error(error);process.exitCode=1;});

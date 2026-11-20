@@ -19,7 +19,7 @@ const planningArgs={asOf:v.number(),projectId:v.id('projects'),productionId:v.op
 
 export function plannedShotMetadata(shot:Record<string,any>){
     const metadata={...object(shot.metadata)};
-    for(const field of ['resourceBindings','dialogueSegments','audioPolicy','aspectRatio'])if(shot[field]!==undefined){
+    for(const field of ['resourceBindings','dialogueSegments','audioPolicy','aspectRatio','operation'])if(shot[field]!==undefined){
         if(metadata[field]!==undefined&&stable(metadata[field])!==stable(shot[field]))throw new Error('Shot planning controls conflict with their metadata.');
         metadata[field]=shot[field];
     }
