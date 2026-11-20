@@ -391,3 +391,6 @@ export const REVIEWED_OPERATION_CONTRACTS = {
         evidence: ['https://developers.heygen.com/audio-to-video', 'https://developers.heygen.com/docs/usage-limits', 'https://developers.heygen.com/assets'], reviewedAt: '2026-11-02',
     },
 } as const;
+
+/** Single-shot source-preserving repair; catalog certification still applies. */
+export function getActionRepairModel(){ return configuredModel('OPENROUTER_ACTION_REPAIR_MODEL', 'black-forest-labs/flux-video-edit'); }

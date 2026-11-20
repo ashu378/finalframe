@@ -7,7 +7,7 @@ import { getEffectiveResourceState } from './resourceStates';
 import { parseStoryActions, validateStoryActionObservations } from '../src/lib/production/story-actions';
 
 type ReadCtx = QueryCtx | MutationCtx;
-async function reviewContext(ctx: ReadCtx, takeId: Id<'shotVersions'>) {
+export async function reviewContext(ctx: ReadCtx, takeId: Id<'shotVersions'>) {
     const take = await ctx.db.get(takeId);
     if (!take?.projectId || !take.productionId || !take.assetId || take.status !== 'COMPLETED') throw new Error('Choose a completed project take.');
     const [shot, asset] = await Promise.all([ctx.db.get(take.shotId), ctx.db.get(take.assetId)]);
@@ -15,8 +15,10 @@ async function reviewContext(ctx: ReadCtx, takeId: Id<'shotVersions'>) {
     const actions = parseStoryActions(shot.metadata?.storyActions, shot.durationSeconds);
     const requirementKey = JSON.stringify([take._id, take.assetId, asset.checksum, shot.prompt, actions]);
     const latest = await ctx.db.query('storyActionReviews').withIndex('by_take', q => q.eq('takeId', takeId)).order('desc').first();
-    const passed = !actions.length || Boolean(latest?.requirementKey === requirementKey && latest.passed);
-    return { take, actions, requirementKey, latest, passed };
+    const check = await ctx.db.query('storyActionChecks').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
+    const unresolvedCheck = check?.requirementKey===requirementKey && check.completedAt && check.observations?.some(o=>o.result!=='PASS') && (!latest||latest.createdAt<check.completedAt);
+    const passed = !actions.length || Boolean(latest?.requirementKey === requirementKey && latest.passed && !unresolvedCheck);
+    return { take, shot, asset, actions, requirementKey, latest, passed };
 }
 /** Used by both approval and assembly; a prompt or completed file is not evidence. */
 export async function requireStoryActionsPassed(ctx: ReadCtx, takeId: Id<'shotVersions'>) {

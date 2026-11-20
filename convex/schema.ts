@@ -400,6 +400,15 @@ export default defineSchema({
     name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
 
+  storyActionChecks: defineTable({
+    projectId: v.id('projects'), takeId: v.id('shotVersions'), requirementKey: v.string(),
+    requestKey: v.string(), actorUserId: v.id('users'), model: v.string(),
+    maximumCostUsd: v.number(), priceCeiling: v.object({prompt:v.number(),completion:v.number()}),
+    expiresAt: timestamp, createdAt: timestamp,
+    observations: v.optional(v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL'),v.literal('UNCERTAIN')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()}))),
+    receiptId: v.optional(v.id('providerTextRequests')), completedAt: v.optional(timestamp),
+  }).index('by_take', ['takeId']).index('by_request_key', ['requestKey']),
+
   storyActionReviews: defineTable({
     projectId: v.id('projects'), productionId: v.id('productions'), takeId: v.id('shotVersions'), assetId: v.id('assets'),
     requirementKey: v.string(), observations: v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()})),

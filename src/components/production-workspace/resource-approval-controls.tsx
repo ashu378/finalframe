@@ -23,7 +23,7 @@ export function ApprovalControls({ data, resourceType, resourceId, state }: { da
             if (!result.success) setError(result.error); else router.refresh();
         });
     }
-    return <div className="space-y-3">{resourceType==='shotVersion'?<StoryActionReview takeId={resourceId} canReview={canReview&&['DRAFT','IN_REVIEW','REVISION_REQUESTED'].includes(state)}/>:null}<div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-secondary px-3 py-1 text-xs capitalize">{label(state)}</span>
+    return <div className="space-y-3">{resourceType==='shotVersion'?<StoryActionReview takeId={resourceId} canEdit={data.canEdit} canReview={canReview&&['DRAFT','IN_REVIEW','REVISION_REQUESTED'].includes(state)}/>:null}<div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-secondary px-3 py-1 text-xs capitalize">{label(state)}</span>
         {data.canEdit && (state === 'DRAFT' || state === 'REVISION_REQUESTED') ? <Button size="sm" variant="secondary" disabled={pending} onClick={() => change('REVIEW')}>Submit for review</Button> : null}
         {canReview && state === 'IN_REVIEW' ? <Button size="sm" disabled={pending} onClick={() => change('APPROVE')}>Approve</Button> : null}
         {data.canEdit && state === 'APPROVED' ? <Button size="sm" variant="secondary" disabled={pending} onClick={() => change('LOCK')}>Lock version</Button> : null}

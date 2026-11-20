@@ -133,7 +133,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
                 takes: await Promise.all(shot.takes.map(async (take) => {
                     const approval = await client.query(api.resourceStates.get, { projectId: project._id, resourceType: 'shotVersion', resourceId: take._id });
                     const media = take.assetId ? mediaById.get(take.assetId) : undefined;
-                    return { id: take._id.toString(), versionNumber: take.versionNumber, status: take.status, state: approval.state as WorkspaceResourceState,
+                    return { id: take._id.toString(), versionNumber: take.versionNumber, status: take.status, state: approval.state as WorkspaceResourceState, needsOriginalAudio: Boolean(object(object(take.contextSnapshot).request).storyRepair),
                         ...(take.provider ? { provider: take.provider } : {}), ...(take.model ? { model: take.model } : {}),
                         ...(take.assetId ? { assetId: take.assetId.toString() } : {}), ...(media?.storageUrl ? { url: media.storageUrl, mimeType: media.mimeType } : {}) };
                 })),

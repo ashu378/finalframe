@@ -59,7 +59,7 @@ export interface ShotControlView {
     resourceBindings?: Array<{ role: string; resourceVersionId: string; voiceVersionId?: string; characterResourceVersionId?: string }>;
     dialogueSegments?: Array<{ speakerResourceVersionId: string; voiceVersionId: string; startSeconds: number; durationSeconds: number; text: string; delivery?: string }>;
     operationControls: ShotOperationControls;
-    takes: Array<{ id: string; versionNumber: number; status: string; state: WorkspaceResourceState; model?: string; provider?: string; assetId?: string; url?: string; mimeType?: string }>;
+    takes: Array<{ needsOriginalAudio?: boolean; id: string; versionNumber: number; status: string; state: WorkspaceResourceState; model?: string; provider?: string; assetId?: string; url?: string; mimeType?: string }>;
 }
 
 export interface WorkspaceControlData {

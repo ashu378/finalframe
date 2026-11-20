@@ -347,3 +347,7 @@ The full route inventory is in REDESIGN-ROUTE-INVENTORY.md. Shared token adoptio
 ## 20 November — biscuit-shot action review
 
 Narrow repair PASS: original voices and characters retained; timed chewing added before grandmother speaks; actual asynchronous export downloaded and checked. New timed story-action contracts, human evidence review and approval/assembly gates pass 42 focused checks. This is a localized deterministic repair, not provider acting certification. One HTTP 503 submission remains unconfirmed with its cost held; no blind retry. Conservative cumulative spend plus holds: $17.781781544 / $25. [Evidence and limits](CHEWING-SHOT-REPAIR-2026-11-20.md).
+
+## 20 November — user-operated missing-action assistant
+
+Implementation and ordinary browser check/estimate/repair/reload path PASS. Actual visual inspection detected the missing chewing; a new canonical take was created without changing the approved take. Original-recording export enforcement and repeated-failed-repair charge prevention PASS. **Creative chewing repair remains FAIL; detector sensitivity to subtle localized animation remains unverified.** This does not certify universal automatic correction. Conservative cumulative spending including unresolved holds: **$18.026722641 / $25**. [Implementation, receipts, limitations and tests](STORY-ACTION-ASSISTANT-2026-11-20.md).

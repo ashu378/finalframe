@@ -27,8 +27,8 @@ export async function editedSourceContext(ctx:ReadCtx,projectId:Id<'projects'>,t
  const version=take.productionVersionId?await ctx.db.get(take.productionVersionId):null;if(!version||version.productionId!==production._id||version.status!=='APPROVED')throw new Error('SOURCE_AUDIO_TAKE_UNAVAILABLE');
  await requireApprovedResource(ctx,projectId,'shotVersion',takeId,production._id,actorId);
  const edited=await asset(ctx,projectId,take.assetId,actorId);const jobId=ctx.db.normalizeId('generationJobs',String(record(edited.asset.metadata).generationJobId??''));const job=jobId?await ctx.db.get(jobId):null;
- const request=record(job?.request),frozen=record(record(take.contextSnapshot).request),certificate=record(request.editSource);
- if(!job||job.projectId!==projectId||job.productionId!==production._id||job.productionVersionId!==take.productionVersionId||job.shotVersionId!==take._id||job.status!=='COMPLETED'||!job.providerJobId||record(job.response).assetId!==edited.asset._id||request.audioPolicy!=='KEEP_SOURCE'||frozen.audioPolicy!=='KEEP_SOURCE'||!['EDIT','APPEARANCE_EDIT','OBJECT_REPLACE'].includes(request.operation)||record(request.editQuote).version!=='FLUX_SOURCE_VIDEO_EDIT_V1'||JSON.stringify(frozen.editSource)!==JSON.stringify(request.editSource))throw new Error('SOURCE_AUDIO_SOURCE_BINDING_REQUIRED');
+ const request=record(job?.request),frozen=record(record(take.contextSnapshot).request),certificate=record(record(request.storyRepair).audioSource??request.editSource);
+ if(!job||job.projectId!==projectId||job.productionId!==production._id||job.productionVersionId!==take.productionVersionId||job.shotVersionId!==take._id||job.status!=='COMPLETED'||!job.providerJobId||record(job.response).assetId!==edited.asset._id||request.audioPolicy!=='KEEP_SOURCE'||frozen.audioPolicy!=='KEEP_SOURCE'||!['EDIT','APPEARANCE_EDIT','OBJECT_REPLACE'].includes(request.operation)||record(request.editQuote).version!=='FLUX_SOURCE_VIDEO_EDIT_V1'||JSON.stringify(frozen.editSource)!==JSON.stringify(request.editSource)||JSON.stringify(frozen.storyRepair)!==JSON.stringify(request.storyRepair))throw new Error('SOURCE_AUDIO_SOURCE_BINDING_REQUIRED');
  const sourceId=ctx.db.normalizeId('assets',String(certificate.assetId??''));if(!sourceId)throw new Error('SOURCE_AUDIO_SOURCE_BINDING_REQUIRED');const original=await asset(ctx,projectId,sourceId,actorId);
  if(certificate.hasAudio!==true||original.asset.storageId!==certificate.storageId||!sha256Equal(original.stored.sha256,certificate.checksum)||original.stored.size!==certificate.byteSize||!original.asset.mimeType?.startsWith('video/'))throw new Error('SOURCE_AUDIO_SOURCE_CHANGED');
  return {access,take,production,edited,original,certificate};
@@ -75,6 +75,13 @@ export async function validateSourceAudioPairs(ctx:ReadCtx,projectId:Id<'project
  * The caller has already authorized the exact current version or retained
  * movie component before supplying its server-only expected version. */
 export async function validateSourceAudioManifest(ctx:ReadCtx,projectId:Id<'projects'>,manifest:unknown,actorId:Id<'users'>,expectedProductionVersionId:Id<'productionVersions'>){
+ // Check repair provenance even when the manifest has no restoration receipts.
+ const inspection=record(manifest);
+ for(const value of Array.isArray(inspection.items)?inspection.items:[]){
+  const item=record(value);if(item.kind!=='video'||!item.shotVersionId)continue;
+  const id=ctx.db.normalizeId('shotVersions',String(item.shotVersionId)),take=id?await ctx.db.get(id):null;
+  if(record(record(take?.contextSnapshot).request).storyRepair&&!item.sourceAudioRestoration)throw new Error('Restore the original recording for the repaired shot in the editor before exporting.');
+ }
  if(!sourceAudioRequirements(manifest))return;
  if(!validateManifest(manifest).ok)throw new Error('SOURCE_AUDIO_MANIFEST_INVALID');
  const raw=record(manifest),fps=Number(record(raw.output).fps),sources=new Map<string,Record<string,any>>();
