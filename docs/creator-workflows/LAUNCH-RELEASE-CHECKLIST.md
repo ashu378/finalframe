@@ -351,3 +351,9 @@ Narrow repair PASS: original voices and characters retained; timed chewing added
 ## 20 November — user-operated missing-action assistant
 
 Implementation and ordinary browser check/estimate/repair/reload path PASS. Actual visual inspection detected the missing chewing; a new canonical take was created without changing the approved take. Original-recording export enforcement and repeated-failed-repair charge prevention PASS. **Creative chewing repair remains FAIL; detector sensitivity to subtle localized animation remains unverified.** This does not certify universal automatic correction. Conservative cumulative spending including unresolved holds: **$18.026722641 / $25**. [Implementation, receipts, limitations and tests](STORY-ACTION-ASSISTANT-2026-11-20.md).
+
+## 20 November 2026 — live email authentication activated
+
+Email verification and password recovery are enabled on the existing live `.xyz` site and online `knowing-snail-785` backend. Signup, actual six-digit mail delivery, wrong/expired/reused codes, resend throttling, verification-to-dashboard, password reset, old-password rejection, immediate prior-session denial and normal browser login/logout passed. Recovery UI was checked on desktop and mobile. Password changes were exercised through the live HTTP auth endpoint; browser tests covered request, verification, login and recovery form rendering. Code revision `2e3c0d9` has a successful Vercel deployment. See [full test and rollback report](EMAIL-AUTH-ACTIVATION-2026-11-20.md).
+
+The Convex Free-plan usage warning remains an operational risk; no upgrade or destructive cleanup was performed. Payments, `.com` website cutover, mailbox receiving and outstanding video-quality requirements are not certified by this authentication milestone.

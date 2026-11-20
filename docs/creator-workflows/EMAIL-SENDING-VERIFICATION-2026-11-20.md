@@ -1,5 +1,7 @@
 # FinalFrame email sending verification — 20 November 2026
 
+This records the earlier sending-only checkpoint. It is superseded for activation status by [the completed live authentication report](EMAIL-AUTH-ACTIVATION-2026-11-20.md).
+
 - Owner associated the already verified `usefinalframe.com` domain with the existing `mail_agent_1`.
 - Existing DKIM and bounce CNAME both show Verified. No DNS or mailbox records were changed in this check.
 - Two controlled messages from `support@usefinalframe.com` to the owner's authorized Gmail inbox show **Delivered** in Zoho: one dashboard test and one test through the exact application sending helper using the credentials stored in online Convex.
