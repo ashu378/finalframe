@@ -13,9 +13,8 @@ export const createPurchase = mutation({
 });
 
 /**
- * Fulfill a verified Bachs event. This is internal on purpose: the public
- * webhook entry point is the signed paymentWebhook action, which verifies the
- * raw body and timestamp before calling this mutation.
+ * Legacy live fulfillment retained for migration review only. Sandbox events
+ * use sandboxPaymentEvents. No active public caller invokes this function.
  */
 export const processBachsEvent = internalMutation({
   args: {
@@ -24,6 +23,7 @@ export const processBachsEvent = internalMutation({
     refundId: v.optional(v.string()), refundAmount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (process.env.BACHS_ENVIRONMENT !== 'production' || process.env.BACHS_LIVE_PAYMENTS_ENABLED !== 'true') throw new Error('Live payment fulfillment has not been activated.');
     const duplicate = await ctx.db.query("paymentEvents").withIndex("by_provider_event", (q) => q.eq("provider", "bachs").eq("providerEventId", args.eventId)).unique();
     if (duplicate) return { duplicate: true, status: "DUPLICATE" };
 
@@ -34,6 +34,7 @@ export const processBachsEvent = internalMutation({
         : args.chargeId
           ? await ctx.db.query("purchases").withIndex("by_provider_payment", (q) => q.eq("provider", "bachs").eq("providerPaymentId", args.chargeId)).unique()
           : null;
+    if (purchase?.metadata?.environment !== 'production') throw new Error('Only an explicitly live purchase can use live fulfillment.');
     const studio = purchase ? await ctx.db.query("studios").withIndex("by_external_id", (q) => q.eq("externalId", purchase.studioExternalId)).unique() : null;
     const eventRecordId = await ctx.db.insert("paymentEvents", {
       studioExternalId: purchase?.studioExternalId,
