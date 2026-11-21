@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { authenticatedReturnPath } from '@/lib/auth/return-path';
 
 type Mode = 'signIn' | 'signUp';
 
@@ -26,6 +27,7 @@ export function ConvexAuthForm({ mode }: { mode: Mode }) {
 
   async function submit(formData: FormData) {
     setPending(true); setError('');
+    const returnTo = authenticatedReturnPath(new URLSearchParams(window.location.search).get('redirect'));
     try {
       const result = await signIn('password', {
         flow: mode,
@@ -34,11 +36,11 @@ export function ConvexAuthForm({ mode }: { mode: Mode }) {
         ...(mode === 'signUp' ? { name: String(formData.get('fullName') || '').trim() } : {}),
       });
       if (!result.signingIn) {
-        router.push(`/verify-email?email=${encodeURIComponent(String(formData.get('email') || ''))}`);
+        router.push(`/verify-email?email=${encodeURIComponent(String(formData.get('email') || ''))}&redirect=${encodeURIComponent(returnTo)}`);
         return;
       }
       await ensureAccount(mode === 'signUp' ? { name: String(formData.get('fullName') || '').trim() } : {});
-      router.push('/dashboard');
+      router.push(returnTo);
       router.refresh();
     } catch {
       // Convex errors can contain implementation details and request traces.

@@ -21,7 +21,7 @@ const guards = { requirePlatformRole: async () => { if (!authorized) throw Error
 const client = { getAuthenticatedConvexClient: async () => ({ query: async () => { reads++; return { role: studioRole, studio: hasStudio ? { name: 'Fixture studio', externalId: 'fixture' } : null }; } }) };
 const common = { 'next/link': Link, '@/lib/guards/platform': guards, '@/lib/platform-admin/contracts': contracts, '@/lib/convex/server': client };
 const adminNavigation = load('src/components/admin/admin-navigation.tsx', { 'next/link': Link, 'next/navigation': { usePathname: () => selectedPath } });
-const layout = load('src/app/(admin)/layout.tsx', { ...common, '@/components/admin/admin-navigation': adminNavigation, 'next/image': ({ priority, ...props }) => { void priority; return React.createElement('img', props); }, '@/components/threeui/scroll-reveal-root': { ScrollRevealRoot: () => null } });
+const layout = load('src/app/(admin)/layout.tsx', { ...common, '@/components/admin/admin-navigation': adminNavigation, '@/components/auth/sign-out-button': { SignOutButton: () => React.createElement('button', null, 'Sign out') }, 'next/image': ({ priority, ...props }) => { void priority; return React.createElement('img', props); }, '@/components/threeui/scroll-reveal-root': { ScrollRevealRoot: () => null } });
 const overview = load('src/app/(admin)/admin/page.tsx', common);
 const settings = load('src/app/(dashboard)/dashboard/settings/page.tsx', { ...common, '@/lib/guards': { requireAuth: async () => { if (!authorized) throw Error('account denied'); return { user: { email: 'fixture@example.test' } }; } }, '@/components/billing/credit-packs': { CreditPacks: () => null }, '@/lib/credits/service': { getStudioCreditBalance: async () => 0 } });
 const html = async (component, args) => renderToStaticMarkup(await component(args));
@@ -32,6 +32,8 @@ const html = async (component, args) => renderToStaticMarkup(await component(arg
     assert.equal((markup.match(/href="\/admin\/account-requests"/g) || []).length, role === 'ADMIN' ? 2 : 0, 'Recovery navigation is ADMIN-only on both surfaces');
     assert.equal((markup.match(/href="\/dashboard"/g) || []).length, 2, 'Desktop and mobile each provide Back to app');
     assert.equal(markup.includes('href="/admin/roles"'), role === 'ADMIN');
+    assert.equal((markup.match(/href="\/admin\/payments"/g) || []).length, role === 'ADMIN' ? 2 : 0);
+    assert.equal((markup.match(/Sign out/g) || []).length, 2);
     assert.equal(markup.includes('href="/admin/moderation"'), role !== 'SUPPORT');
     assert.equal(markup.includes('href="/admin/users"'), role !== 'MODERATOR');
     for (const membership of ['owner', 'admin', 'member', null]) {

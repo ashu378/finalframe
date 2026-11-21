@@ -7,7 +7,7 @@ import { Menu, Plus, X } from 'lucide-react';
 import { StudioNavigation } from './studio-navigation';
 import { SignOutButton } from '@/components/auth/sign-out-button';
 
-export function MobileStudioMenu() {
+export function MobileStudioMenu({ canAccessPlatform = false }: { canAccessPlatform?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
@@ -19,6 +19,7 @@ export function MobileStudioMenu() {
       <div className="mb-8 flex items-center justify-between gap-4"><h2 id="studio-menu-title" className="ff-display text-xl font-semibold">Your studio</h2><button type="button" onClick={close} aria-label="Close studio menu" className="grid size-11 place-items-center rounded-xl hover:bg-secondary"><X className="size-5" aria-hidden="true" /></button></div>
       <Link href="/dashboard/create" onClick={close} className="ff-button-primary mb-6"><Plus className="size-4" aria-hidden="true" />Create a video</Link>
       <StudioNavigation onNavigate={close} />
+      {canAccessPlatform ? <Link href="/admin" onClick={close} className="mt-4 flex min-h-12 items-center rounded-xl border border-border px-4 text-sm font-semibold text-primary">Manage FinalFrame</Link> : null}
       <div className="mt-auto border-t border-border pt-6"><SignOutButton /></div>
     </dialog>
   </>;

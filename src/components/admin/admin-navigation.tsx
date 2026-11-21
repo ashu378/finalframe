@@ -9,6 +9,7 @@ const icons: Record<string, typeof Users> = {
   '/admin': LayoutDashboard, '/admin/users': Users, '/admin/roles': Users,
   '/admin/account-requests': Users, '/admin/moderation': AlertTriangle,
   '/admin/jobs': Activity, '/admin/credits': CreditCard, '/admin/audit': ScrollText,
+  '/admin/payments': CreditCard,
   '/admin/video-routing': Settings2,
 };
 

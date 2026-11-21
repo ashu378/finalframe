@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { authenticatedReturnPath } from '@/lib/auth/return-path';
 
 export function ConvexVerificationForm() {
   const router = useRouter();
@@ -33,7 +34,7 @@ export function ConvexVerificationForm() {
       const result = await signIn('password', { flow: 'email-verification', email: email.trim().toLowerCase(), code: code.trim() });
       if (!result.signingIn) throw new Error('That code is not ready yet. Please try again.');
       await ensureAccount({});
-      router.push('/dashboard');
+      router.push(authenticatedReturnPath(params.get('redirect')));
       router.refresh();
     } catch {
       // Do not expose Convex/Auth stack traces or internal request details.

@@ -8,7 +8,7 @@ import type { PlatformRole } from '@/lib/platform-admin/contracts';
 
 const roleQuery = makeFunctionReference<'query', {}, { userId: string; role: PlatformRole } | null>('platformAdministration:currentRole');
 
-const readPlatformRole = cache(async () => {
+export const readPlatformRole = cache(async () => {
   await requireAuth();
   return (await getAuthenticatedConvexClient()).query(roleQuery, {});
 });
