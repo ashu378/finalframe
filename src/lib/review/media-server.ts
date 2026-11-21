@@ -72,7 +72,23 @@ export async function serveReviewMedia(request: Request, params: { kind: string;
     } catch { return empty(503); }
     if (!media) return empty(502);
 
+    return streamMedia(request, media);
+}
+
+/** Caller must resolve a project-authorized, completed export first. */
+export function serveAuthorizedDownload(request: Request, value: unknown) {
+    const origin = convexMediaOrigin(process.env.NEXT_PUBLIC_CONVEX_URL);
+    const media = origin && mediaSource(value, origin);
+    if (!media) return empty(404);
+    return streamMedia(request, media, true);
+}
+
+async function streamMedia(request: Request, media: NonNullable<ReturnType<typeof mediaSource>>, attachment = false) {
     const headers = new Headers({ ...PRIVATE_HEADERS, 'Accept-Ranges': 'bytes', 'Content-Type': media.contentType });
+    if (attachment) {
+        const extension = media.contentType === 'video/webm' ? 'webm' : media.contentType === 'video/quicktime' ? 'mov' : 'mp4';
+        headers.set('Content-Disposition', `attachment; filename="finalframe-export.${extension}"`);
+    }
     if (request.method === 'HEAD') {
         headers.set('Content-Length', media.size.toString());
         return new Response(null, { status: 200, headers });

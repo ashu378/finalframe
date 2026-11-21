@@ -218,6 +218,7 @@ export const getExport = query({
     if (exportRecord.projectId && exportRecord.projectId !== production.projectId) throw new Error("Export not found.");
     const job = exportRecord.renderJobId ? await ctx.db.get(exportRecord.renderJobId) : null;
     let url: string | null | undefined;
+    let downloadSize: number | undefined;
     if (exportRecord.storageId && exportRecord.status === 'COMPLETED') {
       const manifestId = exportRecord.manifestId ?? job?.manifestId;
       const [manifest, storage] = await Promise.all([manifestId ? ctx.db.get(manifestId) : null, ctx.db.system.get('_storage', exportRecord.storageId)]);
@@ -225,8 +226,9 @@ export const getExport = query({
       if (!storage || storage.size < 1) throw new Error('Export media is unavailable.');
       assertStoredRenderMediaType(manifest?.manifest, manifest?.contractVersion, storage.contentType, exportRecord.mimeType);
       url = await ctx.storage.getUrl(exportRecord.storageId);
+      downloadSize = storage.size;
     }
-    return { ...exportRecord, progress: exportRecord.progress ?? job?.progress ?? 0, jobStatus: job?.status, downloadUrl: url };
+    return { ...exportRecord, progress: exportRecord.progress ?? job?.progress ?? 0, jobStatus: job?.status, downloadUrl: url, downloadSize };
   },
 });
 
