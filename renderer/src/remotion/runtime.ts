@@ -12,6 +12,7 @@ import type { AssemblyPlan } from '../assembly/plan.js';
 import type { RenderRequest, RenderRuntime } from '../renderer.js';
 import type { RenderArtifactVerification } from '../types.js';
 import { outputFormatForManifest } from '../output-format.js';
+import { canRenderSequentially, renderSequentialCuts } from '../media/sequential-render.js';
 
 export interface RemotionRuntimeOptions {
   entryPoint: string;
@@ -23,6 +24,8 @@ export interface RemotionRuntimeOptions {
   bundleCache?: Map<string, string>;
   requireMediaTools?: boolean;
   mediaPolicy?: Pick<WorkerMediaPolicy, 'allowedRemoteHosts' | 'allowedLocalRoots'>;
+  /** Opt-in until the deployed-worker equivalence benchmark passes. */
+  sequentialFastPath?: boolean;
 }
 
 function safeOutputPath(value: string): string {
@@ -68,7 +71,23 @@ export class RemotionRenderRuntime implements RenderRuntime {
     const remotionPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.remotion.${intermediateExtension}`);
     const normalizedPath = join(dirname(outputPath), `.${request.jobId}.${request.attempt ?? 1}.normalized.${normalizedExtension}`);
     try {
-      await withRenderDeadline(this.options.commandTimeoutMs ?? 900_000, async scope => {
+      let sequential = Boolean(this.options.sequentialFastPath && this.options.ffmpeg && this.options.ffprobe && canRenderSequentially(plan));
+      if (sequential) {
+        try { await renderSequentialCuts(plan, manifest, remotionPath, {
+          ffmpeg: this.options.ffmpeg!, ffprobe: this.options.ffprobe!,
+          policy: { mode: production ? 'production' : 'fixture', ...this.options.mediaPolicy },
+          timeoutMs: this.options.commandTimeoutMs ?? 900_000,
+          renderGraphic: async (piece, path, timeoutMs) => {
+            const runtime = new RemotionRenderRuntime({ ...this.options, bundleCache: this.bundleCache, sequentialFastPath: false, commandTimeoutMs: timeoutMs });
+            const { createAssemblyPlan } = await import('../assembly/plan.js');
+            await runtime.render(createAssemblyPlan(piece), { ...request, manifest: piece, outputPath: path });
+          },
+        }); } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'SEQUENTIAL_SOURCE_REQUIRES_BROWSER') throw error;
+          sequential = false;
+        }
+      }
+      if (!sequential) await withRenderDeadline(this.options.commandTimeoutMs ?? 900_000, async scope => {
         const serveUrl = await this.bundledEntryPoint();
         scope.check();
         const browser = await openBrowser('chrome', { logLevel: 'error' });

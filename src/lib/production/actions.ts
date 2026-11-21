@@ -261,8 +261,10 @@ export async function createDirectorPlan(intent: CreateIntent): Promise<CreateDi
         const planningVideo=(api as any).planningVideo;
         const planningArguments={projectId:project._id,productionId:normalized.productionId as Id<'productions'>|undefined,durationSeconds:normalized.requestedDurationSeconds,outputPreset:normalized.outputPreset,input:normalized};
         let shotConstraints:unknown;
+        let rendererOnly = false;
         if(!(fallbackAllowed&&process.env.FINALFRAME_PLANNING_FIXTURE_MODE==='true')){
             const path=await context.convex.query(planningVideo.path,{projectId:project._id,productionId:planningArguments.productionId,input:normalized,outputPreset:normalized.outputPreset});
+            rendererOnly = path === 'RENDERER';
             if(path!=='RENDERER')await context.convex.action(api.videoRouting.refreshReviewedForQuote,{projectId:project._id}).catch(()=>null);
             shotConstraints=await context.convex.query(planningVideo.constraints,{...planningArguments,asOf:Date.now()});
         }
@@ -292,7 +294,7 @@ export async function createDirectorPlan(intent: CreateIntent): Promise<CreateDi
         }
         const totalShots = plan.sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sum, scene) => sum + scene.shots.length, 0), 0);
         const totalSeconds = plan.sequences.reduce((total, sequence) => total + sequence.scenes.reduce((sum, scene) => sum + scene.shots.reduce((shotSum, shot) => shotSum + shot.durationSeconds, 0), 0), 0);
-        const estimate = await estimateProductionCost({ shotCount: totalShots, videoSeconds: Math.ceil(totalSeconds), qualityTier: normalized.qualityTier || 'STANDARD', hasVoice: normalized.mode === 'VOICE', needsCaptions: normalized.mode === 'VOICE' || normalized.mode === 'FOOTAGE', needsAssembly: true });
+        const estimate = await estimateProductionCost({ shotCount: totalShots, videoSeconds: Math.ceil(totalSeconds), qualityTier: normalized.qualityTier || 'STANDARD', hasVoice: normalized.mode === 'VOICE', needsCaptions: normalized.mode === 'VOICE' || normalized.mode === 'FOOTAGE', needsAssembly: true, rendererOnly });
         const production = await context.convex.mutation(api.productions.createPlan, { studioExternalId: context.studio.externalId, projectExternalId: normalized.projectId, productionId: normalized.productionId as any, workflow: plan.workflow, inputMode: normalized.mode, durationSeconds: normalized.requestedDurationSeconds, language: normalized.language || 'en', outputPreset: normalized.outputPreset, input: { ...normalized, ...(continuityContext ? { continuityContext } : {}), ...(planningReceipt ? { planningReceipt } : {}) }, plan, estimate });
         const balance = await context.convex.query(api.credits.getBalance, { studioExternalId: context.studio.externalId });
         return { success: true, planId: production.planId.toString(), productionId: production.productionId.toString(), plan, planningPreview: buildPlanningPreview(plan, normalized, estimate), estimate, balance, planningSource, continuityBibleId: normalized.continuityBibleId, ...(warning ? { warning } : {}) };

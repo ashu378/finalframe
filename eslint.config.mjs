@@ -1,7 +1,7 @@
 import nextConfig from 'eslint-config-next/core-web-vitals';
 
 const eslintConfig = [
-  { ignores: ['.next/**', 'node_modules/**', 'renderer/node_modules/**', 'convex/_generated/**'] },
+  { ignores: ['.next/**', 'node_modules/**', 'renderer/node_modules/**', 'renderer/dist/**', 'convex/_generated/**'] },
   ...nextConfig,
   {
     rules: {

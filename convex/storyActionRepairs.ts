@@ -5,11 +5,21 @@ import { api, internal } from './_generated/api';
 import { v } from 'convex/values';
 import { reviewContext } from './storyActionReviews';
 import { requireProjectRole } from './authorization';
-import { requireApprovedResource } from './resourceStates';
+import { getEffectiveResourceState, requireApprovedResource } from './resourceStates';
 import { resolveVideoEditSourceCertificate } from './videoRouting';
-import { actionRepairPrompt } from '../src/lib/production/story-action-check';
+import { actionRepairPrompt, ACTION_REPAIR_VERSION } from '../src/lib/production/story-action-check';
 import { getActionRepairModel } from '../src/lib/ai/model-registry';
 const object=(value:unknown):Record<string,any>=>value&&typeof value==='object'?value as Record<string,any>:{};
+
+/** A failed picture may be approved as a reference without approving its take.
+ * Reuse the ordinary resource approval log; never auto-approve during a quote. */
+export const sourceApproval=query({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
+ const data=await reviewContext(ctx,args.takeId);
+ const projectId=data.take.projectId;if(!projectId)throw new Error('REPAIR_SOURCE_UNAVAILABLE');
+ await requireProjectRole(ctx,projectId,['OWNER','EDITOR']);
+ const state=await getEffectiveResourceState(ctx,projectId,'asset',data.asset._id);
+ return {projectId,assetId:data.asset._id,state:state.currentState};
+}});
 
 /** Server-derived repair instructions. Never mutate the approved plan or take. */
 export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'shotVersions'>,shotId:Id<'shots'>){
@@ -22,7 +32,9 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  const missing=data.actions.filter(action=>observations.some(o=>o.actionId===action.id&&o.result==='FAIL'));
  if(!missing.length)throw new Error('Review and identify the missing action before repairing.');
  const priorRepair=object(object(data.take.contextSnapshot).request).storyRepair;
- if(priorRepair&&missing.some(a=>object(priorRepair).failedActionIds?.includes(a.id)))throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH: This repair still missed the action. Change the shot direction or use a separately verified route before another paid attempt.');
+ // Only the specifically superseded, unversioned preservation prompt gets
+ // one revised approach. Current/unknown versions cannot buy a retry chain.
+ if(priorRepair&&object(priorRepair).approachVersion!==undefined&&missing.some(a=>object(priorRepair).failedActionIds?.includes(a.id)))throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH: This repair still missed the action. Change the shot direction or use a separately verified route before another paid attempt.');
  const asset=data.asset;
  if(!asset.storageId||asset.scope!=='PROJECT'||!asset.mimeType?.startsWith('video/'))throw new Error('REPAIR_SOURCE_UNAVAILABLE');
  // The original recording may predate this take (e.g. cartoon conversion).
@@ -34,7 +46,7 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
   const request=object(job.request),frozen=object(object(data.take.contextSnapshot).request);
   if(request.audioPolicy==='KEEP_SOURCE'&&JSON.stringify(request.editSource)===JSON.stringify(frozen.editSource)&&JSON.stringify(request.storyRepair)===JSON.stringify(frozen.storyRepair))audioAssetId=object(request.storyRepair).audioSource?.assetId??object(request.editSource).assetId??asset._id;
  }
- return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:actionRepairPrompt(missing),proof:{sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
+ return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:actionRepairPrompt(missing),proof:{approachVersion:ACTION_REPAIR_VERSION,sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
 }
 export const context=internalQuery({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
  const take=await ctx.db.get(args.takeId);if(!take?.projectId)throw new Error('REPAIR_SOURCE_UNAVAILABLE');await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);

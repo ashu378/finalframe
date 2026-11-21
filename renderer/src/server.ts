@@ -63,6 +63,7 @@ const runtime = new RemotionRenderRuntime({
   commandTimeoutMs: Number(process.env.RENDER_COMMAND_TIMEOUT_MS ?? 900_000),
   maxOutputBytes: Number(process.env.RENDER_MAX_OUTPUT_BYTES ?? 2_000_000_000),
   bundleCache: new Map(),
+  sequentialFastPath: process.env.RENDER_SEQUENTIAL_FAST_PATH === 'true',
   mediaPolicy: { allowedRemoteHosts: mediaHosts },
   requireMediaTools: true,
 });

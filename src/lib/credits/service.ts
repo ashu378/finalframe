@@ -6,11 +6,11 @@ import { VIDEO_CREDITS_PER_SECOND } from './pricing';
 const FALLBACK_PRICES: Record<string, number> = { VIDEO_ECONOMY: VIDEO_CREDITS_PER_SECOND.ECONOMY, VIDEO_STANDARD: VIDEO_CREDITS_PER_SECOND.STANDARD, VIDEO_PREMIUM: VIDEO_CREDITS_PER_SECOND.PREMIUM, TRANSCRIPTION: 4, CAPTIONS: 2, ASSEMBLY: 3 };
 function priceKey(operation: string, tier: QualityTier = 'STANDARD') { return operation === 'VIDEO' ? `${operation}_${tier}` : operation; }
 
-export async function estimateProductionCost(input: { shotCount: number; videoSeconds: number; qualityTier: QualityTier; hasVoice?: boolean; needsCaptions?: boolean; needsAssembly?: boolean }): Promise<CostEstimate> {
-    const operations = ['VIDEO', ...(input.hasVoice ? ['TRANSCRIPTION'] : []), ...(input.needsCaptions ? ['CAPTIONS'] : []), ...(input.needsAssembly ? ['ASSEMBLY'] : [])];
+export async function estimateProductionCost(input: { shotCount: number; videoSeconds: number; qualityTier: QualityTier; hasVoice?: boolean; needsCaptions?: boolean; needsAssembly?: boolean; rendererOnly?: boolean }): Promise<CostEstimate> {
+    const operations = [...(input.rendererOnly ? [] : ['VIDEO']), ...(input.hasVoice ? ['TRANSCRIPTION'] : []), ...(input.needsCaptions ? ['CAPTIONS'] : []), ...(input.needsAssembly ? ['ASSEMBLY'] : [])];
     const findRate = (operation: string) => ({ credits: FALLBACK_PRICES[priceKey(operation, input.qualityTier)] ?? FALLBACK_PRICES[operation] ?? 0, unit: operation === 'VIDEO' ? 'second' : 'production' });
     const videoRate = findRate('VIDEO');
-    const items: CostLineItem[] = [{ operation: 'VIDEO', quantity: input.videoSeconds, unit: videoRate.unit, credits: Math.ceil(input.videoSeconds * videoRate.credits), description: `${input.shotCount} shot${input.shotCount === 1 ? '' : 's'} at ${input.qualityTier.toLowerCase()} quality` }];
+    const items: CostLineItem[] = input.rendererOnly ? [] : [{ operation: 'VIDEO', quantity: input.videoSeconds, unit: videoRate.unit, credits: Math.ceil(input.videoSeconds * videoRate.credits), description: `${input.shotCount} shot${input.shotCount === 1 ? '' : 's'} at ${input.qualityTier.toLowerCase()} quality` }];
     for (const operation of operations.filter((item) => item !== 'VIDEO')) { const rate = findRate(operation); const quantity = operation === 'TRANSCRIPTION' ? Math.max(1, Math.ceil(input.videoSeconds / 60)) : 1; items.push({ operation, quantity, unit: rate.unit, credits: quantity * rate.credits, description: operation.toLowerCase() }); }
     return { totalCredits: items.reduce((total, item) => total + item.credits, 0), qualityTier: input.qualityTier, lineItems: items, estimateVersion: `pricing-${new Date().toISOString().slice(0, 10)}`, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
 }
