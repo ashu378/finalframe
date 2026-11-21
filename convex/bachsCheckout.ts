@@ -1,7 +1,7 @@
 "use node";
 import { action } from './_generated/server';
 import { internal } from './_generated/api';
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { BachsPaymentProvider } from '../src/lib/payments/bachs';
 import { getBachsConfig } from '../src/lib/payments/config';
 
@@ -34,11 +34,19 @@ export const create = action({
 export const refundSandbox = action({
   args: { purchaseId: v.id('purchases') }, returns: v.any(),
   handler: async (ctx, args): Promise<any> => {
+    try {
     const api = provider();
     const purchase = await ctx.runQuery(internal.paymentCheckoutState.getForRecovery, args);
     if (purchase.status !== 'COMPLETED' || !purchase.providerPaymentId) throw new Error('Only a confirmed sandbox payment can be refunded.');
     if ((purchase.metadata?.refundedAmount ?? 0) > 0) throw new Error('This test payment already has a refund.');
-    const result = await api.refund({ chargeId: purchase.providerPaymentId, amount: purchase.amount, reference: `refund_${purchase.reference}`, idempotencyKey: `sandbox-full-refund:${purchase._id}`, reason: 'FinalFrame sandbox acceptance test' });
+    const refundAmount = Number(purchase.metadata?.settlementAmount);
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new Error('Verified refund amount is missing.');
+    const existing = await api.findRefund(purchase.providerPaymentId);
+    const result = existing ?? await api.refund({ chargeId: purchase.providerPaymentId, amount: refundAmount, reference: `refund_${purchase.reference}`, idempotencyKey: `sandbox-full-refund:${purchase._id}`, reason: 'FinalFrame sandbox acceptance test' });
+    await ctx.runMutation(internal.paymentCheckoutState.recordRefund, { purchaseId: purchase._id, refundId: result.refundId, providerStatus: result.status });
     return { refundId: result.refundId, status: result.status };
+    } catch {
+      throw new ConvexError('The test refund could not be confirmed. Retry to check the same payment; no additional refund is created automatically.');
+    }
   },
 });

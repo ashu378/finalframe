@@ -23,7 +23,7 @@ export const status = query({
     if (!enabled) return { enabled: false, environment: 'disabled', balance: 0, purchases: [] };
     const wallet = await ctx.db.query('sandboxPaymentBalances').withIndex('by_studio', q => q.eq('studioId', member.studio._id)).unique();
     const rows = await ctx.db.query('purchases').withIndex('by_studio', q => q.eq('studioExternalId', member.studio.externalId)).order('desc').take(30);
-    return { enabled, environment: 'sandbox', balance: wallet?.balance ?? 0, purchases: rows.filter(p => p.metadata?.environment === 'sandbox').map(p => ({ id: p._id, reference: p.reference, status: p.status, amount: p.amount, currency: p.currency, credits: p.credits, refundedCredits: p.metadata?.refundedCredits ?? 0, createdAt: p.createdAt })) };
+    return { enabled: process.env.BACHS_SANDBOX_CHECKOUT_PAUSED !== 'true', environment: 'sandbox', balance: wallet?.balance ?? 0, purchases: rows.filter(p => p.metadata?.environment === 'sandbox').map(p => ({ id: p._id, reference: p.reference, status: p.status, amount: p.amount, currency: p.currency, credits: p.credits, refundedCredits: p.metadata?.refundedCredits ?? 0, refundStatus: p.metadata?.refundStatus ?? null, createdAt: p.createdAt })) };
   },
 });
 
@@ -31,6 +31,7 @@ export const prepare = internalMutation({
   args: { studioExternalId: v.string(), packId: v.string(), currency: v.union(v.literal('USD'), v.literal('NGN')), requestKey: v.string() }, returns: v.any(),
   handler: async (ctx, args) => {
     const member = await sandboxAccess(ctx, args.studioExternalId);
+    if (process.env.BACHS_SANDBOX_CHECKOUT_PAUSED === 'true') throw new Error('New sandbox checkouts are paused.');
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(args.requestKey)) throw new Error('Invalid checkout request.');
     const pack = CREDIT_PACKS.find(p => p.id === args.packId);
     if (!pack) throw new Error('Unknown credit pack.');
@@ -73,5 +74,15 @@ export const getForRecovery = internalQuery({
     if (!purchase || purchase.metadata?.environment !== 'sandbox') throw new Error('Sandbox purchase missing.');
     await sandboxAccess(ctx, purchase.studioExternalId);
     return purchase;
+  },
+});
+
+export const recordRefund = internalMutation({
+  args: { purchaseId: v.id('purchases'), refundId: v.string(), providerStatus: v.string() }, returns: v.null(),
+  handler: async (ctx, args) => {
+    const purchase = await ctx.db.get(args.purchaseId);
+    if (!purchase || purchase.metadata?.environment !== 'sandbox') throw new Error('Sandbox purchase missing.');
+    if (!purchase.metadata?.refundedCredits) await ctx.db.patch(purchase._id, { metadata: { ...purchase.metadata, refundId: args.refundId, refundStatus: args.providerStatus.toUpperCase() === 'FAILED' ? 'FAILED' : 'PROCESSING' } });
+    return null;
   },
 });

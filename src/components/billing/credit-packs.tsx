@@ -64,7 +64,7 @@ export function CreditPacks({ balance, studioExternalId }: { balance: number; st
     return (
         <div className="space-y-5" aria-busy={busy}>
             <p className="rounded-xl border border-border p-4 text-sm" role="status">{sandbox?.enabled ? `Sandbox test mode — no real money. Test balance: ${sandbox.balance} credits. These credits cannot pay for video generation.` : 'Live credit purchases are disabled. Sandbox testing is available only to authorized test accounts.'}</p>
-            {sandbox?.purchases?.map((purchase) => <div key={purchase.id} className="rounded-xl border border-border p-4 text-sm"><p>{purchase.amount} {purchase.currency} — {purchase.status}{purchase.refundedCredits > 0 ? ' — Refunded' : ''}</p><p className="break-all text-xs text-muted-foreground">{purchase.reference}</p>{purchase.status === 'COMPLETED' && purchase.refundedCredits === 0 && <button className="ff-button-secondary mt-2" onClick={async () => { try { await refund({ purchaseId: purchase.id }); toast.success('Test refund requested. Waiting for confirmation.'); } catch { toast.error('Test refund could not be confirmed. Retry safely.'); } }}>Refund test payment</button>}</div>)}
+            {sandbox?.purchases?.map((purchase) => <div key={purchase.id} className="rounded-xl border border-border p-4 text-sm"><p>{purchase.amount} {purchase.currency} — {purchase.status}{purchase.refundedCredits > 0 ? ' — Refunded' : purchase.refundStatus === 'PROCESSING' ? ' — Refund processing' : purchase.refundStatus === 'FAILED' ? ' — Refund failed' : ''}</p><p className="break-all text-xs text-muted-foreground">{purchase.reference}</p>{purchase.status === 'COMPLETED' && purchase.refundedCredits === 0 && purchase.refundStatus !== 'PROCESSING' && <button className="ff-button-secondary mt-2" onClick={async () => { try { await refund({ purchaseId: purchase.id }); toast.success('Test refund requested. Waiting for confirmation.'); } catch { toast.error('Test refund could not be confirmed. Retry safely.'); } }}>Refund test purchase</button>}</div>)}
             <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-card p-5 sm:flex-row sm:items-center">
                 <div className="flex items-center gap-3">
                     <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
@@ -73,7 +73,7 @@ export function CreditPacks({ balance, studioExternalId }: { balance: number; st
                     <div>
                         <p className="text-xs text-muted-foreground">Available video credits</p>
                         <p className="mt-1 text-3xl font-semibold">{balance.toLocaleString()}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Updates after a verified payment.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Sandbox purchases do not change this balance.</p>
                     </div>
                 </div>
                 <label className="flex flex-col gap-1.5 text-xs font-semibold text-muted-foreground">
@@ -138,7 +138,7 @@ export function CreditPacks({ balance, studioExternalId }: { balance: number; st
 
             <div className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
                 <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <p>Payments are handled by the configured provider. FinalFrame only adds credits after a verified payment event.</p>
+                <p>Test purchases and refunds use simulated money. Provider processing fees are shown at checkout; the refund test returns the credit-pack purchase amount.</p>
             </div>
         </div>
     );

@@ -108,11 +108,18 @@ export class BachsPaymentProvider implements PaymentProvider {
         return { provider: 'bachs', checkoutId: stringValue(response.checkout_id ?? id, 'checkout_id'), status: stringValue(response.status, 'status'), chargeId: optionalString(response.charge_id), amount: decimalValue(response.amount ?? response.total_amount, 'checkout amount'), currency: optionalString(response.currency)?.toUpperCase(), raw: response };
     }
 
+    async findRefund(chargeId: string): Promise<RefundResult | null> {
+        let response: JsonRecord;
+        try { response = await this.request(`/v1/refunds/by-charge/${encodeURIComponent(chargeId)}`, { method: 'GET' }); }
+        catch (error) { if (error instanceof Error && error.message.startsWith('Bachs request failed (404)')) return null; throw error; }
+        return { provider: 'bachs', refundId: stringValue(response.refund_id, 'refund_id'), chargeId: stringValue(response.charge_id, 'charge_id'), reference: stringValue(response.reference, 'reference'), status: stringValue(response.status, 'status'), requestedAmount: decimalValue(response.requested_amount, 'requested_amount'), raw: response };
+    }
+
     async refund(input: RefundInput): Promise<RefundResult> {
         const response = await this.request('/v1/refunds', {
             method: 'POST',
             headers: { 'Idempotency-Key': stringValue(input.idempotencyKey, 'refund idempotency key') },
-            body: { idempotency_key: stringValue(input.idempotencyKey, 'refund idempotency key'), charge_id: stringValue(input.chargeId, 'charge id'), reference: stringValue(input.reference, 'refund reference'), ...(input.amount === undefined ? {} : { amount: ensureAmount(input.amount) }), ...(input.reason ? { reason: input.reason } : {}) },
+            body: { ...(this.config.environment === 'sandbox' ? { simulated_outcome: 'success' } : {}), idempotency_key: stringValue(input.idempotencyKey, 'refund idempotency key'), charge_id: stringValue(input.chargeId, 'charge id'), reference: stringValue(input.reference, 'refund reference'), ...(input.amount === undefined ? {} : { amount: ensureAmount(input.amount) }), ...(input.reason ? { reason: input.reason } : {}) },
         });
         return { provider: 'bachs', refundId: stringValue(response.refund_id, 'refund_id'), chargeId: stringValue(response.charge_id, 'charge_id'), reference: stringValue(response.reference ?? input.reference, 'refund reference'), status: stringValue(response.status, 'status'), requestedAmount: decimalValue(response.requested_amount, 'requested_amount'), raw: response };
     }
