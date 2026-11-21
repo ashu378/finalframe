@@ -52,6 +52,10 @@ const html = async (component, args) => renderToStaticMarkup(await component(arg
   const activeMarkup = renderToStaticMarkup(React.createElement(adminNavigation.AdminNavigation, { items: [{href:'/admin',label:'Overview'},{href:'/admin/jobs',label:'Video jobs'}] }));
   assert.equal((activeMarkup.match(/aria-current="page"/g)||[]).length,1);
   assert(activeMarkup.includes('href="/admin/jobs" aria-current="page"'));
+  const mobileTree = adminNavigation.AdminNavigation({ mobile: true, items: [{href:'/admin/jobs',label:'Video jobs'}] });
+  let focused = false; const disclosure = { open: true, querySelector: () => ({ focus: () => { focused = true; } }) };
+  mobileTree.props.children[0].props.onClick({currentTarget:{closest:()=>disclosure}});
+  assert.equal(disclosure.open, false); assert.equal(focused, true);
   authorized = false; const before = reads;
   await assert.rejects(layout.default({ children: null }), /platform denied/);
   await assert.rejects(overview.default(), /platform denied/);

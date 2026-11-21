@@ -31,3 +31,9 @@ This is not whole-product acceptance. Platform job and credit pages inspect reco
 The whole-product release checklist retains video-quality, collaboration, format and recovery gates. Activation remains a separate final step after completion and explicit owner approval. Existing sandbox pack values remain test configuration, not final prices.
 
 No database migration is required. Rollback restores the preceding frontend without changing project data, platform grants, payment receipts or existing balances.
+
+## Main-domain verification
+
+Revision `7566a13` deployed successfully through the existing FinalFrame Git/Vercel connection. On the live main domain, the owner used the phone menu to open platform admin, signed out, was denied direct admin access without login, then used the saved account to log in directly back to /admin. The role remained ADMIN and balances were not changed. Payment readiness rendered the planned USD 3 minimum and non-expiring credit policy, without activation controls.
+
+Phone inspection found that the existing native admin disclosure stayed open after choosing a page and covered most of the viewport. The follow-up closes it on ordinary link activation and returns focus to its summary; modified clicks retain normal browser behavior. The actual-component regression covers close/focus behavior. Scoped lint, TypeScript, the production build, platform navigation/authorization/action tests, owner-access tests and sandbox payment suites passed. Existing unrelated working-tree changes were preserved and excluded from publication.
