@@ -818,6 +818,16 @@ export default defineSchema({
   }).index("by_reference", ["reference"]).index("by_checkout", ["providerCheckoutId"])
     .index("by_provider_payment", ["provider", "providerPaymentId"]).index("by_idempotency", ["idempotencyKey"]).index("by_status", ["status"]).index("by_studio", ["studioExternalId"]),
 
+  // Sandbox purchases cannot fund paid AI generation. Their wallet and ledger
+  // are separate from the spendable production credits tables.
+  sandboxPaymentBalances: defineTable({
+    studioId: v.id("studios"), balance: v.number(), updatedAt: timestamp,
+  }).index("by_studio", ["studioId"]),
+  sandboxPaymentLedger: defineTable({
+    studioId: v.id("studios"), purchaseId: v.id("purchases"), refundId: v.optional(v.string()),
+    amount: v.number(), idempotencyKey: v.string(), createdAt: timestamp,
+  }).index("by_key", ["idempotencyKey"]).index("by_purchase", ["purchaseId"]).index("by_studio", ["studioId"]),
+
   paymentEvents: defineTable({
     studioExternalId: v.optional(v.string()), studioId: v.optional(v.id("studios")), provider: v.string(), providerEventId: v.string(), eventType: v.string(), payload: json,
     purchaseId: v.optional(v.id("purchases")), receivedAt: v.optional(timestamp), processedAt: v.optional(timestamp), createdAt: timestamp,

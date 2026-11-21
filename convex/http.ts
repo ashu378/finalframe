@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { auth } from "./auth";
 import { validCallbackReceiptReplayTime, validCallbackTime } from './renderHeartbeatPolicy';
 import { REVIEW_MEDIA_RESOLVER_PATH, respondToReviewMediaResolver } from './reviewMediaContract';
@@ -43,6 +43,20 @@ http.route({
   handler: httpAction((ctx, request) => respondToReviewMediaResolver(request, process.env.FINALFRAME_REVIEW_MEDIA_SECRET, ({ kind, token }) =>
     ctx.runQuery(kind === 'export' ? internal.reviewExport.resolveSharedMedia : internal.movieReviews.resolveSharedMedia, { token }))),
 });
+
+// Direct online webhook: secrets stay in Convex, independent of frontend deploys.
+http.route({ path: '/payments/bachs/webhook', method: 'POST', handler: httpAction(async (ctx, request) => {
+  const reader = request.body?.getReader();
+  if (!reader) return jsonResponse({ code: 'BODY_REQUIRED' }, 400);
+  const chunks: Uint8Array[] = []; let length = 0;
+  try { while (true) { const next = await reader.read(); if (next.done) break; length += next.value.byteLength; if (length > 131072) return jsonResponse({ code: 'BODY_TOO_LARGE' }, 413); chunks.push(next.value); } }
+  finally { await reader.cancel().catch(() => undefined); }
+  const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  try {
+    const result = await ctx.runAction(api.paymentWebhook.receive, { rawBody: new TextDecoder().decode(bytes), timestamp: request.headers.get('x-bachs-timestamp') ?? '', signature: request.headers.get('x-bachs-signature') ?? '' });
+    return jsonResponse({ received: true, ...result }, 200);
+  } catch { return jsonResponse({ code: 'PAYMENT_EVENT_REJECTED' }, 400); }
+}) });
 
 http.route({
   path: "/health",

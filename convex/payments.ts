@@ -1,6 +1,6 @@
 import { internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { now, requireStudio } from "./_shared";
+import { now } from "./_shared";
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -8,10 +8,8 @@ function object(value: unknown): Record<string, unknown> {
 
 export const createPurchase = mutation({
   args: { studioExternalId: v.string(), provider: v.string(), providerCheckoutId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), metadata: v.any() },
-  handler: async (ctx, args) => {
-    await requireStudio(ctx, args.studioExternalId);
-    return await ctx.db.insert("paymentPurchases", { studioExternalId: args.studioExternalId, provider: args.provider, providerCheckoutId: args.providerCheckoutId, amount: args.amount, currency: args.currency, credits: args.credits, reference: args.reference, status: "PENDING", metadata: args.metadata, createdAt: now() });
-  },
+  returns: v.null(),
+  handler: async () => { throw new Error("Use the server-priced checkout flow."); },
 });
 
 /**

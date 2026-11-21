@@ -1,16 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, WalletCards } from 'lucide-react';
 import { toast } from 'sonner';
 import { createCreditCheckout } from '@/lib/payments/actions';
-import type { CreditPack, SupportedCurrency } from '@/lib/payments/types';
+import type { SupportedCurrency } from '@/lib/payments/types';
 
-const CREDIT_PACKS: CreditPack[] = [
-    { id: 'starter', label: 'Starter', amounts: { USD: 5, NGN: 7500 }, credits: 100 },
-    { id: 'creator', label: 'Creator', amounts: { USD: 10, NGN: 15000 }, credits: 240 },
-    { id: 'studio', label: 'Studio', amounts: { USD: 20, NGN: 30000 }, credits: 520 },
-];
+import { CREDIT_PACKS } from '@/lib/payments/config';
+import { useQuery, useAction } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 
 type PurchaseState =
     | { kind: 'idle' }
@@ -21,18 +19,27 @@ function isUnavailableMessage(message: string) {
     return /not enabled|not configured|not available|sandbox|BACHS_API_KEY/i.test(message);
 }
 
-export function CreditPacks({ balance }: { balance: number }) {
+export function CreditPacks({ balance, studioExternalId }: { balance: number; studioExternalId?: string }) {
+    const sandbox = useQuery(api.paymentCheckoutState.status, studioExternalId ? { studioExternalId } : 'skip');
+    const refund = useAction(api.bachsCheckout.refundSandbox);
+    const submitting = useRef(false);
     const [currency, setCurrency] = useState<SupportedCurrency>('NGN');
     const [loading, setLoading] = useState<string | null>(null);
     const [purchaseState, setPurchaseState] = useState<PurchaseState>({ kind: 'idle' });
 
     async function buy(packId: string) {
+        if (submitting.current) return;
+        submitting.current = true;
         setLoading(packId);
         setPurchaseState({ kind: 'idle' });
 
         try {
-            const result = await createCreditCheckout(packId, currency);
+            const slot = `ff-checkout:${studioExternalId}:${packId}:${currency}`;
+            const key = sessionStorage.getItem(slot) || crypto.randomUUID();
+            sessionStorage.setItem(slot, key);
+            const result = await createCreditCheckout(packId, currency, key);
             if (!result.success || !result.checkoutUrl) {
+                if (result.finished) sessionStorage.removeItem(slot);
                 const message = result.error || 'Secure checkout could not be started.';
                 setPurchaseState({ kind: isUnavailableMessage(message) ? 'unavailable' : 'failed', message });
                 toast.error(message);
@@ -47,6 +54,7 @@ export function CreditPacks({ balance }: { balance: number }) {
             setPurchaseState({ kind: isUnavailableMessage(message) ? 'unavailable' : 'failed', message });
             toast.error(message);
         } finally {
+            submitting.current = false;
             setLoading(null);
         }
     }
@@ -55,6 +63,8 @@ export function CreditPacks({ balance }: { balance: number }) {
 
     return (
         <div className="space-y-5" aria-busy={busy}>
+            <p className="rounded-xl border border-border p-4 text-sm" role="status">{sandbox?.enabled ? `Sandbox test mode — no real money. Test balance: ${sandbox.balance} credits. These credits cannot pay for video generation.` : 'Live credit purchases are disabled. Sandbox testing is available only to authorized test accounts.'}</p>
+            {sandbox?.purchases?.map((purchase) => <div key={purchase.id} className="rounded-xl border border-border p-4 text-sm"><p>{purchase.amount} {purchase.currency} — {purchase.status}{purchase.refundedCredits > 0 ? ' — Refunded' : ''}</p><p className="break-all text-xs text-muted-foreground">{purchase.reference}</p>{purchase.status === 'COMPLETED' && purchase.refundedCredits === 0 && <button className="ff-button-secondary mt-2" onClick={async () => { try { await refund({ purchaseId: purchase.id }); toast.success('Test refund requested. Waiting for confirmation.'); } catch { toast.error('Test refund could not be confirmed. Retry safely.'); } }}>Refund test payment</button>}</div>)}
             <div className="flex flex-col justify-between gap-4 rounded-[1.1rem] bg-card p-5 sm:flex-row sm:items-center">
                 <div className="flex items-center gap-3">
                     <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
@@ -71,7 +81,7 @@ export function CreditPacks({ balance }: { balance: number }) {
                     <select
                         aria-label="Purchase currency"
                         value={currency}
-                        disabled={busy}
+                        disabled={busy || !sandbox?.enabled}
                         onChange={(event) => {
                             setCurrency(event.target.value as SupportedCurrency);
                             setPurchaseState({ kind: 'idle' });
@@ -115,11 +125,11 @@ export function CreditPacks({ balance }: { balance: number }) {
                             <button
                                 type="button"
                                 onClick={() => void buy(pack.id)}
-                                disabled={busy}
+                                disabled={busy || !sandbox?.enabled}
                                 className="ff-button-primary mt-5 min-h-11 w-full px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 {isLoading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-3.5" aria-hidden="true" />}
-                                {isLoading ? 'Opening checkout…' : 'Buy credits'}
+                                {isLoading ? 'Opening checkout…' : 'Test checkout'}
                             </button>
                         </div>
                     );

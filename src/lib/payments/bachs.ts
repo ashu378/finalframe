@@ -41,6 +41,13 @@ function ensureUrl(url: string, field: string): string {
     }
 }
 
+function checkoutUrl(value: unknown, environment: 'sandbox' | 'production'): string {
+    const url = new URL(stringValue(value, 'checkout_url'));
+    const allowed = environment === 'sandbox' ? ['sandbox-checkout.bachs.io', 'checkout.bachs.io'] : ['checkout.bachs.io'];
+    if (url.protocol !== 'https:' || !allowed.includes(url.hostname) || url.username || url.password || url.port) throw new Error('Unexpected checkout destination.');
+    return url.toString();
+}
+
 function errorMessage(body: unknown, status: number): string {
     const parsed = typeof body === 'object' && body !== null ? body as JsonRecord : undefined;
     const detail = parsed?.detail ?? parsed?.message ?? parsed?.error_code;
@@ -72,7 +79,7 @@ export class BachsPaymentProvider implements PaymentProvider {
                 cancel_url: ensureUrl(input.cancelUrl, 'cancelUrl'),
             },
         });
-        return { provider: 'bachs', checkoutId: stringValue(response.checkout_id, 'checkout_id'), checkoutUrl: stringValue(response.checkout_url, 'checkout_url'), reference, status: stringValue(response.status, 'status'), expiresAt: optionalString(response.expires_at) };
+        return { provider: 'bachs', checkoutId: stringValue(response.checkout_id, 'checkout_id'), checkoutUrl: checkoutUrl(response.checkout_url, this.config.environment), reference, status: stringValue(response.status, 'status'), expiresAt: optionalString(response.expires_at) };
     }
 
     verifyWebhook(input: RawWebhookInput): VerifiedPaymentEvent {
@@ -105,7 +112,7 @@ export class BachsPaymentProvider implements PaymentProvider {
         const response = await this.request('/v1/refunds', {
             method: 'POST',
             headers: { 'Idempotency-Key': stringValue(input.idempotencyKey, 'refund idempotency key') },
-            body: { charge_id: stringValue(input.chargeId, 'charge id'), reference: stringValue(input.reference, 'refund reference'), ...(input.amount === undefined ? {} : { amount: ensureAmount(input.amount) }), ...(input.reason ? { reason: input.reason } : {}) },
+            body: { idempotency_key: stringValue(input.idempotencyKey, 'refund idempotency key'), charge_id: stringValue(input.chargeId, 'charge id'), reference: stringValue(input.reference, 'refund reference'), ...(input.amount === undefined ? {} : { amount: ensureAmount(input.amount) }), ...(input.reason ? { reason: input.reason } : {}) },
         });
         return { provider: 'bachs', refundId: stringValue(response.refund_id, 'refund_id'), chargeId: stringValue(response.charge_id, 'charge_id'), reference: stringValue(response.reference ?? input.reference, 'refund reference'), status: stringValue(response.status, 'status'), requestedAmount: decimalValue(response.requested_amount, 'requested_amount'), raw: response };
     }
@@ -113,6 +120,7 @@ export class BachsPaymentProvider implements PaymentProvider {
     private async request(path: string, input: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: JsonRecord }): Promise<JsonRecord> {
         const response = await this.fetcher(`${this.config.baseUrl}${path}`, {
             method: input.method,
+            signal: AbortSignal.timeout(30000),
             headers: { Authorization: `Bearer ${this.config.apiKey}`, Accept: 'application/json', ...(input.body ? { 'Content-Type': 'application/json' } : {}), ...input.headers },
             body: input.body ? JSON.stringify(input.body) : undefined,
         });

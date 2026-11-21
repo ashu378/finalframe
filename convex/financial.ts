@@ -362,35 +362,15 @@ export const getLedger = query({
   },
 });
 
+// Legacy endpoints remain named for compatibility, but may not accept client-priced
+// purchases or grant credits. Only a verified provider event can fulfill a purchase.
 export const createPurchase = mutation({
   args: { studioExternalId: v.string(), provider: v.string(), providerCheckoutId: v.optional(v.string()), amount: v.number(), currency: v.string(), credits: v.number(), reference: v.string(), idempotencyKey: v.optional(v.string()), metadata: v.optional(v.any()) },
-  handler: async (ctx, args) => {
-    const member = await getStudioForMember(ctx, args.studioExternalId);
-    if (args.amount < 0 || !Number.isInteger(args.credits) || args.credits <= 0) throw new Error("Invalid purchase amount or credits.");
-    const idempotencyKey = args.idempotencyKey?.trim();
-    const existingByKey = idempotencyKey ? await ctx.db.query("purchases").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique() : null;
-    const existing = existingByKey ?? await ctx.db.query("purchases").withIndex("by_reference", (q) => q.eq("reference", args.reference)).unique();
-    if (existing) {
-      if (existing.studioExternalId !== member.studio.externalId || existing.credits !== args.credits) throw new Error("Purchase reference is already in use.");
-      return existing;
-    }
-    return await ctx.db.insert("purchases", { studioExternalId: member.studio.externalId, studioId: member.studio._id, provider: args.provider, providerCheckoutId: args.providerCheckoutId, amount: args.amount, currency: args.currency, credits: args.credits, reference: args.reference, status: "PENDING", idempotencyKey, metadata: args.metadata ?? {}, createdAt: now() });
-  },
+  returns: v.null(),
+  handler: async () => { throw new Error("Use the server-priced checkout flow."); },
 });
-
 export const applyPurchase = mutation({
   args: { purchaseId: v.id("purchases"), providerPaymentId: v.optional(v.string()), idempotencyKey: v.string() },
-  handler: async (ctx, args) => {
-    const purchase = await ctx.db.get(args.purchaseId);
-    if (!purchase) throw new Error("Purchase not found.");
-    const member = await getStudioForMember(ctx, purchase.studioExternalId);
-    const idempotencyKey = requireKey(args.idempotencyKey);
-    const existing = await ctx.db.query("ledger").withIndex("by_idempotency", (q) => q.eq("idempotencyKey", `purchase:${idempotencyKey}`)).unique();
-    if (existing) return { purchase, ledger: existing, duplicate: true };
-    if (purchase.status === "COMPLETED") return { purchase, ledger: null, duplicate: true };
-    await changeWallet(ctx, member, purchase.credits, 0);
-    const ledger = await appendLedger(ctx, { studioExternalId: member.studio.externalId, studioId: member.studio._id, entryType: "PURCHASE", amount: purchase.credits, sourceType: "PURCHASE", sourceId: purchase._id.toString(), idempotencyKey: `purchase:${idempotencyKey}`, purchaseId: purchase._id, metadata: { providerPaymentId: args.providerPaymentId } });
-    await ctx.db.patch(purchase._id, { status: "COMPLETED", providerPaymentId: args.providerPaymentId, completedAt: now() });
-    return { purchase: await ctx.db.get(purchase._id), ledger, duplicate: false };
-  },
+  returns: v.null(),
+  handler: async () => { throw new Error("A verified payment event is required."); },
 });

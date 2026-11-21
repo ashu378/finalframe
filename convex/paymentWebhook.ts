@@ -1,46 +1,17 @@
 "use node";
-
-import crypto from "node:crypto";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-
-function verify(rawBody: string, timestamp: string, signature: string, secret: string, toleranceSeconds = 300) {
-  const timestampNumber = Number(timestamp);
-  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() / 1000 - timestampNumber) > toleranceSeconds) return false;
-  const expected = crypto.createHmac("sha256", secret).update(`${timestamp}.${rawBody}`, "utf8").digest("hex");
-  const expectedBuffer = Buffer.from(expected);
-  const receivedBuffer = Buffer.from(signature);
-  return expectedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
-}
+import { verifyBachsSignature } from "../src/lib/payments/bachs";
 
 export const receive = action({
-  args: { rawBody: v.string(), timestamp: v.string(), signature: v.string() },
-  handler: async (ctx, args): Promise<Record<string, unknown>> => {
-    const secret = process.env.BACHS_WEBHOOK_SECRET;
-    if (!secret || !verify(args.rawBody, args.timestamp, args.signature, secret)) throw new Error("Invalid Bachs webhook signature.");
-    let event: Record<string, any>;
-    try { event = JSON.parse(args.rawBody) as Record<string, any>; } catch { throw new Error("Invalid Bachs webhook JSON."); }
-    if (typeof event.id !== "string" || typeof event.type !== "string") throw new Error("Invalid Bachs webhook event envelope.");
-    const data = event.data && typeof event.data === "object" ? event.data : {};
-    if (event.type === "collection.succeeded") {
-      const status = typeof data.status === "string" ? data.status.toUpperCase() : "";
-      if (status !== "SUCCEEDED" && status !== "ACCEPTED") throw new Error("Bachs payment success event has no successful payment status.");
-    }
-    const amount = data.amount === undefined ? undefined : Number(data.amount);
-    const refundAmountValue = data.refunded_amount ?? data.requested_amount ?? data.amount;
-    const refundAmount = event.type.startsWith("refund.") && refundAmountValue !== undefined ? Number(refundAmountValue) : undefined;
-    return await ctx.runMutation(internal.payments.processBachsEvent, {
-      eventId: event.id,
-      eventType: event.type,
-      payload: event,
-      checkoutId: typeof data.checkout_id === "string" ? data.checkout_id : undefined,
-      reference: typeof data.reference === "string" ? data.reference : typeof data.metadata?.reference === "string" ? data.metadata.reference : undefined,
-      chargeId: typeof data.charge_id === "string" ? data.charge_id : undefined,
-      amount: Number.isFinite(amount) ? amount : undefined,
-      currency: typeof data.currency === "string" ? data.currency : undefined,
-      refundId: typeof data.refund_id === "string" ? data.refund_id : undefined,
-      refundAmount: Number.isFinite(refundAmount) ? refundAmount : undefined,
-    });
+  args: { rawBody: v.string(), timestamp: v.string(), signature: v.string() }, returns: v.any(),
+  handler: async (ctx, args): Promise<any> => {
+    if (Buffer.byteLength(args.rawBody, 'utf8') > 131072) throw new Error('Webhook body too large.');
+    if (!verifyBachsSignature(args.rawBody, args.timestamp, args.signature, process.env.BACHS_WEBHOOK_SECRET)) throw new Error('Invalid Bachs webhook signature.');
+    const event = JSON.parse(args.rawBody);
+    if (!event || typeof event.id !== 'string' || !event.id || event.id.length > 200 || typeof event.type !== 'string' || event.type.length > 100 || !event.data || typeof event.data !== 'object' || Array.isArray(event.data)) throw new Error('Invalid webhook envelope.');
+    if (process.env.BACHS_ENVIRONMENT !== 'sandbox') throw new Error('Live payments have not been activated.');
+    return ctx.runMutation(internal.sandboxPaymentEvents.applyEvent, { event });
   },
 });
