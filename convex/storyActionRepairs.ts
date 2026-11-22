@@ -1,3 +1,5 @@
+export { requireStoryRepairRecovery } from './storyRepairRecovery';
+import { canRecoverUnsubmittedRegion, latestStoryRepairJob, storyRepairKey } from './storyRepairRecovery';
 import { action, internalQuery, internalMutation, query } from './_generated/server';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -109,8 +111,8 @@ export const recordProbe=internalMutation({args:{projectId:v.id('projects'),asse
  const row={projectId:args.projectId,assetId:args.assetId,storageId:args.storageId,checksum:args.checksum,byteSize:args.byteSize,width:p.width,height:p.height,durationSeconds:p.durationSeconds,videoCodec:p.videoCodec,hasAudio:p.hasAudio,...(p.videoTiming?{videoTiming:p.videoTiming,videoTimingSourceChecksum:stored.sha256,videoTimingSourceStorageId:args.storageId}:{}),...(p.audioCodec?{audioCodec:p.audioCodec}:{}),probedAt:Date.now()};
  const old=await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',args.assetId)).unique();if(old)await ctx.db.patch(old._id,row);else await ctx.db.insert('verifiedMediaProbes',row);return null;
 }});
-export const estimate=action({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args):Promise<any>=>{
- const data=await ctx.runQuery(internal.storyActionRepairs.context,args);
+export const estimate=action({args:{takeId:v.id('shotVersions'),retryOfJobId:v.optional(v.id('generationJobs'))},returns:v.any(),handler:async(ctx,args):Promise<any>=>{
+ const data=await ctx.runQuery(internal.storyActionRepairs.context,{takeId:args.takeId});
  const base=process.env.RENDER_WORKER_URL?.trim(),secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();if(!base||!secret)throw new Error('Source measurement is not configured.');
  if(process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true'){const health=await fetch(base.replace(/\/$/,'')+'/health',{redirect:'error',signal:AbortSignal.timeout(10000)});if(!health.ok)throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');const capabilities=await health.json();if(capabilities.actionWindowVersion!=='ACTION_WINDOW_V1'||data.region&&capabilities.actionRegionVersion!=='ACTION_REGION_V1')throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');}
  for(const asset of data.assets){
@@ -120,7 +122,7 @@ export const estimate=action({args:{takeId:v.id('shotVersions')},returns:v.any()
   const {url:_url,...binding}=asset;await ctx.runMutation(internal.storyActionRepairs.recordProbe,{projectId:data.projectId,...binding,probe:JSON.parse(text)});
  }
  await ctx.runAction(api.videoRouting.refreshReviewedForQuote,{projectId:data.projectId});
- return ctx.runMutation(api.generationJobs.previewShotEstimate,{productionId:data.productionId,shotId:data.shotId,provider:'openrouter',model:getActionRepairModel(),request:{storyRepairTakeId:args.takeId,qualityTier:'STANDARD'},estimatedCost:1,capability:'VIDEO_FINAL',idempotencyKey:`story-repair:${args.takeId}`});
+ return ctx.runMutation(api.generationJobs.previewShotEstimate,{productionId:data.productionId,shotId:data.shotId,provider:'openrouter',model:getActionRepairModel(),request:{storyRepairTakeId:args.takeId,...(args.retryOfJobId?{storyRepairRetryOfJobId:args.retryOfJobId}:{}),qualityTier:'STANDARD'},estimatedCost:1,capability:'VIDEO_FINAL',idempotencyKey:storyRepairKey(args.takeId,args.retryOfJobId)});
 }});
 export async function repairAudioCertificate(ctx:QueryCtx|MutationCtx,projectId:Id<'projects'>,assetId:Id<'assets'>,actorId?:Id<'users'>){
  await requireApprovedResource(ctx,projectId,'asset',assetId,undefined,actorId);
@@ -131,8 +133,8 @@ export async function repairAudioCertificate(ctx:QueryCtx|MutationCtx,projectId:
 
 export const get=query({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
  const take=await ctx.db.get(args.takeId);if(!take?.projectId)throw new Error('Take unavailable.');await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR','REVIEWER','VIEWER']);
- const job=await ctx.db.query('generationJobs').withIndex('by_idempotency',q=>q.eq('idempotencyKey',`story-repair:${args.takeId}`)).unique();
+ const job=await latestStoryRepairJob(ctx,args.takeId);
  if(!job||job.projectId!==take.projectId)return null;
  const response=object(job.response),composed=object(response.actionWindowComposed);
- return {id:job._id,status:job.status,stage:job.executionStage,takeId:job.shotVersionId??null,canResumeSavedOutput:job.status==='FAILED'&&Boolean(job.providerJobId&&object(response.actionWindowRaw).storageId),trimmedTrailingFrames:Number(object(composed.proof).trimmedTrailingFrames??0)};
+ return {id:job._id,status:job.status,canRequestFreshEstimate:await canRecoverUnsubmittedRegion(ctx,job,args.takeId),stage:job.executionStage,takeId:job.shotVersionId??null,canResumeSavedOutput:job.status==='FAILED'&&Boolean(job.providerJobId&&object(response.actionWindowRaw).storageId),trimmedTrailingFrames:Number(object(composed.proof).trimmedTrailingFrames??0)};
 }});

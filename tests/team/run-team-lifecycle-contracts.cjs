@@ -6,7 +6,7 @@ const ts = require('typescript');
 const { webcrypto, createHash } = require('node:crypto');
 global.crypto ||= webcrypto;
 const root = path.resolve(__dirname, '../..');
-function load(file, stubs = {}) { const filename = path.join(root, file); const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename)); const normal = mod.require.bind(mod); mod.require = name => Object.hasOwn(stubs, name) ? stubs[name] : normal(name); mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename); return mod.exports; }
+function load(file, stubs = {}, cache = new Map()) { const filename = path.resolve(root, file); if(cache.has(filename))return cache.get(filename).exports; const mod = new Module(filename, module); cache.set(filename,mod); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename)); const normal = mod.require.bind(mod); mod.require = name => {if(Object.hasOwn(stubs,name))return stubs[name];if(name.startsWith('.')){const next=path.resolve(path.dirname(filename),name.replace(/\.js$/,''))+'.ts';if(fs.existsSync(next))return load(next,stubs,cache);}return normal(name);}; mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename); return mod.exports; }
 class AccessError extends Error { constructor(code, message) { super(message); this.code = code; } }
 let actor = 'owner'; let signedIn = true; let writes = 0; let sequence = 0; let paginations = 0;
 const registered = { query: value => value, mutation: value => value };
@@ -18,10 +18,11 @@ const team = load('convex/teamLifecycle.ts', { './_generated/server': registered
 const account = load('convex/account.ts', { './_generated/server': registered, './studioMemberships': membership, './identity': identity });
 const actualAuth = load('convex/auth.ts', { './_generated/server': registered, './studioMemberships': membership, '@convex-dev/auth/providers/Password': { Password: () => ({}) }, '@convex-dev/auth/providers/Email': { Email: () => ({}) }, '@convex-dev/auth/server': { convexAuth: () => ({}), getAuthUserId: async () => signedIn ? actor : null } });
 const app = load('convex/app.ts', { './_generated/server': registered, './authorization': authorization, './auth': errors, './generationWorkerContracts': load('convex/generationWorkerContracts.ts') });
-const tables = Object.fromEntries(['users', 'studios', 'members', 'studioMembers', 'studioInvitations', 'projectMembers', 'projects', 'audit'].map(name => [name, []]));
+const tables = Object.fromEntries(['authSessions', 'users', 'studios', 'members', 'studioMembers', 'studioInvitations', 'projectMembers', 'projects', 'audit'].map(name => [name, []]));
 const indexReads = new Set();
 function add(table, fields) { const row = { _creationTime: ++sequence, createdAt: sequence, updatedAt: sequence, ...fields }; tables[table].push(row); return row; }
-const ctx = { db: {
+const ctx = { auth:{getUserIdentity:async()=>signedIn?{subject:actor+'|session-'+actor}:null}, db: {
+  normalizeId:(table,id)=>typeof id==='string'&&tables[table]?.some(row=>row._id===id)?id:null,
   get: async id => Object.values(tables).flat().find(row => row._id === id) ?? null,
   insert: async (table, fields) => { writes++; const id = `${table}-${++sequence}`; add(table, { _id: id, ...structuredClone(fields) }); return id; },
   patch: async (id, fields) => { writes++; const row = await ctx.db.get(id); assert(row); for (const [key, value] of Object.entries(fields)) { if (value === undefined) delete row[key]; else row[key] = structuredClone(value); } },
@@ -32,7 +33,7 @@ const ctx = { db: {
   },
 } };
 const call = async (name, args = {}) => { paginations = 0; const result = await team[name].handler(ctx, args); if (['workspaces', 'roster', 'invitations'].includes(name)) assert(paginations <= 1); return result; };
-function user(id) { return add('users', { _id: id, externalId: id, authSubject: id, name: `Name ${id}`, displayName: `Display ${id}`, email: `${id}@private.example`, status: 'active', metadata: { secret: 'private-metadata' } }); }
+function user(id) { add('authSessions',{_id:'session-'+id,userId:id,expirationTime:Date.now()+3600000});return add('users', { _id: id, externalId: id, authSubject: id, name: `Name ${id}`, displayName: `Display ${id}`, email: `${id}@private.example`, status: 'active', metadata: { secret: 'private-metadata' } }); }
 for (const id of ['owner', 'admin', 'member', 'recipient', 'wrong', 'successor', 'restore', 'legacy', 'new-user', 'peer', 'alternate']) user(id);
 const studio = add('studios', { _id: 'studio', externalId: 'studio', ownerId: 'owner', ownerUserId: 'owner', ownerExternalId: 'owner', name: 'Workspace', credits: 0, status: 'active' });
 function member(id, role = 'member', status = 'active', studioId = 'studio') { return add('members', { _id: `canonical-${id}-${studioId}`, studioId, userId: id, role, status }); }

@@ -233,7 +233,8 @@ export async function createCanonicalTimelineDraft(ctx:MutationCtx,args:Infer<ty
         duration = input.durationSeconds;
         kind = asset.mimeType.startsWith('image/') ? 'IMAGE' : 'VIDEO';
         if (input.fit !== undefined) {
-          if (kind !== 'IMAGE' || !['contain', 'cover'].includes(input.fit)) throw new Error('Fit applies only to still images.');
+          if (!['contain', 'cover'].includes(input.fit)) throw new Error('Fit must preserve the whole source or explicitly crop it.');
+          if (kind === 'VIDEO' && !finishingV5Enabled()) throw new Error('Video framing requires canonical finishing v5.');
           metadata = { renderItem: { fit: input.fit } };
         }
       } else {

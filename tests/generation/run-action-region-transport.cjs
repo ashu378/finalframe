@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const {load}=require('../recipes/backend-fixture.cjs');
+const worker=load('convex/actionWindowWorker.ts');
+const {planActionWindow}=load('renderer/src/media/action-window-contract.ts');
+const window=planActionWindow([{startSeconds:4.79,endSeconds:7.25}],{width:864,height:480,videoTiming:{version:'DECODED_VIDEO_FRAMES_V1',fpsNumerator:24,fpsDenominator:1,firstFrameSeconds:0,frameCount:193}});
+const region={version:'ACTION_REGION_V1',mode:'STATIONARY_RECTANGLE',window,x:320,y:64,width:256,height:256};
+const sorted=value=>value&&typeof value==='object'?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,sorted(v)])):value;
+let writes=0,stores=0,requests=0;
+const ctx={runQuery:async()=>sorted({source:{checksum:'fixture-only',byteSize:3},window,region}),runMutation:async(_,args)=>{assert.equal(args.phase,'PREPARED');writes++;},storage:{store:async blob=>{assert.equal(blob.size,3);stores++;return'fixture-storage';},getUrl:async()=> 'https://fixture.invalid/prepared'}};
+const originalFetch=global.fetch,originalUrl=process.env.RENDER_WORKER_URL,originalSecret=process.env.RENDER_WORKER_SHARED_SECRET;
+process.env.RENDER_WORKER_URL='https://fixture.invalid';process.env.RENDER_WORKER_SHARED_SECRET='fixture-only';
+global.fetch=async()=>{requests++;return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'video/mp4','content-length':'3','x-finalframe-action-window':JSON.stringify({version:'ACTION_REGION_V1',region,width:256,height:256,fps:24,outputFrames:60,originalAudioCopied:false,byteSize:3,checksum:'fixture-only'})}});};
+(async()=>{await worker.prepareActionWindowInput(ctx,{jobId:'job',leaseId:'lease'});assert.equal(requests,1);assert.equal(stores,1);assert.equal(writes,1);console.log('PASS actual Convex action worker accepts key-reordered query region and persists prepared receipt; no provider calls.');})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{global.fetch=originalFetch;for(const[k,v]of[['RENDER_WORKER_URL',originalUrl],['RENDER_WORKER_SHARED_SECRET',originalSecret]]){if(v===undefined)delete process.env[k];else process.env[k]=v;}});

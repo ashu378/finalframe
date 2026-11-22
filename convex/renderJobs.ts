@@ -12,7 +12,7 @@ import { validateLockedManifest } from "../renderer/src/manifest";
 import { assertStoredRenderMediaType } from '../renderer/src/output-format';
 import { assertGraphicsCertificate, expectedGraphicsCertificate } from '../renderer/src/templates/graphics-v2-certificate';
 import { authorizeMovieRenderContext, movieActor, movieEnabled, movieWorkerEnabled, requiredMovieMediaAbi } from './movieAuthority';
-import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled, safeRenderError } from "./renderWorkerContracts";
+import { dispatchCanRun, publicRenderJob, RENDER_DISPATCH_LEASE_MS, RENDER_FIXTURE_MARKER, RENDER_LEASE_MS, RENDER_MAX_ATTEMPTS, RENDER_RETRY_MS, RENDER_TERMINAL, renderWorkerEnabled } from "./renderWorkerContracts";
 import { finishingRetryEligibility } from '../src/lib/render/recovery';
 import { validateSourceAudioManifest } from './sourceAudioContracts';
 import { sourceAudioRequirements } from '../renderer/src/media/source-audio-contract';
@@ -280,7 +280,7 @@ export const recordAcceptance = internalMutation({
     assertLease(job, args.leaseId);
     const required = expectedGraphicsCertificate({ jobId: String(job._id), leaseId: args.leaseId, attempt: job.dispatchAttempt ?? 1, manifest: object(job.dispatchPayload).manifest });
     if (required) assertGraphicsCertificate(args.graphicsCertificate, required);
-    await ctx.db.patch(job._id, { status: "SUBMITTED", executionStage: "AWAITING_CALLBACK", providerJobId: args.rendererJobId, acceptedAt: now(), ...(required ? { errorCode: undefined, errorMessage: undefined } : {}), progress: Math.max(job.progress, 10), dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, updatedAt: now() });
+    await ctx.db.patch(job._id, { status: "SUBMITTED", executionStage: "AWAITING_CALLBACK", providerJobId: args.rendererJobId, acceptedAt: now(), errorCode: undefined, errorMessage: undefined, progress: Math.max(job.progress, 10), dispatchLeaseId: undefined, dispatchLeaseExpiresAt: undefined, updatedAt: now() });
     await updateExports(ctx, job._id, "PROCESSING", Math.max(job.progress, 10));
     return null;
   },
@@ -374,7 +374,8 @@ export const getStatus = query({
     const { job } = await authorizedJob(ctx, args.jobId);
     const exportRecord = (await ctx.db.query("exports").withIndex("by_render_job", (q) => q.eq("renderJobId", job._id)).take(100)).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
     const downloadUrl = exportRecord?.storageId && exportRecord.status === "COMPLETED" ? await ctx.storage.getUrl(exportRecord.storageId) : undefined;
-    return { job: { _id: job._id, status: job.status, progress: job.progress, errorCode: job.status === "COMPLETED" ? undefined : job.errorCode, errorMessage: job.status === "COMPLETED" ? undefined : safeRenderError(job.errorCode), completedAt: job.completedAt, projectId: job.projectId, selectionScope: job.selectionScope, exportScope: job.exportScope }, export: exportRecord ? { ...exportRecord, downloadUrl } : null };
+    const visible = publicRenderJob(job);
+    return { job: { _id: job._id, status: job.status, progress: job.progress, errorCode: visible.errorCode, errorMessage: visible.errorMessage, completedAt: job.completedAt, projectId: job.projectId, selectionScope: job.selectionScope, exportScope: job.exportScope }, export: exportRecord ? { ...exportRecord, downloadUrl } : null };
   },
 });
 

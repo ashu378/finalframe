@@ -6,10 +6,12 @@ const ts = require('typescript');
 const { createHmac, createHash, webcrypto } = require('node:crypto');
 const root = path.resolve(__dirname, '../..');
 globalThis.crypto ??= webcrypto;
-function load(file, imports = {}) {
-  const filename = path.join(root, file);
+function load(file, imports = {}, cache = new Map()) {
+  const filename = path.resolve(root, file);
+  if(cache.has(filename))return cache.get(filename).exports;
   const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
-  const normal = mod.require.bind(mod); mod.require = id => Object.hasOwn(imports, id) ? imports[id] : normal(id);
+  cache.set(filename,mod);
+  const normal = mod.require.bind(mod); mod.require = id => { if(Object.hasOwn(imports,id))return imports[id]; if(id.startsWith('.')){const next=path.resolve(path.dirname(filename),id.replace(/\.js$/,''))+'.ts';if(fs.existsSync(next))return load(next,imports,cache);}return normal(id); };
   mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, filename);
   return mod.exports;
 }

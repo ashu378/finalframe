@@ -1,3 +1,4 @@
+import { assessSpeechFit } from '../ugc-brief';
 import { normalizeSha256 } from '../../../../renderer/src/media/sha256';
 import { RECIPE_LIMITS, type CompiledRecipe, type CompiledRecipeNode, type RecipeBinding, type RecipeContext, type RecipeDocument, type RecipeStep, type ExistingRecipeNode } from './contract';
 import { parseRecipeDocument } from './schema';
@@ -33,7 +34,7 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   selected(recipe.narrationStepKey, 'NARRATION'); selected(recipe.musicStepKey, 'MUSIC_ANALYSIS'); selected(recipe.captionStepKey, 'CAPTIONS');
   if (recipe.videoType === 'MOTION_GRAPHICS') assert(recipe.steps.filter(visual).every(step => step.operation === 'GRAPHIC'), 'Motion graphics recipes require structured graphics, not generated footage.');
   if (recipe.videoType === 'PRODUCT_SAAS_LAUNCH') assert(recipe.steps.some(step => step.operation === 'GRAPHIC'), 'Product launch needs exact structured copy and CTA graphics.');
-  if (recipe.videoType === 'EXPLAINER_STORY') assert(recipe.narrationStepKey, 'Narrated explainers need an explicitly approved narration step.');
+  if (recipe.videoType === 'EXPLAINER_STORY') assert(recipe.narrationStepKey || recipe.narrationTracks?.length, 'Narrated explainers need an explicitly approved narration step.');
   if (recipe.videoType === 'MUSIC_VIDEO') assert(recipe.musicStepKey, 'Music videos need a supplied approved soundtrack and reviewed beat map.');
   if (recipe.videoType === 'SOCIAL_CUTDOWN') assert(recipe.steps.some(step => step.operation === 'SOURCE_RANGE'), 'Social cutdowns need explicit measured source ranges.');
   if (context.speechMode === 'ON_CAMERA') {
@@ -92,13 +93,34 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
       durations.set(step.key, shot.durationFrames); request = { ...request, shot };
     }
     if (step.operation === 'GRAPHIC') { assert(step.title.trim(), 'Graphics need an explicit readable title.'); if (step.logoAssetId) { asset(step.logoAssetId, 'image'); assert(step.templateId !== 'kinetic-title', 'This template has no logo slot.'); } durations.set(step.key, step.durationFrames); }
-    if (step.operation === 'SOURCE_RANGE') { const source = asset(step.sourceAssetId, 'visual'); if (source.mimeType.startsWith('video/')) { assert(step.fit === undefined, 'Still-image fit cannot be applied to video.'); assert(Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && (step.startFrame + step.durationFrames) / recipe.fps <= source.durationSeconds! + 0.000001, 'Source range must fit the measured canonical video.'); } else assert(step.startFrame === 0 && step.audioPolicy === 'MUTE', 'Still images have no source-audio or media trim.'); durations.set(step.key, step.durationFrames); request = { ...request, source }; }
+    if (step.operation === 'SOURCE_RANGE') { const source = asset(step.sourceAssetId, 'visual'); if (source.mimeType.startsWith('video/')) { assert(Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && (step.startFrame + step.durationFrames) / recipe.fps <= source.durationSeconds! + 0.000001, 'Source range must fit the measured canonical video.'); } else assert(step.startFrame === 0 && step.audioPolicy === 'MUTE', 'Still images have no source-audio or media trim.'); durations.set(step.key, step.durationFrames); request = { ...request, source }; }
     if (step.operation === 'MUSIC_ANALYSIS') { const source = asset(step.sourceAssetId, 'audio'); assert(Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && (step.trimStartFrame + step.durationFrames) / recipe.fps <= source.durationSeconds! + 0.000001, 'RECIPE_SOUNDTRACK_TIMING_REVIEW_REQUIRED'); request = { ...request, source }; }
-    if (step.operation === 'CAPTIONS' && step.mode !== 'PLANNED_DIALOGUE') { const transcript = steps.get(step.transcriptStepKey); assert(transcript?.operation === 'PREPARATION' && transcript.kind === 'TRANSCRIPT', 'Caption timing must come from reviewed transcript evidence, never invented timestamps.'); deps.push(approvalId(transcript.key)); request = { ...request, timingPolicy: 'VALIDATED_TIMED_SEGMENTS_OR_REVIEWED_CUES' }; }
+    if (step.operation === 'CAPTIONS' && step.mode !== 'PLANNED_DIALOGUE' && step.mode !== 'PLANNED_NARRATION') { const transcript = steps.get(step.transcriptStepKey); assert(transcript?.operation === 'PREPARATION' && transcript.kind === 'TRANSCRIPT', 'Caption timing must come from reviewed transcript evidence, never invented timestamps.'); deps.push(approvalId(transcript.key)); request = { ...request, timingPolicy: 'VALIDATED_TIMED_SEGMENTS_OR_REVIEWED_CUES' }; }
     dependencies.set(step.key, deps); requests.set(step.key, request);
   }
   const durationFrames = recipe.visualOrder.reduce((sum, key) => sum + durations.get(key)!, 0);
   assert(durationFrames > 0 && durationFrames <= RECIPE_LIMITS.maxSeconds * recipe.fps, 'Recipe timeline remains within the sixty-second production bound.');
+  const narrationTracks: Array<{stepKey:string;visualStepKey:string;startFrame:0;startSeconds:number;durationSeconds:number;text:string}> = [];
+  if (recipe.narrationTracks?.length) {
+    assert(recipe.videoType === 'EXPLAINER_STORY' && !recipe.narrationStepKey && !recipe.dialogueTracks?.length && recipe.narrationTracks.length === recipe.visualOrder.length && recipe.narrationTracks.length + (recipe.musicStepKey ? 1 : 0) <= 16, 'RECIPE_NARRATION_BINDING_CHANGED');
+    if (recipe.captionStepKey) { const caption = steps.get(recipe.captionStepKey); assert(caption?.operation === 'CAPTIONS' && caption.mode === 'PLANNED_NARRATION', 'RECIPE_NARRATION_BINDING_CHANGED'); }
+    const seenSpeech = new Set<string>(), seenCards = new Set<string>();
+    for (const track of recipe.narrationTracks) {
+      const speech = steps.get(track.stepKey), card = steps.get(track.visualStepKey), index = recipe.visualOrder.indexOf(track.visualStepKey);
+      assert(speech?.operation === 'NARRATION' && speech.mode === 'GENERATE' && card?.operation === 'GRAPHIC' && index >= 0 && track.startFrame === 0 && !seenSpeech.has(track.stepKey) && !seenCards.has(track.visualStepKey), 'RECIPE_NARRATION_BINDING_CHANGED');
+      assert(speech.text.trim() && speech.text.length <= 1024 && !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(speech.text) && !/\r(?!\n)/.test(speech.text) && speech.text.replace(/\r\n/g,'\n').split('\n').every(line=>line.trim()), 'RECIPE_NARRATION_BINDING_CHANGED');
+      assert(assessSpeechFit(speech.text,card.durationFrames/recipe.fps).fits,'RECIPE_NARRATION_TIMING_REVIEW_REQUIRED');
+      const before = recipe.visualOrder.slice(0,index).reduce((sum,key) => sum + durations.get(key)!,0);
+      narrationTracks.push({...track,startSeconds:before/recipe.fps,durationSeconds:card.durationFrames/recipe.fps,text:speech.text});
+      seenSpeech.add(track.stepKey); seenCards.add(track.visualStepKey);
+    }
+  }
+  for (const step of recipe.steps) if (step.operation === 'CAPTIONS' && step.mode === 'PLANNED_NARRATION') {
+    assert(recipe.captionStepKey === step.key && narrationTracks.length > 0, 'RECIPE_NARRATION_BINDING_CHANGED');
+    assert(step.language.length <= 32 && /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(step.language), 'RECIPE_NARRATION_BINDING_CHANGED');
+    dependencies.set(step.key,[...narrationTracks.map(track=>approvalId(track.stepKey)),...recipe.visualOrder]);
+    requests.set(step.key,{...requests.get(step.key),narrationTracks,visualOrder:recipe.visualOrder,durationFrames,fps:recipe.fps,timingPolicy:'APPROVED_CARD_LINE_MEASURED_COMPLETE_AUDIO'});
+  }
   const dialogueTracks: Array<{stepKey:string;visualStepKey:string;shotId:string;segmentIndex:number;speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string}> = [];
   const dialogueSteps = new Set<string>(), dialogueSegments = new Set<string>();
   for (const track of recipe.dialogueTracks ?? []) {
@@ -135,8 +157,8 @@ export async function compileRecipe(input: unknown, context: RecipeContext, now:
   const raw: Array<Omit<CompiledRecipeNode, 'requestHash' | 'idempotencyKey'>> = [];
   for (const step of recipe.steps) { raw.push({ id: step.key, operation: step.operation, dependencies: dependencies.get(step.key)!, request: requests.get(step.key)!, effect: paid(step) ? 'PAID' : 'LOCAL' }); const target = targets.get(step.key); if (target) raw.push({ id: approvalId(step.key), operation: 'APPROVAL', dependencies: [step.key], request: { sourceNodeId: step.key, decisionPolicy: 'EXPLICIT_OWNER_APPROVAL_OF_EXACT_RESULT' }, approvalTarget: target, effect: 'HUMAN' }); }
   const terminal = (key: string) => targets.has(key) ? approvalId(key) : key;
-  const roots = [...recipe.visualOrder, ...dialogueTracks.map(track=>track.stepKey), recipe.narrationStepKey, recipe.musicStepKey, recipe.captionStepKey].filter((key): key is string => !!key);
-  raw.push({ id: 'timeline', operation: 'TIMELINE', dependencies: roots.map(terminal), request: { visualOrder: recipe.visualOrder, narrationStepKey: recipe.narrationStepKey ?? null, ...(dialogueTracks.length?{dialogueTracks}:{}), musicStepKey: recipe.musicStepKey ?? null, captionStepKey: recipe.captionStepKey ?? null, durationFrames, fps: recipe.fps, narrationTiming: 'MEASURE_BEFORE_PLACEMENT_REVISE_IF_OVERFLOW', preserveApprovedSources: true }, effect: 'LOCAL' });
+  const roots = [...recipe.visualOrder, ...narrationTracks.map(track=>track.stepKey), ...dialogueTracks.map(track=>track.stepKey), recipe.narrationStepKey, recipe.musicStepKey, recipe.captionStepKey].filter((key): key is string => !!key);
+  raw.push({ id: 'timeline', operation: 'TIMELINE', dependencies: roots.map(terminal), request: { visualOrder: recipe.visualOrder, narrationStepKey: recipe.narrationStepKey ?? null, ...(dialogueTracks.length?{dialogueTracks}:{}), ...(narrationTracks.length?{narrationTracks}:{}), musicStepKey: recipe.musicStepKey ?? null, captionStepKey: recipe.captionStepKey ?? null, durationFrames, fps: recipe.fps, narrationTiming: 'MEASURE_BEFORE_PLACEMENT_REVISE_IF_OVERFLOW', preserveApprovedSources: true }, effect: 'LOCAL' });
   raw.push({ id: 'approve:timeline', operation: 'APPROVAL', dependencies: ['timeline'], request: { sourceNodeId: 'timeline', decisionPolicy: 'EXPLICIT_OWNER_APPROVAL_AND_LOCK_OF_EXACT_VERSION' }, approvalTarget: 'TIMELINE', effect: 'HUMAN' });
   raw.push({ id: 'manifest', operation: 'MANIFEST', dependencies: ['approve:timeline'], request: { contractVersion: 5, timelineNodeId: 'timeline' }, effect: 'LOCAL' });
   raw.push({ id: 'export', operation: 'EXPORT', dependencies: ['manifest'], request: { manifestNodeId: 'manifest', completionPolicy: 'SIGNED_CALLBACK_STORED_SHA_VERIFIED_DOWNLOAD', reviewPolicy: 'CANONICAL_REVIEW_REQUIREMENTS_NO_AUTO_APPROVAL' }, effect: 'LOCAL' });

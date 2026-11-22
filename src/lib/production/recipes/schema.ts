@@ -19,8 +19,8 @@ export const RECIPE_DOCUMENT_SCHEMA = {
       step('SOURCE_RANGE', { sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1), audioPolicy: { enum: ['KEEP_SOURCE', 'MUTE'] }, fit: { enum: ['contain', 'cover'] } }, ['fit']),
       step('MUSIC_ANALYSIS', { sourceAssetId: id, trimStartFrame: frameOffset, durationFrames: integer(1) }),
       step('CAPTIONS', { mode: { const: 'TRANSCRIPT' }, transcriptStepKey: key, language: text(35) }, ['mode']),
-      step('CAPTIONS', { mode: { const: 'PLANNED_DIALOGUE' }, language: text(35) }),
-    ] } }, visualOrder: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: key }, narrationStepKey: key, dialogueTracks: { type: 'array', minItems:1, maxItems:32, items:object({stepKey:key,shotId:id,segmentIndex:{type:'integer',minimum:0,maximum:31}}) }, musicStepKey: key, captionStepKey: key }, ['narrationStepKey', 'dialogueTracks', 'musicStepKey', 'captionStepKey']),
+      step('CAPTIONS', { mode: { enum: ['PLANNED_DIALOGUE', 'PLANNED_NARRATION'] }, language: text(35) }),
+    ] } }, visualOrder: { type: 'array', minItems: 1, maxItems: RECIPE_LIMITS.maxSteps, items: key }, narrationStepKey: key, narrationTracks: { type:'array', minItems:1, maxItems:16, items:object({stepKey:key,visualStepKey:key,startFrame:{const:0}}) }, dialogueTracks: { type: 'array', minItems:1, maxItems:32, items:object({stepKey:key,shotId:id,segmentIndex:{type:'integer',minimum:0,maximum:31}}) }, musicStepKey: key, captionStepKey: key }, ['narrationStepKey', 'narrationTracks', 'dialogueTracks', 'musicStepKey', 'captionStepKey']),
 } satisfies Schema;
 function matches(value: unknown, schema: Schema): boolean {
   if (schema.oneOf) return schema.oneOf.filter(candidate => matches(value, candidate)).length === 1;

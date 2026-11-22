@@ -127,6 +127,7 @@ import type * as teamLifecycle from "../teamLifecycle.js";
 import type * as templates from "../templates.js";
 import type * as timeline from "../timeline.js";
 import type * as timelineEditor from "../timelineEditor.js";
+import type * as videoReferenceEligibility from "../videoReferenceEligibility.js";
 import type * as videoRouting from "../videoRouting.js";
 import type * as voices from "../voices.js";
 
@@ -256,6 +257,7 @@ declare const fullApi: ApiFromModules<{
   templates: typeof templates;
   timeline: typeof timeline;
   timelineEditor: typeof timelineEditor;
+  videoReferenceEligibility: typeof videoReferenceEligibility;
   videoRouting: typeof videoRouting;
   voices: typeof voices;
 }>;

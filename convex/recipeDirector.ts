@@ -62,6 +62,7 @@ async function cut(ctx:ReadCtx,runId:Id<'recipeRuns'>){
   }
   const timeline=object(byKey.get('timeline')?.request),dialogue=Array.isArray(timeline.dialogueTracks)?timeline.dialogueTracks:[];
   const audioSlots=dialogue.map((track:any)=>({key:track.stepKey,startSeconds:Number(track.startSeconds),durationSeconds:Number(track.durationSeconds),kind:'DIALOGUE'}));
+  for(const track of Array.isArray(timeline.narrationTracks)?timeline.narrationTracks:[])audioSlots.push({key:track.stepKey,startSeconds:Number(track.startSeconds),durationSeconds:Number(track.durationSeconds),kind:'NARRATION'});
   if(typeof recipe.narrationStepKey==='string')audioSlots.push({key:recipe.narrationStepKey,startSeconds:0,durationSeconds:elapsed,kind:'NARRATION'});
   if(typeof recipe.musicStepKey==='string')audioSlots.push({key:recipe.musicStepKey,startSeconds:0,durationSeconds:elapsed,kind:'MUSIC'});
   for(const slot of audioSlots){

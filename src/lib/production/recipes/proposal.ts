@@ -9,7 +9,7 @@ const placeholderBinding: RecipeBinding = { projectId: 'proposal-project', produ
 export function parseRecipeProposal(value: unknown): RecipeProposalDocument {
   const raw = JSON.stringify(value); if (typeof raw !== 'string' || new TextEncoder().encode(raw).length > 128 * 1024) throw new Error('Recipe proposal exceeds its JSON bound.');
   const snapshot = object(JSON.parse(raw));
-  const allowed = new Set(['kind', 'version', 'videoType', 'fps', 'steps', 'visualOrder', 'narrationStepKey', 'dialogueTracks', 'musicStepKey', 'captionStepKey']);
+  const allowed = new Set(['kind', 'version', 'videoType', 'fps', 'steps', 'visualOrder', 'narrationStepKey', 'narrationTracks', 'dialogueTracks', 'musicStepKey', 'captionStepKey']);
   if (snapshot.kind !== 'finalframe.recipe-proposal' || Object.keys(snapshot).some(key => !allowed.has(key)) || !Array.isArray(snapshot.steps)) throw new Error('Choose a versioned logical recipe proposal without invented canonical IDs.');
   const steps = snapshot.steps.map(value => { const step = object(value); if (step.operation !== 'GENERATION') return step; if (Object.prototype.hasOwnProperty.call(step, 'shotId') || typeof step.logicalShotKey !== 'string') throw new Error('Proposal generation uses logical shot keys, not canonical IDs.'); const { logicalShotKey, ...rest } = step; return { ...rest, shotId: logicalShotKey }; });
     const dialogueTracks=Array.isArray(snapshot.dialogueTracks)?snapshot.dialogueTracks.map(value=>{const track=object(value);if(Object.prototype.hasOwnProperty.call(track,'shotId')||typeof track.logicalShotKey!=='string')throw new Error('Dialogue proposals use logical shot keys.');const {logicalShotKey,...rest}=track;return {...rest,shotId:logicalShotKey};}):snapshot.dialogueTracks;
