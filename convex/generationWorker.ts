@@ -1,3 +1,5 @@
+import { getFrameRegionState,retainFrameRegionRaw,composeFrameRegionOutput } from './frameRegionRepairs';
+import { ACTION_MOTION_REPAIR_VERSION,motionOutputValidationRequest } from '../src/lib/production/action-motion-repair';
 import { prepareActionWindowInput,composeActionWindowOutput,getActionWindowState,retainRawActionWindow } from './actionWindowWorker';
 import { isLocalizedActionRepair } from '../renderer/src/media/action-window-contract';
 import { internalAction } from './_generated/server';
@@ -30,6 +32,7 @@ export const run = internalAction({
       const input = await ctx.runQuery(inputRef, lease);
       const job = input.job;
       const request = object(input.request);
+      const motionRepair=object(request.storyRepair).approachVersion===ACTION_MOTION_REPAIR_VERSION;
       const isolatedRepair=isLocalizedActionRepair(object(request.storyRepair).approachVersion);
       const constraints = { ...request, ...object(request.constraints) };
       const options = { maxRetries: 0, fallbackModels: [], idempotencyKey: job.idempotencyKey, allowDiscoveredModel: true, timeoutMs: 60_000, maxResponseBytes: GENERATION_MAX_MEDIA_BYTES };
@@ -66,10 +69,10 @@ export const run = internalAction({
           ...(typeof request.previousJobId === 'string' ? { previousJobId: request.previousJobId } : {}),
         };
         let liveCatalog: { liveCatalogFingerprint: string; liveCatalogCheckedAt: number; liveEndpointFingerprint?: string } | undefined;
-        if (request.operation === 'LIP_SYNC' || request.operation === 'UPSCALE' || isSourceVideoEdit(request.operation) || request.operation === 'EXTEND' || request.operation === 'PERFORMANCE_TRANSFER') {
+        if (motionRepair || request.operation === 'LIP_SYNC' || request.operation === 'UPSCALE' || isSourceVideoEdit(request.operation) || request.operation === 'EXTEND' || request.operation === 'PERFORMANCE_TRANSFER') {
           const current = (await discoverOpenRouterVideoModels({ force: true, staleIfError: false, fetch: (url, init) => fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }) })).find(model => model.id === job.model);
           if (!current) throw Object.assign(new Error('The upscale model is no longer available.'), { code: 'ROUTE_CHANGED' });
-          const fingerprint = request.operation === 'PERFORMANCE_TRANSFER' ? videoCatalogQuoteFingerprint : videoCatalogFingerprint;
+          const fingerprint = request.operation === 'PERFORMANCE_TRANSFER' || motionRepair ? videoCatalogQuoteFingerprint : videoCatalogFingerprint;
           liveCatalog = { liveCatalogFingerprint: fingerprint({ provider: 'openrouter', modelId: current.id, ...current, supportedParameters: current.allowedPassthroughParameters }), liveCatalogCheckedAt: Date.now() };
         }
         if (request.operation === 'LIP_SYNC') {
@@ -90,7 +93,7 @@ export const run = internalAction({
       let assetId = input.outputAssetId as string | undefined;
       let outputUrl = input.outputUrl as string | undefined;
       if (!assetId || !outputUrl) {
-        const retainedWindow=isolatedRepair?await getActionWindowState(ctx,lease):null;
+        const retainedWindow=motionRepair?await getFrameRegionState(ctx,lease):isolatedRepair?await getActionWindowState(ctx,lease):null;
         if(!retainedWindow?.actionWindowRaw){
         if (Date.now() - Number(job.startedAt || job.createdAt) > 30 * 60 * 1000) throw Object.assign(new Error('Provider polling needs review.'), { code: 'PROVIDER_POLL_TIMEOUT' });
         const current = await pollVideo(providerJobId!, options);
@@ -104,13 +107,14 @@ export const run = internalAction({
         if (!done) return null;
         const media = await downloadVideo(providerJobId!, options);
         if (!media.body.byteLength || media.body.byteLength > GENERATION_MAX_MEDIA_BYTES || !media.contentType.toLowerCase().startsWith('video/')) throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' });
-        if(isolatedRepair){await retainRawActionWindow(ctx,lease,media.body);}else{
+        if(motionRepair){await retainFrameRegionRaw(ctx,lease,media.body);}else if(isolatedRepair){await retainRawActionWindow(ctx,lease,media.body);}else{
           const storageId = await ctx.storage.store(new Blob([media.body], { type: media.contentType }));
           const output = await ctx.runMutation(jobs.recordOutput, { ...lease, storageId, contentType: media.contentType, byteSize: media.body.byteLength });
           assetId = output.assetId;
           outputUrl = await ctx.storage.getUrl(storageId) || undefined;
         }
         }
+        if(motionRepair){const composed=await composeFrameRegionOutput(ctx,lease);const output=await ctx.runMutation(jobs.recordOutput,{...lease,storageId:composed.storageId,contentType:'video/mp4',byteSize:composed.byteSize});assetId=output.assetId;outputUrl=composed.url||undefined;}
         if(isolatedRepair){const composed=await composeActionWindowOutput(ctx,lease);const output=await ctx.runMutation(jobs.recordOutput,{...lease,storageId:composed.storageId,contentType:'video/mp4',byteSize:composed.byteSize});assetId=output.assetId;outputUrl=composed.url||undefined;}
       }
       if (!assetId || !outputUrl) throw new Error('Canonical stored output is missing.');
@@ -130,7 +134,7 @@ export const run = internalAction({
         throw Object.assign(new Error('Media validation service failed.'), { code });
       }
       let technicalProbe;
-      try { technicalProbe = validateMediaProbe(await probeResponse.json(), request, job.model); }
+      try { const outputRequest=motionRepair?motionOutputValidationRequest(request):request;technicalProbe = validateMediaProbe(await probeResponse.json(), outputRequest, job.model); }
       catch { throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' }); }
       await ctx.runMutation(jobs.succeed, { ...lease, assetId, technicalProbe });
     } catch (error) {
@@ -139,7 +143,7 @@ export const run = internalAction({
       const code = details.code || castCode || 'GENERATION_WORKER_ERROR';
       const rejected = !submissionAttempted || (typeof details.status === 'number' && details.status >= 400 && details.status < 500 && details.status !== 408);
       const submissionDiagnostic = sanitizeSubmissionDiagnostic(object(details.details).submissionDiagnostic);
-      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: !['MEDIA_VALIDATION_FAILED','ACTION_WINDOW_MEDIA_INVALID','ACTION_WINDOW_BINDING_CHANGED'].includes(code), ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {
+      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: !['MEDIA_VALIDATION_FAILED','ACTION_WINDOW_MEDIA_INVALID','ACTION_WINDOW_BINDING_CHANGED','FRAME_TO_REGION_MEDIA_INVALID'].includes(code), ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {
         // A stale action cannot mutate a newer lease. The scheduled expiry
         // recovers accepted jobs or holds an ambiguous submission for review.
       });

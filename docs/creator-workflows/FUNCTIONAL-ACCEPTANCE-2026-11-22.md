@@ -224,3 +224,28 @@ The focused repair failed locally before provider submission because equivalent 
 Integration `ff9a26b` includes reviewed per-card narration, truthful recovered-export status, fresh social source contain defaults with explicit crop option, planner CHARACTER self-binding normalization, and guarded local-preparation recovery. Root build, typecheck, lint and affected contract suites pass. Narration7, UI25, compiler22, backend22, framing4, renderer policy10, dispatch10, recovery9 and team7 pass. Existing fixture loader dependencies were repaired so the affected suites run rather than being skipped. New narration still needs ordinary live audio/download review.
 
 15:35UTC budget: current key$12.511348187 +prior keys$8.494995241 = **$21.006343428** actual; retain **$1.794376** uncertain holds => **$22.800719428/$100** conservative. Active key has$17.488651813 remaining. No history/holds were reset. No live payment activation.
+
+## Built-in browser continuation and current results
+
+The main website was tested using the Codex built-in browser. Frontend `c2205db` restored the character-binding panel on the storyboard approval screen and was verified with the revised UGC project. Online Convex and the FinalFrame worker were previously updated at `a3bb9fe` (renderer deployment `ma5wpzdjnlcsm6tsbcdnylfp`). The new animation repair described below remains gated while live acceptance is pending.
+
+| Journey | Verified result | Remaining evidence |
+|---|---|---|
+| Motion graphics | Fresh structured graphic brief through reviewed download, with no AI footage purchase | Broader template matrix tracked separately |
+| Cinematic short | Fresh silent red-paper-boat brief through reviewed download | Continuing story and long creative production remain separate |
+| Music video | Owned click-track upload, beat review, timed cut and ordinary download `ps75vwe1c3cmh6gnmk9e5k9qk98jqdfy`. Cut at frame 60 (2.000 seconds), audio correlation 0.9999649 at zero offset | Performance and lip sync remain separate |
+| Social cutdown | Vertical fit variant reviewed and downloaded as `ps73hd6hr57jcm5hhjbxxys68d8jqpdt`. Full layout readable on a 360px preview and speech preserved | Earlier center-crop failure remains available |
+| Product/SaaS | Two readable phone-size cards and exact CTA in the 8s vertical browser download `ps70a05k4qt0hnc3caenxh0d3x8jqzkb` | Checkbox glyph displayed incorrectly. Deterministic outline replacement passes actual local renders; live recheck pending |
+| Narrated explainer | Two approved lines, per-card captions, locked timeline, reviewed assembly and ordinary completed download `ps71va44b3t2b1hbf0hva8dxks8jqdtb` | This covers the two-card stock-voice fixture |
+| Realistic UGC | New silent eight-second mug demonstration passed decoded-frame review for identity, handle contact, lift, smile and plain product. Normal browser review persisted all three actions, created and locked the edit, and reached assembly approval | Final render and download pending |
+| 2D comedy | New Standard take visibly shows chest expansion, theft and wide-eyed payoff with both intended characters | Exact timing remains open. Sparrow is visible at 1.750s, before the 2.000s cue, and exits before the 4.000–4.600s direction. Pigeon looks down before 4.900s. Retained for review, without certifying the take |
+
+Explainer MP4 `finalframe-export (19).mp4` is 8.000 seconds, 240 frames, 1080×1080 H.264 with 48 kHz AAC. SHA-256 `67768bb0915532e5dfe56db759abea20a386e58c7215afa2467c3f0f5d111e67`. Offline transcription of decoded final audio recovered “Choose one task.” in card one and “Finish, then choose the next.” in card two. The approved caption intervals are 0.000–1.267s and 4.000–5.833s. Final frames show both texts in place. Evidence includes `explainer-per-card-final.jpg` and the downloaded file.
+
+Adult romance sample used two approved fictional adult characters, ordinary beach clothes and an eight-second non-explicit kiss. Independent review passed identity/action/coherence at 4/5. The shot pushed in despite a fixed-camera direction, scoring 2/5 on framing, so this exact brief is still open. The complete source remains saved. No identical retry was purchased.
+
+The prior FLUX region repair recovered its saved output with exact original voice and outside-region preservation. It did not produce three convincing chews on time. The new first/last-frame repair has passing contracts for project/approval checks, temporary object cleanup, one-time charging, retrying transient interruptions, preserving accepted results and stopping when generated media is invalid. Real local media tests confirm 96 provider frames are reduced to 60 frames inside the exact approved region of the 193-frame clip, with unchanged outside-region decoded pixels and original encoded AAC. Creative motion acceptance requires a live take. The scoped Seedance first/last-frame route also needs catalog review before a paid test. Ordinary Seedance text or reference-image generation keeps its existing behavior.
+
+The built-in browser became unavailable for this chat after the explainer download and UGC approval work. The UGC download, the new live repair and the renderer checkbox download recheck are pending. No external browser was used for this continuation.
+
+Latest active-key usage **$14.542900466**, prior-key usage **$8.494995241**, cumulative known **$23.037895707**. Conservatively retain the last verified **$1.794376** of uncertain holds, for **$24.832271707 / $100**. Live payments remain disabled.

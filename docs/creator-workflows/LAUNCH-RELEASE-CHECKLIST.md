@@ -412,3 +412,13 @@ Required automatic chewing repair remains **FAIL pending a genuinely different t
 - Confirmed content-policy refusals now have a separate non-retryable error path instead of being labeled invalid credentials; unknown 403 and budget-limit errors remain distinct. No safeguards disabled or automatic policy-rejection purchases added. See the current functional checkpoint for exact tests and the historical image-retry test mismatch.
 
 Latest reconciliation at 14:20:56 UTC: current key $12.303163418 + prior keys $8.494995241 = **$20.798158659 known actual**; retain $1.794376 uncertain holds, conservative **$22.592534659 / $100**. Current key remaining $17.696836582. No paid calls during the policy investigation. Strict online FinalFrame Convex deployment of the refusal fix completed at 15:21 local. Live payments remain disabled.
+
+### 22 November continuation — current ordinary-browser evidence
+
+- **Fresh downloads:** silent cinematic short, structured motion graphics, click-track music timing, corrected vertical social cutdown and the revised per-card narrated explainer. Exact sources, output IDs and limits are in the [acceptance checkpoint](FUNCTIONAL-ACCEPTANCE-2026-11-22.md).
+- **Product/SaaS:** vertical download and readable copy pass. Checkbox outline fix passes nine local renders with decoded-pixel assertions. Live export recheck remains open.
+- **UGC:** new exact take passes the timed action review, then media approval and timeline lock in the normal browser. Final render/download remains open.
+- **Comedy:** revised take visibly performs the gag, but several movements lead their requested timing. Exact brief and fresh download remain open. Pidgin and cartoon lip sync are separate.
+- **Romance:** fictional adult romance, kissing and ordinary beachwear succeeded in the source clip. Fixed-camera compliance failed. Exact creative acceptance remains open.
+- **Automatic repair:** new frame-guided route passes safety, recovery and actual local composition tests. Original voices and pixels outside the approved change stay intact in those tests. Live chewing and output review remain open.
+- **Spend:** $23.037895707 known, last verified uncertain holds $1.794376, $24.832271707 conservative total against $100. Live payments remain disabled.

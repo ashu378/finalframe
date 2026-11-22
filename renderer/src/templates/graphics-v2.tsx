@@ -5,6 +5,9 @@ import { parseGraphicsV2Render, type GraphicsV2Props } from './graphics-v2-contr
 import { containGraphicImage, graphicBarGeometry, graphicCursorPosition, graphicStepIndex, graphicsSafeBox, normalizedGraphicBox, type GraphicBox } from './graphics-v2-layout.js';
 const FONT = 'Arial, Helvetica, sans-serif';
 const MinimumFontSize = createContext(12);
+const PhoneCheckboxes = createContext(false);
+const checkboxStyle: CSSProperties = { display: 'inline-block', width: '.72em', height: '.72em', border: '.085em solid currentColor', boxSizing: 'border-box', verticalAlign: '-.015em' };
+const checkboxParts = (text: string) => text.split(/(☐)/u);
 const absolute = (box: GraphicBox): CSSProperties => ({ position: 'absolute', left: box.x, top: box.y, width: box.width, height: box.height, boxSizing: 'border-box' });
 function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
     text: string;
@@ -15,6 +18,7 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
     weight?: number;
 }) {
     const minimumFontSize = useContext(MinimumFontSize);
+    const drawCheckboxes = useContext(PhoneCheckboxes) && text.includes('☐');
     const [handle] = useState(() => delayRender('Checking full graphic text'));
     const [size, setSize] = useState<number | null>(null);
     useLayoutEffect(() => {
@@ -24,7 +28,14 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
                 return;
             const el = document.createElement('div');
             Object.assign(el.style, { position: 'absolute', left: '-100000px', top: '0', width: box.width + 'px', fontFamily: FONT, fontWeight: String(weight), lineHeight: '1.2', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' });
-            el.textContent = text;
+            if (drawCheckboxes) {
+                for (const part of checkboxParts(text)) {
+                    if (part !== '☐') { el.append(document.createTextNode(part)); continue; }
+                    const square = document.createElement('span');
+                    Object.assign(square.style, checkboxStyle);
+                    el.append(square);
+                }
+            } else el.textContent = text;
             document.body.appendChild(el);
             try {
                 let fitted: number | undefined;
@@ -47,10 +58,10 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
             }
         });
         return () => { canceled = true; continueRender(handle); };
-    }, [text, box.width, box.height, maxFontSize, lines, weight, handle, minimumFontSize]);
+    }, [text, box.width, box.height, maxFontSize, lines, weight, handle, minimumFontSize, drawCheckboxes]);
     useLayoutEffect(() => { if (size !== null)
         continueRender(handle); }, [size, handle]);
-    return size === null ? null : <div data-graphic-text={text} style={{ ...absolute(box), fontFamily: FONT, fontSize: size, fontWeight: weight, lineHeight: 1.2, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color }}>{text}</div>;
+    return size === null ? null : <div data-graphic-text={text} aria-label={drawCheckboxes ? text : undefined} style={{ ...absolute(box), fontFamily: FONT, fontSize: size, fontWeight: weight, lineHeight: 1.2, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color }}>{drawCheckboxes ? checkboxParts(text).map((part, index) => part === '☐' ? <span key={index} aria-hidden="true" data-graphic-checkbox style={checkboxStyle}/> : part) : text}</div>;
 }
 function OptionalText(props: Parameters<typeof Text>[0]) { return props.text ? <Text {...props}/> : null; }
 function ProductUI({ props, box, titleSize, frames }: {
@@ -131,5 +142,5 @@ export function GraphicsV2({ item }: {
     }
     const reveal = item.durationInFrames === 1 ? 1 : interpolate(frame, [0, Math.min(18, item.durationInFrames - 1)], [0, 1], { extrapolateRight: 'clamp' });
     const animated = ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'].includes(templateId);
-    return <MinimumFontSize.Provider value={phoneReadable ? Math.max(12, Math.ceil(width / 30)) : 12}><AbsoluteFill data-graphics-v2={templateId} style={{ backgroundColor: p.backgroundColor ?? '#111722', color: p.textColor ?? '#f5f7fb', fontFamily: FONT }}><AbsoluteFill style={animated ? { opacity: reveal, transform: `translateY(${(1 - reveal) * Math.min(24, height * .04)}px)` } : {}}>{content}</AbsoluteFill></AbsoluteFill></MinimumFontSize.Provider>;
+    return <PhoneCheckboxes.Provider value={phoneReadable}><MinimumFontSize.Provider value={phoneReadable ? Math.max(12, Math.ceil(width / 30)) : 12}><AbsoluteFill data-graphics-v2={templateId} style={{ backgroundColor: p.backgroundColor ?? '#111722', color: p.textColor ?? '#f5f7fb', fontFamily: FONT }}><AbsoluteFill style={animated ? { opacity: reveal, transform: `translateY(${(1 - reveal) * Math.min(24, height * .04)}px)` } : {}}>{content}</AbsoluteFill></AbsoluteFill></MinimumFontSize.Provider></PhoneCheckboxes.Provider>;
 }

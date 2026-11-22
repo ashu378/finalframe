@@ -1,4 +1,6 @@
-import { realpath, stat, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { assertFrameToRegion, frameSelection, FRAME_TO_REGION_VERSION, type FrameToRegion } from './frame-to-region-contract.js';
+import { realpath, stat, unlink, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { ChildProcessCommandRunner, type CommandRunner } from './command-runner.js';
 import { assertActionRegion, type ActionRegion } from './action-region-contract.js';
@@ -167,4 +169,41 @@ export async function composeActionRegion(input: ActionRegionInput & { repairPat
     if (measured.frames !== source.frames || measured.width !== source.width || measured.height !== source.height || measured.fps !== 24 || measured.audio.length !== source.audio.length) fail('OUTPUT_TIMING');
     return { version: 'ACTION_REGION_V1', outputPath: out, region, width: source.width, height: source.height, outputFrames: measured.frames, fps: 24, originalAudioCopied: source.audio.length > 0, repairInputFrames: repair.frames, trimmedTrailingFrames };
   } catch (error) { await unlink(out).catch(() => undefined); throw error; }
+}
+
+
+/** Explicit generated-action alternative. This path alone permits the reviewed
+ * 640px/96-frame provider clip to be downscaled and uniformly shortened. */
+export async function prepareFrameToRegion(input:{sourcePath:string;firstFramePath:string;lastFramePath:string;frameToRegion:FrameToRegion},options:ActionWindowOptions={}) {
+ const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath);
+ measuredRegion(c.region,source);
+ if(resolve(input.firstFramePath)===resolve(input.lastFramePath))fail('OVERWRITE_SOURCE');
+ const files:string[]=[];
+ try {
+  const outputs=[];
+  for(const [path,sourceFrame]of [[input.firstFramePath,c.region.window.startFrame],[input.lastFramePath,c.region.window.endFrame-1]] as const){
+   const out=await outputPath({sourcePath:input.sourcePath,outputPath:path,startSeconds:0,endSeconds:1},source);files.push(out);
+   await tools.ffmpeg([...preamble,...inputArgs(source.canonical),'-vf',`select=eq(n\\,${sourceFrame}),crop=${c.region.width}:${c.region.height}:${c.region.x}:${c.region.y}:exact=1,scale=640:640:flags=lanczos`,'-frames:v','1','-an','-c:v','png','-threads','1','-f','image2',out]);
+   const bytes=await readFile(out);
+   if(bytes.length<24||bytes.length>4_000_000||bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||bytes.toString('ascii',12,16)!=='IHDR'||bytes.readUInt32BE(16)!==640||bytes.readUInt32BE(20)!==640)fail('OUTPUT_FORMAT');
+   outputs.push({outputPath:out,checksum:createHash('sha256').update(bytes).digest('hex'),byteSize:bytes.length,width:640,height:640,sourceFrame});
+  }
+  return {proof:{version:FRAME_TO_REGION_VERSION,phase:'PREPARED' as const,frameToRegion:c,firstFrame:c.region.window.startFrame,lastFrame:c.region.window.endFrame-1,width:c.region.width,height:c.region.height,anchorWidth:640,anchorHeight:640},firstFrame:outputs[0],lastFrame:outputs[1]};
+ }catch(error){await Promise.all(files.map(p=>unlink(p).catch(()=>undefined)));throw error;}
+}
+export async function composeFrameToRegion(input:{sourcePath:string;repairPath:string;normalizedPath:string;outputPath:string;frameToRegion:FrameToRegion},options:ActionWindowOptions={}) {
+ const deadline=Date.now()+(options.timeoutMs??120_000);
+ const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath),repair=await tools.probe(input.repairPath);
+ measuredRegion(c.region,source);
+ if(repair.width!==640||repair.height!==640||repair.fps!==24||repair.frames!==96||repair.audio.length)throw new Error('FRAME_TO_REGION_PROVIDER_OUTPUT_INVALID');
+ if(resolve(input.normalizedPath)===resolve(input.outputPath))fail('OVERWRITE_SOURCE');
+ const normalized=await outputPath({sourcePath:input.sourcePath,outputPath:input.normalizedPath,startSeconds:0,endSeconds:4},source,repair),selected=frameSelection(c);
+ try{
+  await tools.ffmpeg([...preamble,...inputArgs(repair.canonical),'-vf',`select=${selected.map(n=>`eq(n\\,${n})`).join('+')},setpts=N/(24*TB),scale=${c.region.width}:${c.region.height}:flags=lanczos`,'-map','0:v:0','-an',...encodeArgs,normalized]);
+  const measured=await tools.probe(normalized);
+  if(measured.frames!==selected.length||measured.fps!==24||measured.width!==c.region.width||measured.height!==c.region.height)fail('OUTPUT_TIMING');
+  const remaining=deadline-Date.now();if(remaining<=0)fail('TIMEOUT');
+  const composed=await composeActionRegion({sourcePath:input.sourcePath,repairPath:normalized,outputPath:input.outputPath,region:c.region},{...options,timeoutMs:remaining});
+  return {version:FRAME_TO_REGION_VERSION,phase:'COMPOSED' as const,frameToRegion:c,outputPath:composed.outputPath,providerInputFrames:96,providerInputWidth:640,providerInputHeight:640,providerInputFps:24,normalizedFrames:measured.frames,normalizedWidth:measured.width,normalizedHeight:measured.height,selectedProviderFrames:selected,outputFrames:composed.outputFrames,width:composed.width,height:composed.height,fps:24,originalAudioCopied:composed.originalAudioCopied};
+ }finally{await unlink(normalized).catch(()=>undefined);}
 }

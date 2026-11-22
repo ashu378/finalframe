@@ -250,6 +250,7 @@ export const refreshReviewedForQuote = action({
 export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args: {
   studioExternalId: string; modelId: string; request: Record<string, unknown>; estimatedCostUsd?: number;
   productionVersionId: Id<'productionVersions'>; shotId: Id<'shots'>;
+  certifiedActionMotionRepair?: boolean;
 }) {
   const nested = args.request.constraints && typeof args.request.constraints === "object" ? args.request.constraints as Record<string, unknown> : {};
   const raw = { ...args.request, ...nested };
@@ -267,6 +268,7 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
     hasImageReferences: raw.hasImageReferences === true, hasVideoReference: raw.hasVideoReference === true,
     hasAudioReference: raw.hasAudioReference === true, requiresFirstFrame: raw.requiresFirstFrame === true,
     requiresLastFrame: raw.requiresLastFrame === true, requiresAudio: raw.requiresAudio === true,
+    certifiedActionMotionRepair: args.certifiedActionMotionRepair === true,
     imageReferenceCount: typeof raw.imageReferenceCount === "number" ? raw.imageReferenceCount : undefined,
     previousJobId: typeof raw.previousJobId === "string" ? raw.previousJobId : undefined,
     previousModelId: typeof raw.previousModelId === "string" ? raw.previousModelId : undefined,

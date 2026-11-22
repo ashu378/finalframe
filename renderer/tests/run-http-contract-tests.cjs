@@ -3,7 +3,16 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const ts = require(root + '/node_modules/typescript');
 const Module = require('node:module');
-Module._extensions['.ts'] = (m, p) => m._compile(ts.transpileModule(fs.readFileSync(p, 'utf8'), {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,p);
+Module._extensions['.ts'] = (module, filename) => {
+  const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+  });
+  // NodeNext sources use emitted .js paths. This fixture loads the matching TS files directly.
+  const source = outputText.replace(/require\("(\.{1,2}\/[^\"]+)\.js"\)/g, (match, relative) =>
+    fs.existsSync(path.resolve(path.dirname(filename), `${relative}.ts`)) ? `require("${relative}.ts")` : match,
+  );
+  module._compile(source, filename);
+};
 const assert = require('node:assert/strict');
 const {RenderRequestQueue} = require(root + '/renderer/src/request-queue.ts');
 const {assertProbeUrl,probeRemoteMedia} = require(root + '/renderer/src/media/remote-probe.ts');

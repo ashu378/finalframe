@@ -415,6 +415,7 @@ export default defineSchema({
     requirementKey: v.string(), observations: v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()})),
     passed: v.boolean(), reviewerUserId: v.id('users'), createdAt: timestamp,
     repairRegion: v.optional(v.object({version:v.literal('ACTION_REGION_REVIEW_V1'),sourceChecksum:v.string(),selection:v.any()})),
+    repairFrames: v.optional(v.object({version:v.literal('FRAME_TO_REGION_V1'),sourceKind:v.literal('CREATOR_CONFIRMED_ORIGINAL_CARTOON'),sourceChecksum:v.string(),contract:v.any(),proof:v.any(),firstAssetId:v.id('assets'),lastAssetId:v.id('assets'),createdByUserId:v.id('users'),createdAt:v.number()})),
   }).index('by_take', ['takeId']),
 
   speakerSegments: defineTable({

@@ -94,6 +94,8 @@ export interface VideoRoutingRequest {
     videoReferenceCount?: number;
     requiresFirstFrame?: boolean;
     requiresLastFrame?: boolean;
+    /** Set by the canonical job only after checking the approved repair frames. */
+    certifiedActionMotionRepair?: boolean;
     requiresAudio?: boolean;
     maximumCostUsd?: number;
 }
@@ -350,6 +352,11 @@ export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoR
 export function videoModelSupportsRequest(model: VideoModelCapabilities, request: VideoRoutingRequest): boolean {
     if (!model.available) return false;
     const operation = request.operation || request.task;
+    // The reviewed Seedance first/last-frame route is scoped to cartoon repair.
+    // Existing text and reference-image generation keep their own capabilities.
+    if (model.modelId === 'bytedance/seedance-2.5' && (operation === 'FRAME_TO_VIDEO' || request.requiresFirstFrame || request.requiresLastFrame)) {
+        if (request.certifiedActionMotionRepair !== true || operation !== 'FRAME_TO_VIDEO' || !request.requiresFirstFrame || !request.requiresLastFrame || !model.reviewedOperations?.includes('FRAME_TO_VIDEO')) return false;
+    }
     if (request.externalHumanPortraitAssetIds?.length && getReviewedVideoReferenceContract(model.modelId, model.canonicalSlug)?.humanPortraitPolicy?.mode === 'TRUSTED_PROVIDER_ASSET_REQUIRED') return false;
     const sourceEdit = isSourceVideoEdit(operation) && model.modelId === 'black-forest-labs/flux-video-edit';
     // Flags alone cannot certify a motion reference, its decoded source bounds,

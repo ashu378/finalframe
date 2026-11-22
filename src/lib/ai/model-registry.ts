@@ -395,4 +395,5 @@ export const REVIEWED_OPERATION_CONTRACTS = {
 } as const;
 
 /** Single-shot source-preserving repair; catalog certification still applies. */
+export function getActionMotionRepairModel(){ return configuredModel('OPENROUTER_ACTION_MOTION_REPAIR_MODEL', 'bytedance/seedance-2.5'); }
 export function getActionRepairModel(){ return configuredModel('OPENROUTER_ACTION_REPAIR_MODEL', 'black-forest-labs/flux-video-edit'); }

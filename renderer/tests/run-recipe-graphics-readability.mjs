@@ -25,6 +25,20 @@ try{
  for(const [name,frame]of [['checklist',60],['cta',180]]){
   const output=join(artifacts,name+'.png');await renderStill({composition,serveUrl,inputProps:{manifest},puppeteerInstance:browser,frame,imageFormat:'png',output,logLevel:'error'});
   const r=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-i',output,'-vf','scale=360:640','-frames:v','1','-y',join(artifacts,name+'-phone.png')],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
+  if(name==='checklist'){
+   // Real phone pixels must contain three square outlines, not missing-font tofu.
+   const pixels=spawnSync('ffmpeg',['-v','error','-i',join(artifacts,name+'-phone.png'),'-vf','crop=36:90:0:300','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-']);assert.equal(pixels.status,0);
+   const width=36,height=90,seen=new Set(),squares=[];
+   const white=(x,y)=>x>=0&&x<width&&y>=0&&y<height&&pixels.stdout[(y*width+x)*3]>170;
+   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const key=y*width+x;if(seen.has(key)||!white(x,y))continue;
+    const queue=[[x,y]],points=[];seen.add(key);
+    for(let n=0;n<queue.length;n++){const [cx,cy]=queue[n];points.push([cx,cy]);for(const [nx,ny]of [[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1]]){const k=ny*width+nx;if(white(nx,ny)&&!seen.has(k)){seen.add(k);queue.push([nx,ny]);}}}
+    const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]),left=Math.min(...xs),top=Math.min(...ys),w=Math.max(...xs)-left+1,h=Math.max(...ys)-top+1;
+    if(w>=8&&h>=8){assert(Math.abs(w-h)<=2,'checkbox must be square at phone size');assert(!white(left+Math.floor(w/2),top+Math.floor(h/2)),'checkbox must have an empty center');squares.push({left,top,w,h});}
+   }
+   assert.equal(squares.length,3,'all three checkbox outlines must be visible');
+  }
  }
  for(const templateId of ['kinetic-title','brand-card','feature-callout','end-card','product-ui','bar-chart','explainer-steps']){
   const props={layoutVersion:2,readability:'PHONE',title:'Exact title',...(templateId==='feature-callout'?{feature:'Exact title',detail:'Exact detail'}:{}),...(templateId==='end-card'?{callToAction:'Start now',url:'owned.test'}:{}),...(templateId==='product-ui'?{screenFit:'contain',screenUrl:'/public/screen.png'}:{}),...(templateId==='bar-chart'?{series:[{label:'Zero',value:0},{label:'Exact',value:1.25}]}:{}),...(templateId==='explainer-steps'?{steps:[{heading:'First',detail:'Own input'},{heading:'Second',detail:'Exact output'}]}:{})};

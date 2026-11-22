@@ -38,6 +38,7 @@ import type * as devFixtures from "../devFixtures.js";
 import type * as episodes from "../episodes.js";
 import type * as financial from "../financial.js";
 import type * as finishingContracts from "../finishingContracts.js";
+import type * as frameRegionRepairs from "../frameRegionRepairs.js";
 import type * as generation from "../generation.js";
 import type * as generationContinuity from "../generationContinuity.js";
 import type * as generationJobs from "../generationJobs.js";
@@ -170,6 +171,7 @@ declare const fullApi: ApiFromModules<{
   episodes: typeof episodes;
   financial: typeof financial;
   finishingContracts: typeof finishingContracts;
+  frameRegionRepairs: typeof frameRegionRepairs;
   generation: typeof generation;
   generationContinuity: typeof generationContinuity;
   generationJobs: typeof generationJobs;
