@@ -7,7 +7,7 @@ Status: IN PROGRESS. This checkpoint is not a whole-product launch certificate. 
 - Main frontend and backend changes: `a7aeb53` (repair/estimate/export acceleration), `21ba3db` (authorized attachments), `b00797f` (structured planned graphics).
 - Main domain: https://www.usefinalframe.xyz. Vercel deployment for `b00797f`: `6aeR32QAMv9grpNbybNB8khZYeTS`, successful.
 - Matching online Convex: `dev:knowing-snail-785`, strict typecheck/deployment passed. No local database was used.
-- The new renderer acceleration is committed but is **not enabled/deployed on the live worker**. Coolify requires the owner to restore its login session. Existing live rendering continues on its earlier version.
+- The signed-in Coolify session was found in the in-app browser; the earlier login warning came from a different Chrome session. FinalFrame renderer deployment `y0zddjhcppqonw4yg0qod1jq` succeeded at revision `dfde90a592945424f15d7b96039f74be1e03fb97`, with `RENDER_SEQUENTIAL_FAST_PATH=true`. Only project **Final Frame**, resource **finalframe-renderer** (`iqxnl8oe3xnssu9oe4eyaj3z`), was changed. Existing 1 CPU / 2 GB limits remain intact. Yafpay and shared server settings were not changed.
 - Existing unrelated changes and retained projects/exports were preserved. No destructive cleanup or migration ran.
 
 ## What changed
@@ -44,7 +44,7 @@ The browser tool intermittently stalled on a second download in the same tab. Fr
 - Do not approve or export this failed repair as successful. Approved previous takes and original voices remain unchanged. The earlier localized deterministic chewing repair is different evidence and does not certify provider acting repair.
 - No repeat of the same failed strategy was purchased. A different verified repair strategy needs a new quality test before automatic correction can be called reliable.
 
-## Export speed: local PASS, live rollout BLOCKED
+## Export speed: local and live same-edit benchmark PASS
 
 Same 30-second, 900-frame, 1080×1920, four-segment retained edit, one CPU:
 
@@ -53,10 +53,20 @@ Same 30-second, 900-frame, 1080×1920, four-segment retained edit, one CPU:
 | Earlier local Remotion path | 582.08 seconds |
 | New eligible sequential path | 131.593 seconds |
 | Earlier VPS result, different environment | 968.731 seconds |
+| New live VPS path, same approved edit and retained resource limits | 258.035 seconds |
 
 The local comparison is about 4.4× faster. Mean decoded-frame SSIM is 0.98982779, minimum 0.951368 across all 900 frames; joins and end card were inspected. This is a visual comparison, not a bit-identical claim. The approved fixture is silent: the new output has no audio track while the old output contained synthetic silence.
 
-The faster code still needs FinalFrame-only worker deployment and a measured live rerun. Coolify is at its login screen. No host-wide or unrelated-service setting was changed.
+The faster code is now deployed on the FinalFrame-only worker. Its health check passed, preserving the `finalframe-media-pcm-v1` compatibility value, format/source-audio versions and graphics readers. A new render of the exact retained approved manifest was queued through the authorized online-development CLI (`r575r77qn336v1jdfph8ma0fy98jpyjf`, export `ps73fa2jtvfrb8rwg6dvy945hs8jqf0z`). Repeating the request returned the same job; no AI provider call was made. The ordinary main-site download completed as `/home/ashuboris/Downloads/finalframe-export (9).mp4`: 30.000 seconds, 900 frames, 1080×1920, H264, silent as approved. Mean decoded-frame SSIM against the older live export is 0.98993889, minimum 0.951407; all four segments, joins and authored end card were inspected. Accepted-to-completed time fell from 968.731 to 258.035 seconds (3.75× faster, approximately 73% shorter). Timing includes render finishing/upload/callback. This is a finishing benchmark, not a fresh browser creation or a performance guarantee for caption/transition/audio-lane-heavy compositions. Peak memory was not measured; server-wide metrics were left disabled rather than changing shared-host settings.
+
+Rollback: set the FinalFrame resource's `RENDER_SEQUENTIAL_FAST_PATH` to `false` and redeploy the same revision. The earlier pinned revision `0a95c5a360fb67a92254f289af0bf47c95f09874` and deployment `fg8gcnngfar2ab63ncac54mx` remain recorded. Preserve all accepted jobs, receipts, storage and database records; do not restart the shared host or alter another application.
+
+### Live audio and archive regression
+
+- An additional retained UGC fixture initially failed before dispatch with `RENDER_SOURCE_UNAVAILABLE`: its project was archived. Restoring the test project through `projects.restore` and retrying the same job succeeded. The fixture was then returned to ARCHIVED through `projects.archive`. Earlier approved resources and downloads were retained. Job `r5797ddfksjf93kh2aqbw5grgh8jq9y1`, export `ps78pfjds95txyk2f98x68d12h8jpa93`, 30.920s after acceptance. This fixture's actual source contains no audio; the earlier export's AAC track was synthetic silence. The new silent output is therefore not native-audio evidence.
+- A separate audible test deliberately uploaded the retained owned four-second music export (132,528 bytes) into the active test project as a new project asset. New timeline/manifest/review records preserve the earlier approved thirty-second timeline. The completed export was downloaded through the ordinary main-site link. This is developer-authenticated fixture preparation plus ordinary browser delivery, not a new creative recipe test.
+- Job `r57ccnk93f3gm8c2h7tyaf7cfx8jqab4`, export `ps78qg4rxe0f04skn4zmsqqqk98jq9wr`, 6.825s after acceptance. Actual output: 1080×1920, 120 frames, 4.000s, H264/AAC. Comparison against the original uploaded soundtrack: correlation 0.9999407174 at zero lag, best measured lag 0ms, both decode to 191,968 mono samples for the comparison. RMS remains nonzero (0.10361 versus 0.10371). This proves audible native-track preservation for this fixture, not human speech/lip-sync quality.
+- Evidence: `desk30-live-result.json`, `desk30-live-contact.jpg`, `desk30-live-ssim.txt`, `real-audio-live-result.json`, `real-audio-fixture.private.json`, `native-audio-live-fast.private.json`, `renderer-health-live.json`, `finalframe-renderer-deployed.png`, and `real-audio-live-download.png` in the checkpoint artifact folder. All new renderer tests in this follow-up made **zero AI-provider calls**. The last reconciled spending total below is unchanged by these tests.
 
 ## Fresh motion-graphics regression
 
@@ -89,7 +99,7 @@ Contains eight-download-probes.json, browser-downloads.json, contact sheets, the
 ## Remaining acceptance gates
 
 - Successful automatic acting correction after the failed v2 approach.
-- Live renderer acceleration deployment and timing/recovery verification.
+- Broader renderer interruption/recovery verification; the live acceleration rollout and same-edit timing comparison now pass.
 - Fresh all-eight start-to-download and independent creative-review matrix; retained downloads are not a substitute.
 - Existing fluent Pidgin and consented personal-likeness requirements, advanced operations and broader collaboration/recovery checks remain as recorded in the release checklist.
 - Live payments remain disabled until separate owner authorization.
