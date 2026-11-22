@@ -1,6 +1,7 @@
 'use client';
 
 import { SpeakingShotSetup } from './speaking-shot-setup';
+import { EditedTakeImport } from './edited-take-import';
 import { DraftCastBindingPanel } from './draft-cast-binding-panel';
 
 import { useRef, useState, useTransition } from 'react';
@@ -88,6 +89,7 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
                 <OnDemandVideo key={comparisonSource.url} url={comparisonSource.url} label="Original source footage" />
             </figure>}
             {shot.takes.map((take) => <div key={take.id} className="min-w-0 space-y-3 rounded-xl border border-border p-4"><p className="text-sm font-medium">Take {take.versionNumber} · {take.status.toLowerCase()}</p>{take.url && take.mimeType?.startsWith('video/') ? <OnDemandVideo key={take.url} url={take.url} label={`Take ${take.versionNumber}${take.needsOriginalAudio ? ' · picture before original-voice restoration' : ''}`} /> : take.url && take.mimeType?.startsWith('image/') ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">View take image</a> : null}{take.needsOriginalAudio ? <p className="text-sm text-muted-foreground">This is the repaired picture. Restore the original recording in Edit &amp; sound before downloading the finished video.</p> : take.url ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">Open or download take</a> : <p className="text-xs text-muted-foreground">Media is not available for this take.</p>}{take.provider || take.model ? <p className="break-words text-xs text-muted-foreground">{take.provider} · {take.model}</p> : null}<ApprovalControls data={data} resourceType="shotVersion" resourceId={take.id} state={take.state} /></div>)}</div>}</section>
+        <EditedTakeImport data={data} shot={shot} />
         {saved ? <p role="status" className="text-sm text-emerald-300">{saved}</p> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </article>;

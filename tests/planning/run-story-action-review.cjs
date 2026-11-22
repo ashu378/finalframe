@@ -35,5 +35,14 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  const f=setup();f.rows.get('shot').sceneId='scene';f.rows.get('shot').versionNumber=1;f.put('scenes',{_id:'scene',productionId:'production'});Object.assign(f.rows.get('asset'),{storageId:'stored',mimeType:'video/mp4',studioExternalId:'studio'});f.storageObjects.set('stored',{contentType:'video/mp4',sha256:'checksum-a'});
  await f.call('approvals','submitForReview',{projectId:'project',resourceType:'asset',resourceId:'asset'});await f.call('approvals','approve',{projectId:'project',resourceType:'asset',resourceId:'asset'});
  const imported=await f.call('scenes','importEditedTake',{shotId:'shot',assetId:'asset',idempotencyKey:'manual-repair',note:'Localized cartoon animation; original voices copied.'});assert.equal(imported.status,'COMPLETED');assert.equal(imported.provider,undefined);await assert.rejects(requireStoryActionsPassed(f,imported._id),/visible story actions/);assert.equal((await f.call('scenes','importEditedTake',{shotId:'shot',assetId:'asset',idempotencyKey:'manual-repair',note:'Localized cartoon animation; original voices copied.'}))._id,imported._id);console.log('PASS uploaded edit creates one honest take and still needs action review');
+ const importArgs={shotId:'shot',assetId:'asset',idempotencyKey:'post-lock-import',note:'Timing fix'};
+ const sceneState={projectId:'project',resourceType:'scene',resourceId:'scene'};
+ await f.call('approvals','submitForReview',sceneState);
+ await f.call('approvals','approve',sceneState);
+ await f.call('approvals','lock',sceneState);
+ await assert.rejects(f.call('scenes','importEditedTake',importArgs),/locked/);
+ const replay=await f.call('scenes','importEditedTake',{shotId:'shot',assetId:'asset',idempotencyKey:'manual-repair',note:'Localized cartoon animation; original voices copied.'});
+ assert.equal(replay._id,imported._id);
+ console.log('PASS a locked scene denies a new imported take and permits recovery of the previous successful import');
  f.rows.get('asset').projectId='other';await assert.rejects(f.call('scenes','importEditedTake',{shotId:'shot',assetId:'asset',idempotencyKey:'wrong-project',note:'Cross project denied'}),/this project/);f.role='VIEWER';await assert.rejects(f.call('scenes','importEditedTake',{shotId:'shot',assetId:'asset',idempotencyKey:'viewer-import',note:'Viewer denied'}),/denied/);console.log('PASS uploaded edit denies cross-project media and viewer writes');
 })().catch(e=>{console.error(e);process.exitCode=1});

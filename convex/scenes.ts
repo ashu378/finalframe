@@ -682,10 +682,9 @@ export const importEditedTake = mutation({
   args: { shotId: v.id("shots"), assetId: v.id("assets"), idempotencyKey: v.string(), note: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const { production, version, shot } = await shotFor(ctx, args.shotId);
+    const { production, version, shot, scene } = await shotFor(ctx, args.shotId);
     await requireProjectRole(ctx, production.projectId!, ["OWNER", "EDITOR"]);
     if (production.currentVersionId !== version._id || version.status !== "APPROVED") throw new Error("Import into the current approved shot plan.");
-    await resourceEditable(ctx, production.projectId!, production._id, "shot", shot._id.toString());
     const key = text(args.idempotencyKey, "Import key", 200, true);
     if (key.length < 8) throw new Error("Import key is too short.");
     const explanation = text(args.note, "Edit note", 2000, true);
@@ -695,12 +694,15 @@ export const importEditedTake = mutation({
     if (!storage || !storage.contentType?.startsWith("video/")) throw new Error("Uploaded video is unavailable.");
     await requireApprovedResource(ctx, production.projectId!, "asset", asset._id);
     const takes = await ctx.db.query("shotVersions").withIndex("by_shot", q => q.eq("shotId", shot._id)).take(201);
-    if (takes.length > 200) throw new Error("This shot has reached its take import limit.");
     const prior = takes.find(take => take.contextSnapshot?.editedImportKey === key);
     if (prior) {
       if (prior.assetId !== asset._id || prior.contextSnapshot?.editNote !== explanation) throw new Error("Import key belongs to another edit.");
       return prior;
     }
+    if (takes.length >= 200) throw new Error("This shot has reached its take import limit.");
+    if ([shot.status, scene.status].some(status => status === "ARCHIVED" || status === "DELETED")) throw new Error("Choose an active scene and shot for this edit.");
+    await requireEditable(ctx, production.projectId!, "scene", scene._id);
+    await resourceEditable(ctx, production.projectId!, production._id, "shot", shot._id);
     const takeId = await ctx.db.insert("shotVersions", {
       studioExternalId: production.studioExternalId, studioId: production.studioId, projectId: production.projectId,
       productionId: production._id, productionVersionId: version._id, shotId: shot._id,
