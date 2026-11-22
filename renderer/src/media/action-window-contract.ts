@@ -2,6 +2,8 @@
  * native24fps, <=720p sources: no hidden resize, stretching or extra frames. */
 export const ACTION_WINDOW_VERSION = 'ACTION_WINDOW_V1' as const;
 export const ACTION_WINDOW_REPAIR_VERSION = 'isolated-action-window-v3' as const;
+/** Both paths must use prepared input, retained raw output and local composition. */
+export const isLocalizedActionRepair = (value: unknown) => value === ACTION_WINDOW_REPAIR_VERSION || value === 'isolated-action-region-v4';
 export const ACTION_WINDOW_MAX_BYTES = 50_000_000;
 export type ActionWindow = {version:typeof ACTION_WINDOW_VERSION;startFrame:number;endFrame:number;sourceFrames:number;fps:24;startSeconds:number;endSeconds:number;durationSeconds:number;width:number;height:number};
 const object=(v:unknown):Record<string,any>=>v&&typeof v==='object'?v as Record<string,any>:{};

@@ -25,6 +25,7 @@ export interface GraphicsV2Step {
 }
 export interface GraphicsV2Props {
     layoutVersion: 2;
+    readability?: 'PHONE';
     title: string;
     subtitle?: string;
     eyebrow?: string;
@@ -109,7 +110,7 @@ function validate(templateId: unknown, raw: unknown, durationInFrames: number, f
     }
     if (size > GRAPHICS_V2_LIMITS.maxBytes)
         fail('props', 'exceeds 24KiB');
-    const common = ['layoutVersion', 'title', 'subtitle', 'eyebrow', 'brandName', 'accentColor', 'backgroundColor', 'textColor'];
+    const common = ['layoutVersion', 'readability', 'title', 'subtitle', 'eyebrow', 'brandName', 'accentColor', 'backgroundColor', 'textColor'];
     const extras: Record<GraphicsV2TemplateId, string[]> = {
         'kinetic-title': [], 'brand-card': render ? ['logoUrl'] : [],
         'feature-callout': ['feature', 'detail', 'index', ...(render ? ['logoUrl'] : [])],
@@ -121,6 +122,8 @@ function validate(templateId: unknown, raw: unknown, durationInFrames: number, f
     keys(p, [...shared, ...extras[templateId as GraphicsV2TemplateId]], 'props');
     if (p.layoutVersion !== 2)
         fail('layoutVersion', 'must equal 2');
+    if (p.readability !== undefined && p.readability !== 'PHONE')
+        fail('readability', 'must equal PHONE when provided');
     graphicPlainText(p.title, 'title', 240, true);
     graphicPlainText(p.subtitle, 'subtitle', 500);
     graphicPlainText(p.eyebrow, 'eyebrow', 80);

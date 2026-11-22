@@ -1,9 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { AbsoluteFill, Img, cancelRender, continueRender, delayRender, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { MotionGraphicsRenderItem } from '../types.js';
 import { parseGraphicsV2Render, type GraphicsV2Props } from './graphics-v2-contract.js';
 import { containGraphicImage, graphicBarGeometry, graphicCursorPosition, graphicStepIndex, graphicsSafeBox, normalizedGraphicBox, type GraphicBox } from './graphics-v2-layout.js';
 const FONT = 'Arial, Helvetica, sans-serif';
+const MinimumFontSize = createContext(12);
 const absolute = (box: GraphicBox): CSSProperties => ({ position: 'absolute', left: box.x, top: box.y, width: box.width, height: box.height, boxSizing: 'border-box' });
 function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
     text: string;
@@ -13,6 +14,7 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
     color?: string;
     weight?: number;
 }) {
+    const minimumFontSize = useContext(MinimumFontSize);
     const [handle] = useState(() => delayRender('Checking full graphic text'));
     const [size, setSize] = useState<number | null>(null);
     useLayoutEffect(() => {
@@ -26,7 +28,7 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
             document.body.appendChild(el);
             try {
                 let fitted: number | undefined;
-                for (let font = Math.floor(maxFontSize); font >= 12; font--) {
+                for (let font = Math.floor(Math.max(maxFontSize, minimumFontSize)); font >= minimumFontSize; font--) {
                     el.style.fontSize = font + 'px';
                     if (el.getBoundingClientRect().height <= Math.min(box.height, lines * font * 1.2) + .5 && el.scrollWidth <= box.width + .5) {
                         fitted = font;
@@ -45,7 +47,7 @@ function Text({ text, box, maxFontSize, lines = 3, color, weight = 700 }: {
             }
         });
         return () => { canceled = true; continueRender(handle); };
-    }, [text, box.width, box.height, maxFontSize, lines, weight, handle]);
+    }, [text, box.width, box.height, maxFontSize, lines, weight, handle, minimumFontSize]);
     useLayoutEffect(() => { if (size !== null)
         continueRender(handle); }, [size, handle]);
     return size === null ? null : <div data-graphic-text={text} style={{ ...absolute(box), fontFamily: FONT, fontSize: size, fontWeight: weight, lineHeight: 1.2, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color }}>{text}</div>;
@@ -87,7 +89,8 @@ export function GraphicsV2({ item }: {
 }) {
     const { width, height, fps } = useVideoConfig(), frame = useCurrentFrame();
     const { templateId, props: p } = useMemo(() => parseGraphicsV2Render(item.templateId, item.props, item.durationInFrames, fps), [item.templateId, item.props, item.durationInFrames, fps]);
-    const box = graphicsSafeBox(width, height), titleSize = Math.max(18, Math.min(96, box.width * .095)), bodySize = Math.max(14, Math.min(32, box.width * .045));
+    const phoneReadable = p.readability === 'PHONE';
+    const box = graphicsSafeBox(width, height), titleSize = phoneReadable ? Math.max(18, Math.min(112, box.width * .105)) : Math.max(18, Math.min(96, box.width * .095)), bodySize = phoneReadable ? Math.max(14, box.width * .055) : Math.max(14, Math.min(32, box.width * .045));
     const accent = p.accentColor ?? '#87a8ff', titleHeight = Math.max(26, box.height * .22), gap = Math.max(6, box.height * .025);
     let content;
     if (templateId === 'product-ui')
@@ -104,6 +107,22 @@ export function GraphicsV2({ item }: {
         const count = p.steps!.length, active = graphicStepIndex(frame, item.durationInFrames, count, p.activeStep), vertical = height > width, available = box.height - titleHeight - gap;
         content = <><Text text={p.title} box={{ ...box, height: titleHeight }} maxFontSize={titleSize} lines={2}/>{p.steps!.map((step, index) => { const cell = vertical ? { x: box.x, y: box.y + titleHeight + gap + index * available / count, width: box.width, height: available / count - gap } : { x: box.x + index * box.width / count, y: box.y + titleHeight + gap, width: box.width / count - gap, height: available }; const padding = Math.min(10, cell.width * .05), inner = { x: cell.x + padding, y: cell.y + padding, width: cell.width - 2 * padding, height: cell.height - 2 * padding }, heading = Math.max(24, inner.height * .35); return <div key={index}><div data-graphic-step={index} data-active={index === active} style={{ ...absolute(cell), border: `2px solid ${index === active ? accent : '#738199'}`, borderRadius: 8, background: index === active ? accent + '18' : 'transparent' }}/><Text text={`${index + 1}. ${step.heading}`} box={{ ...inner, height: heading }} maxFontSize={bodySize} lines={3}/><OptionalText text={step.detail ?? ''} box={{ ...inner, y: inner.y + heading, height: inner.height - heading }} maxFontSize={Math.max(12, bodySize * .8)} lines={5}/></div>; })}</>;
     }
+    else if (phoneReadable) {
+        // Opt-in only: existing v2 manifests retain their original layout below.
+        // Size complete text for a 360px-wide viewing surface, and group related
+        // copy instead of spreading a small subtitle over the whole portrait.
+        const title = templateId === 'feature-callout' ? [p.index ? `${p.index}. ${p.title}` : p.title, ...(p.feature && p.feature !== p.title ? [p.feature] : [])].join('\n') : p.title;
+        const body = [p.subtitle, p.detail].filter(Boolean).join('\n');
+        const rowCount = (text: string, size: number) => Math.min(4, text.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(Array.from(line).length * size * .62 / box.width)), 0));
+        const phoneGap = bodySize * .6, header = p.logoUrl || p.brandName || p.eyebrow ? bodySize * 1.5 : 0;
+        const titleH = titleSize * 1.2 * rowCount(title, titleSize), bodyH = body ? bodySize * 1.2 * rowCount(body, bodySize) : 0;
+        const footer = templateId === 'end-card' ? bodySize * 1.7 + (p.url ? bodySize * 1.3 : 0) : 0;
+        const total = header + titleH + bodyH + footer + phoneGap * (Number(header > 0) + Number(bodyH > 0) + Number(footer > 0));
+        if (total > box.height) throw new Error('The complete graphic text cannot fit readably. Shorten it or choose a larger output.');
+        const top = box.y + (box.height - total) / 2, titleY = top + header + (header ? phoneGap : 0), bodyY = titleY + titleH + (bodyH ? phoneGap : 0), footerY = bodyY + bodyH + (footer ? phoneGap : 0);
+        const logoWidth = p.logoUrl ? Math.min(box.width * .25, header * 2) : 0;
+        content = <>{p.logoUrl && <Img src={p.logoUrl} style={{ ...absolute({ x: box.x, y: top, width: logoWidth, height: header }), objectFit: 'contain' }}/>}<OptionalText text={[p.brandName, p.eyebrow].filter(Boolean).join(' · ')} box={{ x: box.x + logoWidth + (logoWidth ? phoneGap : 0), y: top, width: box.width - logoWidth - (logoWidth ? phoneGap : 0), height: header }} maxFontSize={bodySize} lines={1} color={accent}/><Text text={title} box={{ x: box.x, y: titleY, width: box.width, height: titleH }} maxFontSize={titleSize} lines={4}/><OptionalText text={body} box={{ x: box.x, y: bodyY, width: box.width, height: bodyH }} maxFontSize={bodySize} lines={4}/>{footer > 0 && <><div style={{ ...absolute({ x: box.x, y: footerY, width: box.width, height: bodySize * 1.7 }), backgroundColor: accent, borderRadius: 6 }}/><Text text={p.callToAction!} box={{ x: box.x + phoneGap / 2, y: footerY + bodySize * .25, width: box.width - phoneGap, height: bodySize * 1.2 }} maxFontSize={bodySize} lines={1} color="#101722"/><OptionalText text={p.url ?? ''} box={{ x: box.x, y: footerY + bodySize * 1.9, width: box.width, height: bodySize * 1.2 }} maxFontSize={bodySize} lines={1}/></>}</>;
+    }
     else {
         const header = Math.max(20, box.height * .12), footer = templateId === 'end-card' ? Math.max(48, box.height * .24) : 0;
         const titleY = box.y + header + gap, titleH = (box.height - header - footer - 2 * gap) * (p.subtitle || p.detail ? .58 : .95), title = templateId === 'feature-callout' ? [p.index ? `${p.index}. ${p.title}` : p.title, ...(p.feature && p.feature !== p.title ? [p.feature] : [])].join('\n') : p.title;
@@ -112,5 +131,5 @@ export function GraphicsV2({ item }: {
     }
     const reveal = item.durationInFrames === 1 ? 1 : interpolate(frame, [0, Math.min(18, item.durationInFrames - 1)], [0, 1], { extrapolateRight: 'clamp' });
     const animated = ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'].includes(templateId);
-    return <AbsoluteFill data-graphics-v2={templateId} style={{ backgroundColor: p.backgroundColor ?? '#111722', color: p.textColor ?? '#f5f7fb', fontFamily: FONT }}><AbsoluteFill style={animated ? { opacity: reveal, transform: `translateY(${(1 - reveal) * Math.min(24, height * .04)}px)` } : {}}>{content}</AbsoluteFill></AbsoluteFill>;
+    return <MinimumFontSize.Provider value={phoneReadable ? Math.max(12, Math.ceil(width / 30)) : 12}><AbsoluteFill data-graphics-v2={templateId} style={{ backgroundColor: p.backgroundColor ?? '#111722', color: p.textColor ?? '#f5f7fb', fontFamily: FONT }}><AbsoluteFill style={animated ? { opacity: reveal, transform: `translateY(${(1 - reveal) * Math.min(24, height * .04)}px)` } : {}}>{content}</AbsoluteFill></AbsoluteFill></MinimumFontSize.Provider>;
 }
