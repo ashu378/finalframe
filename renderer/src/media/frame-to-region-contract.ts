@@ -87,7 +87,9 @@ export function assertFrameToRegionProof(
     )
       throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
   } else if (
-    p.providerInputFrames !== 96 ||
+    !((p.providerInputFrames === c.providerOutput.frames &&
+      (p.trimmedTrailingFrames === undefined || p.trimmedTrailingFrames === 0)) ||
+      (p.providerInputFrames === c.providerOutput.frames + 1 && p.trimmedTrailingFrames === 1)) ||
     p.providerInputWidth !== 640 ||
     p.providerInputHeight !== 640 ||
     p.providerInputFps !== 24 ||

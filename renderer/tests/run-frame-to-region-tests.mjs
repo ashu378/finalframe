@@ -27,6 +27,20 @@ try{
  const[a,b]=await Promise.all([raw(source,'source.yuv'),raw(output,'output.yuv')]);assert.equal(a.length,b.length);let changed=0;
  for(let frame=0;frame<72;frame++){let offset=0;for(let plane=0;plane<3;plane++){const scale=plane===0?1:2,w=320/scale,h=240/scale;for(let y=0;y<h;y++)for(let x=0;x<w;x++){const p=frame*320*240*1.5+offset+y*w+x;const inside=frame>=24&&frame<48&&x>=64/scale&&x<160/scale&&y>=80/scale&&y<176/scale;if(!inside)assert.equal(a[p],b[p],'outside source sample changed');else if(a[p]!==b[p])changed++;}offset+=w*h;}}
  assert(changed>1000);assert.deepEqual(await raw(source,'source.aac',true),await raw(output,'output.aac',true));
+ const endpointFrame = join(dir, 'with-endpoint.mp4');
+ const extraFrames = join(dir, 'extra-frames.mp4');
+ for (const [path, count] of [[endpointFrame, 1], [extraFrames, 2]]) {
+  ff(['-i', provider, '-vf', `tpad=stop=${count}:stop_mode=clone`, '-c:v', 'libx264', '-crf', '0', '-threads', '1', path]);
+ }
+ const endpointOutput = join(dir, 'endpoint-out.mp4');
+ const endpointProof = await composeFrameToRegion({...args, repairPath:endpointFrame, outputPath:endpointOutput});
+ assertFrameToRegionProof(c, endpointProof, 'COMPOSED');
+ assert.equal(endpointProof.providerInputFrames, 97);
+ assert.equal(endpointProof.trimmedTrailingFrames, 1);
+ assert.deepEqual(await raw(endpointOutput, 'endpoint.yuv'), b);
+ assert.deepEqual(await raw(endpointOutput, 'endpoint.aac', true), await readFile(join(dir, 'source.aac')));
+ assert.throws(()=>assertFrameToRegionProof(c, {...endpointProof, trimmedTrailingFrames:0}, 'COMPOSED'));
+ await assert.rejects(composeFrameToRegion({...args,repairPath:extraFrames,outputPath:join(dir,'long.mp4')}),/PROVIDER_OUTPUT_INVALID/);
  await assert.rejects(composeFrameToRegion({...args,repairPath:source,outputPath:join(dir,'bad.mp4')}),/PROVIDER_OUTPUT_INVALID/);
  assert.throws(()=>assertFrameToRegionProof(c,{...result,selectedProviderFrames:frameSelection(c).reverse()},'COMPOSED'));
  console.log('PASS explicit96→24 selection/640→96 scale; all outside luma/chroma samples and original encoded audio unchanged; wrong provider geometry/timing rejected');

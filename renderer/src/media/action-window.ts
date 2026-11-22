@@ -195,7 +195,10 @@ export async function composeFrameToRegion(input:{sourcePath:string;repairPath:s
  const deadline=Date.now()+(options.timeoutMs??120_000);
  const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath),repair=await tools.probe(input.repairPath);
  measuredRegion(c.region,source);
- if(repair.width!==640||repair.height!==640||repair.fps!==24||repair.frames!==96||repair.audio.length)throw new Error('FRAME_TO_REGION_PROVIDER_OUTPUT_INVALID');
+ // Some four-second outputs include the endpoint at t=4.000. Keep the
+ // approved half-open interval [0, 4s) and its original frame selection.
+ const trimmedTrailingFrames = repair.frames - c.providerOutput.frames;
+ if(repair.width!==640||repair.height!==640||repair.fps!==24||![0,1].includes(trimmedTrailingFrames)||repair.audio.length)throw new Error('FRAME_TO_REGION_PROVIDER_OUTPUT_INVALID');
  if(resolve(input.normalizedPath)===resolve(input.outputPath))fail('OVERWRITE_SOURCE');
  const normalized=await outputPath({sourcePath:input.sourcePath,outputPath:input.normalizedPath,startSeconds:0,endSeconds:4},source,repair),selected=frameSelection(c);
  try{
@@ -204,6 +207,6 @@ export async function composeFrameToRegion(input:{sourcePath:string;repairPath:s
   if(measured.frames!==selected.length||measured.fps!==24||measured.width!==c.region.width||measured.height!==c.region.height)fail('OUTPUT_TIMING');
   const remaining=deadline-Date.now();if(remaining<=0)fail('TIMEOUT');
   const composed=await composeActionRegion({sourcePath:input.sourcePath,repairPath:normalized,outputPath:input.outputPath,region:c.region},{...options,timeoutMs:remaining});
-  return {version:FRAME_TO_REGION_VERSION,phase:'COMPOSED' as const,frameToRegion:c,outputPath:composed.outputPath,providerInputFrames:96,providerInputWidth:640,providerInputHeight:640,providerInputFps:24,normalizedFrames:measured.frames,normalizedWidth:measured.width,normalizedHeight:measured.height,selectedProviderFrames:selected,outputFrames:composed.outputFrames,width:composed.width,height:composed.height,fps:24,originalAudioCopied:composed.originalAudioCopied};
+  return {version:FRAME_TO_REGION_VERSION,phase:'COMPOSED' as const,frameToRegion:c,outputPath:composed.outputPath,providerInputFrames:repair.frames,trimmedTrailingFrames,providerInputWidth:640,providerInputHeight:640,providerInputFps:24,normalizedFrames:measured.frames,normalizedWidth:measured.width,normalizedHeight:measured.height,selectedProviderFrames:selected,outputFrames:composed.outputFrames,width:composed.width,height:composed.height,fps:24,originalAudioCopied:composed.originalAudioCopied};
  }finally{await unlink(normalized).catch(()=>undefined);}
 }
