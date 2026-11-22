@@ -12,6 +12,7 @@ import { RendererStatusCard } from '@/components/render/renderer-status-card';
 import type { RenderJobState } from '@/lib/render/contracts';
 
 export interface ProductionReleaseViewProps {
+  stage?: 'review' | 'export';
   review: { availability: ReviewAvailability; videoUrl?: string; decision?: ReviewDecision; canDecide?: boolean };
   versions?: ReviewVersion[];
   warnings?: ReviewDependencyWarning[];
@@ -29,21 +30,24 @@ export interface ProductionReleaseViewProps {
   onRetryRender?: () => void | Promise<void>;
 }
 
-export function ProductionReleaseView({ review, versions = [], warnings = [], timeline, renderer, download, savingDecision = false, lockingTimeline = false, retryingRender = false, onApprove, onRequestChanges, onSelectVersion, onCompareVersions, onLockTimeline, onRetryRender }: ProductionReleaseViewProps) {
+export function ProductionReleaseView({ stage, review, versions = [], warnings = [], timeline, renderer, download, savingDecision = false, lockingTimeline = false, retryingRender = false, onApprove, onRequestChanges, onSelectVersion, onCompareVersions, onLockTimeline, onRetryRender }: ProductionReleaseViewProps) {
+  const showReview = stage !== 'export';
+  const showExport = stage !== 'review';
   return <div className="min-w-0 space-y-6 sm:space-y-8" data-testid="production-release-view">
-    <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)] xl:items-start">
-      <section className="min-w-0 space-y-4" aria-label="Video review">
+    <div className={stage ? 'min-w-0 space-y-4' : 'grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)] xl:items-start'}>
+      {showReview && <section className="min-w-0 space-y-4" aria-label="Video review">
+        {stage==='review' && warnings.length>0?<StaleDependencyWarning warnings={warnings}/>:null}
         <ReviewStateCard availability={review.availability} />
         {review.videoUrl ? <div className="overflow-hidden rounded-2xl border border-border bg-black"><ReviewPlayer url={review.videoUrl} /></div> : null}
         <div className="rounded-2xl border border-border bg-card p-4 sm:p-6"><ReviewDecisionPanel decision={review.decision} canDecide={review.canDecide} saving={savingDecision} onApprove={onApprove} onRequestChanges={onRequestChanges} /></div>
-      </section>
-      <aside className="min-w-0 space-y-4 xl:sticky xl:top-6" aria-label="Video processing status">
+      </section>}
+      {showExport && <aside className="min-w-0 space-y-4" aria-label="Video processing status">
         <StaleDependencyWarning warnings={warnings} />
         {renderer ? <RendererStatusCard {...renderer} retrying={retryingRender} onRetry={onRetryRender} /> : null}
-      </aside>
+      </aside>}
     </div>
-    {versions.length > 0 ? <VersionHistory versions={versions} onSelect={(version) => onSelectVersion?.(version)} onCompare={onCompareVersions} /> : null}
-    {timeline ? <RenderReadiness timelineStatus={timeline.status} checks={timeline.checks} locking={lockingTimeline} onLock={onLockTimeline} /> : null}
-    {download ? <DownloadState {...download} /> : null}
+    {showReview && versions.length > 0 ? <VersionHistory versions={versions} onSelect={(version) => onSelectVersion?.(version)} onCompare={onCompareVersions} /> : null}
+    {showExport && timeline ? <RenderReadiness timelineStatus={timeline.status} checks={timeline.checks} locking={lockingTimeline} onLock={onLockTimeline} /> : null}
+    {showExport && download ? <DownloadState {...download} /> : null}
   </div>;
 }

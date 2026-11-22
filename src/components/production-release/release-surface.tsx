@@ -28,11 +28,19 @@ function rendererStateFor(status: string): RenderJobState | 'UNAVAILABLE' {
   if (status === 'CANCELED' || status === 'CANCELLED') return 'CANCELED';
   return 'UNAVAILABLE';
 }
-export function ReleaseSurface({ productionId }: { productionId: string }) {
+interface ReleaseSurfaceProps {
+  productionId: string;
+  stage?: 'review' | 'export';
+  initialManifestId?: string;
+}
+
+export function ReleaseSurface({ productionId, stage, initialManifestId }: ReleaseSurfaceProps) {
+  const showReview = stage !== 'export';
+  const showExport = stage !== 'review';
   const id = productionId as Id<'productions'>;
   const state = useQuery(api.reviewExport.getState, { productionId: id });
   const jobs = useQuery(api.renderJobs.list, { productionId: id });
-  const [saving, setSaving] = useState(false); const [error, setError] = useState<string>(); const [manifestChoice, setManifestChoice] = useState('');
+  const [saving, setSaving] = useState(false); const [error, setError] = useState<string>(); const [manifestChoice, setManifestChoice] = useState(initialManifestId ?? '');
   const approve = useMutation(api.reviewExport.approve); const requestRevision = useMutation(api.reviewExport.requestRevision);
   const requestReview = useMutation(api.reviewExport.requestReview); const requestExport = useMutation(api.reviewExport.requestExport);
   const currentVersionId=state?.production?.currentVersionId;
@@ -40,13 +48,18 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   const assemblyCategory=(item:any)=>belongsToCurrent(item)?'Current production':item.manifest?.productionVersionId&&item.manifest.productionVersionId!==currentVersionId?'Historical production':'Retained assembly';
   const currentManifest=state?.manifests?.find(belongsToCurrent);
   const manifestHistoryLimited=(state?.manifests?.length??0)>=100;
-  const manifest = state?.manifests?.find((item: any) => item._id === manifestChoice) ?? currentManifest;
+  const manifest = manifestChoice ? state?.manifests?.find((item: any) => item._id === manifestChoice) : currentManifest;
+  const unavailableChoice = Boolean(manifestChoice && state && !manifest);
+  const otherStage = stage === 'review' ? 'export' : 'review';
+  const otherStageHref = state?.projectExternalId && stage && !unavailableChoice
+    ? `/dashboard/projects/${encodeURIComponent(state.projectExternalId)}/workspace/${otherStage}?${new URLSearchParams({production: productionId, ...(manifest ? {manifest: manifest._id} : {})})}`
+    : undefined;
   const isCurrent=Boolean(manifest&&belongsToCurrent(manifest));
   const writableContract=Boolean(manifest&&[4,5].includes(manifest.manifest?.version)&&manifest.manifest.version===manifest.contractVersion);
   const review = state?.reviews?.filter((item: any) => item.manifestId === manifest?._id && !item.exportId).sort((a: any, b: any) => b.createdAt - a.createdAt)[0];
   const latestExport = state?.exports?.find((item: any) => item.manifestId === manifest?._id);
   const exportDetails = useQuery(api.reviewExport.getExport, latestExport ? { exportId: latestExport._id } : 'skip');
-  const captionFiles = useQuery(api.assembly.captionSidecars, manifest && latestExport?.status === 'COMPLETED' && Array.isArray((manifest.manifest as any)?.captionTracks) && (manifest.manifest as any).captionTracks.length ? { manifestId: manifest._id, exportId: latestExport._id } : 'skip');
+  const captionFiles = useQuery(api.assembly.captionSidecars, showExport && manifest && latestExport?.status === 'COMPLETED' && Array.isArray((manifest.manifest as any)?.captionTracks) && (manifest.manifest as any).captionTracks.length ? { manifestId: manifest._id, exportId: latestExport._id } : 'skip');
   const latestJob = jobs?.find((item: any) => item.manifestId === manifest?._id);
   const canEdit = ['OWNER', 'EDITOR'].includes(state?.projectRole ?? ''); const canDecide = ['OWNER', 'EDITOR', 'REVIEWER'].includes(state?.projectRole ?? '');
   // An unexported assembly is not evidence of an unavailable renderer. Other
@@ -67,7 +80,7 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   }
   async function queueExport() {
     const selected = manifest; const approved = review;
-    if (!selected || !approved || !isCurrent || !writableContract || !canEdit) return;
+    if (!selected || approved?.status !== 'APPROVED' || !isCurrent || !writableContract || !canEdit) return;
     await save(() => requestExport({ productionId: id, manifestId: selected._id, reviewId: approved._id, idempotencyKey: `release-export:${selected._id}:${approved._id}` }));
   }
   function downloadCaptions(text: string, language: string, trackId: string, format: 'srt' | 'vtt') {
@@ -80,18 +93,21 @@ export function ReleaseSurface({ productionId }: { productionId: string }) {
   }
   return <div className="min-w-0 space-y-6 sm:space-y-8">
     <section className="min-w-0 space-y-5 rounded-2xl border border-border bg-card p-4 sm:p-6">
-      <header className="space-y-2"><h2 className="text-xl font-semibold tracking-tight">Review, then download</h2><p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">Choose a saved edit, request a review, then prepare the video after approval. Previous versions keep their own reviews and downloads.</p></header>
+      <header className="space-y-2"><h2 className="text-xl font-semibold tracking-tight">{stage==='review'?'Review your edit':stage==='export'?'Download your video':'Review, then download'}</h2>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{stage==='review'?'Choose the edit you want to approve or send back for changes.':stage==='export'?'Choose an approved edit to prepare its video or download the finished file.':'Choose a saved edit, request a review, then prepare the video after approval. Previous versions keep their own reviews and downloads.'}</p></header>
       {!currentManifest ? <div className="space-y-2 text-sm text-muted-foreground"><p>{manifestHistoryLimited?'No current assembly was found in the recent history. Check the saved versions before creating another timeline.':'The current production version needs finishing. Create and approve its timeline, then build an assembly in Edit.'}</p>{state?.projectExternalId ? <Link className="inline-flex min-h-11 items-center text-primary underline underline-offset-4" href={`/dashboard/projects/${encodeURIComponent(state.projectExternalId)}/workspace/edit?production=${encodeURIComponent(productionId)}`}>Open Edit for the current production</Link> : null}</div> : null}
-      {state?.manifests?.length ? <label className="block space-y-2 text-sm">Choose a saved edit<select className="min-h-12 w-full rounded-xl border border-border bg-background p-3 text-base" value={manifest?._id??''} onChange={event => {setManifestChoice(event.target.value);setError(undefined);}}><option value="" disabled={Boolean(currentManifest)}>Choose a previous saved edit</option>{state.manifests.map((item: any) => <option key={item._id} value={item._id}>{assemblyCategory(item)} · {formatLabel(item.manifest?.output)} · Assembly v{item.versionNumber} · {new Date(item.createdAt).toLocaleString()}</option>)}</select></label> : null}
+      {state?.manifests?.length ? <label className="block space-y-2 text-sm">Choose a saved edit<select className="min-h-12 w-full rounded-xl border border-border bg-background p-3 text-base" value={manifestChoice||manifest?._id||''} onChange={event => {setManifestChoice(event.target.value);setError(undefined);}}>{unavailableChoice?<option value={manifestChoice} disabled>Selected edit unavailable</option>:null}<option value="" disabled={Boolean(currentManifest)}>Choose a previous saved edit</option>{state.manifests.map((item: any) => <option key={item._id} value={item._id}>{assemblyCategory(item)} · {formatLabel(item.manifest?.output)} · Assembly v{item.versionNumber} · {new Date(item.createdAt).toLocaleString()}</option>)}</select></label> : null}
+      {unavailableChoice ? <p role="status" className="text-sm text-muted-foreground">This saved edit is unavailable in this production’s recent history. Choose another edit to continue.</p> : null}
       {manifest&&!isCurrent ? <p role="status" className="text-sm text-muted-foreground">Viewing a retained historical assembly. This earlier saved edit keeps its own review and download. You can view it here, but changes need a new version.</p> : manifest&&!writableContract ? <p className="text-sm text-muted-foreground">This saved assembly is available for viewing and download. Create a new current timeline to make changes.</p> : null}
       {completedManifests.some((item: any) => item._id !== manifest?._id) && <div className="space-y-2 text-sm"><p className="text-muted-foreground">Previous downloads stay with the saved edit they were made from.</p><div className="flex flex-wrap gap-2">{completedManifests.filter((item: any) => item._id !== manifest?._id).map((item: any) => <Button key={item._id} variant="secondary" onClick={() => setManifestChoice(item._id)}>View {belongsToCurrent(item)?'completed':'historical'} Assembly v{item.versionNumber}</Button>)}</div></div>}
-      <div className="grid gap-3 sm:flex sm:flex-wrap"><Button disabled={!canEdit || saving || !isCurrent || !writableContract || Boolean(review)} onClick={createReview}>Request review for this edit</Button><Button variant="secondary" disabled={!canEdit || saving || !isCurrent || !writableContract || review?.status !== 'APPROVED' || Boolean(latestJob && !['FAILED', 'CANCELED'].includes(latestJob.status))} onClick={queueExport}>Prepare video for download</Button></div>
-      {latestJob?.status === 'QUEUED' && <p className="text-sm text-muted-foreground">Export queued. Your approved timeline is saved; processing has not started.</p>}
+      <div className="grid gap-3 sm:flex sm:flex-wrap">{showReview && <Button disabled={!canEdit || saving || !isCurrent || !writableContract || Boolean(review)} onClick={createReview}>Request review for this edit</Button>}{showExport && <Button variant="secondary" disabled={!canEdit || saving || !isCurrent || !writableContract || review?.status !== 'APPROVED' || Boolean(latestJob && !['FAILED', 'CANCELED'].includes(latestJob.status))} onClick={queueExport}>Prepare video for download</Button>}</div>
+      {showExport && latestJob?.status === 'QUEUED' && <p className="text-sm text-muted-foreground">Export queued. Your approved timeline is saved; processing has not started.</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {latestExport?.status === 'COMPLETED' && canEdit && isCurrent && writableContract && state?.projectExternalId && <ShareButton projectId={state.projectExternalId} />}
+      {showExport && latestExport?.status === 'COMPLETED' && canEdit && isCurrent && writableContract && state?.projectExternalId && <ShareButton projectId={state.projectExternalId} />}
       {captionFiles?.length ? <div className="space-y-2"><p className="text-sm text-muted-foreground">Caption files match this completed video. Download each language track separately. Styled captions are already included in the video.</p><div className="space-y-3">{captionFiles.map((file, index) => <div key={file.trackId} className="space-y-3 rounded-xl border border-border bg-background p-4"><p className="break-all text-sm text-muted-foreground">Caption track {index + 1} · {file.language} · {file.trackId}</p><div className="flex flex-wrap gap-2"><Button variant="secondary" aria-label={`Download ${file.language} caption track ${file.trackId} as SRT`} onClick={() => downloadCaptions(file.srt, file.language, file.trackId, 'srt')}>Download track {index + 1} SRT</Button><Button variant="secondary" aria-label={`Download ${file.language} caption track ${file.trackId} as VTT`} onClick={() => downloadCaptions(file.vtt, file.language, file.trackId, 'vtt')}>Download track {index + 1} VTT</Button></div></div>)}</div></div> : null}
     </section>
-    <ProductionReleaseView review={{ availability, videoUrl: exportDetails?.downloadUrl ?? undefined, decision, canDecide: Boolean(canDecide && isCurrent && writableContract && review && review.status === 'REQUESTED') }} renderer={{ state: rendererState, message: latestJob?.errorMessage ?? undefined }} download={{ status: downloadStatus, href: exportDetails?.downloadUrl && latestExport ? `/api/download/export/${latestExport._id}` : undefined, fileName: exportDetails?.mimeType === 'video/webm' ? 'finalframe-export.webm' : exportDetails?.mimeType === 'video/quicktime' ? 'finalframe-export.mov' : 'finalframe-export.mp4' }} savingDecision={saving} retryingRender={saving} onApprove={review && isCurrent && writableContract ? () => save(() => approve({ reviewId: review._id })) : undefined} onRequestChanges={review && isCurrent && writableContract ? note => save(() => requestRevision({ reviewId: review._id, note })) : undefined} />
-    {state?.projectExternalId ? <EmergencyReset key={state.projectExternalId} projectId={state.projectExternalId} /> : null}
+    <ProductionReleaseView key={manifest?._id??'unselected'} stage={stage} review={{ availability, videoUrl: exportDetails?.downloadUrl ?? undefined, decision, canDecide: Boolean(canDecide && isCurrent && writableContract && review && review.status === 'REQUESTED') }} renderer={{ state: rendererState, message: latestJob?.errorMessage ?? undefined }} download={{ status: downloadStatus, href: exportDetails?.downloadUrl && latestExport ? `/api/download/export/${latestExport._id}` : undefined, fileName: exportDetails?.mimeType === 'video/webm' ? 'finalframe-export.webm' : exportDetails?.mimeType === 'video/quicktime' ? 'finalframe-export.mov' : 'finalframe-export.mp4' }} savingDecision={saving} retryingRender={saving} onApprove={review && isCurrent && writableContract ? () => save(() => approve({ reviewId: review._id })) : undefined} onRequestChanges={review && isCurrent && writableContract ? note => save(() => requestRevision({ reviewId: review._id, note })) : undefined} />
+    {otherStageHref ? <Link href={otherStageHref} className="ff-button-quiet inline-flex min-h-11 items-center border border-border px-4">{stage==='review'?'Next: export this edit':'Back to review this edit'}</Link> : null}
+    {showExport && state?.projectExternalId ? <EmergencyReset key={state.projectExternalId} projectId={state.projectExternalId} /> : null}
   </div>;
 }
