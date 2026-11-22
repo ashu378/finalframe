@@ -31,7 +31,10 @@ export function assertActionRegion(value: unknown): ActionRegion {
 export function assertActionRegionProof(region: ActionRegion, value: unknown, compose: boolean) {
   const p = value && typeof value === 'object' ? value as Record<string, any> : {};
   const bound = assertActionRegion(p.region);
-  if (p.version !== ACTION_REGION_VERSION || JSON.stringify(bound) !== JSON.stringify(region) ||
+  // Query transport may reorder object keys. Validate and canonicalize both
+  // operands before comparison; every coordinate and frame remains exact.
+  const expected = assertActionRegion(region);
+  if (p.version !== ACTION_REGION_VERSION || JSON.stringify(bound) !== JSON.stringify(expected) ||
       p.width !== (compose ? region.window.width : region.width) ||
       p.height !== (compose ? region.window.height : region.height) || p.fps !== 24 ||
       p.outputFrames !== (compose ? region.window.sourceFrames : region.window.endFrame - region.window.startFrame) ||
