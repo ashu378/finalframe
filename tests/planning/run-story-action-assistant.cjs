@@ -27,6 +27,20 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  c.rows.get('take').contextSnapshot={request:{storyRepair:{failedActionIds:['chew']}}};const revised=await resolveStoryRepair(c,'take','shot');assert.equal(revised.proof.approachVersion,'timed-action-emphasis-v2');assert.match(revised.prompt,/Do not preserve their original still pose/);c.rows.get('take').contextSnapshot.request.storyRepair.approachVersion='timed-action-emphasis-v2';await assert.rejects(resolveStoryRepair(c,'take','shot'),/NEEDS_NEW_APPROACH/);delete c.rows.get('take').contextSnapshot;console.log('PASS a failed repair cannot start an identical paid repair chain');
  c.rows.get('asset').checksum='changed';await assert.rejects(c.call('storyActionChecks','quoteContext',{checkId:id}),/CHANGED/);await assert.rejects(resolveStoryRepair(c,'take','shot'),/missing action/);console.log('PASS stale visual evidence cannot authorize repair');
  const d=setup();const dctx=await d.call('storyActionChecks','context',{takeId:'take'});d.put('storyActionReviews',{_id:'review',takeId:'take',requirementKey:dctx.requirementKey,observations:[pass],passed:true,createdAt:1});d.put('storyActionChecks',{_id:'check',takeId:'take',requirementKey:dctx.requirementKey,observations:[fail],completedAt:2});await assert.rejects(requireStoryActionsPassed(d,'take'));d.rows.get('review').createdAt=3;await requireStoryActionsPassed(d,'take');console.log('PASS newer AI concern requires explicit subsequent human review');
+ const humanFailed=setup();const hfctx=await humanFailed.call('storyActionChecks','context',{takeId:'take'});
+ humanFailed.put('storyActionReviews',{_id:'review',takeId:'take',requirementKey:hfctx.requirementKey,observations:[fail],passed:false,createdAt:1});
+ humanFailed.put('storyActionChecks',{_id:'check',takeId:'take',requirementKey:hfctx.requirementKey,observations:[pass],completedAt:2});
+ await assert.rejects(requireStoryActionsPassed(humanFailed,'take'));
+ assert.deepEqual((await resolveStoryRepair(humanFailed,'take','shot')).proof.failedActionIds,['chew']);
+ humanFailed.rows.get('check').observations=[{...fail,result:'UNCERTAIN'}];
+ assert.deepEqual((await resolveStoryRepair(humanFailed,'take','shot')).proof.failedActionIds,['chew']);
+ Object.assign(humanFailed.rows.get('review'),{observations:[pass],passed:true,createdAt:3});
+ await requireStoryActionsPassed(humanFailed,'take');
+ await assert.rejects(resolveStoryRepair(humanFailed,'take','shot'),/missing action/);
+ Object.assign(humanFailed.rows.get('check'),{observations:[fail],completedAt:4});
+ await assert.rejects(requireStoryActionsPassed(humanFailed,'take'));
+ assert.deepEqual((await resolveStoryRepair(humanFailed,'take','shot')).proof.failedActionIds,['chew']);
+ console.log('PASS AI pass or uncertainty cannot hide human failure; newer human review clears it and later AI failure remains actionable');
  const e=setup();e.rows.get('asset').projectId='other';await assert.rejects(e.call('storyActionChecks','context',{takeId:'take'}),/unavailable/);console.log('PASS cross-project check source denied');
 })().catch(e=>{console.error(e);process.exitCode=1});
 // The export fence must run even when no audio-restoration marker was supplied.

@@ -1,10 +1,12 @@
+import { parseGraphicsV2Authoring } from '../../../../renderer/src/templates/graphics-v2-contract';
+import { recipeGraphicProps } from './graphics';
 import { parsePlannedGraphics, type PlannedGraphicCard } from '../planned-graphics';
 import type {RecipeVideoType} from './contract';
 import {parseRecipeProposal,type RecipeProposalDocument} from './proposal';
 export interface RecipeWorkspaceShot {operation?:string;id:string;key:string;title:string;durationSeconds:number;referenceAssetIds:string[];recipeReferenceSlots:string[];audioPolicy?:string|null;dialogueSegments?:Array<{speakerResourceVersionId:string;voiceVersionId:string;startSeconds:number;durationSeconds:number;text:string;delivery?:string;voiceId:string;voiceKind:'STOCK'|'CLONED'|'RECORDED';sampleAssetIds:string[]}>}
 export interface RecipeWorkspaceSource {id:string;name:string;mimeType:string;durationSeconds:number|null}
 export interface RecipeWorkspaceVoice {id:string;name:string;kind:string;sampleAssetIds:string[]}
-export interface RecipeBuilderInput {plannedGraphics?:PlannedGraphicCard[];captionLanguage?:string;usePlannedDialogue?:boolean;dialoguePrimarySamples?:Record<string,string>;visualMode?:'GENERATE'|'PROJECT_MEDIA'|'GRAPHICS_ONLY';sourceFit?:'contain'|'cover';videoType:RecipeVideoType;fps:24|25|30|50|60;graphicTemplate:'kinetic-title'|'brand-card'|'feature-callout'|'end-card';title:string;subtitle:string;brandName:string;callToAction:string;logoAssetId:string;graphicSeconds:number;sourceAssetId:string;sourceStartSeconds:number;sourceDurationSeconds:number;keepSourceAudio:boolean;narrationMode:'NONE'|'GENERATE'|'RECORDING';narrationText:string;voiceId:string;primaryVoiceSampleAssetId:string;recordingAssetId:string;recordingStartSeconds:number;recordingDurationSeconds:number;captions:boolean;musicAssetId:string;musicStartSeconds:number;referencePrompt:string}
+export interface RecipeBuilderInput {graphicsLayoutVersion?:2;plannedGraphics?:PlannedGraphicCard[];captionLanguage?:string;usePlannedDialogue?:boolean;dialoguePrimarySamples?:Record<string,string>;visualMode?:'GENERATE'|'PROJECT_MEDIA'|'GRAPHICS_ONLY';sourceFit?:'contain'|'cover';videoType:RecipeVideoType;fps:24|25|30|50|60;graphicTemplate:'kinetic-title'|'brand-card'|'feature-callout'|'end-card';title:string;subtitle:string;brandName:string;callToAction:string;logoAssetId:string;graphicSeconds:number;sourceAssetId:string;sourceStartSeconds:number;sourceDurationSeconds:number;keepSourceAudio:boolean;narrationMode:'NONE'|'GENERATE'|'RECORDING';narrationText:string;voiceId:string;primaryVoiceSampleAssetId:string;recordingAssetId:string;recordingStartSeconds:number;recordingDurationSeconds:number;captions:boolean;musicAssetId:string;musicStartSeconds:number;referencePrompt:string}
 export function buildWorkspaceRecipe(input:RecipeBuilderInput,shots:RecipeWorkspaceShot[]):RecipeProposalDocument{
  const graphicsOnly=input.videoType==='MOTION_GRAPHICS'||input.visualMode==='GRAPHICS_ONLY';
  if(input.visualMode==='GRAPHICS_ONLY'&&(!input.plannedGraphics?.length||input.referencePrompt.trim()||input.usePlannedDialogue||shots.some(shot=>shot.referenceAssetIds.length||shot.recipeReferenceSlots.length||shot.dialogueSegments?.length||!['GENERATE',undefined].includes(shot.operation))))throw Error('A graphics-only recipe needs the complete planned cards and no footage or speaker bindings.');
@@ -35,5 +37,15 @@ export function buildWorkspaceRecipe(input:RecipeBuilderInput,shots:RecipeWorksp
  if(input.captions){if(input.usePlannedDialogue&&dialogueTracks.length){if(narrationStepKey)throw new Error('Choose planned dialogue captions or separate narration captions, not both in one recipe.');steps.push({key:'captions',operation:'CAPTIONS',mode:'PLANNED_DIALOGUE',language:input.captionLanguage||'en'});}else{if(!narrationStepKey)throw new Error('Select narration before requesting its transcript and captions.');steps.push({key:'transcript',operation:'PREPARATION',kind:'TRANSCRIPT',text:'',sourceStepKey:'narration'},{key:'captions',operation:'CAPTIONS',transcriptStepKey:'transcript',language:'en'});}captionStepKey='captions';}
  if(input.musicAssetId){steps.push({key:'soundtrack',operation:'MUSIC_ANALYSIS',sourceAssetId:input.musicAssetId,trimStartFrame:frames(input.musicStartSeconds),durationFrames:totalFrames});musicStepKey='soundtrack';}else if(input.videoType==='MUSIC_VIDEO')throw new Error('Choose the approved soundtrack for this music video.');
  if(totalFrames<=0||totalFrames>60*input.fps)throw new Error('Keep this recipe at one to sixty seconds; shorten the draft shots or graphic.');
+ // Upgrade only compatible newly authored cards. Older approved plans may have
+ // legacy-only fields (for example an end card without a CTA); retain their
+ // exact copy and renderer semantics rather than silently dropping any fields.
+ if(input.graphicsLayoutVersion===2)for(const step of steps){
+  if(step.operation!=='GRAPHIC')continue;
+  const candidate={...step,layoutVersion:2 as const,...(step.templateId==='feature-callout'&&!step.feature?{feature:step.title}:{})};
+  try{parseGraphicsV2Authoring({templateId:candidate.templateId,props:recipeGraphicProps(candidate),...(candidate.logoAssetId?{logoAssetId:candidate.logoAssetId}:{})},candidate.durationFrames,input.fps);}
+  catch{continue;}
+  Object.assign(step,candidate);
+ }
  return parseRecipeProposal({kind:'finalframe.recipe-proposal',version:1,videoType:input.videoType,fps:input.fps,steps,visualOrder,...(narrationStepKey?{narrationStepKey}:{}),...(dialogueTracks.length?{dialogueTracks}:{}),...(musicStepKey?{musicStepKey}:{}),...(captionStepKey?{captionStepKey}:{})});
 }

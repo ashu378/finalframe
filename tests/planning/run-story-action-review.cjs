@@ -19,6 +19,17 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  const d=setup();review=await d.call('storyActionReviews','get',{takeId:'take'});d.rows.get('shots') // no side effects
  d.rows.get('shot').prompt='Different action';await assert.rejects(d.call('storyActionReviews','record',{takeId:'take',requirementKey:review.requirementKey,observations:[pass]}),/changed/);console.log('PASS stale prompt review cannot be submitted');
  d.role='VIEWER';await assert.rejects(d.call('storyActionReviews','record',{takeId:'take',requirementKey:review.requirementKey,observations:[pass]}),/denied/);d.denied=true;await assert.rejects(d.call('storyActionReviews','get',{takeId:'take'}),/denied/);console.log('PASS viewer writes and unrelated access denied');
+ const repeated=setup();const repeatedContext=await repeated.call('storyActionReviews','get',{takeId:'take'});
+ const repeatedArgs={takeId:'take',requirementKey:repeatedContext.requirementKey,observations:[pass]};
+ await repeated.call('storyActionReviews','record',repeatedArgs);
+ const oldReview=[...repeated.rows.values()].find(r=>r.requirementKey===repeatedContext.requirementKey&&r.reviewerUserId);
+ oldReview.createdAt=Date.now()-1000;
+ repeated.put('storyActionChecks',{_id:'new-ai-concern',takeId:'take',requirementKey:repeatedContext.requirementKey,observations:[{...fail,result:'UNCERTAIN'}],completedAt:Date.now()-500});
+ await assert.rejects(requireStoryActionsPassed(repeated,'take'),/visible story actions/);
+ assert.deepEqual(await repeated.call('storyActionReviews','record',repeatedArgs),{passed:true,replayed:false});
+ await requireStoryActionsPassed(repeated,'take');
+ assert.deepEqual(await repeated.call('storyActionReviews','record',repeatedArgs),{passed:true,replayed:true});
+ console.log('PASS identical human confirmation clears a newer AI concern once; subsequent duplicates remain idempotent');
  const e=setup();delete e.rows.get('shot').metadata.storyActions;await requireStoryActionsPassed(e,'take');console.log('PASS retained takes without action contracts remain compatible');
  const {plannedShotMetadata}=load('convex/planningVideo.ts');assert.deepEqual(plannedShotMetadata({storyActions:[action],durationSeconds:8}).storyActions,[action]);assert.throws(()=>plannedShotMetadata({storyActions:[action],durationSeconds:3}),/timing/);console.log('PASS canonical planner persists and validates action requirements');
  const f=setup();f.rows.get('shot').sceneId='scene';f.rows.get('shot').versionNumber=1;f.put('scenes',{_id:'scene',productionId:'production'});Object.assign(f.rows.get('asset'),{storageId:'stored',mimeType:'video/mp4',studioExternalId:'studio'});f.storageObjects.set('stored',{contentType:'video/mp4',sha256:'checksum-a'});

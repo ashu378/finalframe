@@ -33,8 +33,15 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  const check=await ctx.db.query('storyActionChecks').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
  const human=data.latest?.requirementKey===data.requirementKey?data.latest:null;
  const ai=check?.requirementKey===data.requirementKey&&check.completedAt?check:null;
- const observations=human&&human.createdAt>=(ai?.completedAt??0)?human.observations:ai?.observations??human?.observations??[];
- const missing=data.actions.filter(action=>observations.some(o=>o.actionId===action.id&&o.result==='FAIL'));
+ // An advisory AI pass must not erase a creator's observed failure. A newer
+ // human review can clear it; a newer AI failure can add a concern for review.
+ // Otherwise approval remains blocked while repair incorrectly finds nothing.
+ const missing=data.actions.filter(action=>{
+  const humanObservation=human?.observations.find(o=>o.actionId===action.id);
+  if(humanObservation?.result==='FAIL')return true;
+  if(human&&human.createdAt>=(ai?.completedAt??0))return false;
+  return ai?.observations?.some(o=>o.actionId===action.id&&o.result==='FAIL')??false;
+ });
  if(!missing.length)throw new Error('Review and identify the missing action before repairing.');
  const priorRepair=object(object(data.take.contextSnapshot).request).storyRepair;
  const isolated=process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true';

@@ -47,7 +47,9 @@ export const record = mutation({
         if(!['DRAFT','IN_REVIEW','REVISION_REQUESTED'].includes(state.currentState))throw new Error('Request a revision before changing an approved take review.');
         if(!data.actions.length||data.requirementKey!==args.requirementKey)throw new Error('The take or required actions changed. Reload the review.');
         const passed=validateStoryActionObservations(data.actions,args.observations);
-        if(data.latest?.requirementKey===args.requirementKey&&JSON.stringify(data.latest.observations)===JSON.stringify(args.observations))return {passed,replayed:true};
+        // Re-confirming the same observations after a newer AI concern is a
+        // fresh human decision, not a duplicate of the superseded approval.
+        if(data.latest?.requirementKey===args.requirementKey&&JSON.stringify(data.latest.observations)===JSON.stringify(args.observations)&&(!passed||data.passed))return {passed,replayed:true};
         await ctx.db.insert('storyActionReviews',{projectId:data.take.projectId!,productionId:data.take.productionId!,takeId:args.takeId,assetId:data.take.assetId!,requirementKey:data.requirementKey,observations:args.observations,passed,reviewerUserId:access.user._id,createdAt:Date.now()});
         return {passed,replayed:false};
     },
