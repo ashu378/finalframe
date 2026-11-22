@@ -12,20 +12,10 @@ export function canBridgeSilentDuration(request: VideoRoutingRequest, hasPlanned
 }
 export function selectGenerationDuration(request: VideoRoutingRequest, models: readonly VideoModelCapabilities[], policy?: VideoRoutePolicy, hasPlannedDialogue = false) {
   const bridgeAllowed = canBridgeSilentDuration(request, hasPlannedDialogue) && Number.isFinite(request.durationSeconds) && request.durationSeconds > 0 && request.durationSeconds < 60;
-  // Quality preferences apply to the complete purchased generation, not merely
-  // its edit length. Keep Economy's existing exact-route/cost behavior intact.
-  if (bridgeAllowed && (request.qualityTier === 'STANDARD' || request.qualityTier === 'PREMIUM')) {
-    for (const modelId of policy?.preferredModelIds || []) {
-      const preferredModels = models.filter(model => model.modelId === modelId && model.available);
-      if (!preferredModels.length) continue;
-      const durations = [request.durationSeconds, ...new Set(preferredModels.flatMap(model => model.supportedDurations)
-        .filter(duration => Number.isFinite(duration) && duration > request.durationSeconds && duration <= 60).sort((a,b)=>a-b))];
-      for (const durationSeconds of durations) {
-        const candidate = durationSeconds === request.durationSeconds ? request : { ...request, durationSeconds };
-        try { return { request: candidate, selection: selectVideoRoute(candidate, preferredModels, policy) }; } catch { /* Try the next fully priced compatible preference. */ }
-      }
-    }
-  }
+  // An exact compatible duration takes priority over a preferred model that
+  // needs longer footage. Live UGC exposed the risk: its action finished in
+  // provider-only handles and disappeared from the approved shorter edit.
+  // Route policy still controls quality/caps (including Premium's allowlist).
   let original: unknown;
   try { return { request, selection: selectVideoRoute(request, models, policy) }; } catch (error) { original = error; }
   if (!bridgeAllowed) throw original;
