@@ -144,6 +144,7 @@ export async function loadWorkspaceControls(projectExternalId: string, productio
         projectId: project._id.toString(), projectExternalId, studioExternalId: project.studioExternalId,
         productionId: workspace.production._id.toString(), versionId: workspace.version?._id.toString() ?? null,
         versionState: workspace.version?.status ?? null, episodeId: episode?._id.toString() ?? null,
+        visualProductionMode: object(workspace.version?.snapshot).visualProductionMode === 'GRAPHICS_ONLY' ? 'GRAPHICS_ONLY' : 'FOOTAGE',
         graphicsV2Enabled:graphicsCapability.enabled===true,
         role: resourceRows.projectRole, canEdit: resourceRows.projectRole === 'OWNER' || resourceRows.projectRole === 'EDITOR',
         resources: resourceRows.page.filter((row) => !row.archived).map(resourceView), resourceCursor: resourceRows.isDone ? null : resourceRows.continueCursor,

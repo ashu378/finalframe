@@ -193,6 +193,7 @@ async function resolveGenerationIntent(ctx: ReadCtx, args: GenerationCreateArgs,
     if (!production.currentVersionId || shot.productionVersionId !== production.currentVersionId) throw new Error('Generate from the current production version.');
     const version = await ctx.db.get(production.currentVersionId);
     if (!version || version.productionId !== production._id || version.status !== 'APPROVED') throw new Error('Approve the canonical production plan before generating.');
+    if (object(version.snapshot).visualProductionMode === 'GRAPHICS_ONLY') throw new Error('GRAPHICS_ONLY_USE_RECIPE: This plan uses editable graphic cards. Continue its production recipe instead of purchasing footage.');
     const shotState = await getEffectiveResourceState(ctx, access.project._id, 'shot', shot._id, production._id, execution?access.user._id:undefined);
     if (shotState.currentState === 'LOCKED') throw new Error('Unlock the shot before making a new take.');
     await requireUnlockedGraph(ctx, access.project._id, shot, scene);

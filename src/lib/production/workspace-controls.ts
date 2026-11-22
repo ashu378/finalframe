@@ -69,6 +69,7 @@ export interface WorkspaceControlData {
     productionId: string;
     versionId: string | null;
     versionState: string | null;
+    visualProductionMode?: 'GRAPHICS_ONLY' | 'FOOTAGE';
     episodeId: string | null;
     role: 'OWNER' | 'EDITOR' | 'REVIEWER' | 'VIEWER';
     canEdit: boolean;

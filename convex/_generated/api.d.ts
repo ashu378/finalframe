@@ -11,6 +11,8 @@
 import type * as _shared from "../_shared.js";
 import type * as account from "../account.js";
 import type * as accountLifecycle from "../accountLifecycle.js";
+import type * as actionWindowRepairs from "../actionWindowRepairs.js";
+import type * as actionWindowWorker from "../actionWindowWorker.js";
 import type * as app from "../app.js";
 import type * as approvals from "../approvals.js";
 import type * as assembly from "../assembly.js";
@@ -138,6 +140,8 @@ declare const fullApi: ApiFromModules<{
   _shared: typeof _shared;
   account: typeof account;
   accountLifecycle: typeof accountLifecycle;
+  actionWindowRepairs: typeof actionWindowRepairs;
+  actionWindowWorker: typeof actionWindowWorker;
   app: typeof app;
   approvals: typeof approvals;
   assembly: typeof assembly;

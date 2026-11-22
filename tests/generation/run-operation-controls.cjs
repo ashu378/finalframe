@@ -255,6 +255,15 @@ async function main() {
     assert.equal((await changed.run()).success, false);
     assert.equal(changed.mutations.length, 0);
   });
+  await check('graphics-only approved plans deny direct shot quotes and purchases before writes', async () => {
+    const state = backendFixture({ operation: 'GENERATE' }, []);
+    state.rows.get('version').snapshot = { visualProductionMode: 'GRAPHICS_ONLY' };
+    await assert.rejects(state.preview(), /GRAPHICS_ONLY_USE_RECIPE/);
+    await assert.rejects(state.create(), /GRAPHICS_ONLY_USE_RECIPE/);
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.creditReservations.length, 0);
+    assert.equal(state.schedules.length, 0);
+  });
   await check('public creation rejects private recipe authority markers before reserving', async () => { const state=backendFixture({operation:'GENERATE'},[]);await assert.rejects(state.create({request:{ratio:'16:9',recipeRunNodeId:'foreign-node'}}),/PRIVATE_AUTHORITY/);assert.equal(state.creditReservations.length,0); });
   await check('a quote makes no purchase and only the exact unexpired consent can schedule a take', async () => {
     const state = backendFixture({ operation: 'GENERATE' });
