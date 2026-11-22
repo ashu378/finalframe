@@ -17,7 +17,7 @@ export async function remoteActionWindow(value:unknown,options:{allowedHosts:rea
  const region=p.region===undefined?undefined:assertActionRegion(p.region);
  if(region&&JSON.stringify(region.window)!==JSON.stringify(window))throw new Error('ACTION_WINDOW_BINDING_CHANGED');
  if(!['PREPARE','COMPOSE'].includes(p.operation))throw new Error('ACTION_WINDOW_INVALID_OPERATION');
- if(p.trailingFramePolicy!==undefined&&(!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
+  if(p.trailingFramePolicy!==undefined&&(region||!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
  const directory=await mkdtemp(join(tmpdir(),'finalframe-action-window-'));
  const download=async(input:unknown,name:string)=>{
   const source=object(input),url=assertProbeUrl(source.url,options.allowedHosts);
