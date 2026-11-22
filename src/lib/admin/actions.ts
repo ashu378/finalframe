@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { api } from '../../../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
 import { requireStudioAdmin } from '@/lib/guards/platform';
@@ -57,6 +58,7 @@ export async function refreshVideoModelCatalog() {
     };
   });
   await client.mutation(api.videoRouting.refreshCatalog, { studioExternalId, models });
+  revalidatePath('/dashboard/settings/operations/video-routing');
 }
 
 export async function reviewVideoModelCapabilities(formData: FormData) {
@@ -86,6 +88,7 @@ export async function reviewVideoModelCapabilities(formData: FormData) {
     supportsCombinedFrameReferences: checked('supportsCombinedFrameReferences'),
     reviewedOperations: formData.getAll('reviewedOperations').map(String),
   });
+  revalidatePath('/dashboard/settings/operations/video-routing');
 }
 
 export async function saveVideoRoutePolicy(formData: FormData) {
@@ -104,4 +107,5 @@ export async function saveVideoRoutePolicy(formData: FormData) {
     preferredModelIds,
     ...(maxCost ? { maxCostUsd: Number(maxCost) } : {}),
   });
+  revalidatePath('/dashboard/settings/operations/video-routing');
 }
