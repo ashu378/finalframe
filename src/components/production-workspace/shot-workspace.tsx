@@ -4,7 +4,8 @@ import { SpeakingShotSetup } from './speaking-shot-setup';
 import { EditedTakeImport } from './edited-take-import';
 import { DraftCastBindingPanel } from './draft-cast-binding-panel';
 
-import { useRef, useState, useTransition } from 'react';
+import { useRef, useState, useTransition, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
@@ -20,13 +21,42 @@ import { isSourceVideoEdit, VIDEO_OPERATIONS, type VideoOperation } from '@/lib/
 const operationLabels: Record<VideoOperation, string> = { GENERATE: 'Create footage', FRAME_TO_VIDEO: 'Animate a first frame', EDIT: 'Restyle footage or change its environment', APPEARANCE_EDIT: 'Change appearance or hairstyle', OBJECT_REPLACE: 'Replace a product, car, or object', PERFORMANCE_TRANSFER: 'Transfer a recorded performance', EXTEND: 'Extend an accepted clip', LIP_SYNC: 'Animate a portrait to recorded speech', UPSCALE: 'Upscale footage' };
 const referenceRoleLabels: Record<ReferenceRole, string> = { SOURCE_PERFORMANCE: 'Source performance and camera', IDENTITY: 'Character identity', COSTUME: 'Outfit', OBJECT: 'Product or object', ENVIRONMENT: 'Environment', RECORDING: 'Voice or soundtrack recording' };
 
-export function ShotWorkspace({ data }: { data: WorkspaceControlData }) {
-    if (data.visualProductionMode === 'GRAPHICS_ONLY') return <section aria-label="Graphic production" className="ff-card space-y-3 p-5"><h2 className="text-xl font-semibold">Your graphic cards</h2><p className="text-sm text-muted-foreground">This plan uses editable graphics, so it does not need AI video takes. Prepare the recipe above, review its timeline, then export. To add generated footage, create and approve a revised plan first.</p></section>;
-    return <div className="space-y-6"><DraftCastBindingPanel key={`${data.productionId}:${data.versionId ?? 'draft'}`} data={data} /><GenerationStatus productionId={data.productionId} canEdit={data.canEdit} /><header><h2 className="text-2xl font-semibold">Shots and takes</h2><p className="mt-2 text-sm text-muted-foreground">Bind the exact references and operation before approving the plan. Model availability and costs are checked again when a job is queued.</p></header>
-        {data.versionState === 'APPROVED' ? <p role="status" className="rounded-xl border border-border bg-card p-4 text-sm">This plan is approved and saved. Make a revised plan to change shot instructions or references. New takes keep the earlier results safe.</p> : null}
-        {!data.scenes.length ? <p className="ff-card p-6 text-sm text-muted-foreground">Create a draft plan to begin editing its scenes and shots.</p> : null}
-        {data.scenes.map((scene) => <section key={scene.id} className="space-y-4" aria-label={scene.title}><div><h3 className="text-lg font-semibold">{scene.title}</h3><p className="text-sm text-muted-foreground">{scene.purpose}</p></div>{scene.shots.map((shot) => <ShotCard key={`${shot.id}:${data.versionState}`} data={data} shot={shot} />)}</section>)}
-    </div>;
+const clipSteps = ['Set up a shot', 'Make clips', 'Review takes'] as const;
+const clipStepKeys = ['setup', 'make', 'review'] as const;
+
+export function ShotWorkspace({ data, recipe, initialStep, initialShot, initialTake }: {
+    data: WorkspaceControlData; recipe?: ReactNode; initialStep?: string; initialShot?: string; initialTake?: string;
+}) {
+    const shots = data.scenes.flatMap(scene => scene.shots);
+    const [shotId, setShotId] = useState(initialShot);
+    const shot = shots.find(item => item.id === shotId) ?? shots[0];
+    const [step, setStep] = useState(initialStep === 'review' ? 2 : initialStep === 'make' ? 1 : initialStep === 'setup' ? 0 : data.versionState === 'DRAFT' ? 0 : shot?.takes.length ? 2 : 1);
+    const heading = useRef<HTMLHeadingElement>(null);
+    function navigate(next: number, nextShot = shot?.id) {
+        setStep(next);
+        setShotId(nextShot);
+        const url = new URL(window.location.href);
+        url.searchParams.set('clipStep', clipStepKeys[next]);
+        if (nextShot) url.searchParams.set('shot', nextShot);
+        if (nextShot !== shot?.id) url.searchParams.delete('take');
+        window.history.replaceState(window.history.state, '', url);
+        requestAnimationFrame(() => { heading.current?.focus({ preventScroll: true }); heading.current?.scrollIntoView({ block: 'start' }); });
+    }
+    if (data.visualProductionMode === 'GRAPHICS_ONLY') return <>{recipe}<section aria-label="Graphic production" className="ff-card space-y-3 p-5"><h2 className="text-xl font-semibold">Your graphic cards</h2><p className="text-sm text-muted-foreground">Prepare your graphics, review the edit, then download it. To add filmed scenes, create a revised plan.</p></section></>;
+    return <section aria-label="Shots and takes" className="space-y-4">
+        <header className="space-y-3">
+            <div className="flex items-baseline justify-between gap-3"><h2 ref={heading} tabIndex={-1} className="scroll-mt-4 text-xl font-semibold">{clipSteps[step]}</h2><span className="shrink-0 text-sm text-muted-foreground">Step {step + 1} of 3</span></div>
+            <nav aria-label="Clip steps" className="grid grid-cols-3 gap-1">{clipSteps.map((label, index) => <button type="button" key={label} aria-current={step === index ? 'step' : undefined} onClick={() => navigate(index)} className={`min-h-11 border-b-2 px-1 text-sm focus-visible:outline-primary ${step === index ? 'border-primary font-semibold text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>{label}</button>)}</nav>
+        </header>
+        {shot && shots.length > 1 ? <label className="block text-sm font-medium">Shot<select className={controlInput} value={shot.id} onChange={event => navigate(step, event.target.value)}>{data.scenes.map(scene => <optgroup key={scene.id} label={scene.title}>{scene.shots.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</optgroup>)}</select></label> : null}
+        <div hidden={step !== 0}><DraftCastBindingPanel key={data.versionId} data={data} /></div>
+        <div hidden={step !== 1} className="space-y-4">{recipe}<details className="ff-card px-4"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Check individual shot jobs</summary><GenerationStatus productionId={data.productionId} canEdit={data.canEdit} /></details></div>
+        {shot ? <ShotCard key={`${shot.id}:${data.versionState}`} data={data} shot={shot} step={step} initialTake={initialTake} /> : <p className="ff-card p-5 text-sm text-muted-foreground">Create a plan to see the shots for this video.</p>}
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <Button type="button" variant="secondary" disabled={step === 0} onClick={() => navigate(step - 1)}>Back</Button>
+            {step < 2 ? <Button type="button" onClick={() => navigate(step + 1)}>Next: {clipSteps[step + 1]}</Button> : <Link className="ff-button-primary" href={`/dashboard/projects/${encodeURIComponent(data.projectExternalId)}/workspace/edit?production=${encodeURIComponent(data.productionId)}`}>Next: Edit &amp; sound</Link>}
+        </footer>
+    </section>;
 }
 
 function OnDemandVideo({url,label}:{url:string;label:string}) {
@@ -34,9 +64,11 @@ function OnDemandVideo({url,label}:{url:string;label:string}) {
     return <details onToggle={event=>setOpen(event.currentTarget.open)} className="space-y-2"><summary className="min-h-11 cursor-pointer text-sm">Preview {label.toLowerCase()}</summary>{open?<video src={url} controls playsInline preload="metadata" aria-label={label} className="max-h-72 w-full rounded-lg bg-background" />:null}</details>;
 }
 
-function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotControlView }) {
+function ShotCard({ data, shot, step, initialTake }: { data: WorkspaceControlData; shot: ShotControlView; step?: number; initialTake?: string }) {
     const router = useRouter(); const [pending, start] = useTransition(); const [error, setError] = useState(''); const [saved, setSaved] = useState('');
     const [controls, setControls] = useState(shot.operationControls);
+    const [takeId, setTakeId] = useState(initialTake);
+    const take = shot.takes.find(item => item.id === takeId) ?? shot.takes.reduce<ShotControlView['takes'][number] | undefined>((latest, item) => !latest || item.versionNumber > latest.versionNumber ? item : latest, undefined);
     const editable = data.canEdit && data.versionState === 'DRAFT' && shot.state !== 'LOCKED';
     const sourceEdit = isSourceVideoEdit(controls.operation);
     const [savedSourceId, ...extraSavedReferences] = shot.operationControls.referenceAssetIds;
@@ -47,7 +79,8 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
         setError(''); setSaved(''); try { const result = await action(); if (!result.success) setError(result.error || 'This change could not be saved.'); else { setSaved('Saved to this draft production.'); router.refresh(); } }
         catch { setError('This change could not be saved. Please try again.'); }
     }
-    return <article className="ff-card space-y-6 p-5 sm:p-7"><header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h4 className="font-semibold">{shot.title}</h4><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{shot.prompt}</p><p className="mt-2 text-xs text-muted-foreground">{shot.durationSeconds} seconds · {operationLabels[shot.operationControls.operation] || 'Video operation'}</p></div>{data.canEdit && data.versionState === 'APPROVED' ? <GenerateShotButton productionId={data.productionId} shotId={shot.id} /> : null}</header>
+    return <article className="ff-card space-y-6 p-5 sm:p-7"><header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h4 className="font-semibold">{shot.title}</h4><details className="mt-1 text-sm text-muted-foreground"><summary className="cursor-pointer py-2">Shot instructions</summary><p className="whitespace-pre-wrap">{shot.prompt}</p></details><p className="mt-2 text-xs text-muted-foreground">{shot.durationSeconds} seconds · {operationLabels[shot.operationControls.operation] || 'Video operation'}</p></div>{step === 1 && data.canEdit && data.versionState === 'APPROVED' ? <GenerateShotButton productionId={data.productionId} shotId={shot.id} /> : null}</header>
+        <div hidden={step !== undefined && step !== 0} className="space-y-4">
         {(shot.resourceBindings?.length || shot.dialogueSegments?.length) ? <section aria-label={`${shot.title} planned cast and dialogue`} className="space-y-3 rounded-xl border border-border p-4"><h5 className="text-sm font-semibold">Planned cast and dialogue</h5>
             {shot.resourceBindings?.map((binding, index) => { const resource = data.boundResources.find(item => item.id === binding.resourceVersionId); const character = data.boundResources.find(item => item.id === binding.characterResourceVersionId); return <p key={`${binding.resourceVersionId}:${index}`} className="text-sm">{binding.role.toLowerCase()} · {resource ? `${resource.name}, version ${resource.versionNumber}` : 'Reference needs review'}{character ? ` · assigned to ${character.name}` : ''}{binding.voiceVersionId ? ' · approved voice configuration' : ''}</p>; })}
             {shot.dialogueSegments?.map((segment, index) => { const speaker = data.boundResources.find(item => item.id === segment.speakerResourceVersionId); return <blockquote key={index} className="space-y-1 border-l-2 border-primary pl-3"><p className="text-xs text-muted-foreground">{speaker?.name || 'Speaker needs review'} · {segment.startSeconds}–{Number((segment.startSeconds + segment.durationSeconds).toFixed(3))} seconds{segment.delivery ? ` · ${segment.delivery}` : ''}</p><p className="whitespace-pre-wrap text-sm">{segment.text}</p></blockquote>; })}
@@ -82,14 +115,22 @@ function ShotCard({ data, shot }: { data: WorkspaceControlData; shot: ShotContro
             {(['firstFrameAssetId', 'lastFrameAssetId'] as const).map((field) => <label key={field} className="text-sm font-medium">{field === 'firstFrameAssetId' ? 'First frame' : 'Last frame'}<select className={controlInput} disabled={!editable || pending} value={controls[field]} onChange={(event) => setControls((previous) => ({ ...previous, [field]: event.target.value }))}><option value="">No image selected</option>{data.assets.filter((asset) => asset.mimeType.startsWith('image/')).map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select></label>)}
             <p className="text-xs leading-5 text-muted-foreground md:col-span-2">These are requirements, not promises of availability. FinalFrame stops if no reviewed model supports the operation, media, audio policy, and spending cap together.</p>
             {editable ? <Button type="submit" disabled={pending}>Save video settings</Button> : null}
-        </form></details>
-        <section aria-label={`${shot.title} takes`} className="space-y-3"><h5 className="text-sm font-semibold">Saved takes</h5>{!shot.takes.length ? <p className="text-sm text-muted-foreground">{data.versionState==='APPROVED'?'No takes yet.':'No takes yet. Approve the plan before starting a generation job.'}</p> : <div className="grid gap-4 lg:grid-cols-2">
+        </form></details></div>
+        <div hidden={step !== undefined && step !== 2} className="space-y-4"><section aria-label={`${shot.title} takes`} className="space-y-3"><h5 className="text-sm font-semibold">Saved takes</h5>{!shot.takes.length ? <p className="text-sm text-muted-foreground">{data.versionState==='APPROVED'?'No takes yet.':'No takes yet. Approve the plan before starting a generation job.'}</p> : <div className="space-y-3">
+            {shot.takes.length > 1 && <label className="block text-sm">Choose a take<select className={controlInput} value={take?.id} onChange={event => {
+                setTakeId(event.target.value);
+                const url = new URL(window.location.href);
+                url.searchParams.set('take', event.target.value);
+                url.searchParams.set('shot', shot.id);
+                url.searchParams.set('clipStep', 'review');
+                window.history.replaceState(window.history.state, '', url);
+            }}>{shot.takes.map(item => <option key={item.id} value={item.id}>Take {item.versionNumber} · {item.state.toLowerCase().replaceAll('_', ' ')}</option>)}</select></label>}
             {comparisonSource?.url && <figure className="min-w-0 space-y-3 rounded-xl border border-border p-4">
                 <figcaption className="text-sm font-medium">Original source · {comparisonSource.name}</figcaption>
                 <OnDemandVideo key={comparisonSource.url} url={comparisonSource.url} label="Original source footage" />
             </figure>}
-            {shot.takes.map((take) => <div key={take.id} className="min-w-0 space-y-3 rounded-xl border border-border p-4"><p className="text-sm font-medium">Take {take.versionNumber} · {take.status.toLowerCase()}</p>{take.url && take.mimeType?.startsWith('video/') ? <OnDemandVideo key={take.url} url={take.url} label={`Take ${take.versionNumber}${take.needsOriginalAudio ? ' · picture before original-voice restoration' : ''}`} /> : take.url && take.mimeType?.startsWith('image/') ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">View take image</a> : null}{take.needsOriginalAudio ? <p className="text-sm text-muted-foreground">This is the repaired picture. Restore the original recording in Edit &amp; sound before downloading the finished video.</p> : take.url ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">Open or download take</a> : <p className="text-xs text-muted-foreground">Media is not available for this take.</p>}{take.provider || take.model ? <p className="break-words text-xs text-muted-foreground">{take.provider} · {take.model}</p> : null}<ApprovalControls data={data} resourceType="shotVersion" resourceId={take.id} state={take.state} /></div>)}</div>}</section>
-        <EditedTakeImport data={data} shot={shot} />
+            {take && <div key={take.id} className="min-w-0 space-y-3 rounded-xl border border-border p-4"><p className="text-sm font-medium">Take {take.versionNumber} · {take.status.toLowerCase()}</p>{take.url && take.mimeType?.startsWith('video/') ? <OnDemandVideo key={take.url} url={take.url} label={`Take ${take.versionNumber}${take.needsOriginalAudio ? ' · picture before original-voice restoration' : ''}`} /> : take.url && take.mimeType?.startsWith('image/') ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">View take image</a> : null}{take.needsOriginalAudio ? <p className="text-sm text-muted-foreground">This is the repaired picture. Restore the original recording in Edit &amp; sound before downloading the finished video.</p> : take.url ? <a href={take.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm text-primary underline">Open or download take</a> : <p className="text-xs text-muted-foreground">Media is not available for this take.</p>}{take.provider || take.model ? <p className="break-words text-xs text-muted-foreground">{take.provider} · {take.model}</p> : null}<ApprovalControls data={data} resourceType="shotVersion" resourceId={take.id} state={take.state} /></div>}</div>}</section>
+        <EditedTakeImport data={data} shot={shot} /></div>
         {saved ? <p role="status" className="text-sm text-emerald-300">{saved}</p> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </article>;
