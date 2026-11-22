@@ -58,7 +58,7 @@ async function check(name, run) { await run(); checks++; console.log('PASS ' + n
     const filename = path.join(root, 'tests/production-graph/run-current-finishing-ui.cjs'), m = new Module(filename, module); m.filename = filename; m.paths = Module._nodeModulePaths(path.dirname(filename)); m._compile(fs.readFileSync(filename, 'utf8').split('let checks=0;')[0] + '\nmodule.exports={fixture};', filename);
     const s = m.exports.fixture(true); assert.equal(s.view().review.availability, 'NOT_STARTED'); assert.equal(s.view().renderer.state, 'NOT_STARTED');
     s.jobs.push({ _id: 'j3', manifestId: 'manifest3', status: 'QUEUED' }); s.render(); assert.equal(s.view().review.availability, 'WAITING');
-    s.choose('manifest2'); assert.equal(s.view().review.availability, 'READY'); assert.equal(s.view().download.href, 'fixture-private-historical-file'); assert.equal(s.writes.length, 0);
+    s.choose('manifest2'); assert.equal(s.view().review.availability, 'READY'); assert.equal(s.view().download.href, '/api/download/export/export2'); assert.equal(s.writes.length, 0);
     const card = load('src/components/review/review-state-card.tsx'); const html = renderToStaticMarkup(React.createElement(card.ReviewStateCard, { availability: 'NOT_STARTED' })); assert(html.includes('Finishing has not started')); assert(!html.includes('still working')); assert(!html.includes('animate-spin'));
   });
   console.log(`Current Edit UI: ${checks} PASS; actual server projection, React/SSR; no network/DB/provider calls.`);

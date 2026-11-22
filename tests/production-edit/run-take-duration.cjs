@@ -70,7 +70,6 @@ async function check(name, test) { await test(); checks++; console.log('PASS ' +
     const file = path.join(__dirname, 'run-composer-labels-ui.cjs'), m = new Module(file, module); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
     let source = fs.readFileSync(file, 'utf8').split('let checks = 0;')[0];
     source = source.replace("'./soundtrack-editor':", "'../../../renderer/src/output-presets': require('../recipes/backend-fixture.cjs').load('renderer/src/output-presets.ts'), './soundtrack-editor':");
-    source = source.replace("createWorkspaceTimeline: async () => { calls.push('create'); }", "createWorkspaceTimeline: async input => { calls.push(input); return { success: true }; }");
     m._compile(source + '\nmodule.exports={harness};', file);
     const h = m.exports.harness(false, { projectExternalId: 'external', productionId: 'production', versionId: 'version', assets: [{ id: 'asset', mimeType: 'video/mp4', durationSeconds: 3.92, state: 'LOCKED' }], scenes: [{ title: 'Scene', shots: [{ title: 'Shot', durationSeconds: 4, takes: [{ id: 'take', assetId: 'asset', state: 'LOCKED', versionNumber: 1 }] }] }] });
     h.render(); h.find(n => n.type === 'select' && n.props['aria-label'] === 'Approved shot take').props.onChange({ target: { value: 'take' } });
@@ -80,8 +79,9 @@ async function check(name, test) { await test(); checks++; console.log('PASS ' +
     assert.equal(length().props.value, 4); assert.equal(length().props.max, 3.9);
     length().props.onChange({ target: { value: '3.91' } }); h.render(); assert(add().props.disabled);
     length().props.onChange({ target: { value: '3.9' } }); h.render(); assert.equal(add().props.disabled, false); add().props.onClick(); h.render();
+    h.find(n => n.props?.children === 'Review' && n.props.onClick).props.onClick(); h.render();
     h.find(n => n.props?.children === 'Create draft timeline' && n.props.onClick).props.onClick(); await new Promise(resolve => setImmediate(resolve));
-    const submitted = h.calls.find(call => typeof call === 'object'); assert.deepEqual(submitted.clips, [{ kind: 'TAKE', shotVersionId: 'take', durationSeconds: 3.9 }]); assert.equal(submitted.fps, 30);
+    const submitted = h.calls.find(call => typeof call === 'object').create; assert.deepEqual(submitted.clips, [{ kind: 'TAKE', shotVersionId: 'take', durationSeconds: 3.9 }]); assert.equal(submitted.fps, 30);
   });
   console.log(`Take duration: ${checks} PASS; actual canonical authoring and UI handlers, no database/provider/render calls.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
