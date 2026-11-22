@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useAction } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import type { Id } from '../../../convex/_generated/dataModel';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -22,6 +25,28 @@ const outputPresets = [
 ];
 function timelineFormat(timeline: WorkspaceControlData['timelines'][number]) {
     return `${outputFormatLabel(timeline.outputPreset,timeline.width,timeline.height)}${timeline.width&&timeline.height?` · ${timeline.width}×${timeline.height}`:''}`;
+}
+
+function MeasureTakeDuration({ takeId, assetId }: { takeId: string; assetId: string }) {
+    const measure = useAction(api.recipeInputs.measure);
+    const router = useRouter();
+    const [pending, start] = useTransition();
+    const [error, setError] = useState('');
+    function checkLength() {
+        start(async () => {
+            setError('');
+            try {
+                await measure({ takeId: takeId as Id<'shotVersions'>, assetId: assetId as Id<'assets'> });
+                router.refresh();
+            } catch {
+                setError('Could not verify the length. Check that the take and its video are approved and try again.');
+            }
+        });
+    }
+    return <div className="space-y-2">
+        <Button size="sm" variant="secondary" disabled={pending} onClick={checkLength}>{pending ? 'Checking length…' : 'Check video length'}</Button>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    </div>;
 }
 
 export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
@@ -62,6 +87,7 @@ export function TimelineComposer({ data }: { data: WorkspaceControlData }) {
                         </select>
                     </label>
                     {selectedTake && <><label className="block text-sm font-medium">Take length in seconds<input aria-label="Take length in seconds" type="number" min={1 / outputFps} max={takeFrameLimit} step={1 / outputFps} className={controlInput} value={takeDuration} onChange={event => setTakeDuration(Number(event.target.value))} /></label><p className="text-sm text-muted-foreground">Approved shot: {selectedTake.durationSeconds} s. {selectedTakeAsset?.mimeType.startsWith('video/') ? selectedTakeAsset.durationSeconds !== undefined ? `Actual source: ${selectedTakeAsset.durationSeconds} s.` : 'Actual source duration is unavailable.' : 'Still-image take.'} Choose at most {Number(takeFrameLimit.toFixed(6))} s at {outputFps} fps. This trims only the new timeline, without extending or changing the approved take.</p>{!takeDurationValid && <p role="status" className="text-sm text-amber-300">Choose an available positive length in {outputFps} fps frame steps before adding this take.</p>}</>}
+                    {selectedTake && selectedTakeAsset?.mimeType.startsWith('video/') && selectedTakeAsset.durationSeconds === undefined && !takeNeedsMediaApproval && <MeasureTakeDuration key={selectedTake.id} takeId={selectedTake.id} assetId={selectedTakeAsset.id} />}
                     {takeNeedsMediaApproval && <p role="status" className="text-sm text-amber-300">
                         Approve this take’s source asset before adding it to the timeline. <Link className="underline" href={mediaHref}>Review source in Media</Link>
                     </p>}
