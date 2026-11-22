@@ -53,6 +53,16 @@ const approve=(ctx,runId,contentHash)=>ctx.call('recipeDirector','approveCutMedi
   for(const patch of[{projectId:'foreign'},{productionId:'foreign-production'},{response:{assetId:'other-audio'}},{request:{preparationKind:'VOICE_PREVIEW',text:'Hello welcome'}},{request:{...ctx.rows.get('narration-job').request,text:'Different spoken line'}},{request:{...ctx.rows.get('narration-job').request,voiceVersionId:'different-voice'}}]){const original=structuredClone(ctx.rows.get('narration-job'));Object.assign(ctx.rows.get('narration-job'),patch);await assert.rejects(view(ctx,runId));Object.assign(ctx.rows.get('narration-job'),original);}
   const original=structuredClone(ctx.rows.get('narration-node'));Object.assign(ctx.rows.get('narration-node'),{request:{mode:'RECORDING',sourceAssetId:'not-this-recording',startFrame:0,durationFrames:60}});await assert.rejects(view(ctx,runId));Object.assign(ctx.rows.get('narration-node'),original);
  });
+ await test('ordinary stock narration uses the frozen run-node voice without losing explicit dialogue or cross-voice checks',async()=>{
+  const{ctx,runId}=await setup();addNarration(ctx,runId);
+  const node=ctx.rows.get('narration-node');node.voiceVersionId='voice-v1';node.request.voiceId='voice';delete node.request.voiceVersionId;delete node.request.voice.voiceVersionId;
+  const before=ctx.count('generationJobs');
+  const cut=await view(ctx,runId);assert.equal(cut.ready,false);assert(cut.blocked.some(row=>row.code==='AUDIO_TIMING_REVIEW_REQUIRED'));assert.equal(cut.pendingAudio[0].assetId,'audio');
+  node.request.voiceVersionId='different-version';await assert.rejects(view(ctx,runId),/BINDING_CHANGED/);delete node.request.voiceVersionId;
+  ctx.rows.get('narration-job').request.voiceVersionId='different-version';await assert.rejects(view(ctx,runId),/BINDING_CHANGED/);ctx.rows.get('narration-job').request.voiceVersionId='voice-v1';
+  ctx.rows.get('narration-job').request.targetVoiceId='different-voice';await assert.rejects(view(ctx,runId),/BINDING_CHANGED/);
+  assert.equal(ctx.count('generationJobs'),before);assert.equal(ctx.count('approvals'),0);assert.equal(ctx.count('reservations'),0);
+ });
  await test('native speech is retained only when the saved job policy and technical output both prove it',async()=>{
   const{ctx,runId}=await setup('GENERATE');const missing=await view(ctx,runId);assert.equal(missing.ready,false);assert(missing.blocked.some(row=>row.code==='NATIVE_AUDIO_REVIEW_REQUIRED'));ctx.rows.get('retained-job').response.technicalProbe.hasAudio=true;const present=await view(ctx,runId);assert.equal(present.ready,true);assert.equal(present.clips[0].audioPolicy,'KEEP_SOURCE');
   const silent=await setup();silent.ctx.nodes(silent.runId).find(row=>row.operation==='GENERATION').request.shot.nativeAudioPolicy='SILENT';silent.ctx.rows.get('retained-job').request.audioPolicy='GENERATE';silent.ctx.rows.get('retained-job').response.technicalProbe.hasAudio=true;await assert.rejects(view(silent.ctx,silent.runId),/BINDING_CHANGED/);

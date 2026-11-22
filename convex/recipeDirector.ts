@@ -73,7 +73,12 @@ async function cut(ctx:ReadCtx,runId:Id<'recipeRuns'>){
         const job=node.linkedGenerationJobId?await ctx.db.get(node.linkedGenerationJobId):null;
         const sourceId=typeof object(job?.request).recipeRunNodeId==='string'?ctx.db.normalizeId('recipeRunNodes',String(object(job?.request).recipeRunNodeId)):null;
         const origin=sourceId?await ctx.db.get(sourceId):null;
-        if(!job||job.status!=='COMPLETED'||job.operation!=='PREPARATION'||job.projectId!==run.projectId||job.productionId!==run.productionId||object(job.request).preparationKind!=='NARRATION'||object(job.response).assetId!==node.resultId||object(job.request).text!==request.text||object(job.request).voiceVersionId!==request.voiceVersionId||!origin||origin.projectId!==run.projectId||origin.productionVersionId!==run.productionVersionId||origin.linkedGenerationJobId!==job._id)throw new Error('DIRECTOR_CUT_BINDING_CHANGED');
+        // Ordinary narration selects a project voice, then preview freezes its
+        // version on the canonical run node. Timed dialogue also carries an
+        // explicit request version. Both must resolve to that same snapshot.
+        const voiceVersionId=node.voiceVersionId??request.voiceVersionId;
+        const voiceId=request.voiceId??object(request.voice).id;
+        if(!voiceVersionId||request.voiceVersionId!==undefined&&request.voiceVersionId!==voiceVersionId||!job||job.status!=='COMPLETED'||job.operation!=='PREPARATION'||job.projectId!==run.projectId||job.productionId!==run.productionId||object(job.request).preparationKind!=='NARRATION'||object(job.response).assetId!==node.resultId||object(job.request).text!==request.text||object(job.request).voiceVersionId!==voiceVersionId||object(job.request).targetVoiceId!==voiceId||!origin||origin.projectId!==run.projectId||origin.productionVersionId!==run.productionVersionId||origin.linkedGenerationJobId!==job._id||origin.voiceVersionId!==undefined&&origin.voiceVersionId!==voiceVersionId)throw new Error('DIRECTOR_CUT_BINDING_CHANGED');
       }
     }
     const source=await media(node.operation==='MUSIC_ANALYSIS'?request.sourceAssetId:node.resultId);
