@@ -17,3 +17,38 @@ assert.throws(()=>parsePlannedGraphics(Array(17).fill(card)),/INVALID/);
 assert.throws(()=>parsePlannedGraphics([{...card,durationSeconds:40},{...card,durationSeconds:40}]),/DURATION/);
 const parsed=parsePlannedGraphics(cards);parsed[0].title='Edited';assert.equal(cards[0].title,'One small step');assert.equal(recipe.steps[0].title,'One small step');
 console.log('PASS planned graphic order, exact text/colours/timing, no AI footage, legacy compatibility, duration mismatch, invalid input denial and snapshot independence');
+const {validateGraphicsOnlyPlan,plannedVisualMode}=load('src/lib/production/planned-graphics.ts');
+const shot={durationSeconds:2,requiredAssetIds:[],operation:'GENERATE',audioPolicy:'SILENT',resourceBindings:[],dialogueSegments:[],storyActions:[]};
+const plan={visualProductionMode:'GRAPHICS_ONLY',graphicCards:cards,sequences:[{scenes:[{shots:[shot,{...shot}]}]}]};
+assert.equal(validateGraphicsOnlyPlan(plan,4),true);
+assert.equal(validateGraphicsOnlyPlan({...plan,visualProductionMode:undefined},4),false,'legacy cards never imply free footage');
+assert.equal(validateGraphicsOnlyPlan({...plan,visualProductionMode:'FOOTAGE'},4),false,'mixed plans keep footage route');
+assert.throws(()=>plannedVisualMode({visualProductionMode:'FREE'}),/INVALID/);
+assert.throws(()=>validateGraphicsOnlyPlan({...plan,graphicCards:[]},4),/REQUIRED/);
+assert.throws(()=>validateGraphicsOnlyPlan(plan,8),/DURATION/);
+for(const patch of [{requiredAssetIds:['source']},{operation:'EDIT'},{audioPolicy:'KEEP_SOURCE'},{storyActions:[{action:'walk'}]},{resourceBindings:[{}]},{dialogueSegments:[{}]},{metadata:{requiresFirstFrame:true}},{metadata:{previousJobId:'accepted'}}]){
+ assert.throws(()=>validateGraphicsOnlyPlan({...plan,sequences:[{scenes:[{shots:[{...shot,...patch},{...shot}]}]}]},4),/CONFLICT/);
+}
+const workspaceShots=[0,1].map(index=>({id:`s${index}`,key:`sequence_0_scene_0_shot_${index}`,title:'card',durationSeconds:2,operation:'GENERATE',referenceAssetIds:[],recipeReferenceSlots:[]}));
+for(const videoType of ['PRODUCT_SAAS_LAUNCH','EXPLAINER_STORY']){
+ const configured={...input,videoType,visualMode:'GRAPHICS_ONLY',...(videoType==='EXPLAINER_STORY'?{narrationMode:'RECORDING',recordingAssetId:'approved-recording',recordingStartSeconds:0,recordingDurationSeconds:4}:{})};
+ const result=buildWorkspaceRecipe(configured,workspaceShots);
+ assert.deepEqual(result.visualOrder,['graphic_1','graphic_2']);
+ assert.deepEqual(result.steps.filter(s=>s.operation==='GRAPHIC').map(s=>s.title),cards.map(c=>c.title));
+ assert(!result.steps.some(s=>s.operation==='GENERATION'));
+ assert.throws(()=>buildWorkspaceRecipe({...configured,plannedGraphics:[]},workspaceShots),/complete planned cards/);
+ assert.throws(()=>buildWorkspaceRecipe({...configured,referencePrompt:'a person'},workspaceShots),/complete planned cards/);
+ assert.throws(()=>buildWorkspaceRecipe(configured,[{...workspaceShots[0],durationSeconds:5}]),/DURATION/);
+}
+const mixed=buildWorkspaceRecipe({...input,videoType:'PRODUCT_SAAS_LAUNCH',visualMode:'GENERATE',graphicTemplate:'end-card',title:'CTA',subtitle:'',brandName:'',callToAction:'',graphicSeconds:2},workspaceShots);
+assert.equal(mixed.steps.filter(s=>s.operation==='GENERATION').length,2,'cards cannot waive mixed footage purchases');
+console.log('PASS explicit graphics-only product/explainer cards, narration retention, exact duration, mixed footage costs and conflicting controls');
+(async()=>{
+ const {fixture}=require('./backend-fixture.cjs');const ctx=fixture();
+ const validate=load('convex/planningVideo.ts').validateAutomaticVideoPlan;
+ const result=await validate(ctx,ctx.rows.get('project'),{videoType:'PRODUCT_SAAS_LAUNCH',mode:'IDEA',qualityTier:'STANDARD',inputAssetIds:[]},'FULL_HD',4,plan,'production',{});
+ assert.equal(result.mode,'RENDERER');assert.deepEqual(result.shotSeconds,[2,2]);
+ await assert.rejects(validate(ctx,ctx.rows.get('project'),{videoType:'PRODUCT_SAAS_LAUNCH',mode:'IDEA',qualityTier:'STANDARD',inputAssetIds:[]},'FULL_HD',4,{...plan,visualProductionMode:'FOOTAGE'},'production',{}));
+ assert.equal(ctx.count('generationJobs'),0);assert.equal(ctx.count('providerBudgetReservations'),0);
+ console.log('PASS canonical graphics validation without video catalog; FOOTAGE still requires compatible model; no purchases');
+})().catch(error=>{console.error(error);process.exitCode=1;});

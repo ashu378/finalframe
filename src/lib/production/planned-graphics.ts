@@ -41,3 +41,26 @@ export function parsePlannedGraphics(value: unknown, expectedSeconds?: number): 
     if (total > 60 || cards.length && expectedSeconds !== undefined && Math.abs(total - expectedSeconds) > 0.001) throw Error('PLANNED_GRAPHICS_DURATION');
     return cards;
 }
+
+/** An explicit plan contract, not a guess from the presence of an end card. */
+export type VisualProductionMode = 'GRAPHICS_ONLY' | 'FOOTAGE';
+export function plannedVisualMode(plan: unknown): VisualProductionMode | undefined {
+    const value = (plan as { visualProductionMode?: unknown } | null)?.visualProductionMode;
+    if (value !== undefined && value !== 'GRAPHICS_ONLY' && value !== 'FOOTAGE') throw Error('PLANNED_VISUAL_MODE_INVALID');
+    return value;
+}
+export function validateGraphicsOnlyPlan(plan: unknown, expectedSeconds?: number): boolean {
+    if (plannedVisualMode(plan) !== 'GRAPHICS_ONLY') return false;
+    const value = plan as { graphicCards?: unknown; sequences?: Array<{ scenes?: Array<{ shots?: Array<Record<string, any>> }> }> };
+    if (!parsePlannedGraphics(value.graphicCards, expectedSeconds).length) throw Error('PLANNED_GRAPHICS_REQUIRED');
+    const shots = value.sequences?.flatMap(sequence => sequence.scenes?.flatMap(scene => scene.shots ?? []) ?? []) ?? [];
+    if (!shots.length) throw Error('PLANNED_GRAPHICS_SHOTS_REQUIRED');
+    for (const shot of shots) {
+        const controls = { ...(shot.metadata ?? {}), ...shot };
+        if (['requiredAssetIds', 'referenceAssetIds', 'resourceBindings', 'resourceVersionIds', 'dialogueSegments', 'storyActions', 'recipeReferenceSlots'].some(key => controls[key]?.length)
+            || ['firstFrameAssetId', 'lastFrameAssetId', 'requiresFirstFrame', 'requiresLastFrame', 'requiresMask', 'maskAssetId', 'sourceAssetId', 'previousJobId', 'generateAudio', 'requiresSourceAudioPreservation'].some(key => controls[key])
+            || ![undefined, 'GENERATE'].includes(controls.operation) || ![undefined, 'GENERATE'].includes(controls.videoTask)
+            || ![undefined, 'SILENT'].includes(controls.audioPolicy)) throw Error('PLANNED_GRAPHICS_FOOTAGE_CONFLICT');
+    }
+    return true;
+}

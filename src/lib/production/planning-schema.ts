@@ -117,9 +117,10 @@ export const LEGACY_DIRECTOR_PLAN_SCHEMA = {
     schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations', 'graphicCards'],
+        required: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations', 'graphicCards', 'visualProductionMode'],
         properties: {
             graphicCards: PLANNED_GRAPHICS_SCHEMA,
+            visualProductionMode: { type: 'string', enum: ['GRAPHICS_ONLY', 'FOOTAGE'] },
             summary: { type: 'string', minLength: 1 },
             assumptions: stringList,
             questions: stringList,

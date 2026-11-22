@@ -1,3 +1,4 @@
+import { validateGraphicsOnlyPlan } from '../src/lib/production/planned-graphics';
 import { parseStoryActions } from '../src/lib/production/story-actions';
 import { resolveAudioSourceCertificate } from './audioCertificates';
 import { resolvePortraitSourceCertificate } from './imageCertificates';
@@ -76,6 +77,7 @@ async function planningVideoConstraintsImpl(ctx:ReadCtx,project:Doc<'projects'>,
 }
 async function validateAutomaticVideoPlanImpl(ctx:ReadCtx,project:Doc<'projects'>,input:unknown,outputPreset:string,totalSeconds:number,plan:unknown,productionId?:Id<'productions'>,continuitySnapshot?:unknown,asOf=Date.now()){
     const scope=await routeContext(ctx,project,input,outputPreset,productionId),shots=[];
+    if(validateGraphicsOnlyPlan(plan,totalSeconds)){scope.mode='RENDERER';scope.rendererReason='GRAPHIC';}
     const source=object(input),bibleId=typeof source.continuityBibleId==='string'?ctx.db.normalizeId('continuityBibles',source.continuityBibleId):null;
     const continuity=continuitySnapshot===undefined?await resolvePlanningContinuity(ctx,project._id,productionId,bibleId??undefined,String(source.prompt??source.script??'').slice(0,256)):continuitySnapshot;
     for(const sequence of object(plan).sequences??[])for(const scene of object(sequence).scenes??[])for(const raw of object(scene).shots??[]){const shot=object(raw),metadata=plannedShotMetadata(shot);
