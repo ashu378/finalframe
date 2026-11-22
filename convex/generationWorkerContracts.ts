@@ -53,6 +53,7 @@ export function safeGenerationError(code: string, preparation = false, active = 
   if (code === 'PROVIDER_RATE_LIMIT') return 'The video provider is busy. FinalFrame will check again shortly.';
   if (code === 'PROVIDER_PAYMENT_REQUIRED') return 'Video generation is temporarily unavailable.';
   if (code === 'RECONCILIATION_REQUIRED') return 'This submission needs an administrator check before it can continue. It will not be submitted again automatically.';
+  if (code.startsWith('ACTION_WINDOW_')) return code==='ACTION_WINDOW_WORKER_UNAVAILABLE' ? 'The shot repair is saved. Its finishing service is temporarily unavailable; resume this same job when it is ready.' : 'This localized repair could not preserve the source timing or picture safely. The original take and voices are retained; it will not be purchased again automatically.';
   if (code === 'MEDIA_VALIDATION_FAILED') return 'The generated video did not pass its technical checks. Your other takes are unchanged.';
   if (code === 'MEDIA_PROBE_BUSY' || code === 'MEDIA_PROBE_UNAVAILABLE') {
     if (!active) return 'Automatic media checks paused. Resume this saved take to try again.';

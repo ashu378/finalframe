@@ -1,3 +1,5 @@
+import { prepareActionWindowInput,composeActionWindowOutput,getActionWindowState,retainRawActionWindow } from './actionWindowWorker';
+import { ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import type { FunctionReference } from 'convex/server';
@@ -28,6 +30,7 @@ export const run = internalAction({
       const input = await ctx.runQuery(inputRef, lease);
       const job = input.job;
       const request = object(input.request);
+      const isolatedRepair=object(request.storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION;
       const constraints = { ...request, ...object(request.constraints) };
       const options = { maxRetries: 0, fallbackModels: [], idempotencyKey: job.idempotencyKey, allowDiscoveredModel: true, timeoutMs: 60_000, maxResponseBytes: GENERATION_MAX_MEDIA_BYTES };
       if (job.operation === 'PREPARATION') {
@@ -42,6 +45,7 @@ export const run = internalAction({
       if (!providerJobId) {
         if (!process.env.OPENROUTER_API_KEY?.trim()) throw Object.assign(new Error('MISSING_API_KEY'), { code: 'MISSING_API_KEY' });
         const references = input.references as Array<{ assetId: string; url: string; kind: 'image' | 'video' | 'audio' }>;
+        if(isolatedRepair){const prepared=await prepareActionWindowInput(ctx,lease);const sourceId=object(request.storyRepair).sourceAssetId;const index=references.findIndex(r=>r.assetId===sourceId&&r.kind==='video');if(index<0||references.length!==1||!prepared.url)throw new Error('ACTION_WINDOW_BINDING_CHANGED');references[index]={...references[index],url:prepared.url};}
         const frameIds = [request.firstFrameAssetId, request.lastFrameAssetId];
         const frameImages: Array<{ url: string; frameType: 'first_frame' | 'last_frame' }> = [];
         for (const [index, id] of frameIds.entries()) {
@@ -86,6 +90,8 @@ export const run = internalAction({
       let assetId = input.outputAssetId as string | undefined;
       let outputUrl = input.outputUrl as string | undefined;
       if (!assetId || !outputUrl) {
+        const retainedWindow=isolatedRepair?await getActionWindowState(ctx,lease):null;
+        if(!retainedWindow?.actionWindowRaw){
         if (Date.now() - Number(job.startedAt || job.createdAt) > 30 * 60 * 1000) throw Object.assign(new Error('Provider polling needs review.'), { code: 'PROVIDER_POLL_TIMEOUT' });
         const current = await pollVideo(providerJobId!, options);
         const status = String(current.status || '').toLowerCase();
@@ -98,10 +104,14 @@ export const run = internalAction({
         if (!done) return null;
         const media = await downloadVideo(providerJobId!, options);
         if (!media.body.byteLength || media.body.byteLength > GENERATION_MAX_MEDIA_BYTES || !media.contentType.toLowerCase().startsWith('video/')) throw Object.assign(new Error('MEDIA_VALIDATION_FAILED'), { code: 'MEDIA_VALIDATION_FAILED' });
-        const storageId = await ctx.storage.store(new Blob([media.body], { type: media.contentType }));
-        const output = await ctx.runMutation(jobs.recordOutput, { ...lease, storageId, contentType: media.contentType, byteSize: media.body.byteLength });
-        assetId = output.assetId;
-        outputUrl = await ctx.storage.getUrl(storageId) || undefined;
+        if(isolatedRepair){await retainRawActionWindow(ctx,lease,media.body);}else{
+          const storageId = await ctx.storage.store(new Blob([media.body], { type: media.contentType }));
+          const output = await ctx.runMutation(jobs.recordOutput, { ...lease, storageId, contentType: media.contentType, byteSize: media.body.byteLength });
+          assetId = output.assetId;
+          outputUrl = await ctx.storage.getUrl(storageId) || undefined;
+        }
+        }
+        if(isolatedRepair){const composed=await composeActionWindowOutput(ctx,lease);const output=await ctx.runMutation(jobs.recordOutput,{...lease,storageId:composed.storageId,contentType:'video/mp4',byteSize:composed.byteSize});assetId=output.assetId;outputUrl=composed.url||undefined;}
       }
       if (!assetId || !outputUrl) throw new Error('Canonical stored output is missing.');
       const rendererUrl = process.env.RENDER_WORKER_URL?.trim();
@@ -129,7 +139,7 @@ export const run = internalAction({
       const code = details.code || castCode || 'GENERATION_WORKER_ERROR';
       const rejected = !submissionAttempted || (typeof details.status === 'number' && details.status >= 400 && details.status < 500 && details.status !== 408);
       const submissionDiagnostic = sanitizeSubmissionDiagnostic(object(details.details).submissionDiagnostic);
-      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: code !== 'MEDIA_VALIDATION_FAILED', ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {
+      await ctx.runMutation(jobs.fail, { ...lease, errorCode: code, retryable: !['MEDIA_VALIDATION_FAILED','ACTION_WINDOW_MEDIA_INVALID','ACTION_WINDOW_BINDING_CHANGED'].includes(code), ambiguous: submissionAttempted && !rejected, rejected, ...(submissionDiagnostic ? { submissionDiagnostic } : {}) }).catch(() => {
         // A stale action cannot mutate a newer lease. The scheduled expiry
         // recovers accepted jobs or holds an ambiguous submission for review.
       });

@@ -1,3 +1,5 @@
+import { requirePreparedActionWindow } from './actionWindowRepairs';
+import { ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
 import { resolveStoryRepair, repairAudioCertificate } from './storyActionRepairs';
 import { parseStoryActions, storyActionPrompt } from '../src/lib/production/story-actions';
 import { resolveShotDependencyProof, synchronizeShotDependencies } from './productionDependencies';
@@ -328,7 +330,9 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.requiresSourceAudioPreservation = source.hasAudio;
       normalizedRequest.resolution = undefined;
     }
-    normalizedRequest.prompt = String(normalizedRequest.prompt) + storyActionPrompt(parseStoryActions(metadata.storyActions, shot.durationSeconds));
+    // Temporal repair already contains rebased failed actions; appending the
+    // original absolute shot timing would contradict its cropped provider input.
+    normalizedRequest.prompt = String(normalizedRequest.prompt) + (object(normalizedRequest.storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION?'':storyActionPrompt(parseStoryActions(metadata.storyActions, shot.durationSeconds)));
     if (Object.values(directing).some(value=>Array.isArray(value)?value.length>0:typeof value==='string'&&value.length>0)) normalizedRequest.prompt = `${normalizedRequest.prompt}\nCreator's shot direction (preserve the approved project references): ${JSON.stringify(directing)}`;
     if (operation === 'PERFORMANCE_TRANSFER') {
       normalizedRequest.motionSource = await resolveMotionSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, referenceBindings: references.referenceBindings, ...(execution ? {actorId:access.user._id} : {}) });
@@ -640,6 +644,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
           await requireApprovedResource(ctx,project._id,'asset',currentRepair.assetId,undefined,actor._id);
           const audioSource = await repairAudioCertificate(ctx,project._id,currentRepair.audioAssetId,actor._id);
           if (stable({...currentRepair.proof,audioSource}) !== stable(repair)) throw new Error('The repair source or review changed.');
+          if(repair.approachVersion===ACTION_WINDOW_REPAIR_VERSION)await requirePreparedActionWindow(ctx,job);
         }
         const source = await resolveVideoEditSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
         const frozen = object(request.editQuote);
@@ -693,6 +698,7 @@ export const recordOutput = internalMutation({ args: { ...leaseArgs, storageId: 
   const existingId = object(job.response).assetId;
   if (typeof existingId === 'string') return { assetId: existingId };
   const storage = await ctx.db.system.get('_storage', args.storageId);
+  if(object(object(job.request).storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION&&object(object(job.response).actionWindowComposed).storageId!==args.storageId)throw new Error('ACTION_WINDOW_COMPOSITION_REQUIRED');
   if (!storage || !job.projectId || !job.providerJobId) throw new Error('Canonical generated media is missing.');
   const assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: ['GENERATED_VIDEO'], storageId: args.storageId, mimeType: args.contentType, byteSize: storage.size, checksum: storage.sha256, metadata: { technicalStatus: 'PENDING', generationJobId: job._id, shotVersionId: job.shotVersionId }, provenance: { provider: job.provider, model: job.model, providerTaskId: job.providerJobId, generationJobId: job._id }, createdAt: Date.now(), updatedAt: Date.now() });
   await ctx.db.patch(job._id, { executionStage: 'TECHNICAL_QC', progress: 85, response: { ...object(job.response), assetId }, updatedAt: Date.now() });

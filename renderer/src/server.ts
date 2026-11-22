@@ -9,6 +9,7 @@ import { RemotionRenderRuntime } from './remotion/runtime.js';
 import { InjectableFFmpegAdapter, InjectableFFprobeAdapter } from './media/ffmpeg.js';
 import { sendRendererCallback } from './contracts/callback.js';
 import type { RenderManifest, RenderMode } from './types.js';
+import { remoteActionWindow,actionWindowErrorStatus } from './media/remote-action-window.js';
 import { probeRemoteMedia } from './media/remote-probe.js';
 import { extractCanonicalAudio } from './media/extract-audio.js';
 import { SOURCE_AUDIO_VERSION } from './media/source-audio-contract.js';
@@ -131,12 +132,19 @@ heartbeatTimer.unref();
 
 createServer(async (request, response) => {
   try {
-    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer',storage:await observeWorkerStorage({outputRoot,stateRoot}), rendererVersion,formatVariantVersion:FORMAT_VARIANT_VERSION,sourceAudioVersion:SOURCE_AUDIO_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
-    if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
+    if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true, service: 'finalframe-renderer',storage:await observeWorkerStorage({outputRoot,stateRoot}), rendererVersion,actionWindowVersion:process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true'?'ACTION_WINDOW_V1':null,formatVariantVersion:FORMAT_VARIANT_VERSION,sourceAudioVersion:SOURCE_AUDIO_VERSION,graphicsLayoutVersions:[1,2],motionTemplateIds:SUPPORTED_MOTION_TEMPLATE_IDS, beatAnalysis: { algorithmVersion: BEAT_ANALYSIS_VERSION, enabled: process.env.FINALFRAME_BEAT_ANALYSIS_ENABLED === 'true' },movieMerge:{version:1,enabled:process.env.FINALFRAME_MOVIE_ENABLED==='true'} });
+    if (request.method !== 'POST' || !['/render', '/media/probe', '/media/extract-audio', '/media/analyze-beats', '/media/action-window', '/movie/merge'].includes(request.url ?? '')) return json(response, 404, { error: 'Not found' });
     if (!secret) return json(response, 503, { error: 'Renderer authentication is not configured.' });
     const headerSecret = request.headers['x-finalframe-worker-secret'];
     if (headerSecret !== secret) return json(response, 401, { error: 'Unauthorized' });
     const payload = await body(request);
+    if(request.url==='/media/action-window'){
+      if(process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED!=='true')return json(response,503,{error:'ACTION_WINDOW_WORKER_UNAVAILABLE'});
+      const release=heavyMedia.tryAcquireMedia();if(!release)return json(response,429,{error:'ACTION_WINDOW_WORKER_BUSY'});
+      try{const result=await remoteActionWindow(payload,{allowedHosts:mediaHosts});response.writeHead(200,{'content-type':'video/mp4','content-length':result.bytes.length,'cache-control':'no-store','x-finalframe-action-window':JSON.stringify(result.proof)});return response.end(result.bytes);}
+      catch(error){const status=actionWindowErrorStatus(error);return json(response,status,{error:status===503?'ACTION_WINDOW_WORKER_UNAVAILABLE':'ACTION_WINDOW_MEDIA_INVALID'});}
+      finally{release();}
+    }
     if (request.url === '/media/extract-audio') {
       const release = heavyMedia.tryAcquireMedia();
       if (!release) return json(response,429,{error:'EXTRACTION_WORKER_UNAVAILABLE'});
