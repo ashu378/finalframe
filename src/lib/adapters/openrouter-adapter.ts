@@ -226,9 +226,20 @@ function getFetch(options?: OpenRouterTransportOptions): typeof globalThis.fetch
     return result;
 }
 
-export function classifyOpenRouterError(status: number): { code: AICapabilityError['code']; retryable: boolean } {
+export function classifyOpenRouterError(status: number, body?: unknown): { code: AICapabilityError['code']; retryable: boolean } {
+    // A 403 can mean moderation, a budget limit, or access denial. Classify
+    // documented machine fields; never infer a policy violation from a prompt
+    // or an arbitrary provider message.
+    if (status >= 400 && status < 500) {
+        const record = asRecord(body), error = asRecord(record.error);
+        const metadata = asRecord(error.metadata);
+        const errorType = metadata.error_type ?? error.error_type ?? record.error_type ?? error.code;
+        if (errorType === 'content_policy_violation' || errorType === 'refusal') return { code: 'CONTENT_POLICY', retryable: false };
+        if (status === 403 && ['openrouter_guardrail_budget', 'openrouter_workspace_budget', 'openrouter_key_limit'].includes(String(metadata.limit_source))) return { code: 'PROVIDER_PAYMENT_REQUIRED', retryable: false };
+    }
     if (status === 400 || status === 422) return { code: 'INVALID_REQUEST', retryable: false };
-    if (status === 401 || status === 403) return { code: 'PROVIDER_AUTHENTICATION', retryable: false };
+    if (status === 401) return { code: 'PROVIDER_AUTHENTICATION', retryable: false };
+    if (status === 403) return { code: 'PROVIDER_ERROR', retryable: false };
     if (status === 402) return { code: 'PROVIDER_PAYMENT_REQUIRED', retryable: false };
     if (status === 404) return { code: 'UNSUPPORTED_MODEL', retryable: false };
     if (status === 408) return { code: 'REQUEST_TIMEOUT', retryable: true };
@@ -238,6 +249,7 @@ export function classifyOpenRouterError(status: number): { code: AICapabilityErr
 }
 
 function isFallbackEligible(error: AICapabilityError): boolean {
+    if (error.code === 'CONTENT_POLICY') return false;
     if (error.code === 'UNSUPPORTED_MODEL' || error.retryable) return true;
     // OpenRouter sometimes reports an unavailable/incompatible model as a
     // 400/422 request error. Treat only those explicit availability messages
@@ -389,7 +401,7 @@ async function requestJson<T>(path: string, init: RequestInit, options: OpenRout
             if (response.ok) {
                 return { body: body as T, requestId: response.headers.get('x-request-id') || undefined };
             }
-            const classification = classifyOpenRouterError(response.status);
+            const classification = classifyOpenRouterError(response.status, body);
             let submissionDiagnostic;
             if (videoRejection) {
                 const record = asRecord(body), nested = asRecord(record.error);
@@ -751,7 +763,7 @@ export async function generateImage(input: ImageGenerationRequest, options: Open
             try {
                 const init={method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...imageRequestBody,stream:true})};
                 const http=await getFetch(options)(`${(options.baseUrl || BASE_URL).replace(/\/+$/, '')}/images`,{...init,headers:requestHeaders(options,init,'POST',stableRequestIdempotencyKey('/images','POST',init,options)),redirect:'error',signal:controller.signal});
-                if(!http.ok){await http.body?.cancel();const classified=classifyOpenRouterError(http.status);throw new AICapabilityError({code:classified.code,message:'Image request was not completed.',provider:'openrouter',capability:'IMAGE_GENERATION',model,status:http.status,retryable:false});}
+                if(!http.ok){const rejected=await rejectedVideoBody(http,controller.signal);const classified=classifyOpenRouterError(http.status,rejected.body);throw new AICapabilityError({code:classified.code,message:'Image request was not completed.',provider:'openrouter',capability:'IMAGE_GENERATION',model,status:http.status,retryable:false});}
                 response=await readImageResponse(http,{onImageReceipt:options.onImageReceipt,onImageCompleted:(body,id)=>options.onImageCompleted?.(body,id,body.model||model)??Promise.resolve()},options.maxResponseBytes?Math.ceil(options.maxResponseBytes*4/3)+65536:undefined);
             } catch(cause) { if(cause instanceof AICapabilityError)throw cause;throw Object.assign(abortError(cause,'IMAGE_GENERATION',model),{retryable:false}); }
             finally {clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
@@ -923,7 +935,7 @@ async function requestBinary(path: string, init: RequestInit, options: OpenRoute
             const response = await fetcher(`${(options.baseUrl || BASE_URL).replace(/\/+$/, '')}${path}`, { ...init, method, signal: controller.signal, headers: requestHeaders(options, init, method, idempotencyKey) });
             if (response.ok) return { response, requestId: response.headers.get('x-request-id') || undefined, generationId: response.headers.get('x-generation-id') || undefined, ...usageFromHeaders(response.headers) };
             const body = await response.clone().json().catch(() => null) as unknown;
-            const classification = classifyOpenRouterError(response.status);
+            const classification = classifyOpenRouterError(response.status, body);
             const error = new AICapabilityError({ code: classification.code, message: responseMessage(body, `OpenRouter ${capability} request failed (${response.status}).`), provider: 'openrouter', capability, model, status: response.status, requestId: response.headers.get('x-request-id') || undefined, retryable: classification.retryable, details: normalizedProviderDetails(body) });
             if (!error.retryable || attempt >= retry.maxRetries) throw error;
             const wait = delayForAttempt(response, attempt, options);

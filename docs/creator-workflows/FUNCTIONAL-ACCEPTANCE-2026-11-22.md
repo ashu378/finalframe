@@ -107,3 +107,69 @@ Contains eight-download-probes.json, browser-downloads.json, contact sheets, the
 ## Reconciled spending
 
 Current provider usage $8.886359812, earlier deleted-key usage $8.494995241; cumulative known $17.381355053. Retained uncertain holds $0.912404. Conservative total **$18.293759053 / $25**. The provider key has $1.113640188 left under its separate $10 limit; the application ledger still has its independent $20 limit. No cap, reservation history or payment mode was changed.
+
+
+## Follow-up: fresh cinematic browser journey and approval feedback
+
+A new one-sentence cinematic brief completed on the main domain through plan approval, recipe estimate/confirmation, one paid generated shot, actual picture review, exact story-action reviews, media approval, timeline approval/lock, assembly review, asynchronous export and ordinary Download video. Production `kh7adrm7tcfdf1g9q6nzn3ygm18jpa8r`, recipe `zh7fmyz69dtar3vg50jeqz6mrd8jqnc8`, render `r570sbq5jejydpp5x1evxs6yp18jpq66`, export `ps7fs4pdd1ppekrn8x0zakhsx58jpt6h`. The requested silent red-paper-boat shot is 4.000 seconds, 120 frames, 1920×1080, H264, no audio. Render creation to verified completion: 28.607 seconds. Video provider charge: $0.1188; planning is separately metered. Download SHA-256: `62f6612c053fd3f9434fa7041de7df73d507f1b8e5e07ecd5022a95fb89080c9`.
+
+Independent review of the actual source output passed identity 5/5, action 4.5/5, setting/framing 4.5/5, pacing 4.5/5, brief 4.5/5 and requested silence 5/5. The downloaded final canvas and live playback were inspected. This proves this scoped silent cinematic journey, not dialogue or multi-scene continuity. Evidence: `cinematic-browser.private.json`, `cinematic-boat-contact.jpg`, `cinematic-live-download.png`, and `/home/ashuboris/Downloads/finalframe-export (12).mp4`.
+
+The first-cut approval correctly rejected unreviewed required actions, but hid those checks lower on the page and gave an unhelpful error. Revision `f8a49c5` displays the exact take's existing story-action review beside its first cut and explains the gate. No approval is bypassed. Actual-component tests: 18 PASS; canonical first-cut tests: 11 PASS; budget tests: 4 PASS; TypeScript and production build PASS. GitHub's Vercel status reports successful deployment `3cv9FqWQkQHZwq6tQUPJKM5Lycjz`.
+
+## Updated spending authority
+
+The owner's 22 November instruction supersedes the earlier $25 ceiling. The coordinator uses a **$100 cumulative ceiling**, including earlier keys and unresolved charges. The existing application ledger was raised to $99.848764, retaining a separately reconciled ~$0.151235 provider discrepancy; prior spend, reservations, ledger identity and studio allowlist were preserved. The change is audited and idempotency tested.
+
+Latest reconciliation after cinematic and product-launch planning: current-key limit $30, usage $9.037308379, remaining $20.962691621. Earlier deleted-key usage $8.494995241. Known cumulative provider usage **$17.532303620**; retained unknown holds **$0.912404**; conservative total **$18.444707620 / $100**. The new key allowance does not reset earlier spending. No live payments activated.
+
+## Graphics-only pricing correction — PASS
+
+Revisions `4f55dd5` and `f26f930` carry explicit `GRAPHICS_ONLY` intent across canonical planning, estimates, recipe construction and direct generation guards. A graphic plan cannot accidentally buy video takes; mixed footage retains its own real costs. The fresh Pocket Tasks ad reached ordinary plan approval, a three-credit assembly estimate with no AI footage charge, timeline review/lock, asynchronous rendering and browser download. Production `kh78skbphwb0egx5knnf334t2s8jqz87`, approved v2, export `ps7dgznnnk976yj1yn08bs8m8n8jpbsz`.
+
+Downloaded `/home/ashuboris/Downloads/finalframe-export (13).mp4`: 8s, 240 frames, 1080×1920 H264, silent as requested. SHA-256 `d30bdbaf3dea810e9e0052324414e3d29879f51a7003ac28329635b1ae1113ae`. Exact copy is present. The small single-line checklist still needs readability improvement; pricing/delivery passing does not close creative layout acceptance. Evidence: `ad-browser-download.json`, `ad-contact.jpg`, `ad-live-download.png`.
+
+## Saved repair recovery and creative result — partial
+
+Revision `6b12422` is deployed to the main frontend and FinalFrame renderer. A source-bound 2.5s repair window was prepared, submitted once, saved and recomposed into the untouched outer frames. FLUX returned one inclusive trailing frame; an explicit model-specific normalization removes that trailing frame only. No stretching, arbitrary trimming or extra purchase is allowed. Browser “Resume saved repair · no new AI purchase” completed from the stored result. Job `js76kz1qh1tp7wfye8cqeya1v58jqr6f`, take `m17785k4vae8drnervwsabb20h8jqjt5`, provider cost $0.0891. Original audio and outer decoded frames are retained.
+
+Actual frames still show no convincing repeated chewing before the grandmother speaks. Human FAIL is retained. The operation/recovery works, but automatic creative correction remains FAIL. A repeated identical approach is blocked. Evidence: `repair-v3-raw.mp4`, `repair-v3-contact.jpg`, `repair-v3-chewing-deadline.jpg`, browser download `/home/ashuboris/Downloads/63bec350-abae-4f2d-9a4f-7fae5158e71b.mp4`.
+
+## Fresh comedy and picture-check accuracy — FAIL
+
+Production `kh7fkyv9hjdftbznr10x27mx098jq6as` uses two approved original project character images and immutable bindings. Both a Standard take ($0.6336) and a separately estimated Premium take ($1.5840) completed. The latter improved the exit direction, but the crumb pickup/exit occurred late and the required chest-puff action was not clear. It remains unapproved. The picture checker incorrectly marked all actions present; the later human review records the specific timing failures. Do not use this AI result as creative certification.
+
+Revisions `a0c5f9f` / `dafb192` fix large-media transport and preserve safe failure receipts; valid late FAIL timestamps are retained without allowing a late PASS. These transport/validation fixes do not establish detector accuracy. Premium output: `/home/ashuboris/Downloads/93700543-22d1-4292-a29d-938fecc5f880.mp4`; `comedy-premium-contact.jpg`.
+
+## Narrated preview binding repair — deployed and browser verified
+
+The fresh explainer's completed stock narration exposed `DIRECTOR_CUT_BINDING_CHANGED`: the preview looked only inside the request for a voice version, while the canonical recipe node stores the frozen version separately. Revision `7cb2198` resolves that frozen node version, validates any explicit request version, and continues to reject mismatched job versions, voice IDs, project, production and asset lineage. Strict online Convex deployment passed at 14:42:42 local. The same saved browser run reloaded successfully and continued without buying the speech again.
+
+Production `kh72fngkbmefqtnaacwcgcbp598jq8g2`, recipe `zh72nn5axb6qjvn0yt4brvww418jp4bk`, narration job `js7eg1cfpm6rdj11rmesz97nq98jqrcf`. The downloaded MP3 has a misleading 3.047s container estimate but actually decodes to 3.578776s; the application's measured sound binding correctly uses approximately 3.58s. Subsequent transcription matches “Choose one small task, finish it, then choose the next.” Captions are 0.1–3.5s. The two graphic cards last eight seconds; pacing remains a creative review item. The ordinary review/assembly/export flow completed and Download video saved `/home/ashuboris/Downloads/finalframe-export (14).mp4` (export `ps75h4g4myt931vgvtpddtnwv98jpc91`). It is 8s, 240 frames, 1080×1080 H264/AAC, SHA-256 `ec8f45c961270b71b4966af71b800d0992c2822ea2e6018ed894411d021f078d`. Decoded source/output speech correlation is 0.97689998 at zero lag; the exact transcript and visible caption survive. Evidence: `explainer-audio-check.json`, `explainer-contact.jpg`, `explainer-live-download.png`. All speech finishes during the first card; matching narration to the second card and independent listening remain open. This is functional delivery evidence, not full creative certification.
+
+Tests: director cut 12 groups, director UI 18, recipe backend 21, story-action assistant 13, vision transport 4, TypeScript and scoped ESLint PASS. Tests exercising stubs are contract evidence, not provider acceptance.
+
+## Latest reconciliation — 22 November 13:50 UTC
+
+Current key usage $11.573038282 + prior/deleted keys $8.494995241 = **$20.068033523 actual known cumulative**. Retained uncertain holds $1.794376; conservative total **$21.862409523 / $100**. Current key has $18.426961718 remaining under its separate $30 limit. No spending history or holds were reset. Live payments remain disabled. Later planning calls require another reconciliation before final reporting.
+
+
+## Exact-duration routing and fresh UGC — repaired selection, creative retest open
+
+Revision `41cd880` first selects a route compatible with the exact approved duration, before considering longer silent provider handles. Quality caps, required references and Premium allowlists remain enforced. Online Convex deployment passed; the existing takes are unchanged. Duration bridge 7, planning subdivision 9, recipe duration 4, planning bridge 5 and eight-type routing contract checks passed. Typecheck passed.
+
+Fresh UGC production `kh7984yjea8gfrh7wnys6wavsn8jq07f` reached approved original presenter reference, canonical plan v2, explicit quote/purchase, saved take and human review. The eight-second Veo result preserves the woman and plain mug, but its lift and smile occur after the planned four-second timing. Human FAIL remains authoritative. `/home/ashuboris/Downloads/324ac6db-db7a-42b3-94b4-d51cb63a8630.mp4`; evidence `ugc-green-presenter-full-contact.jpg`. No downloaded finished four-second UGC cut is certified. Exact-duration retest remains open.
+
+Fresh music production `kh77ajsg2d17ey1vzypxvxkcfh8jpf0a` has an approved four-second square GRAPHICS_ONLY plan (PULSE / MOVE). Original 120bpm fixture audio is prepared locally; upload, beat review, export and download remain unfinished. Fresh social cutdown remains open.
+
+## Adult romance scope and accurate provider refusals — 22 November
+
+Owner requests ordinary adult romance/beachwear support without misleading model errors. Do not infer that a published drama was generated by a particular model, that Chinese origin means unrestricted generation, or that an API exposes every consumer-app control. Non-explicit adult kissing, embraces and ordinary beachwear need named sample tests; none were purchased in this investigation. This is not certification of explicit sexual content generation or a safeguard-bypass route.
+
+Verified OpenRouter error documentation distinguishes machine-reported `content_policy_violation`/`refusal`, budget-limit metadata and credential errors. The adapter previously mapped every 403 to authentication. New handling uses documented fields, keeps unknown 403 generic, surfaces a fixed content-rule explanation and does not retry/fallback on a confirmed policy refusal. Image, video and speech rejection contracts each assert one submission. No raw provider message or prompt is added to public job output. Budget/hold reconciliation and existing approved media are unchanged. This error fix is not evidence that any romance route is creatively certified.
+
+Sources: https://openrouter.ai/docs/api_reference/errors-and-debugging ; https://ai.google.dev/gemini-api/docs/safety-settings ; https://seed.bytedance.com/en/seedance2_0 . Provider product pages do not establish the permitted scope of every hosted endpoint.
+
+Validation: `node tests/openrouter-policy-errors.cjs` PASS (classification, image/video/speech one-submission rejection, safe public messages); submission diagnostics 7 PASS; worker contracts 11 PASS; root typecheck and scoped ESLint PASS. The older `tests/openrouter-execution.cjs` was also attempted and fails its pre-existing expectation of an automatic image retry after 429; current durable image transport deliberately does not resubmit. It was left unchanged. This is recorded rather than reported as a complete green suite.
+
+Latest reconciliation at 14:20:56 UTC: current key $12.303163418 + prior keys $8.494995241 = **$20.798158659 known actual**; retain $1.794376 uncertain holds, conservative **$22.592534659 / $100**. Current key remaining $17.696836582. No paid calls during the policy investigation. Strict online FinalFrame Convex deployment of the refusal fix completed at 15:21 local. Live payments remain disabled.

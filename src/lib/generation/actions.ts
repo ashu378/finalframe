@@ -41,6 +41,7 @@ function userSafeGenerationError(error: unknown): string {
     if (error instanceof Error && /SHOT_ESTIMATE_(EXPIRED|CHANGED|REVIEW_REQUIRED)/.test(error.message)) return 'This estimate is no longer valid. Review a fresh estimate before making the take.';
     if (error instanceof Error && /budget|paid testing|not configured|not enabled|verified provider cost/i.test(error.message)) return 'Generation needs an active capped testing budget and a verified model route. Ask an administrator to complete setup.';
     const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+    if (code === 'CONTENT_POLICY') return 'The provider declined this scene or reference under its content rules. Your saved work is unchanged; review the request before submitting again.';
     if (code === 'MISSING_API_KEY') return 'Video generation is not configured yet.';
     if (code === 'PROVIDER_RATE_LIMIT') return 'The video provider is busy. Please try again shortly.';
     if (code === 'PROVIDER_PAYMENT_REQUIRED') return 'Video generation is temporarily unavailable.';

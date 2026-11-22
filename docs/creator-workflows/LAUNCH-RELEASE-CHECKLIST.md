@@ -1,6 +1,6 @@
 # Whole-product release checklist
 
-Status: IN PROGRESS. Latest owner instruction (22 November): finish video workflows, automatic shot repair and export speed within the $25 cumulative ceiling; do not activate live payments. Redesign has been published, live email authentication has its separate recorded acceptance, and payments remain sandbox-only. Historical dated checkpoints below retain their original scope; the latest checkpoint supersedes earlier status and budget figures. No launch certification is implied by a passing mock, UI presence, or catalog entry.
+Status: IN PROGRESS. Latest owner instruction (22 November): finish video workflows, automatic shot repair, graphics-only pricing and export speed within the $100 cumulative ceiling; do not activate live payments. Redesign has been published, live email authentication has its separate recorded acceptance, and payments remain sandbox-only. Historical dated checkpoints below retain their original scope; the latest checkpoint supersedes earlier status and budget figures. No launch certification is implied by a passing mock, UI presence, or catalog entry.
 
 Latest evidence: [22 November acceptance checkpoint](FUNCTIONAL-ACCEPTANCE-2026-11-22.md). All eight retained browser downloads passed; the new structured motion-graphics brief-to-download passed. Automatic chewing repair still fails creative review. The faster renderer is deployed on the FinalFrame-only worker; the same 30-second live edit now finishes in 258.035s versus 968.731s previously.
 
@@ -45,7 +45,7 @@ Each row requires code revision, unit/contracts, online integration, browser evi
 ## Runtime limits and proof
 
 - Use online Convex only for database-backed verification. Pure tests use no database.
-- Spend authority: minimum of live application allowance, provider allowance and the latest owner-approved $25 cumulative ceiling, including earlier deleted-key usage missing from the ledger. The current application ledger limit is conservatively $20 and the current provider key still has its own $10 limit. Keep unknown holds. No accepted purchase retry or budget reset.
+- Spend authority: minimum of live application allowance, provider allowance and the latest owner-approved $100 cumulative ceiling, including earlier deleted-key usage missing from the ledger. The application ledger limit is $99.848764 (retaining the reconciled provider discrepancy), and the current provider key has its own $30 limit. Keep unknown holds. No accepted purchase retry or budget reset.
 - Renderer/analysis jobs initially serial; retain server limits and never touch Yafpay resources.
 - All route capability claims require current controls, billing units and pricing bounds. An unavailable required OpenRouter route blocks its release entry.
 - Retained fixture results are in `/home/ashuboris/.codex/artifacts/finalframe/launch-verification-2026-11-02/RESULTS.md`; latest historical verification is `LAUNCH-VERIFICATION-2026-11-02.md`.
@@ -379,3 +379,32 @@ The live native-audio fixture also passed: a new explicitly uploaded copy of the
 Known cumulative provider spend **$17.381355053**, retained unknown holds **$0.912404**, conservative total **$18.293759053 / $25**. The current key has **$1.113640188** left under its separate $10 cap; prior deleted-key charges are included in the cumulative calculation. No caps or holds were reset. No live payments activated.
 
 Owner reports upgrading Convex to Pro; the earlier Free-plan warning is historical, not a newly verified current-plan warning. No fresh usage-dashboard audit was performed in this video checkpoint.
+
+
+### 22 November follow-up — current authority and fresh cinematic completion
+
+The owner expanded testing authority; coordinator ceiling is now **$100 cumulative**, preserving previous spend and unknown holds. The existing key is verified at $30, not $90. Latest known usage plus holds is **$18.444707620**; this supersedes the earlier $25/$10-limit snapshot above. No payment activation.
+
+A fresh main-domain cinematic brief completed all ordinary approval/generation/edit/assembly/download steps. Actual final file: 4s, 120 frames, landscape1080p, silent as requested; independently reviewed source action and identity passed. The first-cut action-review discoverability fix is deployed in `f8a49c5`; canonical action gates remain enforced. See the updated [checkpoint](FUNCTIONAL-ACCEPTANCE-2026-11-22.md) for exact IDs, evidence and test counts.
+
+Required automatic chewing repair remains **FAIL pending a genuinely different tested approach**. Superseded by the later checkpoint below: the targeted-window implementation is deployed and its saved-output recovery passes, but visible chewing still fails. The graphics-only pricing/recipe mismatch is fixed and the fresh ad reached download without buying AI footage. Other retained eight-type downloads remain delivery regressions, not eight new creative certifications.
+
+
+### 22 November — current pricing, repair and fresh-journey evidence
+
+- **Graphics-only pricing PASS:** revisions `4f55dd5` / `f26f930` enforce the approved renderer-only plan in estimates, recipes and direct shot purchasing. Pocket Tasks export `ps7dgznnnk976yj1yn08bs8m8n8jpbsz` downloaded as an 8s vertical MP4 with zero AI-media purchase. Its checklist text still needs creative readability review.
+- **Automatic repair remains FAIL:** deployed temporal v3 produced and recovered a new take for $0.0891 without rebuying its accepted result. It preserves source audio and outer frames, but the man still does not visibly chew before the question. No repeated identical purchase is allowed.
+- **Fresh cinematic and motion-graphics journeys PASS within their silent briefs.** Fresh narrated explainer reaches reviewed timeline, render and browser download after the frozen-voice preview fix `7cb2198`; exact words, captions and audible signal survive, while speech/card pacing remains open.
+- **Fresh comedy creative FAIL:** original project character references and both Standard/Premium takes are retained. The Premium take's action timing is late and the picture checker falsely passed it. Human failure findings supersede that advisory result.
+- **Fresh UGC is in progress; music and social-cut fresh journeys remain open.** The eight retained downloads are still delivery regressions, not a substitute for this fresh creative matrix.
+- Latest reconciled known spend is $20.068033523 plus $1.794376 uncertain holds, **$21.862409523 / $100**, before the subsequent UGC planning/reference image. No live payments activated. Full IDs, output hashes, scope limits and test results are in the current acceptance checkpoint.
+
+
+### Latest follow-up — exact durations and provider refusal clarity
+
+- `41cd880` corrects exact-duration routing priority while preserving required controls, quality caps and Premium allowlists. Existing UGC take still fails timing; a new route test is required before marking that journey PASS.
+- Fresh music has its approved renderer-only plan; audio upload/beat/export journey remains open. Fresh social cutdown remains open. No eight-of-eight fresh creative completion claim.
+- Non-explicit adult romance, kissing and ordinary beachwear sample acceptance added as OPEN. Provider/model origin is not evidence of an unrestricted endpoint. No paid romance sample run.
+- Confirmed content-policy refusals now have a separate non-retryable error path instead of being labeled invalid credentials; unknown 403 and budget-limit errors remain distinct. No safeguards disabled or automatic policy-rejection purchases added. See the current functional checkpoint for exact tests and the historical image-retry test mismatch.
+
+Latest reconciliation at 14:20:56 UTC: current key $12.303163418 + prior keys $8.494995241 = **$20.798158659 known actual**; retain $1.794376 uncertain holds, conservative **$22.592534659 / $100**. Current key remaining $17.696836582. No paid calls during the policy investigation. Strict online FinalFrame Convex deployment of the refusal fix completed at 15:21 local. Live payments remain disabled.

@@ -20,6 +20,7 @@ function mapReasonCode(failure: ProviderFailure): RetryReasonCode {
         case 'NETWORK_ERROR': return 'NETWORK_ERROR';
         case 'REQUEST_TIMEOUT': return 'REQUEST_TIMEOUT';
         case 'UNSUPPORTED_CAPABILITY': return 'UNSUPPORTED_CAPABILITY';
+        case 'CONTENT_POLICY': return 'CONTENT_POLICY';
         case 'PROVIDER_AUTHENTICATION': return 'AUTHENTICATION_FAILED';
         case 'INVALID_REQUEST': return 'INVALID_REQUEST';
         default: return 'UNKNOWN_PROVIDER_STATE';

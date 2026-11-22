@@ -191,6 +191,7 @@ function planningFailureMessage(error: unknown): string {
     const reference = error.requestId ? ` Reference: ${error.requestId}.` : '';
     switch (error.code) {
         case 'MISSING_API_KEY': return 'Planning is not configured yet. Add the OpenRouter API key in the server environment.';
+        case 'CONTENT_POLICY': return 'The provider declined this request under its content rules. Review the scene or references before submitting again.';
         case 'PROVIDER_AUTHENTICATION': return 'The planning provider rejected its credentials. Check the OpenRouter API key.';
         case 'PROVIDER_PAYMENT_REQUIRED': return 'The planning provider account needs available credit before it can create a plan.';
         case 'UNSUPPORTED_MODEL': return 'The configured planning model is unavailable. Choose a supported model in the server environment.';

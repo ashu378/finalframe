@@ -41,6 +41,7 @@ export function canClaim(job: { status: string; executionStage?: string; leaseEx
 }
 
 export function safeGenerationError(code: string, preparation = false, active = false): string {
+  if (code === 'CONTENT_POLICY') return 'The provider declined this scene or reference under its content rules. Your saved work is unchanged. It will not be submitted again automatically.';
   if (preparation) {
     if(code.startsWith('SFX_'))return 'The saved sound effect needs an administrator check. It will not be purchased again automatically.';
     if (['MUSIC_OUTPUT_INVALID','MUSIC_OUTPUT_CHANGED','MUSIC_DURATION_REVIEW_REQUIRED','MUSIC_QC_INVALID_RESPONSE','MUSIC_QC_AUTHORITY_DENIED','MUSIC_OUTPUT_REVIEW_REQUIRED'].includes(code)) return 'The saved music needs an administrator check. It will not be purchased again automatically.';
