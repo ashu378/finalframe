@@ -33,7 +33,7 @@ export async function externalHumanPortraits(ctx: QueryCtx | MutationCtx, args: 
       const saved = resources.find(row => row.resourceVersionId === id);
       if (!resourceVersion || !resource || !saved || resource.kind !== 'CHARACTER' || resource.archivedAt || resource.projectId !== production.projectId || resourceVersion.projectId !== production.projectId || saved.resourceId !== resource._id || JSON.stringify(saved.assetIds) !== JSON.stringify(resourceVersion.assetIds) || resourceVersion.assetIds.length > 12) continue;
       const descriptions = [cast.description, object(resourceVersion.profile).description].filter((value): value is string => typeof value === 'string');
-      if (!descriptions.some(description => /^(?:an?\s+|one\s+)?(?:original\s+|fictional\s+|photorealistic\s+|realistic\s+)*(?:adult\s+(?:woman|man|person|female|male)|human\s+(?:woman|man|person|female|male))\b/i.test(description.trim()))) continue;
+      if (!descriptions.some(description => /^(?:an?\s+|one\s+)?(?:original\s+|fictional\s+|photorealistic\s+|realistic\s+)*(?:adult\s+(?:woman|man|person|female|male)|human\s+(?:woman|man|person|female|male))\b/i.test(description.trim().replace(/^Proposed reference:\s*/i, '')))) continue;
       const state = await ctx.db.query('resourceStates').withIndex('by_project_resource', q => q.eq('projectId', production.projectId!).eq('resourceType', 'projectResourceVersion').eq('resourceId', id!)).unique();
       if (!state || !['APPROVED', 'LOCKED'].includes(state.state)) continue;
       for (const assetId of resourceVersion.assetIds) {
