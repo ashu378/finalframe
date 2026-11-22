@@ -173,3 +173,54 @@ Sources: https://openrouter.ai/docs/api_reference/errors-and-debugging ; https:/
 Validation: `node tests/openrouter-policy-errors.cjs` PASS (classification, image/video/speech one-submission rejection, safe public messages); submission diagnostics 7 PASS; worker contracts 11 PASS; root typecheck and scoped ESLint PASS. The older `tests/openrouter-execution.cjs` was also attempted and fails its pre-existing expectation of an automatic image retry after 429; current durable image transport deliberately does not resubmit. It was left unchanged. This is recorded rather than reported as a complete green suite.
 
 Latest reconciliation at 14:20:56 UTC: current key $12.303163418 + prior keys $8.494995241 = **$20.798158659 known actual**; retain $1.794376 uncertain holds, conservative **$22.592534659 / $100**. Current key remaining $17.696836582. No paid calls during the policy investigation. Strict online FinalFrame Convex deployment of the refusal fix completed at 15:21 local. Live payments remain disabled.
+
+
+## Built-in browser, music delivery and safe retakes — 22 November follow-up
+
+Per owner instruction, ordinary browser journeys now use the built-in browser, not external Chrome. Source upload worked without changing Chrome extension permissions. Three parallel lanes handle repair, routing, and finishing while the coordinator operates the browser and serialized purchases.
+
+Revisions `be19665` and `66d46cf` are pushed to main. Vercel reports successful deployment `WTrJ7BjwdHPRycfrYrZ6bddeU7jd`; strict online Convex deployment passed at 15:55 local. Renderer remains at `6b12422`. No live payment activation or unrelated service changes.
+
+- Human action FAIL remains actionable after a newer AI PASS/UNCERTAIN. A renewed human PASS can supersede a newer AI concern through a fresh review; immutable history remains.
+- Both recipe preparation entry points measure selected audio/video before creating a run. Existing completed outputs are not purchased again by this probe.
+- A different-route deliberate retake is permitted only when the previous take is completed, downloaded, lineage-matched and financially settled. Uncertain/pending accepted jobs remain blocked. Seven reuse suites include 26 damaged-proof cases; 22 backend suites passed independently.
+- Fresh compatible graphic cards now retain responsive-v2 properties through recipe/timeline/manifest. Readability remains subject to rendered-frame review.
+
+### Fresh music upload-to-download — scoped PASS
+
+Production `kh77ajsg2d17ey1vzypxvxkcfh8jpf0a`, saved run ending `td8jpq2z`, export `ps75vwe1c3cmh6gnmk9e5k9qk98jqdfy`. Ordinary built-in upload of an owned 120bpm click track, media review/approval, measured duration, recipe estimate ($0 AI), beat review, timeline approval/lock, assembly and asynchronous download completed. Download `/home/ashuboris/Downloads/finalframe-export (15).mp4`.
+
+Independent review: 4.000s, 1080×1080, 30fps/120frames, H264/AAC; PULSE through frame59 and MOVE begins frame60 (2.000s). Audio correlation0.9999649 with zero-sample offset; all eight exported click onsets within0.5ms. Online beat analysis:16 beats across eight-second source,120bpm,confidence0.861. Evidence: `music-live-analysis.json`, `music-live-contact.png`, `music-builtin-completed.jpg` in acceptance artifact folder. This verifies the owned two-card music fixture, not a performance/lip-sync music-video creative certificate.
+
+### Exact-four-second UGC route — provider eligibility FAIL, no retry
+
+Fresh deliberate run ending `598jqtca` was submitted once after maximum quote$0.441762. Job `js72qmdy9pdmzqtkjwd0btvjdh8jp0hw` failed HTTP400 `REFERENCE_PERSON_RESTRICTED`, attemptCount1, no accepted provider job/request ID, no scheduled retry. Reservation was released; recorded provider charge$0. The previous Veo take and human timing FAIL remain saved.
+
+Official BytePlus portrait documentation describes restrictions on direct face references and trusted portrait provenance. The fictional Riverflow portrait in Convex does not establish supported provider provenance. This is not evidence that ordinary kissing or beachwear is prohibited. The prepared romance run has not been submitted through this known-ineligible reference route. Source: https://docs.byteplus.com/en/docs/modelark/seedance-portrait-asset-guide .
+
+Latest pre-submission reconciliation at14:45:39UTC: current key$12.461167661 + earlier keys$8.494995241 = $20.956162902 actual; retain$1.794376 uncertain holds, conservative$22.750538902/$100. Subsequent social planning needs final reconciliation. No spending history was reset.
+
+
+## Integration and fresh social journey — further 22 November evidence
+
+Latest compatible reader is renderer `627652e`, deployment `bceoxswnmeqfsgxrgdb4zp77`, visibly Finished and healthy with ACTION_REGION_V1. Frontend `5446370` is deployed successfully; online Convex `b978acd` passed strict typecheck/deploy. This supersedes the earlier renderer revision above. Only the FinalFrame resource was changed.
+
+- Uploaded source duration now resolves from the same-project, exact-storage/checksum/size canonical media probe; stale/foreign/short/nonfinite probes are denied. The social editor no longer crashes on an otherwise measured upload. Eight regression tests pass.
+- Prepared explicit human references are rejected before purchase by routes that require trusted portrait provenance. Online read-only checks identify UGC1, romance2, cartoon0 human references without deriving identity from filenames.
+- Planner punctuation normalization preserves immutable resource IDs. A further distinct redundant character self-binding issue was found in the eight-second romance plan and is being repaired; no romance video has yet been purchased or certified.
+- The focused repair UI saves an exact stationary region without buying anything. Saved-region resave/edit regression passes. Live preparation failed before any accepted provider job; the new take is retained and no blind paid retry was made. Root-cause investigation remains open until repaired and retested.
+
+Fresh social production `kh70ftbmxjwp26hqxg4mwqc1bs8jq84a` completed ordinary source upload, brief, plan, approval, zero-AI recipe, timeline, review, export and download. First export `ps75thmcwmphnkwa4spyvc8xh18jp2jy`, download16, is a **creative FAIL**: center-cover crops the original burned captions. Audio correlation0.999727, zero offset,4s1080×1920H264/AAC. The source is owned explainer download14, not the unrelated older plant clip.
+
+Using ordinary editor controls, a separate contain-framed vertical timeline2 was created, reviewed and locked without changing the original. Export `ps73hd6hr57jcm5hhjbxxys68d8jqpdt`, download `/home/ashuboris/Downloads/finalframe-export (17).mp4`, completed. Independent review PASS: full title and captions readable at360px, audio correlation0.999773 with zero offset,4.000s1080×1920/30fps. Evidence SOCIAL17-INDEPENDENT-REVIEW.md and social17-independent-review.json. This supersedes export16 only for the corrected version; export16 remains failed history. A stale dispatch error displayed during recovered rendering is separately being fixed. Evidence: SOCIAL-INDEPENDENT-REVIEW.md, social-independent-review.json, social-independent-phone.png, social-variant-builtin-completed.jpg.
+
+Reconciled known cumulative provider usage before the latest romance planning call: **$20.990371560**, plus **$1.794376 retained holds** = **$22.784747560** conservative. Latest additional completed plan receipt costs$0.015971868. Further purchases require fresh reconciliation, under the owner-approved$100 total. Live payments remain disabled. None of these scoped passes certify all eight creative workflows.
+
+
+### Integration follow-up: exact preparation failure and recovery
+
+The focused repair failed locally before provider submission because equivalent validated region objects had different JSON key orders across Convex serialization. Renderer fix `657e0c3` validates both operands canonically. Actual saved take6 now prepares256×256/60frames/24fps locally; changed coordinates/timing/frame counts remain denied. The failed job `js76f8nzsg3nse8t8vfz6ayzsh8jp631` cost$0; exact online records prove both reservations released and no provider IDs/output. A new explicit estimate+confirmation recovery path rechecks those facts and all current authorizations; accepted/uncertain jobs cannot use it. Independent review and real-record read-only guard evaluation pass. Creative chewing remains unverified.
+
+Integration `ff9a26b` includes reviewed per-card narration, truthful recovered-export status, fresh social source contain defaults with explicit crop option, planner CHARACTER self-binding normalization, and guarded local-preparation recovery. Root build, typecheck, lint and affected contract suites pass. Narration7, UI25, compiler22, backend22, framing4, renderer policy10, dispatch10, recovery9 and team7 pass. Existing fixture loader dependencies were repaired so the affected suites run rather than being skipped. New narration still needs ordinary live audio/download review.
+
+15:35UTC budget: current key$12.511348187 +prior keys$8.494995241 = **$21.006343428** actual; retain **$1.794376** uncertain holds => **$22.800719428/$100** conservative. Active key has$17.488651813 remaining. No history/holds were reset. No live payment activation.

@@ -1,8 +1,12 @@
 # Whole-product release checklist
 
+Latest 22 November: built-in-browser fresh music and corrected social contain export have scoped reviewed downloads. All-eight creative acceptance is still open (UGC/comedy/romance and new narration/repair review). Integration `ff9a26b`; worker `657e0c3`. See FUNCTIONAL-ACCEPTANCE-2026-11-22.md for exact evidence and failures. Live payments remain disabled.
+
 Status: IN PROGRESS. Latest owner instruction (22 November): finish video workflows, automatic shot repair, graphics-only pricing and export speed within the $100 cumulative ceiling; do not activate live payments. Redesign has been published, live email authentication has its separate recorded acceptance, and payments remain sandbox-only. Historical dated checkpoints below retain their original scope; the latest checkpoint supersedes earlier status and budget figures. No launch certification is implied by a passing mock, UI presence, or catalog entry.
 
 Latest evidence: [22 November acceptance checkpoint](FUNCTIONAL-ACCEPTANCE-2026-11-22.md). All eight retained browser downloads passed; the new structured motion-graphics brief-to-download passed. Automatic chewing repair still fails creative review. The faster renderer is deployed on the FinalFrame-only worker; the same 30-second live edit now finishes in 258.035s versus 968.731s previously.
+
+Latest built-in-browser follow-up: music source upload → reviewed beat map/timeline → downloaded four-second square MP4 passes independent timing/audio checks. Main frontend and online Convex are at `66d46cf`. The new exact-four-second UGC Seedance attempt was rejected for reference-face eligibility, with zero recorded charge and no retry; fresh UGC/romance creative acceptance remains open. Automatic chewing remains FAIL. See the latest dated checkpoint for exact evidence.
 
 Each row requires code revision, unit/contracts, online integration, browser evidence, paid receipt where applicable, saved output, and independent creative review. Record unavailable evidence as blocked, never passed. Preserve historic evidence and errors.
 
