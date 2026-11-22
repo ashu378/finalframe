@@ -11,6 +11,7 @@ export interface ActionWindowResult {
   startFrame: number; endFrame: number; windowFrames: number;
   startSeconds: number; endSeconds: number; durationSeconds: number;
   sourceDurationSeconds: number; outputFrames: number; originalAudioCopied: boolean;
+  repairInputFrames?: number; trimmedTrailingFrames?: number;
 }
 export interface ActionWindowOptions { runner?: CommandRunner; ffmpegCommand?: string; ffprobeCommand?: string; timeoutMs?: number }
 const MAX_BYTES = 512 * 1024 * 1024;
@@ -94,20 +95,22 @@ export async function prepareActionWindow(input: ActionWindowInput, options: Act
     return result(source,window,out,measured.frames,false);
   } catch (error) { await unlink(out).catch(() => undefined); throw error; }
 }
-export async function composeActionWindow(input: ActionWindowInput & { repairPath: string }, options: ActionWindowOptions = {}): Promise<ActionWindowResult> {
+export async function composeActionWindow(input: ActionWindowInput & { repairPath: string; trailingFramePolicy?: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }, options: ActionWindowOptions = {}): Promise<ActionWindowResult> {
   const tools = createTools(options), source = await tools.probe(input.sourcePath), window = windowFor(input,source), repair = await tools.probe(input.repairPath), out = await outputPath(input,source,repair);
-  // No hidden stretching, cropping, frame insertion, truncation or silence.
+  // A certified provider may return one inclusive end frame. Explicitly record
+  // its removal; never stretch, pad, resize, or discard any in-window frame.
   if (repair.width !== source.width || repair.height !== source.height) fail('DIMENSIONS_CHANGED');
-  if (repair.fps !== source.fps || repair.frames !== window.windowFrames) fail('REPAIR_TIMING_CHANGED');
+  const trimmedTrailingFrames = repair.frames - window.windowFrames;
+  if (repair.fps !== source.fps || trimmedTrailingFrames !== 0 && !(input.trailingFramePolicy === 'DROP_ONE_PROVIDER_TRAILING_FRAME' && trimmedTrailingFrames === 1)) fail('REPAIR_TIMING_CHANGED');
   const parts: string[] = [], labels: string[] = [];
   if (window.startFrame) { parts.push(`[0:v]trim=end_frame=${window.startFrame},setpts=PTS-STARTPTS[prefix]`); labels.push('[prefix]'); }
-  parts.push('[1:v]setpts=PTS-STARTPTS[repair]'); labels.push('[repair]');
+  parts.push(`[1:v]trim=end_frame=${window.windowFrames},setpts=PTS-STARTPTS[repair]`); labels.push('[repair]');
   if (window.endFrame < source.frames) { parts.push(`[0:v]trim=start_frame=${window.endFrame},setpts=PTS-STARTPTS[suffix]`); labels.push('[suffix]'); }
   parts.push(`${labels.join('')}concat=n=${labels.length}:v=1:a=0[v]`);
   try {
     await tools.ffmpeg([...preamble,...inputArgs(source.canonical),...inputArgs(repair.canonical),'-filter_complex',parts.join(';'),'-map','[v]','-map','0:a?','-c:a','copy',...encodeArgs,out]);
     const measured = await tools.probe(out);
     if (measured.frames !== source.frames || measured.fps !== source.fps || measured.audio.length !== source.audio.length) fail('OUTPUT_TIMING');
-    return result(source,window,out,measured.frames,source.audio.length > 0);
+    return {...result(source,window,out,measured.frames,source.audio.length > 0),repairInputFrames:repair.frames,trimmedTrailingFrames};
   } catch (error) { await unlink(out).catch(() => undefined); throw error; }
 }

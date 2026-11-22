@@ -14,6 +14,7 @@ const object=(v:unknown):Record<string,any>=>v&&typeof v==='object'?v as Record<
 export async function remoteActionWindow(value:unknown,options:{allowedHosts:readonly string[];fetch?:typeof fetch}){
  const p=object(value),window=assertActionWindow(p.window),compose=p.operation==='COMPOSE';
  if(!['PREPARE','COMPOSE'].includes(p.operation))throw new Error('ACTION_WINDOW_INVALID_OPERATION');
+ if(p.trailingFramePolicy!==undefined&&(!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
  const directory=await mkdtemp(join(tmpdir(),'finalframe-action-window-'));
  const download=async(input:unknown,name:string)=>{
   const source=object(input),url=assertProbeUrl(source.url,options.allowedHosts);
@@ -28,7 +29,7 @@ export async function remoteActionWindow(value:unknown,options:{allowedHosts:rea
  try{
   const sourcePath=await download(p.source,'source.mp4'),outputPath=join(directory,'output.mp4');
   const args={sourcePath,outputPath,startSeconds:window.startSeconds,endSeconds:window.endSeconds};
-  const result=compose?await composeActionWindow({...args,repairPath:await download(p.repair,'repair.mp4')}):await prepareActionWindow(args);
+  const result=compose?await composeActionWindow({...args,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionWindow(args);
   assertActionWindowProof(window,result,compose);
   const size=(await stat(outputPath)).size;if(size<1||size>ACTION_WINDOW_MAX_BYTES)throw new Error('ACTION_WINDOW_OUTPUT_LIMIT');
   const bytes=await readFile(outputPath),{outputPath:_path,...proof}=result;

@@ -30,7 +30,7 @@ export async function requirePreparedActionWindow(ctx:QueryCtx|MutationCtx,job:D
 export const context=internalQuery({args,returns:v.any(),handler:async(ctx,input)=>{
  const data=await scope(ctx,input),response=object(data.job.response),receipts:Record<string,unknown>={};
  for(const key of ['actionWindowPrepared','actionWindowRaw','actionWindowComposed']){const row=object(response[key]);if(!row.storageId)continue;const stored=await ctx.db.system.get('_storage',row.storageId as Id<'_storage'>);if(!stored||stored.size!==row.byteSize||!sha256Equal(stored.sha256,row.checksum))throw new Error('ACTION_WINDOW_OUTPUT_CHANGED');receipts[key]={...row,url:await ctx.storage.getUrl(row.storageId as Id<'_storage'>)};}
- return {window:data.window,source:data.source,...receipts};
+ return {window:data.window,source:data.source,...(data.job.provider==='openrouter'&&data.job.model==='black-forest-labs/flux-video-edit'?{trailingFramePolicy:'DROP_ONE_PROVIDER_TRAILING_FRAME'}:{}),...receipts};
 }});
 export const record=internalMutation({args:{...args,phase:v.union(v.literal('PREPARED'),v.literal('RAW'),v.literal('COMPOSED')),storageId:v.id('_storage'),proof:v.optional(v.any())},returns:v.null(),handler:async(ctx,input)=>{
  const {job,window}=await scope(ctx,input),response=object(job.response),key={PREPARED:'actionWindowPrepared',RAW:'actionWindowRaw',COMPOSED:'actionWindowComposed'}[input.phase],old=object(response[key]);

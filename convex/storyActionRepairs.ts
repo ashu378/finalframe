@@ -105,5 +105,6 @@ export const get=query({args:{takeId:v.id('shotVersions')},returns:v.any(),handl
  const take=await ctx.db.get(args.takeId);if(!take?.projectId)throw new Error('Take unavailable.');await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR','REVIEWER','VIEWER']);
  const job=await ctx.db.query('generationJobs').withIndex('by_idempotency',q=>q.eq('idempotencyKey',`story-repair:${args.takeId}`)).unique();
  if(!job||job.projectId!==take.projectId)return null;
- return {id:job._id,status:job.status,stage:job.executionStage,takeId:job.shotVersionId??null};
+ const response=object(job.response),composed=object(response.actionWindowComposed);
+ return {id:job._id,status:job.status,stage:job.executionStage,takeId:job.shotVersionId??null,canResumeSavedOutput:job.status==='FAILED'&&Boolean(job.providerJobId&&object(response.actionWindowRaw).storageId),trimmedTrailingFrames:Number(object(composed.proof).trimmedTrailingFrames??0)};
 }});

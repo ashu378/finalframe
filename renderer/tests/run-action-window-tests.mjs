@@ -27,6 +27,17 @@ try {
   assert.deepEqual(await pcm(output,'output.pcm'),await pcm(source,'source.pcm'));
   const measured=await probe.probe(output,{countFrames:true});assert.equal(measured.streams.find(s=>s.codec_type==='video').nb_read_frames,'72');assert(Number(measured.format.duration)>=3.19);
   console.log('PASS only selected window changes; prefix/suffix decoded frames and complete original audio samples are identical');
+  const inclusive=join(root,'inclusive.mp4'),normalized=join(root,'normalized.mp4');
+  await ffmpeg.execute([...base,'-f','lavfi','-i','testsrc2=size=320x240:rate=24:duration=2','-frames:v','27',...video,inclusive],{timeoutMs:15000});
+  await assert.rejects(composeActionWindow({sourcePath:source,repairPath:inclusive,outputPath:normalized,startSeconds:.48,endSeconds:1.51}),/REPAIR_TIMING_CHANGED/);
+  const bounded=await composeActionWindow({sourcePath:source,repairPath:inclusive,outputPath:normalized,startSeconds:.48,endSeconds:1.51,trailingFramePolicy:'DROP_ONE_PROVIDER_TRAILING_FRAME'});
+  assert.equal(bounded.repairInputFrames,27);assert.equal(bounded.trimmedTrailingFrames,1);
+  const boundedHashes=await hashes(normalized),inclusiveHashes=await hashes(inclusive);
+  assert.deepEqual(boundedHashes.slice(0,11),sourceHashes.slice(0,11));assert.deepEqual(boundedHashes.slice(11,37),inclusiveHashes.slice(0,26));assert.deepEqual(boundedHashes.slice(37),sourceHashes.slice(37));
+  assert.deepEqual(await pcm(normalized,'normalized.pcm'),await pcm(source,'original-for-normalized.pcm'));
+  await assert.rejects(composeActionWindow({sourcePath:source,repairPath:inclusive,outputPath:join(root,'too-long.mp4'),startSeconds:0,endSeconds:1,trailingFramePolicy:'DROP_ONE_PROVIDER_TRAILING_FRAME'}),/REPAIR_TIMING_CHANGED/);
+  await assert.rejects(composeActionWindow({sourcePath:source,repairPath:repair,outputPath:join(root,'too-short.mp4'),startSeconds:0,endSeconds:2,trailingFramePolicy:'DROP_ONE_PROVIDER_TRAILING_FRAME'}),/REPAIR_TIMING_CHANGED/);
+  console.log('PASS explicit inclusive-end-frame policy records one trailing frame removal; no in-window or source/audio change, no padding or larger truncation');
   for (const [startSeconds,endSeconds] of [[-1,1],[2,1],[0,4],[NaN,1],[1,Infinity]]) await assert.rejects(prepareActionWindow({sourcePath:source,outputPath:join(root,'invalid.mp4'),startSeconds,endSeconds}),/RANGE_INVALID/);
   await assert.rejects(prepareActionWindow({sourcePath:'https://example.invalid/source.mp4',outputPath:join(root,'invalid.mp4'),startSeconds:0,endSeconds:1}),/LOCAL_PATH_REQUIRED/);
   await assert.rejects(prepareActionWindow({sourcePath:source,outputPath:source,startSeconds:0,endSeconds:1}),/OVERWRITE_SOURCE/);
