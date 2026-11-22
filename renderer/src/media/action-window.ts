@@ -121,6 +121,7 @@ export interface ActionRegionResult {
   version: 'ACTION_REGION_V1'; outputPath: string; region: ActionRegion;
   width: number; height: number; outputFrames: number; fps: 24;
   originalAudioCopied: boolean;
+  repairInputFrames?: number; trimmedTrailingFrames?: number;
 }
 function measuredRegion(value: unknown, source: Probe) {
   const region = assertActionRegion(value), w = region.window;
@@ -145,16 +146,17 @@ export async function prepareActionRegion(input: ActionRegionInput, options: Act
 /** Insert a matching reviewed-region result without changing any outside
  * pixels or frames. Hard boundaries require visual review; tracking, feathering,
  * scaling, interpolation and synthetic speech are intentionally not inferred. */
-export async function composeActionRegion(input: ActionRegionInput & { repairPath: string }, options: ActionWindowOptions = {}): Promise<ActionRegionResult> {
+export async function composeActionRegion(input: ActionRegionInput & { repairPath: string; trailingFramePolicy?: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }, options: ActionWindowOptions = {}): Promise<ActionRegionResult> {
   const tools = createTools(options), source = await tools.probe(input.sourcePath), repair = await tools.probe(input.repairPath);
   const region = measuredRegion(input.region, source), w = region.window;
   const out = await outputPath({ ...input, startSeconds: w.startSeconds, endSeconds: w.endSeconds }, source, repair);
   if (repair.width !== region.width || repair.height !== region.height) fail('DIMENSIONS_CHANGED');
-  if (repair.fps !== 24 || repair.frames !== w.endFrame - w.startFrame) fail('REPAIR_TIMING_CHANGED');
+  const trimmedTrailingFrames = repair.frames - (w.endFrame - w.startFrame);
+  if (repair.fps !== 24 || trimmedTrailingFrames !== 0 && !(input.trailingFramePolicy === 'DROP_ONE_PROVIDER_TRAILING_FRAME' && trimmedTrailingFrames === 1)) fail('REPAIR_TIMING_CHANGED');
   const parts: string[] = [], labels: string[] = [];
   if (w.startFrame) { parts.push(`[0:v]trim=end_frame=${w.startFrame},setpts=PTS-STARTPTS[prefix]`); labels.push('[prefix]'); }
   parts.push(`[0:v]trim=start_frame=${w.startFrame}:end_frame=${w.endFrame},setpts=PTS-STARTPTS[base]`);
-  parts.push('[1:v]setpts=PTS-STARTPTS[patch]');
+  parts.push(`[1:v]trim=end_frame=${w.endFrame - w.startFrame},setpts=PTS-STARTPTS[patch]`);
   parts.push(`[base][patch]overlay=x=${region.x}:y=${region.y}:eof_action=pass:shortest=1:format=yuv420:repeatlast=0[fixed]`);
   labels.push('[fixed]');
   if (w.endFrame < source.frames) { parts.push(`[0:v]trim=start_frame=${w.endFrame},setpts=PTS-STARTPTS[suffix]`); labels.push('[suffix]'); }
@@ -163,6 +165,6 @@ export async function composeActionRegion(input: ActionRegionInput & { repairPat
     await tools.ffmpeg([...preamble, ...inputArgs(source.canonical), ...inputArgs(repair.canonical), '-filter_complex', parts.join(';'), '-map', '[v]', '-map', '0:a?', '-c:a', 'copy', ...encodeArgs, out]);
     const measured = await tools.probe(out);
     if (measured.frames !== source.frames || measured.width !== source.width || measured.height !== source.height || measured.fps !== 24 || measured.audio.length !== source.audio.length) fail('OUTPUT_TIMING');
-    return { version: 'ACTION_REGION_V1', outputPath: out, region, width: source.width, height: source.height, outputFrames: measured.frames, fps: 24, originalAudioCopied: source.audio.length > 0 };
+    return { version: 'ACTION_REGION_V1', outputPath: out, region, width: source.width, height: source.height, outputFrames: measured.frames, fps: 24, originalAudioCopied: source.audio.length > 0, repairInputFrames: repair.frames, trimmedTrailingFrames };
   } catch (error) { await unlink(out).catch(() => undefined); throw error; }
 }

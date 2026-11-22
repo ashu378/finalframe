@@ -14,7 +14,8 @@ export interface PlannedGraphicCard {
 export const PLANNED_GRAPHICS_SCHEMA = {
     type: 'array', maxItems: 16, items: {
         type: 'object', additionalProperties: false,
-        required: ['templateId', 'durationSeconds', 'title', 'subtitle', 'brandName', 'callToAction', 'accentColor', 'backgroundColor', 'textColor'],
+        // Strict provider output requires every field; stored legacy cards may omit narrationText.
+        required: ['narrationText', 'templateId', 'durationSeconds', 'title', 'subtitle', 'brandName', 'callToAction', 'accentColor', 'backgroundColor', 'textColor'],
         properties: {
             narrationText: { type: 'string', maxLength: 1024 },
             templateId: { type: 'string', enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] },

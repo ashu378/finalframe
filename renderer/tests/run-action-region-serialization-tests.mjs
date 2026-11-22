@@ -10,5 +10,9 @@ for (const compose of [false,true]) {
  for(const altered of [{...region,x:322},{...region,y:66},{...region,width:254},{...region,height:254},{...region,window:planActionWindow([{startSeconds:4.75,endSeconds:7.5}], {width:864,height:480,videoTiming:{version:'DECODED_VIDEO_FRAMES_V1',fpsNumerator:24,fpsDenominator:1,firstFrameSeconds:0,frameCount:193}})}]) assert.throws(()=>assertActionRegionProof(sorted(region),sorted({...proof,region:altered}),compose),/BINDING_CHANGED/);
  assert.throws(()=>assertActionRegionProof(sorted(region),sorted({...proof,outputFrames:proof.outputFrames+1}),compose),/BINDING_CHANGED/);
  assert.throws(()=>assertActionRegionProof(sorted(region),sorted({...proof,fps:30}),compose),/BINDING_CHANGED/);
+ if(compose) {
+  assertActionRegionProof(sorted(region), {...proof, repairInputFrames:61,trimmedTrailingFrames:1}, true);
+  for(const invalid of [{repairInputFrames:62,trimmedTrailingFrames:2},{repairInputFrames:60,trimmedTrailingFrames:1},{repairInputFrames:61},{trimmedTrailingFrames:1}]) assert.throws(()=>assertActionRegionProof(region,{...proof,...invalid},true),/BINDING_CHANGED/);
+ } else assert.throws(()=>assertActionRegionProof(region,{...proof,repairInputFrames:61,trimmedTrailingFrames:1},false),/BINDING_CHANGED/);
 }
 console.log('PASS PREPARED/COMPOSED key-order transport round trips; changed coordinates, geometry, timing, frame count and fps remain rejected. No provider calls.');

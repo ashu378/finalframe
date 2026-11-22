@@ -47,9 +47,11 @@ async function setup(){
  await c.call('actionWindowRepairs','record',{...lease,phase:'PREPARED',storageId:'prepared',proof});
  await requirePreparedActionWindow(c,c.rows.get('job'));
  assert.deepEqual((await c.call('actionWindowRepairs','context',lease)).region,saved.selection);
+ assert.equal((await c.call('actionWindowRepairs','context',lease)).trailingFramePolicy,'DROP_ONE_PROVIDER_TRAILING_FRAME');
  c.rows.get('job').providerJobId='accepted';await c.call('actionWindowRepairs','record',{...lease,phase:'RAW',storageId:'prepared'});
  c.storageObjects.set('composed',{size:50,sha256:other,contentType:'video/mp4'});
- const finished={...proof,width:320,height:240,outputFrames:72,originalAudioCopied:true};
+ const finished={...proof,width:320,height:240,outputFrames:72,originalAudioCopied:true,repairInputFrames:25,trimmedTrailingFrames:1};
+ const j=c.rows.get('job');j.model='other/model';j.request.editQuote.catalogFingerprint=JSON.stringify(['openrouter','other/model']);assert.equal((await c.call('actionWindowRepairs','context',lease)).trailingFramePolicy,undefined);await assert.rejects(c.call('actionWindowRepairs','record',{...lease,phase:'COMPOSED',storageId:'composed',proof:finished}),/BINDING_CHANGED/);c.rows.get('job').model='black-forest-labs/flux-video-edit';c.rows.get('job').request.editQuote.catalogFingerprint=JSON.stringify(['openrouter','black-forest-labs/flux-video-edit']);
  await assert.rejects(c.call('actionWindowRepairs','record',{...lease,phase:'COMPOSED',storageId:'composed',proof:{...finished,originalAudioCopied:false}}),/OUTPUT_CHANGED/);
  await c.call('actionWindowRepairs','record',{...lease,phase:'COMPOSED',storageId:'composed',proof:finished});
  assert.equal((await c.call('actionWindowRepairs','context',lease)).actionWindowComposed.storageId,'composed');

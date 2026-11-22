@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareActionRegion, composeActionRegion } from '../dist/media/action-window.js';
-import { assertActionRegion } from '../dist/media/action-region-contract.js';
+import { assertActionRegion, assertActionRegionProof } from '../dist/media/action-region-contract.js';
 import { planActionWindow } from '../dist/media/action-window-contract.js';
 import { InjectableFFmpegAdapter } from '../dist/media/ffmpeg.js';
 
@@ -64,6 +64,23 @@ try {
   const audioHash = async path => (await run(['-i', path, '-map', '0:a:0', '-c:a', 'copy', '-f', 'hash', '-hash', 'sha256', '-'])).stdout.trim();
   assert.equal(await audioHash(output), await audioHash(source));
   console.log('PASS prepared crop exact; every outside luma/chroma sample and entire original encoded audio unchanged; only selected region/window replaced');
+  const inclusive = join(root, 'inclusive-patch.mp4'), compatible = join(root, 'compatible-output.mp4');
+  await run(['-f', 'lavfi', '-i', 'color=red:size=96x96:rate=24', '-frames:v', '25', ...encoding, inclusive]);
+  await assert.rejects(composeActionRegion({ sourcePath: source, repairPath: inclusive, outputPath: compatible, region }), /REPAIR_TIMING_CHANGED/);
+  const compatibleProof = await composeActionRegion({ sourcePath: source, repairPath: inclusive, outputPath: compatible, region, trailingFramePolicy: 'DROP_ONE_PROVIDER_TRAILING_FRAME' });
+  assert.equal(compatibleProof.repairInputFrames, 25); assert.equal(compatibleProof.trimmedTrailingFrames, 1);
+  assertActionRegionProof(region, compatibleProof, true);
+  assert.deepEqual(await raw(compatible, 'compatible.yuv'), outputBytes);
+  assert.equal(await audioHash(compatible), await audioHash(source));
+  for (const frames of [23, 26]) {
+    const invalid = join(root, `invalid-${frames}.mp4`);
+    await run(['-f', 'lavfi', '-i', 'color=red:size=96x96:rate=24', '-frames:v', String(frames), ...encoding, invalid]);
+    await assert.rejects(composeActionRegion({ sourcePath: source, repairPath: invalid, outputPath: join(root, `rejected-${frames}.mp4`), region, trailingFramePolicy: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }), /REPAIR_TIMING_CHANGED/);
+  }
+  const wrongFps = join(root, 'wrong-fps.mp4');
+  await run(['-f', 'lavfi', '-i', 'color=red:size=96x96:rate=30:duration=1', ...encoding, wrongFps]);
+  await assert.rejects(composeActionRegion({ sourcePath: source, repairPath: wrongFps, outputPath: join(root, 'rejected-fps.mp4'), region, trailingFramePolicy: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }), /REPAIR_TIMING_CHANGED/);
+  console.log('PASS explicit inclusive-frame policy removes only one trailing frame; decoded output/outside pixels/audio identical; absent policy, missing frames, two excess frames and fps changes rejected');
   await assert.rejects(prepareActionRegion({ sourcePath: source, outputPath: source, region }), /OVERWRITE_SOURCE/);
   await assert.rejects(prepareActionRegion({ sourcePath: source, outputPath: crop, region }), /OUTPUT_EXISTS/);
   await assert.rejects(prepareActionRegion({ sourcePath: source, outputPath: join(root, 'bad-source.mp4'), region: { ...region, window: { ...window, sourceFrames: 73 } } }), /SOURCE_CHANGED/);

@@ -52,3 +52,17 @@ console.log('PASS explicit graphics-only product/explainer cards, narration rete
  assert.equal(ctx.count('generationJobs'),0);assert.equal(ctx.count('providerBudgetReservations'),0);
  console.log('PASS canonical graphics validation without video catalog; FOOTAGE still requires compatible model; no purchases');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+// Exercise the actual adapter's complete recursive strict-schema validation.
+// A field omitted from required blocks ALL planning, even FOOTAGE with no cards.
+const {buildStructuredResponseFormat}=load('src/lib/adapters/openrouter-adapter.ts');
+const {LEGACY_DIRECTOR_PLAN_SCHEMA}=load('src/lib/production/planning-schema.ts');
+const format=buildStructuredResponseFormat(LEGACY_DIRECTOR_PLAN_SCHEMA);
+assert.equal(format.type,'json_schema');
+assert.equal(format.json_schema.strict,true);
+const broken=structuredClone(LEGACY_DIRECTOR_PLAN_SCHEMA);
+broken.schema.properties.graphicCards.items.required=broken.schema.properties.graphicCards.items.required.filter(key=>key!=='narrationText');
+assert.throws(()=>buildStructuredResponseFormat(broken),/graphicCards\[\].*require every property/);
+assert.equal(parsePlannedGraphics([card])[0].narrationText,undefined,'historical omission remains readable without mutation');
+assert.equal(parsePlannedGraphics([{...card,narrationText:''}])[0].narrationText,'','new non-explainer cards may explicitly have no speech');
+console.log('PASS real adapter validates complete strict planning schema; optional-field regression rejected; old cards remain readable');

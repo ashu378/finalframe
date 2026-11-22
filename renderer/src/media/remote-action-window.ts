@@ -17,7 +17,7 @@ export async function remoteActionWindow(value:unknown,options:{allowedHosts:rea
  const region=p.region===undefined?undefined:assertActionRegion(p.region);
  if(region&&JSON.stringify(region.window)!==JSON.stringify(window))throw new Error('ACTION_WINDOW_BINDING_CHANGED');
  if(!['PREPARE','COMPOSE'].includes(p.operation))throw new Error('ACTION_WINDOW_INVALID_OPERATION');
-  if(p.trailingFramePolicy!==undefined&&(region||!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
+  if(p.trailingFramePolicy!==undefined&&(!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
  const directory=await mkdtemp(join(tmpdir(),'finalframe-action-window-'));
  const download=async(input:unknown,name:string)=>{
   const source=object(input),url=assertProbeUrl(source.url,options.allowedHosts);
@@ -32,7 +32,7 @@ export async function remoteActionWindow(value:unknown,options:{allowedHosts:rea
  try{
   const sourcePath=await download(p.source,'source.mp4'),outputPath=join(directory,'output.mp4');
   const args={sourcePath,outputPath,startSeconds:window.startSeconds,endSeconds:window.endSeconds};
-  const result=region?(compose?await composeActionRegion({sourcePath,outputPath,region,repairPath:await download(p.repair,'repair.mp4')}):await prepareActionRegion({sourcePath,outputPath,region})):(compose?await composeActionWindow({...args,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionWindow(args));
+  const result=region?(compose?await composeActionRegion({sourcePath,outputPath,region,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionRegion({sourcePath,outputPath,region})):(compose?await composeActionWindow({...args,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionWindow(args));
   if(region)assertActionRegionProof(region,result,compose);else assertActionWindowProof(window,result,compose);
   const size=(await stat(outputPath)).size;if(size<1||size>ACTION_WINDOW_MAX_BYTES)throw new Error('ACTION_WINDOW_OUTPUT_LIMIT');
   const bytes=await readFile(outputPath),{outputPath:_path,...proof}=result;

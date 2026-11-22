@@ -41,5 +41,12 @@ export function assertActionRegionProof(region: ActionRegion, value: unknown, co
       typeof p.originalAudioCopied !== 'boolean' || !compose && p.originalAudioCopied !== false) {
     throw new Error('ACTION_WINDOW_BINDING_CHANGED');
   }
+  if (p.repairInputFrames !== undefined || p.trimmedTrailingFrames !== undefined) {
+    const frames = expected.window.endFrame - expected.window.startFrame;
+    if (!compose || ![0, 1].includes(p.trimmedTrailingFrames) ||
+        p.repairInputFrames !== frames + p.trimmedTrailingFrames) {
+      throw new Error('ACTION_WINDOW_BINDING_CHANGED');
+    }
+  }
   return p;
 }
