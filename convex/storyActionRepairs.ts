@@ -10,6 +10,7 @@ import { resolveVideoEditSourceCertificate } from './videoRouting';
 import { actionRepairPrompt, ACTION_REPAIR_VERSION } from '../src/lib/production/story-action-check';
 import { planActionWindow, ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
 import { sha256Equal } from '../renderer/src/media/sha256';
+import { assertActionRegion, ACTION_REGION_REPAIR_VERSION } from '../renderer/src/media/action-region-contract';
 import { getActionRepairModel } from '../src/lib/ai/model-registry';
 const object=(value:unknown):Record<string,any>=>value&&typeof value==='object'?value as Record<string,any>:{};
 
@@ -45,12 +46,15 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  if(!missing.length)throw new Error('Review and identify the missing action before repairing.');
  const priorRepair=object(object(data.take.contextSnapshot).request).storyRepair;
  const isolated=process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true';
+ const regionReview=isolated&&process.env.FINALFRAME_ACTION_REGION_REPAIR_ENABLED==='true'?human?.repairRegion:undefined;
+ const region=regionReview?assertActionRegion(regionReview.selection):undefined;
+ if(regionReview&&!sha256Equal(regionReview.sourceChecksum,data.asset.checksum))throw new Error('ACTION_WINDOW_SOURCE_CHANGED');
  // Only a known superseded approach may progress once to the enabled v3
  // temporal strategy. Current/unknown versions cannot buy a retry chain.
- if(object(priorRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION)throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');
- if(priorRepair&&object(priorRepair).approachVersion!==undefined&&!(isolated&&object(priorRepair).approachVersion===ACTION_REPAIR_VERSION)&&missing.some(a=>object(priorRepair).failedActionIds?.includes(a.id)))throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH: This repair still missed the action. Change the shot direction or use a separately verified route before another paid attempt.');
+ if(object(priorRepair).approachVersion===ACTION_REGION_REPAIR_VERSION||!region&&object(priorRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION)throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');
+ if(priorRepair&&object(priorRepair).approachVersion!==undefined&&!(isolated&&object(priorRepair).approachVersion===ACTION_REPAIR_VERSION)&&!(region&&object(priorRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION)&&missing.some(a=>object(priorRepair).failedActionIds?.includes(a.id)))throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH: This repair still missed the action. Change the shot direction or use a separately verified route before another paid attempt.');
  let asset=data.asset;let baselineTakeId=data.take._id;
- if(isolated){
+ if(isolated&&!region){
   let ancestor=data.take;const seen=new Set<string>();
   for(let i=0;i<8;i++){const prior=object(object(ancestor.contextSnapshot).request).storyRepair;if(!prior)break;const ancestorAsset=ancestor.assetId?await ctx.db.get(ancestor.assetId):null;const receiptId=ctx.db.normalizeId('generationJobs',String(object(ancestorAsset?.metadata).generationJobId??'')),receipt=receiptId?await ctx.db.get(receiptId):null;if(!receipt||receipt.status!=='COMPLETED'||receipt.projectId!==data.take.projectId||receipt.productionId!==data.take.productionId||receipt.productionVersionId!==data.take.productionVersionId||receipt.shotId!==data.take.shotId||receipt.shotVersionId!==ancestor._id||object(receipt.response).assetId!==ancestor.assetId||JSON.stringify(object(receipt.request).storyRepair)!==JSON.stringify(prior))throw new Error('REPAIR_SOURCE_UNAVAILABLE');const id=ctx.db.normalizeId('shotVersions',String(object(prior).sourceTakeId??''));if(!id||seen.has(id)||i===7)throw new Error('REPAIR_SOURCE_UNAVAILABLE');seen.add(id);const root=await ctx.db.get(id);if(!root||root.projectId!==data.take.projectId||root.productionId!==data.take.productionId||root.productionVersionId!==data.take.productionVersionId||root.shotId!==data.take.shotId||root.status!=='COMPLETED'||!root.assetId||object(prior).sourceAssetId!==root.assetId)throw new Error('REPAIR_SOURCE_UNAVAILABLE');ancestor=root;}
   const baseline=ancestor.assetId?await ctx.db.get(ancestor.assetId):null;if(!baseline||baseline.projectId!==data.take.projectId||baseline.deletedAt)throw new Error('REPAIR_SOURCE_UNAVAILABLE');asset=baseline;baselineTakeId=ancestor._id;
@@ -67,9 +71,26 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  }
  let window:ReturnType<typeof planActionWindow>|undefined;
  if(isolated){const probe=await ctx.db.query('verifiedMediaProbes').withIndex('by_asset',q=>q.eq('assetId',asset._id)).unique();if(probe?.storageId===asset.storageId&&probe.videoTimingSourceStorageId===asset.storageId&&sha256Equal(probe.videoTimingSourceChecksum,asset.checksum)&&sha256Equal(probe.checksum,asset.checksum)){window=planActionWindow(missing,probe);}else if(!allowUnmeasured)throw new Error('ACTION_WINDOW_MEASUREMENT_REQUIRED');}
+ if(region&&(!window||JSON.stringify(region.window)!==JSON.stringify(window)))throw new Error('ACTION_WINDOW_BINDING_CHANGED');
  const repairActions=window?missing.map(a=>({...a,startSeconds:a.startSeconds-window!.startSeconds,endSeconds:a.endSeconds-window!.startSeconds,...(a.beforeSeconds!==null?{beforeSeconds:a.beforeSeconds-window!.startSeconds}:{})})):missing;
- return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:actionRepairPrompt(repairActions),proof:{approachVersion:isolated?ACTION_WINDOW_REPAIR_VERSION:ACTION_REPAIR_VERSION,...(window?{window}:{}),...(isolated?{baselineTakeId}:{}),sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
+ return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:(region?'This input is a close crop of the selected stationary subject. Keep the crop boundaries and exact dimensions unchanged. Correct the visible action inside this crop; do not add the rest of the scene. ':'')+actionRepairPrompt(repairActions),proof:{approachVersion:region?ACTION_REGION_REPAIR_VERSION:isolated?ACTION_WINDOW_REPAIR_VERSION:ACTION_REPAIR_VERSION,...(region?{region,regionReviewId:human!._id}:{}),...(window?{window}:{}),...(isolated?{baselineTakeId}:{}),sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
 }
+export const regionContext=internalQuery({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
+ if(process.env.FINALFRAME_ACTION_REGION_REPAIR_ENABLED!=='true'||process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED!=='true')throw new Error('ACTION_REGION_NOT_ENABLED');
+ const data=await reviewContext(ctx,args.takeId);await requireProjectRole(ctx,data.take.projectId!,['OWNER','EDITOR']);
+ const stored=data.asset.storageId?await ctx.db.system.get('_storage',data.asset.storageId):null;
+ if(!stored||stored.size>50_000_000||!sha256Equal(stored.sha256,data.asset.checksum))throw new Error('REPAIR_SOURCE_UNAVAILABLE');
+ return {projectId:data.take.projectId!,assetId:data.asset._id,storageId:data.asset.storageId!,checksum:stored.sha256,byteSize:stored.size,url:await ctx.storage.getUrl(data.asset.storageId!)};
+}});
+export const measureRegion=action({args:{takeId:v.id('shotVersions')},returns:v.null(),handler:async(ctx,args)=>{
+ const source=await ctx.runQuery(internal.storyActionRepairs.regionContext,args);
+ const base=process.env.RENDER_WORKER_URL?.trim(),secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();if(!base||!secret)throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');
+ const health=await fetch(base.replace(/\/$/,'')+'/health',{redirect:'error',signal:AbortSignal.timeout(10000)});
+ if(!health.ok||(await health.json()).actionRegionVersion!=='ACTION_REGION_V1')throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');
+ const response=await fetch(base.replace(/\/$/,'')+'/media/probe',{method:'POST',headers:{'content-type':'application/json','x-finalframe-worker-secret':secret},body:JSON.stringify({url:source.url,kind:'video',checksum:source.checksum,byteSize:source.byteSize,verifyVideoTiming:true}),redirect:'error',signal:AbortSignal.timeout(45000)});
+ if(!response.ok)throw new Error('ACTION_WINDOW_MEASUREMENT_REQUIRED');const text=await response.text();if(text.length>20000)throw new Error('ACTION_WINDOW_MEASUREMENT_REQUIRED');
+ const {url:_url,...binding}=source;await ctx.runMutation(internal.storyActionRepairs.recordProbe,{...binding,probe:JSON.parse(text)});return null;
+}});
 export const context=internalQuery({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
  const take=await ctx.db.get(args.takeId);if(!take?.projectId)throw new Error('REPAIR_SOURCE_UNAVAILABLE');await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);
  const resolved=await resolveStoryRepair(ctx,args.takeId,take.shotId,true);
@@ -80,7 +101,7 @@ export const context=internalQuery({args:{takeId:v.id('shotVersions')},returns:v
   if(!asset||asset.projectId!==take.projectId||asset.deletedAt||!stored||stored.size>50_000_000)throw new Error('REPAIR_SOURCE_UNAVAILABLE');
   assets.push({assetId,storageId:asset.storageId!,checksum:stored.sha256,byteSize:stored.size,url:await ctx.storage.getUrl(asset.storageId!)});
  }
- return {projectId:take.projectId,productionId:take.productionId!,shotId:take.shotId,assets};
+ return {projectId:take.projectId,productionId:take.productionId!,shotId:take.shotId,assets,region:Boolean(resolved.proof.region)};
 }});
 export const recordProbe=internalMutation({args:{projectId:v.id('projects'),assetId:v.id('assets'),storageId:v.id('_storage'),checksum:v.string(),byteSize:v.number(),probe:v.any()},returns:v.null(),handler:async(ctx,args)=>{
  await requireProjectRole(ctx,args.projectId,['OWNER','EDITOR']);const asset=await ctx.db.get(args.assetId),stored=await ctx.db.system.get('_storage',args.storageId),p=object(args.probe);
@@ -91,7 +112,7 @@ export const recordProbe=internalMutation({args:{projectId:v.id('projects'),asse
 export const estimate=action({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args):Promise<any>=>{
  const data=await ctx.runQuery(internal.storyActionRepairs.context,args);
  const base=process.env.RENDER_WORKER_URL?.trim(),secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();if(!base||!secret)throw new Error('Source measurement is not configured.');
- if(process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true'){const health=await fetch(base.replace(/\/$/,'')+'/health',{redirect:'error',signal:AbortSignal.timeout(10000)});if(!health.ok||(await health.json()).actionWindowVersion!=='ACTION_WINDOW_V1')throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');}
+ if(process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true'){const health=await fetch(base.replace(/\/$/,'')+'/health',{redirect:'error',signal:AbortSignal.timeout(10000)});if(!health.ok)throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');const capabilities=await health.json();if(capabilities.actionWindowVersion!=='ACTION_WINDOW_V1'||data.region&&capabilities.actionRegionVersion!=='ACTION_REGION_V1')throw new Error('ACTION_WINDOW_WORKER_UNAVAILABLE');}
  for(const asset of data.assets){
   const response=await fetch(base.replace(/\/$/,'')+'/media/probe',{method:'POST',headers:{'content-type':'application/json','x-finalframe-worker-secret':secret},body:JSON.stringify({url:asset.url,kind:'video',checksum:asset.checksum,byteSize:asset.byteSize,verifyVideoTiming:process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true'}),redirect:'error',signal:AbortSignal.timeout(45000)});
   if(!response.ok)throw new Error('The source video could not be measured.');

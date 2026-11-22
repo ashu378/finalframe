@@ -14,6 +14,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { ShotDurationPlanningError } from './shot-duration-planning';
 import {getOutputPreset} from '../../../renderer/src/output-presets';
 import { parseCreatorIntent, legacyVideoTypeForCreatorIntent, CreatorIntentValidationError } from './creator-intent';
+import { normalizePlannerResourceRoles } from './planner-resource-roles';
 
 export interface PlanningPreview {
     graphicCards?: PlannedGraphicCard[];
@@ -164,7 +165,7 @@ function parsePlan(content: string | null): DirectorPlan {
         const parsed = JSON.parse(content) as Partial<DirectorPlan>;
         if (!parsed.sequences?.length || !parsed.summary) throw new Error('The planning provider returned an incomplete plan.');
         if (!parsed.bible || !Array.isArray(parsed.assumptions) || !Array.isArray(parsed.questions) || !Array.isArray(parsed.operations) || !parsed.workflow) throw new Error('The planning provider returned an incomplete plan.');
-        return parsed as DirectorPlan;
+        return normalizePlannerResourceRoles(parsed as DirectorPlan);
     } catch (error) { throw error instanceof Error ? error : new Error('The planning provider returned invalid plan JSON.'); }
 }
 
@@ -183,6 +184,7 @@ function planningFailureMessage(error: unknown): string {
     if(safe&&['NO_COMPATIBLE_DURATIONS','TOTAL_NOT_DECOMPOSABLE','PLAN_TOTAL_MISMATCH','SHOT_NOT_SUPPORTED','PLANNING_CHECK_EXPIRED'].includes(safe.code??'')&&typeof safe.message==='string')return safe.message;
     if (!(error instanceof AICapabilityError)) {
         const message = error instanceof Error ? error.message : '';
+        if (/PLANNER_RESOURCE_ROLE_INVALID/.test(message)) return 'The plan needs clear, distinct names for its character and resource roles. Revise the plan; your approved references are unchanged.';
         if (/PAID_PLANNING_DISABLED|not enabled for capped paid testing|approved testing budget/.test(message)) return 'Paid planning is paused until the controlled test budget is configured. Your request was not sent to the provider.';
         if (/backend environment/.test(message)) return 'The planning provider key must be configured in FinalFrame’s backend environment.';
         if (/already recorded|already pending|must be reconciled/.test(message)) return 'This request is already recorded. Check its status before submitting a new version.';

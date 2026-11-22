@@ -42,7 +42,7 @@ export function buildWorkspaceRecipe(input:RecipeBuilderInput,shots:RecipeWorksp
  // exact copy and renderer semantics rather than silently dropping any fields.
  if(input.graphicsLayoutVersion===2)for(const step of steps){
   if(step.operation!=='GRAPHIC')continue;
-  const candidate={...step,layoutVersion:2 as const,...(step.templateId==='feature-callout'&&!step.feature?{feature:step.title}:{})};
+  const candidate={...step,layoutVersion:2 as const,readability:'PHONE' as const,...(step.templateId==='feature-callout'&&!step.feature?{feature:step.title}:{})};
   try{parseGraphicsV2Authoring({templateId:candidate.templateId,props:recipeGraphicProps(candidate),...(candidate.logoAssetId?{logoAssetId:candidate.logoAssetId}:{})},candidate.durationFrames,input.fps);}
   catch{continue;}
   Object.assign(step,candidate);

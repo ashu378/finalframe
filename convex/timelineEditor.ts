@@ -254,12 +254,24 @@ async function replacementAsset(ctx: ReadCtx, projectId: Id<'projects'>, studioE
   if (!asset || asset.projectId !== projectId || asset.studioExternalId !== studioExternalId || asset.scope !== 'PROJECT' || asset.deletedAt || !asset.storageId || !asset.mimeType?.startsWith(prefix) || [asset.rights,asset.provenance,asset.moderation].some(denied)) throw new Error('Choose an active approved replacement from this project with current media rights.');
   const storage = await ctx.db.system.get('_storage', asset.storageId);
   if (!storage || storage.size < 1 || storage.contentType !== asset.mimeType || !sha256Equal(asset.checksum, storage.sha256)) throw new Error('The replacement media bytes or type changed.');
+  // Recipe uploads keep measurements in the canonical probe tables, not in
+  // mutable upload metadata. Use only a probe bound to these exact stored bytes.
+  let durationSeconds = asset.durationSeconds;
+  if (clip.kind !== 'IMAGE') {
+    const probe = clip.kind === 'AUDIO'
+      ? await ctx.db.query('verifiedAudioProbes').withIndex('by_asset', q => q.eq('assetId', asset._id)).unique()
+      : await ctx.db.query('verifiedMediaProbes').withIndex('by_asset', q => q.eq('assetId', asset._id)).unique();
+    if (probe) {
+      if (probe.projectId !== projectId || probe.storageId !== asset.storageId || !sha256Equal(probe.checksum, storage.sha256) || probe.byteSize !== storage.size || !Number.isFinite(probe.durationSeconds) || probe.durationSeconds <= 0) throw new Error('The replacement media measurement changed. Verify this source again.');
+      durationSeconds = probe.durationSeconds;
+    }
+  }
   const restoration=record(clip.metadata.sourceAudioRestoration),hold=record(clip.metadata.renderItem).holdAfterFrame;
   const playbackDuration=asset._id===clip.assetId&&typeof hold==='number'&&typeof restoration.fps==='number'?(hold-1)/restoration.fps:clip.durationSeconds;
   // Canonical take composition permits 50ms of container/frame rounding. Keep
   // that existing take viewable; a different replacement still needs full coverage.
   const existingTakeRounding = clip.kind === 'VIDEO' && asset._id === clip.assetId && !!clip.shotVersionId && (clip.trimStartSeconds ?? 0) === 0 ? 0.05 : 0;
-  if (clip.kind !== 'IMAGE' && (!Number.isFinite(asset.durationSeconds) || asset.durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + playbackDuration > asset.durationSeconds! + existingTakeRounding + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
+  if (clip.kind !== 'IMAGE' && (!Number.isFinite(durationSeconds) || durationSeconds! <= 0 || (clip.trimStartSeconds ?? 0) + playbackDuration > durationSeconds! + existingTakeRounding + 0.000001)) throw new Error('The replacement needs a verified duration covering the current source window.');
   await requireApprovedResource(ctx, projectId, 'asset', asset._id);
   return asset;
 }

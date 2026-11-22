@@ -1,3 +1,4 @@
+import { externalHumanPortraits } from './videoReferenceEligibility';
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from './_generated/api';
@@ -248,6 +249,7 @@ export const refreshReviewedForQuote = action({
  * the caller before handing this helper resolved reference requirements. */
 export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args: {
   studioExternalId: string; modelId: string; request: Record<string, unknown>; estimatedCostUsd?: number;
+  productionVersionId: Id<'productionVersions'>; shotId: Id<'shots'>;
 }) {
   const nested = args.request.constraints && typeof args.request.constraints === "object" ? args.request.constraints as Record<string, unknown> : {};
   const raw = { ...args.request, ...nested };
@@ -259,6 +261,7 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
   const catalog = await ctx.db.query("videoModelCatalog").withIndex("by_studio", (q) => q.eq("studioExternalId", args.studioExternalId)).take(200);
   const request: VideoRoutingRequest = {
     videoType, task, qualityTier, operation: raw.operation as VideoOperation | undefined,
+    externalHumanPortraitAssetIds: await externalHumanPortraits(ctx, { productionVersionId: args.productionVersionId, shotId: args.shotId, referenceAssetIds: Array.isArray(args.request.referenceAssetIds) ? args.request.referenceAssetIds.map(String) : [] }),
     durationSeconds: Number(raw.durationSeconds ?? raw.duration), aspectRatio: String(raw.aspectRatio ?? raw.ratio ?? ""),
     resolution: typeof raw.resolution === "string" ? raw.resolution : undefined,
     hasImageReferences: raw.hasImageReferences === true, hasVideoReference: raw.hasVideoReference === true,

@@ -414,6 +414,7 @@ export default defineSchema({
     projectId: v.id('projects'), productionId: v.id('productions'), takeId: v.id('shotVersions'), assetId: v.id('assets'),
     requirementKey: v.string(), observations: v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()})),
     passed: v.boolean(), reviewerUserId: v.id('users'), createdAt: timestamp,
+    repairRegion: v.optional(v.object({version:v.literal('ACTION_REGION_REVIEW_V1'),sourceChecksum:v.string(),selection:v.any()})),
   }).index('by_take', ['takeId']),
 
   speakerSegments: defineTable({

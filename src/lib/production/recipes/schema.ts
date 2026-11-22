@@ -15,7 +15,7 @@ export const RECIPE_DOCUMENT_SCHEMA = {
       step('NARRATION', { mode: { const: 'GENERATE' }, text: text(), voiceId: id, voiceVersionId: id, primaryVoiceSampleAssetId: id }, ['voiceVersionId','primaryVoiceSampleAssetId']),
       step('NARRATION', { mode: { const: 'RECORDING' }, sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1) }),
       step('GENERATION', { shotId: id, references: { type: 'array', maxItems: 20, items: { oneOf: [object({ assetId: id }), object({ stepKey: key })] } } }),
-      step('GRAPHIC', { layoutVersion: { const: 2 }, templateId: { enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] }, durationFrames: integer(1), title: text(200), subtitle: { type: 'string', maxLength: 500 }, brandName: { type: 'string', maxLength: 160 }, eyebrow:text(500),feature:text(2000),detail:text(2000),index:text(100),callToAction:text(500),url:text(500),accentColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},backgroundColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},textColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'}, logoAssetId: id }, ['layoutVersion','logoAssetId','eyebrow','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor']),
+      step('GRAPHIC', { layoutVersion: { const: 2 }, readability: { const: 'PHONE' }, templateId: { enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] }, durationFrames: integer(1), title: text(200), subtitle: { type: 'string', maxLength: 500 }, brandName: { type: 'string', maxLength: 160 }, eyebrow:text(500),feature:text(2000),detail:text(2000),index:text(100),callToAction:text(500),url:text(500),accentColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},backgroundColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'},textColor:{type:'string',pattern:'^#[a-fA-F0-9]{6}$'}, logoAssetId: id }, ['layoutVersion','readability','logoAssetId','eyebrow','feature','detail','index','callToAction','url','accentColor','backgroundColor','textColor']),
       step('SOURCE_RANGE', { sourceAssetId: id, startFrame: frameOffset, durationFrames: integer(1), audioPolicy: { enum: ['KEEP_SOURCE', 'MUTE'] }, fit: { enum: ['contain', 'cover'] } }, ['fit']),
       step('MUSIC_ANALYSIS', { sourceAssetId: id, trimStartFrame: frameOffset, durationFrames: integer(1) }),
       step('CAPTIONS', { mode: { const: 'TRANSCRIPT' }, transcriptStepKey: key, language: text(35) }, ['mode']),
@@ -36,5 +36,6 @@ export function parseRecipeDocument(value: unknown): RecipeDocument {
   if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).length > RECIPE_LIMITS.maxBytes) throw new Error('Recipe does not satisfy version 1 bounded schema.');
   const snapshot: unknown = JSON.parse(serialized);
   if (!matches(snapshot, RECIPE_DOCUMENT_SCHEMA)) throw new Error('Recipe does not satisfy version 1 bounded schema.');
+  if ((snapshot as RecipeDocument).steps.some(step => step.operation === 'GRAPHIC' && step.readability !== undefined && step.layoutVersion !== 2)) throw new Error('Phone-readable graphics require layout version 2.');
   return snapshot as RecipeDocument;
 }

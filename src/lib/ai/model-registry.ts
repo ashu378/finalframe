@@ -64,13 +64,15 @@ export interface VideoReferenceContract {
     imageMode: 'SUBJECT_GUIDANCE' | 'FRAME_ONLY';
     maxImageReferences: number;
     referenceDurations?: readonly number[];
+    /** Direct external photoreal human references are not a supported input. */
+    humanPortraitPolicy?: { mode: 'TRUSTED_PROVIDER_ASSET_REQUIRED'; documentationUrl: string };
     supportsAudioReferences: boolean;
     combinedFrameReferences: boolean;
     documentationUrl: string;
     reviewedOn: string;
 }
 const VIDEO_REFERENCE_CONTRACTS: readonly VideoReferenceContract[] = [
-    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'bytedance/seedance-2.5', canonicalSlug: 'bytedance/seedance-2.5-20260807', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 30, supportsAudioReferences: true, combinedFrameReferences: false, documentationUrl: 'https://openrouter.ai/blog/insights/seedance-2-5-review/', reviewedOn: '2026-11-05' },
+    { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'bytedance/seedance-2.5', canonicalSlug: 'bytedance/seedance-2.5-20260807', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 30, humanPortraitPolicy: { mode: 'TRUSTED_PROVIDER_ASSET_REQUIRED', documentationUrl: 'https://docs.byteplus.com/en/docs/modelark/seedance-portrait-asset-guide' }, supportsAudioReferences: true, combinedFrameReferences: false, documentationUrl: 'https://openrouter.ai/blog/insights/seedance-2-5-review/', reviewedOn: '2026-11-05' },
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1', canonicalSlug: 'google/veo-3.1-20260320', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 3, referenceDurations: [8], supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1-fast', canonicalSlug: 'google/veo-3.1-fast-20260320', imageMode: 'SUBJECT_GUIDANCE', maxImageReferences: 3, referenceDurations: [8], supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/generate-videos-from-references', reviewedOn: '2026-11-11' },
     { version: 'VIDEO_REFERENCE_SEMANTICS_V1', modelId: 'google/veo-3.1-lite', canonicalSlug: 'google/veo-3.1-lite-20260331', imageMode: 'FRAME_ONLY', maxImageReferences: 0, supportsAudioReferences: false, combinedFrameReferences: false, documentationUrl: 'https://ai.google.dev/gemini-api/docs/veo', reviewedOn: '2026-11-05' },

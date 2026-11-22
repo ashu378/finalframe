@@ -28,6 +28,7 @@ function generationTask(value: unknown): VideoTask {
 
 function routingFailure(error: unknown): string {
     const message = error instanceof Error ? error.message : '';
+    if (message === 'RECIPE_HUMAN_REFERENCE_ROUTE_UNAVAILABLE') return 'The available model cannot accept these realistic human references with the requested controls. Keep your references and review a compatible model or a new shot duration before requesting a fresh estimate. No new purchase was made.';
     if (/premium model|administrator/i.test(message)) return 'This finish level is not configured yet. Ask an administrator to approve a compatible model route.';
     if (/supports all requested|within the configured spending cap/i.test(message)) return 'No available video model supports all the requested controls and spending limits.';
     return 'A compatible video route is not available for this request. An administrator can refresh the model catalog and review its capabilities.';
@@ -195,7 +196,7 @@ export async function previewShotGeneration(input: { productionId: string; shotI
                 const durationSelection = selectGenerationDuration({
                     videoType, task: requestedTask, qualityTier: tier, durationSeconds, aspectRatio, ...operationControls, upscaleSource, editSource, motionSource, lipSyncSource, lipSyncPortrait,
                     resolution: requestedResolution, hasImageReferences, imageReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('image/')).length, hasVideoReference, videoReferenceCount: references.filter(asset => String(asset.mimeType).startsWith('video/')).length,
-                    hasAudioReference: shotContext.hasAudioReference,
+                    hasAudioReference: shotContext.hasAudioReference, externalHumanPortraitAssetIds: shotContext.externalHumanPortraitAssetIds,
                     requiresFirstFrame, requiresLastFrame, requiresAudio,
                 }, models, policy, shotMetadata.audioPolicy !== 'SILENT' || Array.isArray(shotMetadata.dialogueSegments) && shotMetadata.dialogueSegments.length > 0);
                 const selection = durationSelection.selection;

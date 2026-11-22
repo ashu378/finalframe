@@ -89,6 +89,8 @@ export interface VideoRoutingRequest {
     hasVideoReference?: boolean;
     hasAudioReference?: boolean;
     imageReferenceCount?: number;
+    /** Server-derived from approved project cast; never a browser assertion. */
+    externalHumanPortraitAssetIds?: readonly string[];
     videoReferenceCount?: number;
     requiresFirstFrame?: boolean;
     requiresLastFrame?: boolean;
@@ -348,6 +350,7 @@ export function quoteVideoUpscale(model: VideoModelCapabilities, request: VideoR
 export function videoModelSupportsRequest(model: VideoModelCapabilities, request: VideoRoutingRequest): boolean {
     if (!model.available) return false;
     const operation = request.operation || request.task;
+    if (request.externalHumanPortraitAssetIds?.length && getReviewedVideoReferenceContract(model.modelId, model.canonicalSlug)?.humanPortraitPolicy?.mode === 'TRUSTED_PROVIDER_ASSET_REQUIRED') return false;
     const sourceEdit = isSourceVideoEdit(operation) && model.modelId === 'black-forest-labs/flux-video-edit';
     // Flags alone cannot certify a motion reference, its decoded source bounds,
     // full input billing, or a supplied-audio output-duration billing bound.
@@ -565,6 +568,7 @@ export function selectVideoRoute(
     const capable = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, { ...candidate, maximumCostUsd: undefined }));
     const eligible = requests.filter(({ model, request: candidate }) => videoModelSupportsRequest(model, candidate));
     if (!eligible.length && capable.length && maximumCostUsd !== undefined) throw new Error('No compatible video model fits within the configured spending cap.');
+    if (!eligible.length && request.externalHumanPortraitAssetIds?.length && requests.some(({model, request: candidate}) => videoModelSupportsRequest(model, {...candidate, maximumCostUsd: undefined, externalHumanPortraitAssetIds: []}))) throw new Error('RECIPE_HUMAN_REFERENCE_ROUTE_UNAVAILABLE');
     if (!eligible.length) throw new Error('No available video model supports all requested video controls and limits.');
 
     if (request.qualityTier === 'PREMIUM' && !eligible.some(({ model }) => preferred.includes(model.modelId))) {

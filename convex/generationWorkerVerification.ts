@@ -47,7 +47,7 @@ export const changeQueuedRoute = internalMutation({
     const catalogId = existing?._id ?? await ctx.db.insert('videoModelCatalog', fields);
     if (existing) await ctx.db.patch(existing._id, fields);
     const request = { ...object(job.request), path: 'AI_VIDEO', resolution: '720p', videoType: 'SOCIAL_CUTDOWN', task: 'GENERATE', qualityTier: 'STANDARD' };
-    const quote = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
+    const quote = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request, productionVersionId: job.productionVersionId!, shotId: job.shotId! });
     const reservation = job.providerBudgetReservationId ? await ctx.db.get(job.providerBudgetReservationId) : null;
     if (!reservation || Math.ceil(quote.estimatedCostUsd * 1_000_000) > reservation.estimatedMicros) throw new Error('The initial fixture quote must fit its reservation.');
     await ctx.db.patch(job._id, { provider: 'openrouter', request });

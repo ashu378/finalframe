@@ -1,3 +1,4 @@
+import { externalHumanPortraits } from './videoReferenceEligibility';
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { getProduction } from "./_shared";
@@ -24,12 +25,14 @@ export const getShot = query({
     const referenceAssets: Array<{ assetId: string; url: string; mimeType: string }> = [];
     const audioAssetIds: string[] = [];
     let hasAudioReference = false;
+    let externalHumanPortraitAssetIds: string[] = [];
     if (production.projectId) {
       const access = await requireProjectAccess(ctx, production.projectId);
       project = access.project;
       if (project.studioExternalId !== production.studioExternalId) throw new Error("Production does not belong to this project.");
       const version = production.currentVersionId ? await ctx.db.get(production.currentVersionId) : null;
       const continuity = await resolveGenerationContinuity(ctx, { projectId: project._id, productionId: production._id, snapshot: version?.planningContextSnapshot, explicitResourceVersionIds: object(shot.metadata).resourceVersionIds, referenceAssetIds: shot.requiredAssetIds || [] });
+      if (version) externalHumanPortraitAssetIds = await externalHumanPortraits(ctx, { productionVersionId: version._id, shotId: shot._id, referenceAssetIds: continuity.referenceAssetIds });
       for (const rawAssetId of continuity.referenceAssetIds) {
         const assetId = ctx.db.normalizeId("assets", rawAssetId);
         const asset = assetId ? await ctx.db.get(assetId) : null;
@@ -46,6 +49,6 @@ export const getShot = query({
         } else throw new Error("A shot reference uses an unsupported media format.");
       }
     }
-    return { production, shot, project, referenceAssets, audioAssetIds, hasAudioReference };
+    return { production, shot, project, referenceAssets, audioAssetIds, hasAudioReference, externalHumanPortraitAssetIds };
   },
 });

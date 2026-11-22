@@ -1,5 +1,5 @@
 import { requirePreparedActionWindow } from './actionWindowRepairs';
-import { ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
+import { isLocalizedActionRepair } from '../renderer/src/media/action-window-contract';
 import { resolveStoryRepair, repairAudioCertificate } from './storyActionRepairs';
 import { parseStoryActions, storyActionPrompt } from '../src/lib/production/story-actions';
 import { resolveShotDependencyProof, synchronizeShotDependencies } from './productionDependencies';
@@ -333,7 +333,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     }
     // Temporal repair already contains rebased failed actions; appending the
     // original absolute shot timing would contradict its cropped provider input.
-    normalizedRequest.prompt = String(normalizedRequest.prompt) + (object(normalizedRequest.storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION?'':storyActionPrompt(parseStoryActions(metadata.storyActions, shot.durationSeconds)));
+    normalizedRequest.prompt = String(normalizedRequest.prompt) + (isLocalizedActionRepair(object(normalizedRequest.storyRepair).approachVersion)?'':storyActionPrompt(parseStoryActions(metadata.storyActions, shot.durationSeconds)));
     if (Object.values(directing).some(value=>Array.isArray(value)?value.length>0:typeof value==='string'&&value.length>0)) normalizedRequest.prompt = `${normalizedRequest.prompt}\nCreator's shot direction (preserve the approved project references): ${JSON.stringify(directing)}`;
     if (operation === 'PERFORMANCE_TRANSFER') {
       normalizedRequest.motionSource = await resolveMotionSourceCertificate(ctx, { projectId: access.project._id, referenceAssetIds: continuity.referenceAssetIds, referenceBindings: references.referenceBindings, ...(execution ? {actorId:access.user._id} : {}) });
@@ -341,7 +341,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.prompt = `Create a NEW five-second silent clip. [Video 1] is the authoritative source for body movement, camera path and event timing. [Image 1] supplies the selected character identity and appearance. Follow the source motion continuously at its original speed and hold its final pose for the remaining output time. Output silent video. ${normalizedRequest.prompt}`;
     }
     validateVideoOperationRequirements({ ...normalizedRequest, operation, audioPolicy: normalizedRequest.audioPolicy as ShotOperationControls['audioPolicy'], hasVideoReference: normalizedRequest.hasVideoReference === true, hasImageReferences: normalizedRequest.hasImageReferences === true, hasAudioReference: normalizedRequest.hasAudioReference === true, firstFrameAssetId: firstFrame, previousJobId: normalizedRequest.previousJobId as string | undefined, previousModelId: normalizedRequest.previousModelId as string | undefined, upscaleFactor: normalizedRequest.upscaleFactor as number | undefined, upscaleMode: normalizedRequest.creativity === 0 ? 'PRECISE' : normalizedRequest.creativity === 1 ? 'CREATIVE' : undefined });
-    const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd });
+    const validated = await validateReviewedVideoJob(ctx, { studioExternalId: production.studioExternalId, modelId: args.model, request: normalizedRequest, estimatedCostUsd: args.estimatedProviderCostUsd, productionVersionId: version._id, shotId: shot._id });
     if (validated.request.durationSeconds !== Number(normalizedRequest.durationSeconds)) {
       // Only the canonical safe-silent selector may add provider handles. The
       // approved shot and prompt snapshot retain their original use duration.
@@ -351,6 +351,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
       normalizedRequest.durationSeconds = validated.request.durationSeconds;
       normalizedRequest.prompt = `Finish all requested action within the FIRST ${shot.durationSeconds} seconds, then hold the final pose for the remaining ${validated.request.durationSeconds-shot.durationSeconds} seconds of this ${validated.request.durationSeconds}-second silent clip. The planned edit uses only the first ${shot.durationSeconds} seconds. ${normalizedRequest.prompt}`;
     }
+    normalizedRequest.externalHumanPortraitAssetIds = validated.request.externalHumanPortraitAssetIds;
     normalizedRequest.referenceContract = validated.selection.referenceContract;
     // Never accept a browser-authored output certificate. Canonical routing
     // derives the exact native grid before hashing the reviewed estimate.
@@ -645,7 +646,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
           await requireApprovedResource(ctx,project._id,'asset',currentRepair.assetId,undefined,actor._id);
           const audioSource = await repairAudioCertificate(ctx,project._id,currentRepair.audioAssetId,actor._id);
           if (stable({...currentRepair.proof,audioSource}) !== stable(repair)) throw new Error('The repair source or review changed.');
-          if(repair.approachVersion===ACTION_WINDOW_REPAIR_VERSION)await requirePreparedActionWindow(ctx,job);
+          if(isLocalizedActionRepair(repair.approachVersion))await requirePreparedActionWindow(ctx,job);
         }
         const source = await resolveVideoEditSourceCertificate(ctx, { projectId: project._id, referenceAssetIds: Array.isArray(request.referenceAssetIds) ? request.referenceAssetIds.map(String) : [] });
         const frozen = object(request.editQuote);
@@ -658,7 +659,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
         const frozen = object(request.motionQuote);
         if (stable(source) !== stable(request.motionSource) || args.liveCatalogFingerprint !== frozen.catalogQuoteFingerprint || typeof args.liveCatalogCheckedAt !== 'number' || Date.now() - args.liveCatalogCheckedAt > 30_000 || args.liveCatalogCheckedAt > Date.now() + 1000) throw new Error('Source motion or catalog certification changed.');
       }
-      const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request });
+      const current = await validateReviewedVideoJob(ctx, { studioExternalId: job.studioExternalId, modelId: job.model, request, productionVersionId: job.productionVersionId!, shotId: job.shotId! });
       if (request.operation === 'PERFORMANCE_TRANSFER' && stable(current.selection.motionQuote) !== stable(request.motionQuote)) throw new Error('The frozen source-motion pricing certificate changed.');
       if (request.expectedNativeOutput !== undefined && stable(current.selection.expectedNativeOutput) !== stable(request.expectedNativeOutput)) throw new Error('The frozen native output certificate changed.');
       if (request.operation === 'UPSCALE' && stable(current.selection.upscaleQuote) !== stable(request.upscaleQuote)) throw new Error('The frozen upscale pricing certificate changed.');
@@ -699,7 +700,7 @@ export const recordOutput = internalMutation({ args: { ...leaseArgs, storageId: 
   const existingId = object(job.response).assetId;
   if (typeof existingId === 'string') return { assetId: existingId };
   const storage = await ctx.db.system.get('_storage', args.storageId);
-  if(object(object(job.request).storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION&&object(object(job.response).actionWindowComposed).storageId!==args.storageId)throw new Error('ACTION_WINDOW_COMPOSITION_REQUIRED');
+  if(isLocalizedActionRepair(object(object(job.request).storyRepair).approachVersion)&&object(object(job.response).actionWindowComposed).storageId!==args.storageId)throw new Error('ACTION_WINDOW_COMPOSITION_REQUIRED');
   if (!storage || !job.projectId || !job.providerJobId) throw new Error('Canonical generated media is missing.');
   const assetId = await ctx.db.insert('assets', { studioExternalId: job.studioExternalId, studioId: job.studioId, projectId: job.projectId, productionId: job.productionId, scope: 'PROJECT', source: 'AI_GENERATED', roles: ['GENERATED_VIDEO'], storageId: args.storageId, mimeType: args.contentType, byteSize: storage.size, checksum: storage.sha256, metadata: { technicalStatus: 'PENDING', generationJobId: job._id, shotVersionId: job.shotVersionId }, provenance: { provider: job.provider, model: job.model, providerTaskId: job.providerJobId, generationJobId: job._id }, createdAt: Date.now(), updatedAt: Date.now() });
   await ctx.db.patch(job._id, { executionStage: 'TECHNICAL_QC', progress: 85, response: { ...object(job.response), assetId }, updatedAt: Date.now() });

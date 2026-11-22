@@ -1,5 +1,5 @@
 import { prepareActionWindowInput,composeActionWindowOutput,getActionWindowState,retainRawActionWindow } from './actionWindowWorker';
-import { ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
+import { isLocalizedActionRepair } from '../renderer/src/media/action-window-contract';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import type { FunctionReference } from 'convex/server';
@@ -30,7 +30,7 @@ export const run = internalAction({
       const input = await ctx.runQuery(inputRef, lease);
       const job = input.job;
       const request = object(input.request);
-      const isolatedRepair=object(request.storyRepair).approachVersion===ACTION_WINDOW_REPAIR_VERSION;
+      const isolatedRepair=isLocalizedActionRepair(object(request.storyRepair).approachVersion);
       const constraints = { ...request, ...object(request.constraints) };
       const options = { maxRetries: 0, fallbackModels: [], idempotencyKey: job.idempotencyKey, allowDiscoveredModel: true, timeoutMs: 60_000, maxResponseBytes: GENERATION_MAX_MEDIA_BYTES };
       if (job.operation === 'PREPARATION') {

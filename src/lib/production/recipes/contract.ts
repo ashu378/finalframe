@@ -11,7 +11,7 @@ export type RecipeStep =
   | Step & { operation: 'PREPARATION'; kind: 'CHARACTER_REFERENCE' | 'TRANSCRIPT'; text: string; sourceAssetId?: string; sourceStepKey?: string }
   | Step & { operation: 'NARRATION' } & ({ mode: 'GENERATE'; text: string; voiceId: string; voiceVersionId?: string; primaryVoiceSampleAssetId?: string } | { mode: 'RECORDING'; sourceAssetId: string; startFrame: number; durationFrames: number })
   | Step & { operation: 'GENERATION'; shotId: string; references: RecipeInput[] }
-  | Step & { operation: 'GRAPHIC'; layoutVersion?: 2; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationFrames: number; title: string; subtitle: string; brandName: string; eyebrow?:string; feature?:string; detail?:string; index?:string; callToAction?:string; url?:string; accentColor?:string; backgroundColor?:string; textColor?:string; logoAssetId?: string }
+  | Step & { operation: 'GRAPHIC'; layoutVersion?: 2; readability?: 'PHONE'; templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card'; durationFrames: number; title: string; subtitle: string; brandName: string; eyebrow?:string; feature?:string; detail?:string; index?:string; callToAction?:string; url?:string; accentColor?:string; backgroundColor?:string; textColor?:string; logoAssetId?: string }
   | Step & { operation: 'SOURCE_RANGE'; sourceAssetId: string; startFrame: number; durationFrames: number; audioPolicy: 'KEEP_SOURCE' | 'MUTE'; fit?: 'contain' | 'cover' }
   | Step & { operation: 'MUSIC_ANALYSIS'; sourceAssetId: string; trimStartFrame: number; durationFrames: number }
   | Step & { operation: 'CAPTIONS'; language: string } & ({ mode?: 'TRANSCRIPT'; transcriptStepKey: string } | { mode: 'PLANNED_DIALOGUE' });
