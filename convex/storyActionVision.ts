@@ -56,7 +56,7 @@ export const run=action({args:{checkId:v.id('storyActionChecks')},returns:v.null
   await ctx.runMutation(internal.providerTextRequests.finish,{requestId:receiptId,submitted,...(response.content!==null?{content:response.content}:{}),model:response.modelUsed,providerRequestId:response.requestId,actualCostUsd:response.costUsd,usage:response.usage?{promptTokens:response.usage.promptTokens,completionTokens:response.usage.completionTokens,totalTokens:response.usage.totalTokens}:undefined});
   await ctx.runMutation(internal.storyActionChecks.complete,args);
  }catch(cause){
-  const error=cause as {status?:unknown;requestId?:unknown};
+  const error=(cause&&typeof cause==='object'?cause:{}) as {status?:unknown;requestId?:unknown};
   const status=typeof error.status==='number'&&Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:null;
   const requestId=typeof error.requestId==='string'&&/^gen-[A-Za-z0-9_-]{1,180}$/.test(error.requestId)?error.requestId:undefined;
   await ctx.runMutation(internal.providerTextRequests.finish,{requestId:receiptId,submitted,errorCode:status?`ACTION_CHECK_HTTP_${status}`:'ACTION_CHECK_FAILED',...(requestId?{providerRequestId:requestId}:{})});

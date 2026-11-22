@@ -35,7 +35,7 @@ export const complete=internalMutation({args:{checkId:v.id('storyActionChecks')}
  await requireProjectRole(ctx,check.projectId,['OWNER','EDITOR']);if(check.completedAt)return null;
  const data=await reviewContext(ctx,check.takeId),receipt=check.receiptId?await ctx.db.get(check.receiptId):null;
  if(data.requirementKey!==check.requirementKey||!receipt||receipt.requestKey!==check.requestKey||receipt.status!=='COMPLETED'||!receipt.content)throw new Error('ACTION_CHECK_NOT_COMPLETE');
- const observations=validateActionCheck(data.actions,JSON.parse(receipt.content));
+ const observations=validateActionCheck(data.actions,JSON.parse(receipt.content),data.shot.durationSeconds);
  await ctx.db.patch(check._id,{observations,completedAt:Date.now()});return null;
 }});
 export const get=query({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{

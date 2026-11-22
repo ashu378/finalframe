@@ -7,14 +7,18 @@ export const ACTION_CHECK_MAX_BYTES = 25_000_000;
 export const ACTION_CHECK_OUTPUT_TOKENS = 4096;
 export type ActionCheckObservation = {actionId:string;result:'PASS'|'FAIL'|'UNCERTAIN';observedStartSeconds:number|null;observedEndSeconds:number|null;evidence:string};
 export const ACTION_CHECK_SCHEMA = {type:'object',additionalProperties:false,required:['observations'],properties:{observations:{type:'array',maxItems:16,items:{type:'object',additionalProperties:false,required:['actionId','result','observedStartSeconds','observedEndSeconds','evidence'],properties:{actionId:{type:'string'},result:{type:'string',enum:['PASS','FAIL','UNCERTAIN']},observedStartSeconds:{type:['number','null']},observedEndSeconds:{type:['number','null']},evidence:{type:'string'}}}}}};
-export function validateActionCheck(actions:StoryAction[], value:unknown):ActionCheckObservation[] {
+export function validateActionCheck(actions:StoryAction[], value:unknown, shotDurationSeconds=60):ActionCheckObservation[] {
+    if(!Number.isFinite(shotDurationSeconds)||shotDurationSeconds<=0||shotDurationSeconds>60)throw new Error('ACTION_CHECK_INVALID_RESULT');
     const observations=(value as {observations?:unknown})?.observations;
     if(!Array.isArray(observations)||observations.length!==actions.length||new Set(observations.map(o=>o.actionId)).size!==actions.length)throw new Error('ACTION_CHECK_INVALID_RESULT');
     for(const action of actions){
         const o=observations.find(o=>o.actionId===action.id);
         if(!o||!['PASS','FAIL','UNCERTAIN'].includes(o.result))throw new Error('ACTION_CHECK_INVALID_RESULT');
         validateStoryActionObservations([action],[{...o,result:o.result==='UNCERTAIN'?'FAIL':o.result}]);
-        for(const time of [o.observedStartSeconds,o.observedEndSeconds])if(time!==null&&(typeof time!=='number'||!Number.isFinite(time)||time<0||time>action.endSeconds))throw new Error('ACTION_CHECK_INVALID_RESULT');
+        // A failed action may genuinely happen after its required window. Keep
+        // that evidence for repair; only PASS must fit the approved action time.
+        for(const time of [o.observedStartSeconds,o.observedEndSeconds])if(time!==null&&(typeof time!=='number'||!Number.isFinite(time)||time<0||time>shotDurationSeconds))throw new Error('ACTION_CHECK_INVALID_RESULT');
+        if(o.observedStartSeconds!==null&&o.observedEndSeconds!==null&&o.observedEndSeconds<=o.observedStartSeconds)throw new Error('ACTION_CHECK_INVALID_RESULT');
     }
     return observations.map(({actionId,result,observedStartSeconds,observedEndSeconds,evidence})=>({actionId,result,observedStartSeconds,observedEndSeconds,evidence}));
 }

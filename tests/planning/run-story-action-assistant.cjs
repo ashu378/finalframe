@@ -9,6 +9,12 @@ const pass={...fail,result:'PASS',observedStartSeconds:4.2,observedEndSeconds:4.
 function setup(){const c=fixture();c.put('productionVersions',{_id:'version',productionId:'production',status:'APPROVED'});c.put('shots',{_id:'shot',projectId:'project',productionId:'production',productionVersionId:'version',durationSeconds:8,prompt:'Biscuit gag',metadata:{storyActions:[action]}});c.put('assets',{_id:'asset',projectId:'project',scope:'PROJECT',checksum:'hash',storageId:'storage',mimeType:'video/mp4'});c.storageObjects.set('storage',{size:100,sha256:'hash',contentType:'video/mp4'});c.put('shotVersions',{_id:'take',projectId:'project',productionId:'production',productionVersionId:'version',shotId:'shot',assetId:'asset',status:'COMPLETED'});return c;}
 (async()=>{
  assert.equal(validateActionCheck([action],{observations:[fail]})[0].result,'FAIL');assert.equal(validateActionCheck([action],{observations:[{...fail,result:'UNCERTAIN'}]})[0].result,'UNCERTAIN');
+ const late={...fail,observedStartSeconds:6.4,observedEndSeconds:7.2,evidence:'Chewing starts at 6.4 seconds, after the question and required window.'};
+ assert.deepEqual(validateActionCheck([action],{observations:[late]},8),[late]);
+ assert.throws(()=>validateActionCheck([action],{observations:[{...late,result:'PASS'}]},8));
+ assert.throws(()=>validateActionCheck([action],{observations:[late]},6));
+ assert.throws(()=>validateActionCheck([action],{observations:[{...late,observedEndSeconds:6.1}]},8));
+ console.log('PASS late failure evidence retained; late passes, reversed and out-of-shot times rejected');
  assert.throws(()=>validateActionCheck([action],{observations:[{...pass,observedStartSeconds:5.2}]}));assert.throws(()=>validateActionCheck([action],{observations:[{...pass,actionId:'other'}]}));assert.throws(()=>validateActionCheck([action],{observations:[{...fail,observedStartSeconds:-1}]}));console.log('PASS strict visual observations, uncertainty and late-action rejection');
  const model={inputModalities:['video'],outputModalities:['text'],supportedParameters:['structured_outputs'],contextLength:1000000,pricing:{input:.000001,output:.000004},raw:{pricing:{prompt:'0.000001',completion:'0.000004'}}};
  assert.equal(quoteActionCheck(model).maximumCostUsd,1.016384);assert.throws(()=>quoteActionCheck({...model,inputModalities:['text']}));assert.throws(()=>quoteActionCheck({...model,raw:{pricing:{audio:'3'}}}));console.log('PASS full-context maximum and unsupported input/billing rejection');
