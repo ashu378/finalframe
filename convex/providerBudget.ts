@@ -4,8 +4,9 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
 // Owner-approved cumulative ceiling, including prior keys and retained holds.
-// Raised explicitly to $25 on 2026-11-12; existing usage is never reset.
-const MAX_TEST_MICROS = 25_000_000;
+// Owner authorized expanded testing on 2026-11-22. This pass uses a $100
+// cumulative ceiling; existing usage and uncertain holds are never reset.
+const MAX_TEST_MICROS = 100_000_000;
 
 export function usdToMicros(value: number) {
   if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(Math.ceil(value * 1_000_000))) {
@@ -22,7 +23,7 @@ export const configure = internalMutation({
   handler: async (ctx, args) => {
     const key = args.key.trim();
     const limitMicros = usdToMicros(args.limitUsd);
-    if (key.length < 8 || key.length > 120 || limitMicros <= 0 || limitMicros > MAX_TEST_MICROS) throw new Error("Testing budget must be positive and at most US$25.");
+    if (key.length < 8 || key.length > 120 || limitMicros <= 0 || limitMicros > MAX_TEST_MICROS) throw new Error("Testing budget must be positive and at most US$100.");
     const studios = [...new Set(args.allowedStudioExternalIds.map((id) => id.trim()).filter(Boolean))];
     if (!studios.length || studios.length > 10) throw new Error("Explicit test studios are required.");
     for (const studioId of studios) {
@@ -31,9 +32,12 @@ export const configure = internalMutation({
     const existing = await ctx.db.query("providerBudgets").withIndex("by_key", (q) => q.eq("key", key)).unique();
     // Creating a new key must not reset a previous run's approved allowance.
     const all = await ctx.db.query("providerBudgets").take(101);
-    if (all.length > 100 || all.reduce((sum, row) => sum + (row._id === existing?._id ? 0 : row.limitMicros), limitMicros) > MAX_TEST_MICROS) throw new Error("The total approved testing allowance is US$25.");
+    if (all.length > 100 || all.reduce((sum, row) => sum + (row._id === existing?._id ? 0 : row.limitMicros), limitMicros) > MAX_TEST_MICROS) throw new Error("The total approved testing allowance is US$100.");
     if (existing) {
       if (limitMicros < existing.spentMicros + existing.reservedMicros) throw new Error("Budget cannot be reduced below committed funds.");
+      if (existing.limitMicros !== limitMicros || existing.status !== (args.active ? "ACTIVE" : "PAUSED") || JSON.stringify(existing.allowedStudioExternalIds) !== JSON.stringify(studios)) {
+        await ctx.db.insert("audit", { actorExternalId: "internal-test-budget-administration", action: "PROVIDER_TEST_BUDGET_CONFIGURED", entityType: "providerBudget", entityId: existing._id, metadata: { previousLimitMicros: existing.limitMicros, limitMicros, spentMicros: existing.spentMicros, reservedMicros: existing.reservedMicros, allowedStudioExternalIds: studios, active: args.active }, createdAt: Date.now() });
+      }
       await ctx.db.patch(existing._id, { limitMicros, allowedStudioExternalIds: studios, status: args.active ? "ACTIVE" : "PAUSED", updatedAt: Date.now() });
       return existing._id;
     }
