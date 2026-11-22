@@ -38,6 +38,11 @@ export const run=action({args:{checkId:v.id('storyActionChecks')},returns:v.null
  const bytes=Buffer.from(await blob.arrayBuffer());
  const digest=createHash('sha256').update(bytes).digest();
  if(![digest.toString('hex'),digest.toString('base64')].includes(data.checksum))throw new Error('The stored video checksum changed.');
+ // Large lossless repairs can exceed gateway JSON body limits after base64
+ // expansion. Resolve only the authorized, checksum-verified storage object.
+ // The provider receives the same approved media, never a caller-supplied URL.
+ const videoUrl=bytes.length>2_000_000?await ctx.storage.getUrl(data.storageId):`data:video/mp4;base64,${bytes.toString('base64')}`;
+ if(!videoUrl)throw new Error('The saved video is unavailable for inspection.');
  const reserved=await ctx.runMutation(internal.providerTextRequests.reserve,{projectId:check.projectId,requestKey:check.requestKey,capability:'VISION_QC',model:check.model,estimatedCostUsd:check.maximumCostUsd});receipt=reserved.request;
  if(!receipt)throw new Error('Unable to reserve the check.');
  const receiptId=receipt._id;
@@ -46,12 +51,15 @@ export const run=action({args:{checkId:v.id('storyActionChecks')},returns:v.null
  let submitted=false;
  try{
   // OpenRouter extends OpenAI message parts with video_url (documented Nov 2026).
-  const messages=[{role:'user' as const,content:[{type:'text',text:actionCheckPrompt(data.actions)},{type:'video_url',video_url:{url:`data:video/mp4;base64,${bytes.toString('base64')}`,processing:'static'}}]}] as unknown as Parameters<typeof executeAITask>[1];
+  const messages=[{role:'user' as const,content:[{type:'text',text:actionCheckPrompt(data.actions)},{type:'video_url',video_url:{url:videoUrl,processing:'static'}}]}] as unknown as Parameters<typeof executeAITask>[1];
   const response=await executeAITask('VALIDATION',messages,{model:check.model,fallbackModels:[],maxRetries:0,retry:{maxRetries:0},maxTokens:ACTION_CHECK_OUTPUT_TOKENS,providerPriceCeiling:check.priceCeiling,structuredOutput:{name:'visible_action_check',schema:ACTION_CHECK_SCHEMA,strict:true},beforeChatSubmit:async()=>{await ctx.runMutation(internal.providerTextRequests.markSubmitting,{requestId:receiptId});submitted=true;}});
   await ctx.runMutation(internal.providerTextRequests.finish,{requestId:receiptId,submitted,...(response.content!==null?{content:response.content}:{}),model:response.modelUsed,providerRequestId:response.requestId,actualCostUsd:response.costUsd,usage:response.usage?{promptTokens:response.usage.promptTokens,completionTokens:response.usage.completionTokens,totalTokens:response.usage.totalTokens}:undefined});
   await ctx.runMutation(internal.storyActionChecks.complete,args);
- }catch{
-  await ctx.runMutation(internal.providerTextRequests.finish,{requestId:receiptId,submitted,errorCode:'ACTION_CHECK_FAILED'});
+ }catch(cause){
+  const error=cause as {status?:unknown;requestId?:unknown};
+  const status=typeof error.status==='number'&&Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:null;
+  const requestId=typeof error.requestId==='string'&&/^gen-[A-Za-z0-9_-]{1,180}$/.test(error.requestId)?error.requestId:undefined;
+  await ctx.runMutation(internal.providerTextRequests.finish,{requestId:receiptId,submitted,errorCode:status?`ACTION_CHECK_HTTP_${status}`:'ACTION_CHECK_FAILED',...(requestId?{providerRequestId:requestId}:{})});
   throw new Error('The video check could not finish. Its receipt is saved; no automatic paid retry was sent.');
  }
  return null;
