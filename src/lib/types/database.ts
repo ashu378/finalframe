@@ -386,6 +386,7 @@ export interface DirectorScenePlan {
 }
 
 export interface DirectorPlan {
+    graphicCards?: import('../production/planned-graphics').PlannedGraphicCard[];
     summary: string;
     assumptions: string[];
     questions: string[];

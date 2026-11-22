@@ -1,3 +1,4 @@
+import { PLANNED_GRAPHICS_SCHEMA } from './planned-graphics';
 /**
  * Structured output contract for the production form.
  *
@@ -116,8 +117,9 @@ export const LEGACY_DIRECTOR_PLAN_SCHEMA = {
     schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations'],
+        required: ['summary', 'assumptions', 'questions', 'workflow', 'bible', 'sequences', 'operations', 'graphicCards'],
         properties: {
+            graphicCards: PLANNED_GRAPHICS_SCHEMA,
             summary: { type: 'string', minLength: 1 },
             assumptions: stringList,
             questions: stringList,

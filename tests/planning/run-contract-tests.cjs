@@ -30,6 +30,7 @@ const qualityPath = compileModule('src/lib/ai/planning/quality.ts');
 const { inspectPlanQuality, assertPlanQuality, hasBlockingQualityGate } = require(qualityPath);
 const fixturePath = compileModule('tests/planning/fixtures.ts');
 const { validCreateIntent, validDirectorPlan, genericShot } = require(fixturePath);
+compileModule('src/lib/production/planned-graphics.ts');
 const productionSchemaPath = compileModule('src/lib/production/planning-schema.ts');
 const { LEGACY_DIRECTOR_PLAN_SCHEMA } = require(productionSchemaPath);
 const productionActionsSource = fs.readFileSync(path.join(repoRoot, 'src/lib/production/actions.ts'), 'utf8');

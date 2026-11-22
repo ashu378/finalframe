@@ -1,3 +1,4 @@
+import { parsePlannedGraphics } from '../src/lib/production/planned-graphics';
 import { parseUgcBrief } from '../src/lib/production/ugc-brief';
 import { resolveAudioSourceCertificate } from './audioCertificates';
 import { makeFunctionReference } from 'convex/server';
@@ -129,6 +130,7 @@ async function validatePlanGraph(ctx: ReadCtx, projectId: Id<"projects">, plan: 
     }
   }
   if (!shots) throw new Error("A plan must contain at least one shot.");
+  parsePlannedGraphics(record(plan).graphicCards, duration);
   for (const value of assets) {
     const id = ctx.db.normalizeId("assets", value);
     const asset = id ? await ctx.db.get(id) : null;

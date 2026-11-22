@@ -1,0 +1,43 @@
+/** Reviewed graphic copy is structured data, never inferred from prose at execution. */
+export interface PlannedGraphicCard {
+    templateId: 'kinetic-title' | 'brand-card' | 'feature-callout' | 'end-card';
+    durationSeconds: number;
+    title: string;
+    subtitle: string;
+    brandName: string;
+    callToAction: string;
+    accentColor: string;
+    backgroundColor: string;
+    textColor: string;
+}
+export const PLANNED_GRAPHICS_SCHEMA = {
+    type: 'array', maxItems: 16, items: {
+        type: 'object', additionalProperties: false,
+        required: ['templateId', 'durationSeconds', 'title', 'subtitle', 'brandName', 'callToAction', 'accentColor', 'backgroundColor', 'textColor'],
+        properties: {
+            templateId: { type: 'string', enum: ['kinetic-title', 'brand-card', 'feature-callout', 'end-card'] },
+            durationSeconds: { type: 'number', minimum: 1, maximum: 60 },
+            title: { type: 'string', minLength: 1, maxLength: 200 },
+            subtitle: { type: 'string', maxLength: 500 }, brandName: { type: 'string', maxLength: 160 }, callToAction: { type: 'string', maxLength: 500 },
+            accentColor: { type: 'string', pattern: '^#[a-fA-F0-9]{6}$' },
+            backgroundColor: { type: 'string', pattern: '^#[a-fA-F0-9]{6}$' },
+            textColor: { type: 'string', pattern: '^#[a-fA-F0-9]{6}$' },
+        },
+    },
+};
+export function parsePlannedGraphics(value: unknown, expectedSeconds?: number): PlannedGraphicCard[] {
+    if (value === undefined) return []; // Historical plans remain readable.
+    if (!Array.isArray(value) || value.length > 16) throw Error('PLANNED_GRAPHICS_INVALID');
+    const cards = value.map(card => {
+        if (!card || typeof card !== 'object' || Array.isArray(card) || Object.keys(card).some(key => !PLANNED_GRAPHICS_SCHEMA.items.required.includes(key))) throw Error('PLANNED_GRAPHICS_INVALID');
+        if (!PLANNED_GRAPHICS_SCHEMA.items.properties.templateId.enum.includes(card.templateId) || !Number.isFinite(card.durationSeconds) || card.durationSeconds < 1 || card.durationSeconds > 60) throw Error('PLANNED_GRAPHICS_INVALID');
+        for (const [key, max] of [['title', 200], ['subtitle', 500], ['brandName', 160], ['callToAction', 500]] as const) {
+            if (typeof card[key] !== 'string' || card[key].length > max || key === 'title' && !card[key].trim()) throw Error('PLANNED_GRAPHICS_INVALID');
+        }
+        for (const key of ['accentColor', 'backgroundColor', 'textColor']) if (typeof card[key] !== 'string' || !/^#[a-fA-F0-9]{6}$/.test(card[key])) throw Error('PLANNED_GRAPHICS_INVALID');
+        return { ...card } as PlannedGraphicCard;
+    });
+    const total = cards.reduce((sum, card) => sum + card.durationSeconds, 0);
+    if (total > 60 || cards.length && expectedSeconds !== undefined && Math.abs(total - expectedSeconds) > 0.001) throw Error('PLANNED_GRAPHICS_DURATION');
+    return cards;
+}
