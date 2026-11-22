@@ -105,6 +105,7 @@ import type * as renderUploadAuthorizationHttp from "../renderUploadAuthorizatio
 import type * as renderWorker from "../renderWorker.js";
 import type * as renderWorkerContracts from "../renderWorkerContracts.js";
 import type * as renderWorkerVerification from "../renderWorkerVerification.js";
+import type * as repairTiming from "../repairTiming.js";
 import type * as resourceStates from "../resourceStates.js";
 import type * as reviewExport from "../reviewExport.js";
 import type * as reviewLinkContracts from "../reviewLinkContracts.js";
@@ -238,6 +239,7 @@ declare const fullApi: ApiFromModules<{
   renderWorker: typeof renderWorker;
   renderWorkerContracts: typeof renderWorkerContracts;
   renderWorkerVerification: typeof renderWorkerVerification;
+  repairTiming: typeof repairTiming;
   resourceStates: typeof resourceStates;
   reviewExport: typeof reviewExport;
   reviewLinkContracts: typeof reviewLinkContracts;

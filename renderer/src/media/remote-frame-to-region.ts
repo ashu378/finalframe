@@ -8,7 +8,9 @@ import { assertFrameToRegion, assertFrameToRegionProof } from './frame-to-region
 import { prepareFrameToRegion, composeFrameToRegion } from './action-window.js';
 const limit = 50_000_000;
 const unavailable = () =>
-  Object.assign(new Error('ACTION_WINDOW_WORKER_UNAVAILABLE'), { code: 'ACTION_WINDOW_WORKER_UNAVAILABLE' });
+  Object.assign(new Error('ACTION_WINDOW_WORKER_UNAVAILABLE'), {
+    code: 'ACTION_WINDOW_WORKER_UNAVAILABLE',
+  });
 const object = (v: unknown): Record<string, any> =>
   v && typeof v === 'object' ? (v as Record<string, any>) : {};
 export async function remoteFrameToRegion(
@@ -17,7 +19,8 @@ export async function remoteFrameToRegion(
 ) {
   const p = object(value),
     contract = assertFrameToRegion(p.frameToRegion);
-  if (!['PREPARE', 'COMPOSE'].includes(p.operation)) throw new Error('FRAME_TO_REGION_OPERATION_INVALID');
+  if (!['PREPARE', 'COMPOSE', 'RETIME'].includes(p.operation))
+    throw new Error('FRAME_TO_REGION_OPERATION_INVALID');
   const directory = await mkdtemp(join(tmpdir(), 'finalframe-frame-region-'));
   const download = async (input: unknown, name: string) => {
     const media = object(input),
@@ -91,21 +94,33 @@ export async function remoteFrameToRegion(
         lastFrame: await encoded(result.lastFrame),
       };
     }
+    const timing =
+      p.operation === 'RETIME'
+        ? {
+            providerFrame: object(p.actionTiming).providerFrame,
+            targetFrame: object(p.actionTiming).targetFrame,
+          }
+        : undefined;
     const result = await composeFrameToRegion({
+      actionTiming: timing,
       sourcePath,
       repairPath: await download(p.repair, 'repair.mp4'),
       normalizedPath: join(directory, 'normalized.mp4'),
       outputPath: join(directory, 'composed.mp4'),
       frameToRegion: contract,
     });
-    assertFrameToRegionProof(contract, result, 'COMPOSED');
+    assertFrameToRegionProof(contract, result, 'COMPOSED', timing);
     if ((await stat(result.outputPath)).size > limit) throw new Error('FRAME_TO_REGION_OUTPUT_LIMIT');
     const bytes = await readFile(result.outputPath),
       { outputPath: _path, ...proof } = result;
     return {
       kind: 'COMPOSED' as const,
       bytes,
-      proof: { ...proof, checksum: createHash('sha256').update(bytes).digest('hex'), byteSize: bytes.length },
+      proof: {
+        ...proof,
+        checksum: createHash('sha256').update(bytes).digest('hex'),
+        byteSize: bytes.length,
+      },
     };
   } finally {
     await rm(directory, { recursive: true, force: true });

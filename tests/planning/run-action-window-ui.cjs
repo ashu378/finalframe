@@ -2,6 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {renderToStaticMarkup}=require('react-dom/server'),{getFunctionName}=require('convex/server');
 let source={projectId:'project',assetId:'asset',state:'APPROVED',repairUnavailable:false};
 const filename=path.resolve(__dirname,'../../src/components/production-workspace/story-action-assistant.tsx'),mod=new Module(filename,module);mod.filename=filename;mod.paths=Module._nodeModulePaths(path.dirname(filename));mod.require=name=>{
+ if(name==='./timed-repair')return{TimedRepair:()=>null};
  if(name==='convex/react')return{useQuery:ref=>getFunctionName(ref)==='storyActionRepairs:sourceApproval'?source:undefined,useAction:()=>async()=>{},useMutation:()=>async()=>{}};
  if(name==='next/navigation')return{useRouter:()=>({refresh(){}})};
  if(name.endsWith('/_generated/api'))return{api:require('../../convex/_generated/api.js').api};

@@ -10,12 +10,14 @@ import { resolveVideoEditSourceCertificate } from './videoRouting';
 import {
   assertFrameToRegion,
   assertFrameToRegionProof,
+  type ActionTiming,
+  type FrameToRegion,
 } from '../renderer/src/media/frame-to-region-contract';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { ACTION_WINDOW_MAX_BYTES } from '../renderer/src/media/action-window-contract';
 const object = (v: unknown): Record<string, any> =>
   v && typeof v === 'object' ? (v as Record<string, any>) : {};
-const denied = (value: unknown) => {
+export const deniedRepairMedia = (value: unknown) => {
   const r = object(value);
   return (
     r.approved === false ||
@@ -47,7 +49,11 @@ async function sourceContext(ctx: Ctx, takeId: Id<'shotVersions'>, actorId?: Id<
     throw new Error('REPAIR_SOURCE_UNAVAILABLE');
   const repair = await resolveStoryRepair(ctx, takeId, take.shotId, false, true);
   await requireApprovedResource(ctx, take.projectId, 'asset', repair.assetId, undefined, actorId);
-  if ([repair.data.asset.rights, repair.data.asset.provenance, repair.data.asset.moderation].some(denied))
+  if (
+    [repair.data.asset.rights, repair.data.asset.provenance, repair.data.asset.moderation].some(
+      deniedRepairMedia,
+    )
+  )
     throw new Error('REPAIR_SOURCE_UNAVAILABLE');
   const source = await resolveVideoEditSourceCertificate(ctx, {
     projectId: take.projectId,
@@ -66,7 +72,11 @@ async function sourceContext(ctx: Ctx, takeId: Id<'shotVersions'>, actorId?: Id<
 }
 /** Exact deterministic derivatives of an explicitly approved source region.
  * This approval permits reference use only; generated takes remain unapproved. */
-export async function resolveFrameRegionAnchors(ctx: Ctx, takeId: Id<'shotVersions'>, actorId?: Id<'users'>) {
+export async function resolveFrameRegionAnchors(
+  ctx: Ctx,
+  takeId: Id<'shotVersions'>,
+  actorId?: Id<'users'>,
+) {
   const data = await sourceContext(ctx, takeId, actorId),
     receipt = data.review.repairFrames;
   if (
@@ -340,6 +350,20 @@ async function jobContext(ctx: Ctx, args: Lease) {
     request.operation !== 'FRAME_TO_VIDEO'
   )
     throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
+  return savedFrameRegionSource(ctx, job, job.createdByUserId);
+}
+
+export async function savedFrameRegionSource(
+  ctx: Ctx,
+  job: Doc<'generationJobs'>,
+  actorId?: Id<'users'>,
+) {
+  const repair = object(object(job.request).storyRepair);
+  if (
+    repair.approachVersion !== ACTION_MOTION_REPAIR_VERSION ||
+    object(job.request).operation !== 'FRAME_TO_VIDEO'
+  )
+    throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
   const contract = assertFrameToRegion(repair.frameToRegion),
     source = object(repair.source),
     asset = await ctx.db.get(source.assetId as Id<'assets'>),
@@ -348,7 +372,7 @@ async function jobContext(ctx: Ctx, args: Lease) {
     !stored ||
     !asset ||
     asset.deletedAt ||
-    [asset.rights, asset.provenance, asset.moderation].some(denied) ||
+    [asset.rights, asset.provenance, asset.moderation].some(deniedRepairMedia) ||
     asset.projectId !== job.projectId ||
     asset.scope !== 'PROJECT' ||
     asset.storageId !== source.storageId ||
@@ -358,7 +382,7 @@ async function jobContext(ctx: Ctx, args: Lease) {
     contract.region.window.height !== source.height
   )
     throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
-  await requireApprovedResource(ctx, job.projectId!, 'asset', asset._id, undefined, job.createdByUserId);
+  await requireApprovedResource(ctx, job.projectId!, 'asset', asset._id, undefined, actorId);
   return {
     job,
     contract,
@@ -496,7 +520,9 @@ async function adopt(
   try {
     await ctx.runMutation(refs.record, { ...args, phase, storageId, ...(proof ? { proof } : {}) });
   } catch (error) {
-    await ctx.runMutation(refs.discardUnadopted, { jobId: args.jobId, storageId }).catch(() => undefined);
+    await ctx
+      .runMutation(refs.discardUnadopted, { jobId: args.jobId, storageId })
+      .catch(() => undefined);
     throw error;
   }
 }
@@ -511,47 +537,61 @@ export async function retainFrameRegionRaw(ctx: ActionCtx, args: Lease, body: Ar
     await adopt(ctx, args, 'RAW', storageId);
   });
 }
+export async function storeFrameRegionComposition(
+  ctx: ActionCtx,
+  data: { source: unknown; actionWindowRaw: unknown; frameToRegion: FrameToRegion },
+  actionTiming?: ActionTiming,
+) {
+  const response = await workerFetch({
+    operation: actionTiming ? 'RETIME' : 'COMPOSE',
+    actionTiming,
+    source: data.source,
+    repair: data.actionWindowRaw,
+    frameToRegion: data.frameToRegion,
+  });
+  if (!response.ok)
+    throw Object.assign(
+      new Error('Animated region processing was interrupted; the accepted clip remains saved.'),
+      {
+        code:
+          response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)
+            ? 'FRAME_TO_REGION_MEDIA_INVALID'
+            : 'FRAME_TO_REGION_WORKER_UNAVAILABLE',
+      },
+    );
+  const raw = response.headers.get('x-finalframe-frame-to-region');
+  if (
+    !raw ||
+    raw.length > 10000 ||
+    response.headers.get('content-type') !== 'video/mp4' ||
+    !response.body
+  )
+    throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
+  const proof = assertFrameToRegionProof(data.frameToRegion, JSON.parse(raw), 'COMPOSED', actionTiming);
+  const reader = response.body.getReader(),
+    chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.length;
+      if (bytes > ACTION_WINDOW_MAX_BYTES) throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
+      chunks.push(next.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  if (bytes !== proof.byteSize) throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
+  const storageId = await ctx.storage.store(new Blob(chunks as BlobPart[], { type: 'video/mp4' }));
+  return { storageId, proof };
+}
 export async function composeFrameRegionOutput(ctx: ActionCtx, args: Lease) {
   return frameRegionProcessing(async () => {
     const data = await getFrameRegionState(ctx, args);
     if (data.actionWindowComposed) return data.actionWindowComposed;
     if (!data.actionWindowRaw) throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
-    const response = await workerFetch({
-      operation: 'COMPOSE',
-      source: data.source,
-      repair: data.actionWindowRaw,
-      frameToRegion: data.frameToRegion,
-    });
-    if (!response.ok)
-      throw Object.assign(
-        new Error('Animated region processing was interrupted; the accepted clip remains saved.'),
-        {
-          code:
-            response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)
-              ? 'FRAME_TO_REGION_MEDIA_INVALID'
-              : 'FRAME_TO_REGION_WORKER_UNAVAILABLE',
-        },
-      );
-    const raw = response.headers.get('x-finalframe-frame-to-region');
-    if (!raw || raw.length > 10000 || response.headers.get('content-type') !== 'video/mp4' || !response.body)
-      throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
-    const proof = assertFrameToRegionProof(data.frameToRegion, JSON.parse(raw), 'COMPOSED');
-    const reader = response.body.getReader(),
-      chunks: Uint8Array[] = [];
-    let bytes = 0;
-    try {
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        bytes += next.value.length;
-        if (bytes > ACTION_WINDOW_MAX_BYTES) throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
-        chunks.push(next.value);
-      }
-    } finally {
-      await reader.cancel().catch(() => undefined);
-    }
-    if (bytes !== proof.byteSize) throw new Error('FRAME_TO_REGION_BINDING_CHANGED');
-    const storageId = await ctx.storage.store(new Blob(chunks as BlobPart[], { type: 'video/mp4' }));
+    const { storageId, proof } = await storeFrameRegionComposition(ctx, data);
     await adopt(ctx, args, 'COMPOSED', storageId, proof);
     return { storageId, byteSize: proof.byteSize, url: await ctx.storage.getUrl(storageId) };
   });

@@ -3,6 +3,7 @@ const {getFunctionName}=require('convex/server');let states=[],index=0;const cal
 let repair={id:'failed',status:'FAILED',stage:'FAILED',canRequestFreshEstimate:true};
 const filename=path.resolve(__dirname,'../../src/components/production-workspace/story-action-assistant.tsx'),mod=new Module(filename,module);mod.filename=filename;mod.paths=Module._nodeModulePaths(path.dirname(filename));
 mod.require=name=>{
+ if(name==='./timed-repair')return{TimedRepair:()=>null};
  if(name==='react')return{...React,useState(initial){const i=index++;if(!(i in states))states[i]=initial;return[states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];}};
  if(name==='next/navigation')return{useRouter:()=>({refresh(){}})};
  if(name==='convex/react')return{useQuery:(ref,args)=>{if(args==='skip')return undefined;const name=getFunctionName(ref);if(name==='storyActionChecks:get'||name==='storyActionRepairs:motionOption')return null;if(name==='storyActionRepairs:get')return repair;if(name==='storyActionRepairs:sourceApproval')return{state:'APPROVED',repairUnavailable:false};throw Error(name);},useAction:ref=>async args=>{calls.push({name:getFunctionName(ref),args});return{estimateId:'new-estimate',quoteHash:'new-hash',providerHoldMicros:100000,totalCredits:9};},useMutation:ref=>async args=>{calls.push({name:getFunctionName(ref),args});repair={id:'fresh',status:'QUEUED',canRequestFreshEstimate:false};}};

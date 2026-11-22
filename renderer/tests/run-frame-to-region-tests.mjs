@@ -3,7 +3,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir}from'node:os';import{join}from'node:path';import{execFileSync}from'node:child_process';
 import{prepareFrameToRegion,composeFrameToRegion}from'../dist/media/action-window.js';
 import{planActionWindow}from'../dist/media/action-window-contract.js';
-import{assertFrameToRegion,assertFrameToRegionProof,frameSelection}from'../dist/media/frame-to-region-contract.js';
+import{assertFrameToRegion,assertFrameToRegionProof,frameSelection,timedFrameSelection}from'../dist/media/frame-to-region-contract.js';
 import{remoteFrameToRegion}from'../dist/media/remote-frame-to-region.js';
 import{createHash}from'node:crypto';
 const dir=await mkdtemp(join(tmpdir(),'ff-frame-region-'));
@@ -61,6 +61,16 @@ try{
  assert.equal(new Set(frameSelection(actual)).size,60);
  const actualOut=join(dir,'actual-out.mp4'),actualResult=await composeFrameToRegion({sourcePath:large,repairPath:provider,normalizedPath:join(dir,'actual-normalized.mp4'),outputPath:actualOut,frameToRegion:actual});
  assertFrameToRegionProof(actual,actualResult,'COMPOSED');assert.equal(actualResult.normalizedFrames,60);assert.equal(actualResult.normalizedWidth,256);assert.equal(actualResult.outputFrames,193);assert.deepEqual(await raw(large,'large.aac',true),await raw(actualOut,'large-out.aac',true));
+ const knot={providerFrame:70,targetFrame:23};
+ const mapped=timedFrameSelection(actual,knot);
+ assert.equal(mapped[0],0);assert.equal(mapped[23],70);assert.equal(mapped.at(-1),95);assert.equal(mapped.length,60);
+ assert.throws(()=>timedFrameSelection(actual,{providerFrame:94,targetFrame:4}));
+ const fittedPath=join(dir,'fit.mp4');
+ const fitted=await composeFrameToRegion({sourcePath:large,repairPath:endpointFrame,normalizedPath:join(dir,'fit-normalized.mp4'),outputPath:fittedPath,frameToRegion:actual,actionTiming:knot});
+ assertFrameToRegionProof(actual,fitted,'COMPOSED',knot);assert.throws(()=>assertFrameToRegionProof(actual,fitted,'COMPOSED'));
+ assert.throws(()=>assertFrameToRegionProof(actual,{...fitted,selectedProviderFrames:frameSelection(actual)},'COMPOSED',knot));
+ assert.deepEqual(await raw(fittedPath,'fit.aac',true),await readFile(join(dir,'large.aac')));
+ console.log('PASS reviewed timing knot preserves both anchors and voice, rejects forged frame choices and cannot satisfy original uniform job');
  console.log('PASS proposed864x480/193frame source: exact96→60 selection and640→256 downscale inside114–174, source AAC unchanged');
 
 }finally{await rm(dir,{recursive:true,force:true});}

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { assertFrameToRegion, frameSelection, FRAME_TO_REGION_VERSION, type FrameToRegion } from './frame-to-region-contract.js';
-import { realpath, stat, unlink, readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { assertFrameToRegion, frameSelection, timedFrameSelection, FRAME_TO_REGION_VERSION, type ActionTiming, type FrameToRegion } from './frame-to-region-contract.js';
+import { realpath, stat, unlink, readFile, open, mkdtemp, rm } from 'node:fs/promises';
+import { isAbsolute, resolve, join, dirname } from 'node:path';
 import { ChildProcessCommandRunner, type CommandRunner } from './command-runner.js';
 import { assertActionRegion, type ActionRegion } from './action-region-contract.js';
 
@@ -191,7 +191,7 @@ export async function prepareFrameToRegion(input:{sourcePath:string;firstFramePa
   return {proof:{version:FRAME_TO_REGION_VERSION,phase:'PREPARED' as const,frameToRegion:c,firstFrame:c.region.window.startFrame,lastFrame:c.region.window.endFrame-1,width:c.region.width,height:c.region.height,anchorWidth:640,anchorHeight:640},firstFrame:outputs[0],lastFrame:outputs[1]};
  }catch(error){await Promise.all(files.map(p=>unlink(p).catch(()=>undefined)));throw error;}
 }
-export async function composeFrameToRegion(input:{sourcePath:string;repairPath:string;normalizedPath:string;outputPath:string;frameToRegion:FrameToRegion},options:ActionWindowOptions={}) {
+export async function composeFrameToRegion(input:{sourcePath:string;repairPath:string;normalizedPath:string;outputPath:string;frameToRegion:FrameToRegion;actionTiming?:ActionTiming},options:ActionWindowOptions={}) {
  const deadline=Date.now()+(options.timeoutMs??120_000);
  const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath),repair=await tools.probe(input.repairPath);
  measuredRegion(c.region,source);
@@ -200,13 +200,41 @@ export async function composeFrameToRegion(input:{sourcePath:string;repairPath:s
  const trimmedTrailingFrames = repair.frames - c.providerOutput.frames;
  if(repair.width!==640||repair.height!==640||repair.fps!==24||![0,1].includes(trimmedTrailingFrames)||repair.audio.length)throw new Error('FRAME_TO_REGION_PROVIDER_OUTPUT_INVALID');
  if(resolve(input.normalizedPath)===resolve(input.outputPath))fail('OVERWRITE_SOURCE');
- const normalized=await outputPath({sourcePath:input.sourcePath,outputPath:input.normalizedPath,startSeconds:0,endSeconds:4},source,repair),selected=frameSelection(c);
+ const normalized=await outputPath({sourcePath:input.sourcePath,outputPath:input.normalizedPath,startSeconds:0,endSeconds:4},source,repair),selected=input.actionTiming ? timedFrameSelection(c,input.actionTiming) : frameSelection(c);
  try{
+  if (input.actionTiming) {
+    // The follow-through may reuse frames. Remap bounded yuv420p planes rather
+    // than blending poses or stretching the original voice track.
+    const directory = await mkdtemp(join(dirname(normalized),'timed-frames-'));
+    try {
+      const decoded = join(directory,'source.yuv'), mapped = join(directory,'timed.yuv');
+      const frameBytes = c.region.width*c.region.height*3/2;
+      await tools.ffmpeg([...preamble,...inputArgs(repair.canonical),'-map','0:v:0','-an','-vf',`scale=${c.region.width}:${c.region.height}:flags=lanczos`,'-pix_fmt','yuv420p','-f','rawvideo',decoded]);
+      if ((await stat(decoded)).size !== repair.frames * frameBytes) fail('OUTPUT_TIMING');
+      const sourceFile = await open(decoded,'r');
+      try {
+        const destination = await open(mapped,'wx',0o600), frame = Buffer.allocUnsafe(frameBytes);
+        try {
+          for (const index of selected) {
+            let offset=0;
+            while (offset < frameBytes) {
+              const {bytesRead}=await sourceFile.read(frame,offset,frameBytes-offset,index*frameBytes+offset);
+              if (!bytesRead) fail('OUTPUT_TIMING');
+              offset+=bytesRead;
+            }
+            await destination.writeFile(frame);
+          }
+        } finally {await destination.close();}
+      } finally {await sourceFile.close();}
+      await tools.ffmpeg([...preamble,'-f','rawvideo','-pixel_format','yuv420p','-video_size',`${c.region.width}x${c.region.height}`,'-framerate','24',...inputArgs(mapped),'-an',...encodeArgs,normalized]);
+    } finally {await rm(directory,{recursive:true,force:true});}
+  } else {
   await tools.ffmpeg([...preamble,...inputArgs(repair.canonical),'-vf',`select=${selected.map(n=>`eq(n\\,${n})`).join('+')},setpts=N/(24*TB),scale=${c.region.width}:${c.region.height}:flags=lanczos`,'-map','0:v:0','-an',...encodeArgs,normalized]);
+  }
   const measured=await tools.probe(normalized);
   if(measured.frames!==selected.length||measured.fps!==24||measured.width!==c.region.width||measured.height!==c.region.height)fail('OUTPUT_TIMING');
   const remaining=deadline-Date.now();if(remaining<=0)fail('TIMEOUT');
   const composed=await composeActionRegion({sourcePath:input.sourcePath,repairPath:normalized,outputPath:input.outputPath,region:c.region},{...options,timeoutMs:remaining});
-  return {version:FRAME_TO_REGION_VERSION,phase:'COMPOSED' as const,frameToRegion:c,outputPath:composed.outputPath,providerInputFrames:repair.frames,trimmedTrailingFrames,providerInputWidth:640,providerInputHeight:640,providerInputFps:24,normalizedFrames:measured.frames,normalizedWidth:measured.width,normalizedHeight:measured.height,selectedProviderFrames:selected,outputFrames:composed.outputFrames,width:composed.width,height:composed.height,fps:24,originalAudioCopied:composed.originalAudioCopied};
+  return {version:FRAME_TO_REGION_VERSION,phase:'COMPOSED' as const,frameToRegion:c,...(input.actionTiming?{actionTiming:input.actionTiming}:{}),outputPath:composed.outputPath,providerInputFrames:repair.frames,trimmedTrailingFrames,providerInputWidth:640,providerInputHeight:640,providerInputFps:24,normalizedFrames:measured.frames,normalizedWidth:measured.width,normalizedHeight:measured.height,selectedProviderFrames:selected,outputFrames:composed.outputFrames,width:composed.width,height:composed.height,fps:24,originalAudioCopied:composed.originalAudioCopied};
  }finally{await unlink(normalized).catch(()=>undefined);}
 }
