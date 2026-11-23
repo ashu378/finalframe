@@ -56,6 +56,7 @@ const client = {
   },
 };
 const actions = load('src/lib/production/episode-actions.ts', {
+  './ugc-brief': load('src/lib/production/ugc-brief.ts', {}),
   'next/cache': { revalidatePath() {} }, '@/lib/convex/server': { getAuthenticatedConvexClient: async () => client },
   '../../../convex/_generated/api': { api: { assetStorage:{getAssetContract:'assetContract'}, projects: { getByExternalId: 'project' }, productions: { listByProject: 'productions', getWorkspaceByProject: 'workspace' }, episodes: { list: 'episodes', create: 'createEpisode', changeContinuityMode: 'changeRelationship' }, continuity: { planningRequirements: 'requirements', listBibles: 'bibles' } } },
   '@/lib/templates/catalog': catalog, '@/lib/ai/video-routing': { normalizeVideoType: value => value, VIDEO_TYPES: ['ANIMATED_COMEDY_2D', 'CINEMATIC_FILM', 'MOTION_GRAPHICS', 'PRODUCT_SAAS_LAUNCH'] },
@@ -156,7 +157,22 @@ function all(element) {
 
   const cells = []; let cell = 0; let captured;
   const form = load('src/components/production/create-production-form.tsx', {
-    react: { ...React, useState(initial) { const index = cell++; if (!(index in cells)) cells[index] = initial; return [cells[index], value => { cells[index] = typeof value === 'function' ? value(cells[index]) : value; }]; } },
+    react: {
+      ...React,
+      useRef(initial) {
+        const index = cell++;
+        return cells[index] ??= { current: initial };
+      },
+      useState(initial) {
+        const index = cell++;
+        if (!(index in cells)) cells[index] = initial;
+        return [cells[index], value => {
+          cells[index] = typeof value === 'function' ? value(cells[index]) : value;
+        }];
+      },
+    },
+    '@/lib/production/ugc-brief': load('src/lib/production/ugc-brief.ts', {}),
+    './ugc-brief-controls': { UgcBriefControls: () => null },
     'next/link': () => null, 'next/navigation': { useRouter: () => ({}) }, sonner: { toast: { error() {}, success() {}, info() {} } },
     '@/lib/project/actions': {}, '@/lib/assets/actions': {}, '@/components/production/planning': {},
     '@/lib/production/actions': { createDirectorPlan: async intent => { captured = intent; return { success: false, error: 'Captured fixture intent.' }; } },
