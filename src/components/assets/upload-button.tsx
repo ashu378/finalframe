@@ -3,11 +3,14 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, Loader2 } from 'lucide-react';
-import { uploadAsset } from '@/lib/assets/actions';
+import { useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { uploadLibraryFile } from '@/lib/assets/upload-library-file';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
 interface UploadProgress {
+    id: string;
     name: string;
     status: 'uploading' | 'success' | 'error';
     progress: number;
@@ -18,33 +21,29 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
     const [dragActive, setDragActive] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
+    const begin = useMutation(api.assetStorage.beginLibraryUpload);
+    const finish = useMutation(api.assetStorage.finishLibraryUpload);
 
     const handleUpload = async (files: FileList | File[]) => {
         const fileArray = Array.from(files);
-        const newUploads = fileArray.map(f => ({ name: f.name, status: 'uploading' as const, progress: 0 }));
-        setUploads(prev => [...prev, ...newUploads]);
+        const newUploads = fileArray.map(f => ({ id: crypto.randomUUID(), name: f.name, status: 'uploading' as const, progress: 0 }));
+        setUploads(prev => [...prev.filter(u => u.status !== 'error' || !newUploads.some(item => item.name === u.name)), ...newUploads]);
 
-        for (const file of fileArray) {
-            const formData = new FormData();
-            formData.append('file', file);
-            if (projectExternalId) formData.append('projectId', projectExternalId);
-
+        for (const [index, file] of fileArray.entries()) {
+            const { id } = newUploads[index];
             try {
-                const res = await uploadAsset(studioId, formData, projectExternalId ? `/productions/${projectExternalId}` : '/');
-                if (res.success) {
-                    setUploads(prev => prev.map(u => u.name === file.name ? { ...u, status: 'success' as const, progress: 100 } : u));
-                } else {
-                    setUploads(prev => prev.map(u => u.name === file.name ? { ...u, status: 'error' as const } : u));
-                }
-            } catch (err) {
-                setUploads(prev => prev.map(u => u.name === file.name ? { ...u, status: 'error' as const } : u));
+                await uploadLibraryFile(file, { studioExternalId: studioId, projectExternalId }, begin, finish);
+                setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'success', progress: 100 } : u));
+            } catch {
+                setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error' } : u));
             }
         }
+        if (inputRef.current) inputRef.current.value = '';
 
         router.refresh();
-        // Clear success/error after 3s
+        // Keep failures visible so a creator can retry.
         setTimeout(() => {
-            setUploads([]);
+            setUploads(prev => prev.filter(upload => upload.status !== 'success' || !newUploads.some(item => item.id === upload.id)));
         }, 3000);
     };
 
@@ -114,8 +113,8 @@ export function UploadButton({ studioId, projectExternalId }: { studioId: string
             {/* Progress Toast-style UI (Bottom Right) */}
             {uploads.length > 0 && (
                 <div className="fixed bottom-4 left-4 right-4 z-[70] sm:left-auto sm:w-96 space-y-4 animate-in slide-in-from-right-10 fade-in duration-300">
-                    {uploads.map((upload, i) => (
-                        <div key={i} role="status" aria-live="polite" className="p-6 bg-card border border-border rounded-xl shadow-3xl flex items-center gap-6 relative overflow-hidden group">
+                    {uploads.map(upload => (
+                        <div key={upload.id} role="status" aria-live="polite" className="p-6 bg-card border border-border rounded-xl shadow-3xl flex items-center gap-6 relative overflow-hidden group">
                             <div className="flex-1 min-w-0 z-10">
                                 <p className="text-sm font-semibold text-zinc-50 truncate tracking-normal ">{upload.name}</p>
                                 <p className="mt-1 text-sm text-muted-foreground">{upload.status === 'uploading' ? 'Uploading…' : upload.status === 'success' ? 'File added' : 'Upload failed. Choose the file again to retry.'}</p>

@@ -59,7 +59,7 @@ assert.match(contracts, /scope\?: 'GLOBAL' \| 'PROJECT'/);
 assert.match(contracts, /if \(input\.scope === 'PROJECT' && !input\.projectId\)/);
 
 assert.match(uploadButton, /projectExternalId\?: string/);
-assert.match(uploadButton, /formData\.append\('projectId', projectExternalId\)/);
+assert.match(uploadButton, /uploadLibraryFile\(file, \{ studioExternalId: studioId, projectExternalId \}/);
 assert.match(assetPanel, /getProjectAssets\(projectId\)/);
 assert.match(assetPanel, /projectExternalId=\{projectId\}/);
 // The blueprint reads project resource versions for the selected episode.

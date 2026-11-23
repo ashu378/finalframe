@@ -1,5 +1,7 @@
-import { mutation, query } from './_generated/server';
-import { v } from 'convex/values';
+import { internalMutation, mutation, query } from './_generated/server';
+import { v, type ObjectType } from 'convex/values';
+import { internal } from './_generated/api';
+import { sha256Equal } from '../renderer/src/media/sha256';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { requireCurrentMember, requireMember, requireProjectAccess, requireProjectRole } from './authorization';
@@ -97,8 +99,7 @@ export const generateUploadUrl = mutation({
 });
 
 /** Bind an uploaded storage object to the canonical project asset record. */
-export const ingestAsset = mutation({
-  args: {
+const ingestArgs = {
     studioExternalId: v.string(),
     scope: v.optional(assetScope),
     projectId: v.optional(v.id('projects')),
@@ -116,8 +117,9 @@ export const ingestAsset = mutation({
     rights: v.optional(v.any()),
     consent: v.optional(v.any()),
     lineage: v.optional(v.any()),
-  },
-  handler: async (ctx, args) => {
+  };
+
+async function saveUploadedAsset(ctx: MutationCtx, args: ObjectType<typeof ingestArgs>) {
     const member = await requireCurrentMember(ctx);
     if (args.studioExternalId !== member.studio.externalId) throw new Error('Studio context does not match the authenticated workspace.');
     const scope = args.scope ?? (args.projectId || args.productionId ? 'PROJECT' : 'GLOBAL');
@@ -182,6 +184,83 @@ export const ingestAsset = mutation({
     });
 
     return { assetId, storageId: args.storageId, kind: record(metadata).kind, mimeType: args.mimeType || storageMetadata.contentType || undefined, checksum: args.checksum || storageMetadata.sha256 };
+}
+
+export const ingestAsset = mutation({ args: ingestArgs, handler: saveUploadedAsset });
+
+
+const LIBRARY_UPLOAD_TTL_MS = 60 * 60 * 1000;
+
+export const beginLibraryUpload = mutation({
+  args: {
+    studioExternalId: v.string(), projectExternalId: v.optional(v.string()),
+    name: v.string(), mimeType: v.string(), byteSize: v.number(), checksum: v.string(),
+  },
+  returns: v.object({ ticketId: v.id('libraryUploadTickets'), uploadUrl: v.string() }),
+  handler: async (ctx, args) => {
+    if (!args.name.trim() || args.name.length > 512 || !Number.isSafeInteger(args.byteSize) ||
+        args.byteSize < 1 || args.byteSize > 500 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(args.checksum) ||
+        !/^[a-z0-9.+_-]+\/[a-z0-9.+_-]+$/i.test(args.mimeType) || args.mimeType.length > 127) {
+      throw new Error('Choose a non-empty media file of up to 500 MB.');
+    }
+    const project = args.projectExternalId === undefined ? null : await ctx.db.query('projects')
+      .withIndex('by_external_id', q => q.eq('externalId', args.projectExternalId!)).unique();
+    if (args.projectExternalId !== undefined && !project) throw new Error('Project unavailable.');
+    const { member } = await requireUploadContext(ctx, args.studioExternalId, project?._id);
+    const ticketId = await ctx.db.insert('libraryUploadTickets', {
+      studioExternalId: member.studio.externalId, userId: member.user._id, projectId: project?._id,
+      name: args.name, mimeType: args.mimeType, byteSize: args.byteSize, checksum: args.checksum,
+      expiresAt: now() + LIBRARY_UPLOAD_TTL_MS,
+    });
+    await ctx.scheduler.runAfter(24 * LIBRARY_UPLOAD_TTL_MS, internal.assetStorage.expireLibraryUpload, { ticketId });
+    return { ticketId, uploadUrl: await ctx.storage.generateUploadUrl() };
+  },
+});
+
+export const finishLibraryUpload = mutation({
+  args: { ticketId: v.id('libraryUploadTickets'), storageId: v.id('_storage') },
+  returns: v.id('assets'),
+  handler: async (ctx, { ticketId, storageId }) => {
+    const ticket = await ctx.db.get(ticketId);
+    if (!ticket) throw new Error('The upload has expired. Select the file again.');
+    const { member, project } = await requireUploadContext(ctx, ticket.studioExternalId, ticket.projectId);
+    if (ticket.userId !== member.user._id) throw new Error('This upload belongs to another account.');
+    if (ticket.assetId) {
+      if (ticket.storageId !== storageId) throw new Error('This upload is already complete.');
+      return ticket.assetId;
+    }
+    const timestamp = now();
+    if (ticket.expiresAt < timestamp) throw new Error('The upload has expired. Select the file again.');
+    const stored = await ctx.db.system.get('_storage', storageId);
+    if (!stored || stored._creationTime < ticket._creationTime || stored.size !== ticket.byteSize ||
+        stored.contentType !== ticket.mimeType || !sha256Equal(stored.sha256, ticket.checksum)) {
+      throw new Error('The uploaded file does not match the selected file.');
+    }
+    if (await ctx.db.query('assets').withIndex('by_storage', q => q.eq('storageId', storageId)).first()) {
+      throw new Error('This storage object already belongs to a media item.');
+    }
+    const family = ticket.mimeType.split('/')[0];
+    const result = await saveUploadedAsset(ctx, {
+      studioExternalId: ticket.studioExternalId, projectId: ticket.projectId, scope: project ? 'PROJECT' : 'GLOBAL',
+      storageId, source: 'USER_UPLOAD', name: ticket.name, mimeType: ticket.mimeType,
+      roles: family === 'video' ? ['SOURCE_VIDEO'] : family === 'audio' ? ['SOURCE_AUDIO'] : ['IMAGE_REFERENCE','SOURCE_IMAGE'],
+      metadata: { kind: ['image','video','audio'].includes(family) ? family : 'other', sizeBytes: stored.size,
+        folderPath: project ? `/productions/${project.externalId}` : '/' },
+      provenance: { source: 'USER_UPLOAD', actorExternalId: member.user.externalId, createdAt: timestamp },
+      rights: { status: 'UNKNOWN' }, consent: { status: 'NOT_REQUIRED' },
+      lineage: { relation: 'SOURCE', parentAssetIds: [], createdAt: timestamp },
+    });
+    await ctx.db.patch(ticketId, { storageId, assetId: result.assetId });
+    return result.assetId;
+  },
+});
+
+export const expireLibraryUpload = internalMutation({
+  args: { ticketId: v.id('libraryUploadTickets') }, returns: v.null(),
+  handler: async (ctx, { ticketId }) => {
+    const ticket = await ctx.db.get(ticketId);
+    if (ticket && ticket.expiresAt <= now()) await ctx.db.delete(ticketId);
+    return null;
   },
 });
 

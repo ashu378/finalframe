@@ -485,6 +485,12 @@ export default defineSchema({
     .index("by_production", ["productionId"]).index("by_version", ["productionVersionId"])
     .index("by_project", ["projectId"]).index("by_studio", ["studioExternalId"]),
 
+  libraryUploadTickets: defineTable({
+    studioExternalId: v.string(), userId: v.id('users'), projectId: v.optional(v.id('projects')),
+    name: v.string(), mimeType: v.string(), byteSize: v.number(), checksum: v.string(), expiresAt: v.number(),
+    storageId: v.optional(v.id('_storage')), assetId: v.optional(v.id('assets')),
+  }),
+
   assets: defineTable({
     ...studioOwned, externalId: v.optional(v.string()), scope: v.optional(v.union(v.literal("GLOBAL"), v.literal("PROJECT"))),
     projectId: v.optional(v.id("projects")), originAssetId: v.optional(v.id("assets")), importedByUserId: v.optional(v.id("users")), importedAt: v.optional(timestamp),
