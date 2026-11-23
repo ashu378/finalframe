@@ -107,6 +107,7 @@ const RETIRED_MODEL_IDS = new Set([
     'google/gemini-2.5-flash',
     'google/gemini-2.5-flash-lite',
     'openai/gpt-4o-mini',
+    'openai/sora-2-pro', // Absent from the dedicated video catalog.
     'google/veo-3.1-fast',
     'bytedance/seedance-2.0-fast',
 ]);
@@ -136,35 +137,34 @@ function isUnsafeAutoModel(value: string): boolean {
  */
 export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
     AI_BRAIN: {
-        id: configuredModel('OPENROUTER_AI_BRAIN_MODEL', 'openai/gpt-6-astra-pro'),
+        id: configuredModel('OPENROUTER_AI_BRAIN_MODEL', 'openai/gpt-6.2-astra-pro'),
         provider: 'openrouter',
         capability: 'AI_BRAIN',
         contextWindow: 1050000,
         description: 'General-purpose reasoning, planning and scripting',
-        costTier: 'premium', inputModalities: ['text', 'image', 'audio', 'video', 'file'], outputModalities: ['text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_AI_BRAIN_FALLBACK_MODELS', ['openai/gpt-6-astra', 'google/gemini-3.8-flash']),
+        costTier: 'premium', inputModalities: ['text', 'image', 'file'], outputModalities: ['text'],
+        fallbackIds: configuredFallbacks('OPENROUTER_AI_BRAIN_FALLBACK_MODELS', ['openai/gpt-6.2-astra', 'google/gemini-3.8-flash']),
     },
     IMAGE_ENGINE: {
-        id: configuredModel('OPENROUTER_IMAGE_MODEL', 'openai/gpt-image-2'),
+        id: configuredModel('OPENROUTER_IMAGE_MODEL', 'openai/gpt-image-2.6-sunburst'),
         provider: 'openrouter',
         capability: 'IMAGE_ENGINE',
-        contextWindow: 32000,
+        contextWindow: 400000,
         description: 'Image understanding and image-generation routing',
         costTier: 'standard', inputModalities: ['text', 'image'], outputModalities: ['image', 'text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_IMAGE_FALLBACK_MODELS', ['google/gemini-3.1-flash-image']),
+        fallbackIds: configuredFallbacks('OPENROUTER_IMAGE_FALLBACK_MODELS', ['openai/gpt-image-2.6-flare', 'openai/gpt-image-2']),
         selectFromCatalog: false,
     },
     VIDEO_ENGINE: {
-        // Seedance 2.5 is the current OpenRouter video catalog's newest
-        // general-purpose storytelling model. It supports text/image/video
-        // references, first/last-frame control, audio, and 4–30 second clips.
+        // Full Seedance is the general final-video preference. Project policies
+        // and reviewed endpoint controls govern each individual operation.
         id: configuredModel('OPENROUTER_VIDEO_MODEL', 'bytedance/seedance-2.5'),
         provider: 'openrouter',
         capability: 'VIDEO_ENGINE',
         contextWindow: 128000,
         description: 'Asynchronous video-generation routing',
         costTier: 'standard', inputModalities: ['text', 'image', 'video'], outputModalities: ['video'],
-        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FALLBACK_MODELS', ['google/veo-3.1', 'openai/sora-2-pro', 'kwaivgi/kling-v3.0-pro']),
+        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FALLBACK_MODELS', ['google/veo-3.1', 'kwaivgi/kling-v3.0-pro']),
         selectFromCatalog: false,
     },
     VIDEO_PREVIEW: {
@@ -184,47 +184,47 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         contextWindow: 128000,
         description: 'High-quality final video generation',
         costTier: 'premium', inputModalities: ['text', 'image', 'video'], outputModalities: ['video'],
-        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FINAL_FALLBACK_MODELS', ['google/veo-3.1', 'openai/sora-2-pro', 'kwaivgi/kling-v3.0-pro']),
+        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FINAL_FALLBACK_MODELS', ['google/veo-3.1', 'kwaivgi/kling-v3.0-pro']),
         selectFromCatalog: false,
     },
     VALIDATOR_ENGINE: {
-        id: configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-3.8-flash'),
+        id: configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-4-carbon'),
         provider: 'openrouter',
         capability: 'VALIDATOR_ENGINE',
         contextWindow: 1000000,
         description: 'Structured validation and quality gates',
         costTier: 'standard', inputModalities: ['text', 'image', 'audio', 'video', 'file'], outputModalities: ['text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_VALIDATOR_FALLBACK_MODELS', ['openai/gpt-6-astra-pro']),
+        fallbackIds: configuredFallbacks('OPENROUTER_VALIDATOR_FALLBACK_MODELS', ['google/gemini-3.8-flash']),
     },
     STRUCTURED_PLANNING: {
-        // GPT-6 Astra Pro is the current structured-output reasoning default;
+        // The planner verifies structured output and current pricing before reserving;
         // every fallback also advertises structured_outputs in OpenRouter's
         // live model catalog.
-        id: configuredModel('OPENROUTER_PLANNER_MODEL', 'openai/gpt-6-astra-pro'),
+        id: configuredModel('OPENROUTER_PLANNER_MODEL', 'openai/gpt-6.2-astra-pro'),
         provider: 'openrouter',
         capability: 'STRUCTURED_PLANNING',
         contextWindow: 1050000,
         description: 'Strict structured production planning',
-        costTier: 'premium', inputModalities: ['text', 'image', 'audio', 'video', 'file'], outputModalities: ['text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_PLANNER_FALLBACK_MODELS', ['openai/gpt-6-astra', 'anthropic/claude-fable-5.1', 'google/gemini-3.8-flash']),
+        costTier: 'premium', inputModalities: ['text', 'image', 'file'], outputModalities: ['text'],
+        fallbackIds: configuredFallbacks('OPENROUTER_PLANNER_FALLBACK_MODELS', ['openai/gpt-6.2-astra', 'anthropic/claude-fable-5.2', 'google/gemini-3.8-flash']),
     },
     VALIDATION: {
-        id: configuredModel('OPENROUTER_VALIDATION_MODEL', configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-3.8-flash')),
+        id: configuredModel('OPENROUTER_VALIDATION_MODEL', configuredModel('OPENROUTER_VALIDATOR_MODEL', 'google/gemini-4-carbon')),
         provider: 'openrouter',
         capability: 'VALIDATION',
         contextWindow: 1000000,
         description: 'Strict multimodal and production quality validation',
         costTier: 'standard', inputModalities: ['text', 'image', 'audio', 'video', 'file'], outputModalities: ['text'],
-        fallbackIds: configuredFallbacks('OPENROUTER_VALIDATION_FALLBACK_MODELS'),
+        fallbackIds: configuredFallbacks('OPENROUTER_VALIDATION_FALLBACK_MODELS', ['google/gemini-3.8-flash']),
     },
     IMAGE_GENERATION: {
-        id: configuredModel('OPENROUTER_IMAGE_MODEL', 'openai/gpt-image-2'),
+        id: configuredModel('OPENROUTER_IMAGE_MODEL', 'openai/gpt-image-2.6-sunburst'),
         provider: 'openrouter',
         capability: 'IMAGE_GENERATION',
-        contextWindow: 32000,
+        contextWindow: 400000,
         description: 'Image generation',
         costTier: 'standard', inputModalities: ['text', 'image'], outputModalities: ['image'],
-        fallbackIds: configuredFallbacks('OPENROUTER_IMAGE_FALLBACK_MODELS', ['google/gemini-3.1-flash-image']),
+        fallbackIds: configuredFallbacks('OPENROUTER_IMAGE_FALLBACK_MODELS', ['openai/gpt-image-2.6-flare', 'openai/gpt-image-2']),
         selectFromCatalog: false,
     },
     VIDEO_GENERATION: {
@@ -234,14 +234,14 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         contextWindow: 128000,
         description: 'Video generation',
         costTier: 'standard', inputModalities: ['text', 'image', 'video'], outputModalities: ['video'],
-        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FALLBACK_MODELS', ['google/veo-3.1', 'openai/sora-2-pro', 'kwaivgi/kling-v3.0-pro']),
+        fallbackIds: configuredFallbacks('OPENROUTER_VIDEO_FALLBACK_MODELS', ['google/veo-3.1', 'kwaivgi/kling-v3.0-pro']),
         selectFromCatalog: false,
     },
     TEXT_TO_SPEECH: {
-        id: configuredModel('OPENROUTER_TTS_MODEL', 'google/gemini-3.1-flash-tts-preview'),
+        id: configuredModel('OPENROUTER_TTS_MODEL', 'google/gemini-3.8-flash-tts'),
         provider: 'openrouter',
         capability: 'TEXT_TO_SPEECH',
-        contextWindow: 32000,
+        contextWindow: 32768,
         description: 'Text-to-speech generation',
         costTier: 'standard', inputModalities: ['text'], outputModalities: ['audio'],
         fallbackIds: configuredFallbacks('OPENROUTER_TTS_FALLBACK_MODELS', ['x-ai/grok-voice-tts-1.0', 'microsoft/mai-voice-2']),
@@ -256,7 +256,7 @@ export const MODEL_REGISTRY: Record<CapabilityId, AIModelConfig> = {
         contextWindow: 32000,
         description: 'Audio transcription',
         costTier: 'low', inputModalities: ['audio'], outputModalities: ['transcription'],
-        fallbackIds: configuredFallbacks('OPENROUTER_TRANSCRIPTION_FALLBACK_MODELS', ['microsoft/mai-transcribe-2', 'x-ai/grok-stt-1.0', 'deepgram/nova-3']),
+        fallbackIds: configuredFallbacks('OPENROUTER_TRANSCRIPTION_FALLBACK_MODELS', ['microsoft/mai-transcribe-2', 'x-ai/grok-stt-2.0', 'deepgram/nova-3']),
         selectFromCatalog: false,
     },
 };
