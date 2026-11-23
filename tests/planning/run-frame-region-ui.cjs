@@ -3,6 +3,7 @@ const {getFunctionName}=require('convex/server');let states=[],index=0;const cal
 let repair={id:'old-paid',status:'COMPLETED',stage:'REVIEW_READY',canRequestFreshEstimate:false};let motion={eligible:true,sourceState:'APPROVED',projectId:'project',assetId:'source',seconds:2.5};
 const filename=path.resolve(__dirname,'../../src/components/production-workspace/story-action-assistant.tsx'),mod=new Module(filename,module);mod.filename=filename;mod.paths=Module._nodeModulePaths(path.dirname(filename));
 mod.require=name=>{
+ if(name==='./performance-retake')return{PerformanceRetake:()=>null};
  if(name==='./timed-repair')return{TimedRepair:()=>null};
  if(name==='react')return{...React,useState(initial){const i=index++;if(!(i in states))states[i]=initial;return[states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];}};
  if(name==='next/navigation')return{useRouter:()=>({refresh(){}})};

@@ -20,6 +20,7 @@ export function TimedRepair({ takeId }: { takeId: Id<'shotVersions'> }) {
   if (!option) return null;
   const choices = option.choices as {
     actionId: string;
+    suggestion?: { providerFrame: number; checkId: Id<'storyActionChecks'> } | null;
     label: string;
     deadline: number;
     firstAllowed: number;
@@ -27,8 +28,8 @@ export function TimedRepair({ takeId }: { takeId: Id<'shotVersions'> }) {
   }[];
   const choice = choices.find((c) => c.actionId === actionId) ?? choices[0];
   if (!choice) return null;
-  async function fit() {
-    if (running.current || frame === null || !choice || !option) return;
+  async function fit(selected = frame, checkId?: Id<'storyActionChecks'>) {
+    if (running.current || selected === null || !choice || !option) return;
     running.current = true;
     setBusy(true);
     setMessage('');
@@ -37,7 +38,8 @@ export function TimedRepair({ takeId }: { takeId: Id<'shotVersions'> }) {
         takeId,
         reviewId: option.reviewId,
         actionId: choice.actionId,
-        providerFrame: frame,
+        providerFrame: selected,
+        ...(checkId ? {checkId} : {}),
       });
       router.refresh();
       setMessage(
@@ -81,6 +83,9 @@ export function TimedRepair({ takeId }: { takeId: Id<'shotVersions'> }) {
       ) : (
         <p className="text-sm">{choice.label}</p>
       )}
+      {choice.suggestion ? <Button type="button" size="sm" disabled={busy} onClick={()=>void fit(choice.suggestion!.providerFrame, choice.suggestion!.checkId)}>
+        Use the timing found in the picture check
+      </Button> : null}
       <video
         controls
         playsInline

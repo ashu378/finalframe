@@ -11,7 +11,7 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  assert.equal(validateActionCheck([action],{observations:[fail]})[0].result,'FAIL');assert.equal(validateActionCheck([action],{observations:[{...fail,result:'UNCERTAIN'}]})[0].result,'UNCERTAIN');
  for (const [performance, expected] of [['AS_DIRECTED','PASS'], ['STILL_OR_CAMERA_ONLY','FAIL'], ['DETACHED_PATCH','FAIL'], ['WRONG_OR_MISSING_ACTION','FAIL'], ['UNCLEAR','UNCERTAIN']]) {
    const [result]=validateActionCheck([action],{observations:[{...pass, performance}]},8,ACTION_CHECK_VERSION);
-   assert.equal(result.result,expected);
+   assert.equal(result.result,expected);assert.equal(result.performance,performance);
  }
  assert.throws(()=>validateActionCheck([action],{observations:[pass]},8,ACTION_CHECK_VERSION),/INVALID_RESULT/);
  assert.equal(validateActionCheck([action],{observations:[pass]},8)[0].result,'PASS');

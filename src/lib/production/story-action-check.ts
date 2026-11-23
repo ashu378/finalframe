@@ -5,7 +5,7 @@ export const ACTION_CHECK_VERSION = 'performance-check-v2';
 export const ACTION_REPAIR_VERSION = 'timed-action-emphasis-v2';
 export const ACTION_CHECK_MAX_BYTES = 25_000_000;
 export const ACTION_CHECK_OUTPUT_TOKENS = 4096;
-export type ActionCheckObservation = {actionId:string;result:'PASS'|'FAIL'|'UNCERTAIN';observedStartSeconds:number|null;observedEndSeconds:number|null;evidence:string};
+export type ActionCheckObservation = {actionId:string;result:'PASS'|'FAIL'|'UNCERTAIN';observedStartSeconds:number|null;observedEndSeconds:number|null;evidence:string;performance?:typeof performanceEvidence[number]};
 const performanceEvidence = ['AS_DIRECTED', 'STILL_OR_CAMERA_ONLY', 'DETACHED_PATCH', 'WRONG_OR_MISSING_ACTION', 'UNCLEAR'] as const;
 export const ACTION_CHECK_SCHEMA = {
     type: 'object', additionalProperties: false, required: ['observations'],
@@ -36,7 +36,7 @@ export function validateActionCheck(actions:StoryAction[], value:unknown, shotDu
         validateStoryActionObservations([action],[{...o,result:result==='UNCERTAIN'?'FAIL':result}]);
         for(const time of [o.observedStartSeconds,o.observedEndSeconds])if(time!==null&&(typeof time!=='number'||!Number.isFinite(time)||time<0||time>shotDurationSeconds))throw new Error('ACTION_CHECK_INVALID_RESULT');
         if(o.observedStartSeconds!==null&&o.observedEndSeconds!==null&&o.observedEndSeconds<=o.observedStartSeconds)throw new Error('ACTION_CHECK_INVALID_RESULT');
-        return {actionId:o.actionId, result, observedStartSeconds:o.observedStartSeconds, observedEndSeconds:o.observedEndSeconds, evidence:o.evidence};
+        return {actionId:o.actionId, result, observedStartSeconds:o.observedStartSeconds, observedEndSeconds:o.observedEndSeconds, evidence:o.evidence,...(o.performance===undefined?{}:{performance:o.performance})};
     });
 }
 /** Static one-pass video: reserve the ENTIRE catalog context, not an invented

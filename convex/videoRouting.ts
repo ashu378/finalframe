@@ -248,7 +248,7 @@ export const refreshReviewedForQuote = action({
  * provider estimate as a budget authority. Asset authorization must happen in
  * the caller before handing this helper resolved reference requirements. */
 export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args: {
-  studioExternalId: string; modelId: string; request: Record<string, unknown>; estimatedCostUsd?: number;
+  studioExternalId: string; modelId?: string; request: Record<string, unknown>; estimatedCostUsd?: number;
   productionVersionId: Id<'productionVersions'>; shotId: Id<'shots'>;
   certifiedActionMotionRepair?: boolean;
 }) {
@@ -290,7 +290,7 @@ export async function validateReviewedVideoJob(ctx: QueryCtx | MutationCtx, args
   }));
   const selected = selectGenerationDuration(request, models, policy ? { ...policy, updatedAt: policy.updatedAt } : undefined, raw.durationBridgeAllowed !== true || Array.isArray(raw.dialogueSegments) && raw.dialogueSegments.length > 0);
   const selection = selected.selection;
-  if (selection.provider !== "openrouter" || selection.modelId !== args.modelId || selection.estimatedCostUsd === undefined) throw new Error("Refresh the reviewed video route before submitting this job.");
+  if (selection.provider !== "openrouter" || args.modelId !== undefined && selection.modelId !== args.modelId || selection.estimatedCostUsd === undefined) throw new Error("Refresh the reviewed video route before submitting this job.");
   return { estimatedCostUsd: selection.estimatedCostUsd, selection, request: selected.request };
 }
 

@@ -169,6 +169,17 @@ const { planActionWindow } = load('renderer/src/media/action-window-contract.ts'
   const option = await c.call('repairTiming', 'option', { takeId: 'take' });
   assert.equal(option.choices.length, 1);
   const args = { takeId: 'take', reviewId: option.reviewId, actionId: 'move', providerFrame: 70 };
+  const observation={actionId:'move',result:'FAIL',performance:'AS_DIRECTED',observedStartSeconds:5.5,observedEndSeconds:6.4};
+  const checked=c.put('storyActionChecks',{_id:'vision',projectId:'project',takeId:'take',requirementKey:rec.requirementKey,completedAt:Date.now(),checkVersion:load('src/lib/production/story-action-check.ts').ACTION_CHECK_VERSION,observations:[observation]});
+  const suggested=(await c.call('repairTiming','option',{takeId:'take'})).choices[0].suggestion;
+  assert.equal(suggested.providerFrame,proof.selectedProviderFrames[Math.ceil(6.4*24)-1-window.startFrame]);
+  await c.call('repairTiming','prepare',{...args,...suggested});
+  await assert.rejects(c.call('repairTiming','prepare',{...args,...suggested,providerFrame:suggested.providerFrame+1}));
+  for (const performance of ['DETACHED_PATCH','STILL_OR_CAMERA_ONLY','WRONG_OR_MISSING_ACTION']) {
+    c.rows.get('vision').observations[0].performance=performance;
+    assert.equal(await c.call('repairTiming','option',{takeId:'take'}),null);
+  }
+  c.rows.delete(checked._id);
   const prepared = await c.call('repairTiming', 'prepare', args);
   assert.deepEqual(prepared.timing, { providerFrame: 70, targetFrame: 23 });
   await assert.rejects(c.call('repairTiming', 'prepare', { ...args, reviewId: 'stale' }));

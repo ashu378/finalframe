@@ -407,7 +407,7 @@ export default defineSchema({
     checkVersion: v.optional(v.string()),
     maximumCostUsd: v.number(), priceCeiling: v.object({prompt:v.number(),completion:v.number()}),
     expiresAt: timestamp, createdAt: timestamp,
-    observations: v.optional(v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL'),v.literal('UNCERTAIN')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()}))),
+    observations: v.optional(v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL'),v.literal('UNCERTAIN')),performance:v.optional(v.union(v.literal('AS_DIRECTED'),v.literal('STILL_OR_CAMERA_ONLY'),v.literal('DETACHED_PATCH'),v.literal('WRONG_OR_MISSING_ACTION'),v.literal('UNCLEAR'))),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()}))),
     receiptId: v.optional(v.id('providerTextRequests')), completedAt: v.optional(timestamp),
   }).index('by_take', ['takeId']).index('by_request_key', ['requestKey']),
 

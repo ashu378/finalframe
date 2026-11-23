@@ -17,16 +17,8 @@ import { sha256Equal } from '../renderer/src/media/sha256';
 import { ACTION_WINDOW_MAX_BYTES } from '../renderer/src/media/action-window-contract';
 const object = (v: unknown): Record<string, any> =>
   v && typeof v === 'object' ? (v as Record<string, any>) : {};
-export const deniedRepairMedia = (value: unknown) => {
-  const r = object(value);
-  return (
-    r.approved === false ||
-    r.consent === false ||
-    ['DENIED', 'REJECTED', 'REVOKED', 'EXPIRED', 'BLOCKED', 'RESTRICTED', 'QUARANTINED'].includes(
-      String(typeof value === 'string' ? value : (r.status ?? r.state ?? '')).toUpperCase(),
-    )
-  );
-};
+import { deniedRepairMedia } from './performanceRetakeSupport';
+export { deniedRepairMedia } from './performanceRetakeSupport';
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const refs = (internal as any).frameRegionRepairs;
 type Ctx = QueryCtx | MutationCtx;

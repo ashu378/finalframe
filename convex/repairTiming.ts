@@ -1,6 +1,7 @@
 import { action, query, internalQuery, internalMutation } from './_generated/server';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { ACTION_CHECK_VERSION } from '../src/lib/production/story-action-check';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import { requireProjectRole } from './authorization';
@@ -24,12 +25,14 @@ const args = {
   reviewId: v.id('storyActionReviews'),
   actionId: v.string(),
   providerFrame: v.number(),
+  checkId: v.optional(v.id('storyActionChecks')),
 };
 type Input = {
   takeId: Id<'shotVersions'>;
   reviewId: Id<'storyActionReviews'>;
   actionId: string;
   providerFrame: number;
+  checkId?: Id<'storyActionChecks'>;
 };
 type Ctx = QueryCtx | MutationCtx;
 async function context(ctx: Ctx, takeId: Id<'shotVersions'>) {
@@ -105,6 +108,9 @@ async function context(ctx: Ctx, takeId: Id<'shotVersions'>) {
     !sha256Equal(stored.sha256, raw.checksum)
   )
     return null;
+  const check = await ctx.db.query('storyActionChecks').withIndex('by_take', q => q.eq('takeId', takeId)).order('desc').first();
+  const observations = check?.projectId === take.projectId && check.requirementKey === requirementKey &&
+    check.completedAt && check.checkVersion === ACTION_CHECK_VERSION ? check.observations : undefined;
   const choices = actions.flatMap((a) => {
     if (
       a.beforeSeconds === null ||
@@ -114,8 +120,17 @@ async function context(ctx: Ctx, takeId: Id<'shotVersions'>) {
     const targetFrame = Math.floor(a.beforeSeconds * 24 + 1e-7) - contract.region.window.startFrame - 1;
     const supported = actionTimingBounds(contract, targetFrame);
     if (!supported) return [];
+    const observation = observations?.find(o => o.actionId === a.id);
+    if (observation?.performance && ['DETACHED_PATCH','STILL_OR_CAMERA_ONLY','WRONG_OR_MISSING_ACTION'].includes(observation.performance)) return [];
+    const end = observation?.observedEndSeconds;
+    const outputFrame = typeof end === 'number' ? Math.ceil(end * 24 - 1e-6) - 1 - contract.region.window.startFrame : -1;
+    const sourceFrame = baseProof.selectedProviderFrames?.[outputFrame];
+    const suggestion = observation?.performance === 'AS_DIRECTED' && observation.result === 'FAIL' &&
+      typeof end === 'number' && end > a.beforeSeconds && typeof sourceFrame === 'number' &&
+      sourceFrame >= supported.firstAllowed && sourceFrame <= supported.lastAllowed ? { providerFrame: sourceFrame, checkId: check!._id } : null;
     return [
       {
+        suggestion,
         actionId: a.id,
         label: a.action,
         deadline: a.beforeSeconds,
@@ -159,6 +174,8 @@ async function selected(ctx: Ctx, input: Input) {
   const action = c?.choices.find((a) => a.actionId === input.actionId);
   if (!c || c.reviewId !== input.reviewId || !action)
     throw new Error('Review this exact take and mark the late action first.');
+  if (input.checkId && (input.checkId !== action.suggestion?.checkId || input.providerFrame !== action.suggestion.providerFrame))
+    throw new Error('The picture check changed. Refresh and review the new timing.');
   const timing = { providerFrame: input.providerFrame, targetFrame: action.targetFrame };
   timedFrameSelection(c.frameToRegion, timing);
   const key = JSON.stringify([
@@ -221,6 +238,7 @@ export const adopt = internalMutation({
       reviewId: c.reviewId,
       actionId: input.actionId,
       actionTiming: timing,
+      ...(input.checkId ? { checkId: input.checkId } : {}),
     };
     const assetId = await ctx.db.insert('assets', {
       ...shared,
