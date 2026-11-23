@@ -1,4 +1,5 @@
-import { refreshVideoModelCatalog, reviewVideoModelCapabilities, saveVideoRoutePolicy } from '@/lib/admin/actions';
+import { refreshVideoModelCatalog, reviewVideoModelCapabilities } from '@/lib/admin/actions';
+import { VideoRoutePreferenceForm } from '@/components/admin/video-route-preference-form';
 import { requireStudioAdmin } from '@/lib/guards/platform';
 import { api } from '@/../convex/_generated/api';
 import { getAuthenticatedConvexClient } from '@/lib/convex/server';
@@ -44,15 +45,14 @@ export default async function AdminVideoRoutingPage() {
     <section className="ff-card p-6 sm:p-8">
       <h2 className="ff-display text-2xl font-semibold">Routing preference</h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">Preview selects the lowest-cost compatible model. Standard follows the reviewed preference order when possible. Premium requires a reviewed preferred model and a per-shot spending cap.</p>
-      <form action={saveVideoRoutePolicy} className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <VideoRoutePreferenceForm>
         <label className="text-sm font-medium">Video type<select name="videoType" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3">{VIDEO_TYPES.map((type) => <option key={type} value={type}>{VIDEO_TYPE_LABELS[type]}</option>)}</select></label>
         <label className="text-sm font-medium">Finish level<select name="qualityTier" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3"><option value="ECONOMY">Preview</option><option value="STANDARD">Standard</option><option value="PREMIUM">Premium</option></select></label>
         <label className="text-sm font-medium">Production path<select name="path" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3"><option value="AI_VIDEO">AI video</option><option value="COMPOSITED">Video with designed overlays</option><option value="MOTION_GRAPHICS">Motion graphics renderer</option></select></label>
-        <label className="text-sm font-medium">Maximum per shot (USD)<input name="maxCostUsd" type="number" min="0.01" step="0.01" placeholder="Use account cap" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>
-        <label className="text-sm font-medium">Preferred models<select name="preferredModelIds" multiple size={4} className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2">{catalog.filter((model) => model.available && model.reviewedAt && model.platformQuarantinedAt === undefined).map((model) => <option key={model.modelId} value={model.modelId}>{model.modelId}</option>)}</select></label>
-        <button className="ff-button-primary min-h-11 px-5 md:col-span-2 xl:col-span-5">Save route preference</button>
-      </form>
-      {config.policies.length > 0 && <div className="mt-6 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-secondary/60"><tr><th className="p-3">Video type</th><th className="p-3">Finish</th><th className="p-3">Path</th><th className="p-3">Preferred models</th><th className="p-3">Updated</th></tr></thead><tbody>{config.policies.map((policy) => <tr key={policy._id} className="border-t border-border"><td className="p-3">{VIDEO_TYPE_LABELS[policy.videoType as VideoType]}</td><td className="p-3">{policy.qualityTier}</td><td className="p-3">{policy.path}</td><td className="max-w-sm p-3">{policy.preferredModelIds.join(' → ') || 'Automatic among eligible models'}</td><td className="p-3">{new Date(policy.updatedAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
+        <label className="text-sm font-medium">Maximum per shot (USD)<input name="maxCostUsd" type="number" min="0.01" step="0.01" placeholder="Required for Premium" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>
+        <label className="text-sm font-medium">Preferred models<select name="preferredModelIds" multiple size={4} className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2">{catalog.filter((model) => model.available && model.reviewedAt && model.platformQuarantinedAt === undefined).map((model) => <option key={model.modelId} value={model.modelId} data-last-seen-at={model.lastSeenAt}>{model.modelId}</option>)}</select></label>
+      </VideoRoutePreferenceForm>
+      {config.policies.length > 0 && <div className="mt-6 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-secondary/60"><tr><th className="p-3">Video type</th><th className="p-3">Finish</th><th className="p-3">Path</th><th className="p-3">Preferred models</th><th className="p-3">Maximum per shot</th><th className="p-3">Updated</th></tr></thead><tbody>{config.policies.map((policy) => <tr key={policy._id} className="border-t border-border"><td className="p-3">{VIDEO_TYPE_LABELS[policy.videoType as VideoType]}</td><td className="p-3">{policy.qualityTier}</td><td className="p-3">{policy.path}</td><td className="max-w-sm p-3">{policy.preferredModelIds.join(' → ') || 'Automatic among eligible models'}</td><td className="p-3">{policy.maxCostUsd == null ? 'Account cap' : `$${policy.maxCostUsd.toFixed(2)}`}</td><td className="p-3">{new Date(policy.updatedAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
     </section>
 
     <section className="space-y-4">
