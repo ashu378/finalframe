@@ -6,13 +6,13 @@ import { ACTION_WINDOW_MAX_BYTES } from './action-window-contract.js';
 import { selectCutawayFrames, type CutawayRange } from './performance-cutaway-contract.js';
 export { selectCutawayFrames } from './performance-cutaway-contract.js';
 
-const input = (file: string) => ['-threads','1','-protocol_whitelist','file,pipe','-i',file];
+const input = (file: string) => ['-threads','1','-protocol_whitelist','file,pipe','-f','mov','-enable_drefs','0','-i',file];
 const common = ['-v','error','-nostdin','-n','-filter_complex_threads','1'];
 
 export async function composePerformanceCutaway(directory: string, sourcePath: string, donorPath: string,
   recordingPath: string, range: CutawayRange) {
   const selectedDonorFrames = selectCutawayFrames(range);
-  const tools = createActionMediaTools({});
+  const tools = createActionMediaTools({},true);
   const source = await tools.probe(sourcePath);
   const donor = await tools.probe(donorPath);
   if (source.frames > 360 || donor.frames > 360 || source.fps !== 24 || donor.fps !== 24 ||
@@ -21,7 +21,7 @@ export async function composePerformanceCutaway(directory: string, sourcePath: s
       range.targetEndFrame > source.frames || range.donorEndFrame > donor.frames) {
     throw new Error('CUTAWAY_MEDIA_TIMING_INVALID');
   }
-  const audioProbe = await tools.run('ffprobe', ['-v','error','-protocol_whitelist','file,pipe',
+  const audioProbe = await tools.run('ffprobe', ['-v','error','-protocol_whitelist','file,pipe','-f','mov','-enable_drefs','0',
     '-select_streams','a','-show_entries','stream=codec_name,channels,start_time,duration',
     '-of','json',recordingPath]);
   const audio = JSON.parse(audioProbe.stdout).streams;

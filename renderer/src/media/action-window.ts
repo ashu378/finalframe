@@ -30,7 +30,8 @@ function rate(value: unknown) {
   if (!Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator) || denominator < 1 || numerator / denominator < 1 || numerator / denominator > 60) fail('CFR_REQUIRED');
   return { numerator, denominator, fps: numerator / denominator };
 }
-export function createActionMediaTools(options: ActionWindowOptions) {
+export function createActionMediaTools(options: ActionWindowOptions, mp4Only = false) {
+  const demuxer = mp4Only ? ["-f", "mov", "-enable_drefs", "0"] : [];
   const runner = options.runner ?? new ChildProcessCommandRunner();
   const timeout = options.timeoutMs ?? 120_000;
   if (!Number.isFinite(timeout) || timeout < 1 || timeout > 180_000) fail('TIMEOUT_INVALID');
@@ -43,7 +44,7 @@ export function createActionMediaTools(options: ActionWindowOptions) {
     const canonical = await realpath(localPath(path));
     const file = await stat(canonical);
     if (!file.isFile() || file.size < 1 || file.size > MAX_BYTES) fail('SOURCE_LIMIT');
-    const result = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-threads','1','-protocol_whitelist','file,pipe','-select_streams','v:0','-show_frames','-show_streams','-show_format','-show_entries','frame=best_effort_timestamp_time,pkt_duration_time,key_frame:stream:format','-of','json',canonical]);
+    const result = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-threads','1','-protocol_whitelist','file,pipe',...demuxer,'-select_streams','v:0','-show_frames','-show_streams','-show_format','-show_entries','frame=best_effort_timestamp_time,pkt_duration_time,key_frame:stream:format','-of','json',canonical]);
     let data: any; try { data = JSON.parse(result.stdout); } catch { return fail('PROBE_INVALID'); }
     const video = data.streams?.find((s: any) => s.codec_type === 'video');
     const frames = data.frames;
@@ -58,7 +59,7 @@ export function createActionMediaTools(options: ActionWindowOptions) {
     }
     // Separate audio inspection: select_streams v:0 intentionally bounds the
     // decoded-frame JSON above; audio packet content is never decoded here.
-    const audioResult = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-protocol_whitelist','file,pipe','-select_streams','a','-show_streams','-of','json',canonical], 131072);
+    const audioResult = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-protocol_whitelist','file,pipe',...demuxer,'-select_streams','a','-show_streams','-of','json',canonical], 131072);
     let audio: any[]; try { audio = JSON.parse(audioResult.stdout).streams ?? []; } catch { return fail('PROBE_INVALID'); }
     if (audio.length > 4 || audio.some(s => !['aac','mp3','alac'].includes(s.codec_name) || !Number.isFinite(Number(s.start_time)) || Math.abs(Number(s.start_time)) > .000002 || Number(s.duration) > 60.000001)) fail('AUDIO_FORMAT');
     return { canonical, codec: String(video.codec_name), keyframes: frames.flatMap((f: {key_frame?: number}, i: number) => f.key_frame === 1 ? [i] : []), width: video.width as number, height: video.height as number, ...r, frames: frames.length, duration, audio };
