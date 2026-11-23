@@ -12,9 +12,9 @@ type Take = Id<'shotVersions'>;
 type Asset = Id<'assets'>;
 type Shot = Id<'shots'>;
 type Video = {id: Asset; title: string; url: string};
-type Options = {shotId: Shot; videos: Video[]; targetStartFrame: number; targetEndFrame: number; fps: number};
+type Options = {approvedRepair: {shotVersionId: Take; versionNumber: number} | null; shotId: Shot; videos: Video[]; targetStartFrame: number; targetEndFrame: number; fps: number};
 type Range = {targetStartFrame: number; targetEndFrame: number; donorStartFrame: number; donorEndFrame: number};
-const list = makeFunctionReference<'query', {shotVersionId: Take}, Options | null>('performanceCutaways:options');
+const list = makeFunctionReference<'query', {shotVersionId: Take; includeVideos: boolean}, Options | null>('performanceCutaways:options');
 const save = makeFunctionReference<'action', Range & {shotVersionId: Take; shotId: Shot; baseAssetId: Asset; donorAssetId: Asset}, {shotVersionId: Take; assetId: Asset}>('performanceCutaways:save');
 const control = 'mt-1 min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm';
 
@@ -50,14 +50,30 @@ function ClipRange({label, videos, selected, choose, start, end, changeStart, ch
   </fieldset>;
 }
 
+function reviewUrl(shot:Shot,take:Take) {
+  const url=new URL(window.location.href);
+  url.searchParams.set('shot',shot);
+  url.searchParams.set('take',take);
+  url.searchParams.set('clipStep','review');
+  return url.pathname+url.search;
+}
+
 export function PerformanceCutaway({takeId}: {takeId: Take}) {
   const [open, setOpen] = useState(false);
-  const options = useQuery(list, open ? {shotVersionId: takeId} : 'skip');
-  return <details className="rounded-lg border border-border p-3" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary className="cursor-pointer font-medium">Fix the action with footage you already have</summary>
-    {open && (options ? <CutawayForm key={takeId} takeId={takeId} options={options} /> :
-      <p role="status" className="mt-2 text-sm">{options === undefined ? 'Loading project footage…' : 'A failed action review and a current editable shot are required.'}</p>)}
-  </details>;
+  const router=useRouter();
+  const options = useQuery(list, {shotVersionId: takeId,includeVideos:open});
+  const repair=options?.approvedRepair;
+  return <div className="space-y-3">
+    {repair && <div className="space-y-2 rounded-lg border border-border p-3">
+      <p className="text-sm font-medium">Take {repair.versionNumber} is the approved fix for this action.</p>
+      <Button type="button" onClick={()=>router.push(reviewUrl(options.shotId,repair.shotVersionId))}>Open approved take</Button>
+    </div>}
+    <details className="rounded-lg border border-border p-3" onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer font-medium">Fix the action with footage you already have</summary>
+      {open && (options ? <CutawayForm key={takeId} takeId={takeId} options={options} /> :
+        <p role="status" className="mt-2 text-sm">{options === undefined ? 'Loading project footage…' : 'A failed action review and a current editable shot are required.'}</p>)}
+    </details>
+  </div>;
 }
 
 function CutawayForm({takeId, options}: {takeId: Take; options: Options}) {
@@ -102,11 +118,7 @@ function CutawayForm({takeId, options}: {takeId: Take; options: Options}) {
   }
 
   if (result) return <div role="status" className="mt-3 space-y-2 text-sm"><p>New take saved. Review the action and listen to the original voices.</p>
-    <Button type="button" onClick={() => {
-      const url = new URL(window.location.href);
-      url.searchParams.set('shot', options.shotId); url.searchParams.set('take', result); url.searchParams.set('clipStep', 'review');
-      router.push(url.pathname + url.search);
-    }}>Review the new take</Button></div>;
+    <Button type="button" onClick={() => router.push(reviewUrl(options.shotId,result))}>Review the new take</Button></div>;
   return <div className="mt-3 space-y-3">
     <p className="text-sm">Use a moment from another clip to fix this action. The suggested time comes from the shot review. Play each clip and mark the first and last frames to use.</p>
     <fieldset disabled={busy} className="grid min-w-0 gap-3 lg:grid-cols-2">

@@ -56,6 +56,49 @@ const { fixture, runFixture, load } = require('../recipes/backend-fixture.cjs');
   c.rows.get([...c.rows.values()].find(r=>r._table==='resourceStates'&&r.resourceId===result.assetId)._id).state='APPROVED';
   await checked(item);
   await assert.rejects(checked({...item,volume:0}));
-  c.rows.get('recording').rights={status:'REVOKED'};await assert.rejects(checked(item));
+  const suggestion=async()=>{
+    const data=await use('options',{shotVersionId:'failed',includeVideos:false});
+    if (!data) return null;
+    assert.deepEqual(data.videos,[]);
+    return data.approvedRepair;
+  };
+  assert.equal(await suggestion(),null);
+  const repairedReview=await c.call('storyActionReviews','get',{takeId:result.shotVersionId});
+  await c.call('storyActionReviews','record',{takeId:result.shotVersionId,requirementKey:repairedReview.requirementKey,observations:[{
+    actionId:'bite',result:'PASS',observedStartSeconds:4.92,observedEndSeconds:5.70,evidence:'Three distinct chews before the question.'}]});
+  assert.equal(await suggestion(),null); // reviewed but still awaiting take approval
+  const state=[...c.rows.values()].find(r=>r._table==='resourceStates'&&r.resourceId===result.shotVersionId);
+  state.state='LOCKED';
+  assert.deepEqual(await suggestion(),{shotVersionId:result.shotVersionId,versionNumber:2});
+  const repaired=c.rows.get(result.shotVersionId);
+  for (const [row,field,bad] of [
+    [repaired,'projectId','other'],[repaired,'productionVersionId','other-version'],[repaired.contextSnapshot,'performanceCutawayKey','stale'],
+    [c.rows.get(result.assetId),'deletedAt',Date.now()],[c.rows.get('donor-approval'),'state','REVISION_REQUESTED'],
+    [c.rows.get('base'),'projectId','foreign'],[c.rows.get(result.assetId),'rights',{status:'REVOKED'}],
+    [c.rows.get('shot'),'prompt','A new agreed direction']
+  ]) {
+    const before=row[field];row[field]=bad;
+    const option=await use('options',{shotVersionId:'failed',includeVideos:false});
+    assert.equal(option?.approvedRepair??null,null);
+    if(before===undefined)delete row[field];else row[field]=before;
+  }
+  const alternate={...args,donorStartFrame:27,donorEndFrame:68};
+  const nextKey=(await use('prepare',alternate)).key;
+  const altProof={...proof,donorStartFrame:27,donorEndFrame:68,selectedDonorFrames:frames.map(n=>n-1),checksum:'5'.repeat(64)};
+  c.storageObjects.set('alternate-output',{contentType:'video/mp4',sha256:altProof.checksum,size:100});
+  const newer=await use('adopt',{...alternate,key:nextKey,storageId:'alternate-output',proof:altProof});
+  const altReviewed=await c.call('storyActionReviews','get',{takeId:newer.shotVersionId});
+  await c.call('storyActionReviews','record',{takeId:newer.shotVersionId,requirementKey:altReviewed.requirementKey,observations:[{
+    actionId:'bite',result:'PASS',observedStartSeconds:4.92,observedEndSeconds:5.70,evidence:'Three chews are visible in this different close-up.'}]});
+  for(const row of c.rows.values()) if(row._table==='resourceStates'&&[newer.shotVersionId,newer.assetId].includes(row.resourceId)) row.state='APPROVED';
+  assert.deepEqual(await suggestion(),{shotVersionId:newer.shotVersionId,versionNumber:3});
+  c.rows.get(newer.assetId).deletedAt=Date.now();
+  assert.deepEqual(await suggestion(),{shotVersionId:result.shotVersionId,versionNumber:2});
+  const oldReview=[...c.rows.values()].find(r=>r._table==='storyActionReviews'&&r.takeId==='failed');
+  c.put('storyActionReviews',{...oldReview,_id:'reconsidered',_creationTime:1000000,createdAt:Date.now()+1});
+  assert.equal(await suggestion(),null);
+  c.rows.delete('reconsidered');
+  assert.deepEqual(await suggestion(),{shotVersionId:result.shotVersionId,versionNumber:2});
+  c.rows.get('recording').rights={status:'REVOKED'};await assert.rejects(checked(item));assert.equal(await suggestion(),null);
   console.log('PASS saved performance, 41 → 23 decoded frame selection, original sound, reapproval, single adoption, zero charges, project access, stale source, locks and export.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

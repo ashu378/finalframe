@@ -5,6 +5,7 @@ import { internal } from './_generated/api';
 import { requireProjectRole } from './authorization';
 import { requireApprovedResource, ensureResourceState, isResourceEditable, getEffectiveResourceState, requireEditable, isResourceApproved } from './resourceStates';
 import { resolveStoryRepair } from './storyActionRepairs';
+import { reviewContext } from './storyActionReviews';
 import { deniedRepairMedia } from './performanceRetakeSupport';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { selectCutawayFrames, type CutawayRange as Range } from '../renderer/src/media/performance-cutaway-contract';
@@ -59,15 +60,61 @@ async function current(ctx:Context, id:Id<'shotVersions'>) {
   return {projectId:take.projectId,production,version,scene,data,proof,audioAssetId,deadlines};
 }
 
+type FailedCutawayContext = Awaited<ReturnType<typeof current>>;
+function repairKey(c:FailedCutawayContext, source:Binding, donor:Binding, recording:Binding, range:Range) {
+  return JSON.stringify([c.data.take._id,c.data.shot._id,c.data.requirementKey,c.proof.reviewId,c.proof.checkId,
+    source,donor,recording,rangeOf(range)]);
+}
+
+/** A suggestion refers to an approved correction for this exact failed review.
+ * Recheck both sides of the edit; a later review or revoked source invalidates it. */
+async function approvedCorrection(ctx:QueryCtx,c:FailedCutawayContext) {
+  const takes=await ctx.db.query('shotVersions').withIndex('by_shot_version',q=>q.eq('shotId',c.data.shot._id)).order('desc').take(200);
+  for (const take of takes) {
+    const receipt=take.contextSnapshot;
+    if (take.status!=='COMPLETED' || !take.assetId || take.projectId!==c.projectId || take.productionId!==c.production._id ||
+        take.productionVersionId!==c.version._id || receipt?.source!=='PERFORMANCE_CUTAWAY' || typeof receipt.performanceCutawayKey!=='string' ||
+        receipt.failedTakeId!==c.data.take._id || receipt.reviewId!==c.proof.reviewId || receipt.checkId!==c.proof.checkId ||
+        receipt.originalRecording?.assetId!==c.audioAssetId) continue;
+    try {
+      await requireApprovedResource(ctx,c.projectId,'shotVersion',take._id,c.production._id);
+      const review=await reviewContext(ctx,take._id);
+      if (!review.passed || review.latest?.projectId!==c.projectId || review.latest.takeId!==take._id ||
+          review.latest.assetId!==take.assetId || review.latest.productionId!==c.production._id) continue;
+      const [source,donor,recording,result]=await Promise.all([
+        media(ctx,c.projectId,receipt.sourcePicture.assetId),media(ctx,c.projectId,receipt.donor.assetId),
+        media(ctx,c.projectId,c.audioAssetId),media(ctx,c.projectId,take.assetId),
+      ]);
+      if (receipt.performanceCutawayKey!==repairKey(c,source,donor,recording,receipt.range)) continue;
+      const metadata=review.asset.metadata, proof=metadata?.proof;
+      if (review.asset.source!=='EDITED' || review.asset.productionId!==c.production._id ||
+          review.asset.originAssetId!==source.assetId || metadata?.failedTakeId!==c.data.take._id ||
+          !sha256Equal(result.checksum,proof?.checksum) || result.byteSize!==proof?.byteSize) continue;
+      const sameBinding=(binding:Binding|undefined,current:Binding)=>binding?.assetId===current.assetId &&
+        binding.storageId===current.storageId && binding.byteSize===current.byteSize && sha256Equal(binding.checksum,current.checksum);
+      const bindings=[['sourcePicture',source],['donor',donor],['originalRecording',recording]] as const;
+      if (bindings.some(([field,binding])=>!sameBinding(receipt[field],binding)||!sameBinding(metadata[field],binding)) ||
+          metadata.source!=='PERFORMANCE_CUTAWAY' || metadata.reviewId!==receipt.reviewId || metadata.checkId!==receipt.checkId) continue;
+      validateProof(proof,rangeOf(receipt.range),source,donor,recording);
+      return {shotVersionId:take._id,versionNumber:take.versionNumber};
+    } catch {
+      // A withdrawn, changed, or historical candidate is never offered.
+      continue;
+    }
+  }
+  return null;
+}
+
 export const options=query({
-  args:{shotVersionId:v.id('shotVersions')},returns:v.any(),
-  handler:async(ctx,{shotVersionId})=>{
+  args:{shotVersionId:v.id('shotVersions'),includeVideos:v.optional(v.boolean())},returns:v.any(),
+  handler:async(ctx,{shotVersionId,includeVideos})=>{
     const take=await ctx.db.get(shotVersionId);
     if (!take?.projectId) return null;
     await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);
     let c:Awaited<ReturnType<typeof current>>;
     try { c=await current(ctx,shotVersionId); } catch { return null; }
-    const assets=await ctx.db.query('assets').withIndex('by_project',q=>q.eq('projectId',c.projectId)).order('desc').take(200);
+    const approvedRepair=await approvedCorrection(ctx,c);
+    const assets=includeVideos===false ? [] : await ctx.db.query('assets').withIndex('by_project',q=>q.eq('projectId',c.projectId)).order('desc').take(200);
     const videos=[];
     for(const asset of assets.filter(allowedMedia)){
       const state=await ctx.db.query('resourceStates').withIndex('by_project_resource',q=>q.eq('projectId',c.projectId).eq('resourceType','asset').eq('resourceId',asset._id)).unique();
@@ -75,7 +122,7 @@ export const options=query({
       const url=await ctx.storage.getUrl(asset.storageId!);
       if (url) videos.push({id:asset._id,title:asset.name??'Untitled video',url});
     }
-    return {shotId:c.data.shot._id,videos,targetStartFrame:c.deadlines[0].start,targetEndFrame:c.deadlines[0].end,fps:24};
+    return {shotId:c.data.shot._id,approvedRepair,videos,targetStartFrame:c.deadlines[0].start,targetEndFrame:c.deadlines[0].end,fps:24};
   },
 });
 
@@ -90,7 +137,7 @@ async function select(ctx:Context,input:Choice) {
   const [source,donor,recording]=await Promise.all([media(ctx,c.projectId,input.baseAssetId),media(ctx,c.projectId,input.donorAssetId),media(ctx,c.projectId,c.audioAssetId)]);
   if(sha256Equal(source.checksum,donor.checksum) && range.targetStartFrame===range.donorStartFrame && range.targetEndFrame===range.donorEndFrame)
     return fail('Choose a different performance or a different moment from the video.');
-  const key=JSON.stringify([input.shotVersionId,input.shotId,c.data.requirementKey,c.proof.reviewId,c.proof.checkId,source,donor,recording,range]);
+  const key=repairKey(c,source,donor,recording,range);
   const takes=await ctx.db.query('shotVersions').withIndex('by_shot',q=>q.eq('shotId',input.shotId)).take(201);
   const prior=takes.find(t=>t.contextSnapshot?.performanceCutawayKey===key);
   if (!prior && takes.length>=200) return fail('This shot has reached its take limit.');
