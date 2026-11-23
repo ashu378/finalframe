@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { useAction, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
 import { useRouter } from 'next/navigation';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { Button } from '@/components/ui/button';
@@ -92,8 +93,8 @@ function CutawayForm({takeId, options}: {takeId: Take; options: Options}) {
         targetEndFrame: Number(last) + 1, donorStartFrame: Number(start), donorEndFrame: Number(end) + 1});
       setResult(saved.shotVersionId);
       router.refresh();
-    } catch {
-      setError('Could not save the take. Check that both videos are approved, the selected frames exist, and the original recording fits the shot. Open saved takes before trying again.');
+    } catch (cause) {
+      setError(cause instanceof ConvexError && typeof cause.data === 'string' ? cause.data : 'Could not save the take. Check that both videos are approved, the selected frames exist, and the original recording fits the shot. Open saved takes before trying again.');
     } finally {
       lock.current = false;
       setBusy(false);
