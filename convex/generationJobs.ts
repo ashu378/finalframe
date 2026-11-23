@@ -1,5 +1,5 @@
 import { PERFORMANCE_RETAKE, performanceRetakeKey, performanceSeconds } from '../src/lib/production/performance-retake';
-import { performanceAnchor } from './performanceRetakeSupport';
+import { performanceAnchor, performanceSubstitution } from './performanceRetakeSupport';
 import { resolveFrameRegionAnchors, requireFrameRegionComposition } from './frameRegionRepairs';
 import { ACTION_MOTION_REPAIR_VERSION, motionRepairKey } from './storyActionRepairs';
 import { requirePreparedActionWindow } from './actionWindowRepairs';
@@ -222,17 +222,21 @@ async function resolveGenerationIntent(ctx: ReadCtx, args: GenerationCreateArgs,
       const imageId=performed&&typeof requested.performanceImageId==='string'?ctx.db.normalizeId('assets',requested.performanceImageId):null;
       if(performed&&(!imageId||requested.storyRepairRetryOfJobId!==undefined||idempotencyKey!==performanceRetakeKey(repairTakeId!)))throw new Error('PERFORMANCE_RETAKE_SOURCE_REQUIRED');
       const startImage=performed?await performanceAnchor(ctx,access.project._id,imageId!):null;
-      requested.storyRepair = {...repair.proof,audioSource,...(startImage?{startImage}:{}),...(anchors?{source:anchors.source,anchors}: {})};
+      const substitution=startImage?await performanceSubstitution(ctx,access.project._id,shot,startImage.assetId,requested.replaceVideoAssetId):{};
+      requested.storyRepair = {...repair.proof,audioSource,...substitution,...(startImage?{startImage}:{}),...(anchors?{source:anchors.source,anchors}: {})};
       if(motionRepair){if(requested.storyRepairRetryOfJobId!==undefined||idempotencyKey!==motionRepairKey(repairTakeId!))throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');}
       else if(!performed)await requireStoryRepairRecovery(ctx,{takeId:repairTakeId!,priorJobId:requested.storyRepairRetryOfJobId,idempotencyKey,projectId:access.project._id,productionId:production._id,productionVersionId:version._id,shotId:shot._id,proof:requested.storyRepair});
       shot = {...shot,prompt:repair.prompt,requiredAssetIds:[repair.assetId],metadata:{...object(shot.metadata),operation:'EDIT',videoTask:'EDIT',audioPolicy:'KEEP_SOURCE',requiresSourceAudioPreservation:true,resolution:undefined,referenceBindings:undefined,editInstructions:undefined,firstFrameAssetId:undefined,lastFrameAssetId:undefined,requiresFirstFrame:false,requiresLastFrame:false}};
-      if(startImage)shot={...shot,durationSeconds:performanceSeconds(shot.durationSeconds),requiredAssetIds:[startImage.assetId],
+      if(startImage && requested.performanceNotes!==undefined && (typeof requested.performanceNotes!=='string'||requested.performanceNotes.length>1200)) throw new Error('Keep performance notes under 1,200 characters.');
+      if(startImage)shot={...shot,prompt:[shot.prompt,...(typeof requested.performanceNotes==='string'&&requested.performanceNotes.trim()?['Creator’s timing and performance notes: '+requested.performanceNotes.trim()]:[])].join('\n'),durationSeconds:performanceSeconds(shot.durationSeconds),requiredAssetIds:[startImage.assetId],
         metadata:{...object(shot.metadata),operation:'FRAME_TO_VIDEO',videoTask:'FRAME_TO_VIDEO',audioPolicy:'SILENT',generateAudio:false,requiresSourceAudioPreservation:false,
           resolution:'720p',firstFrameAssetId:startImage.assetId,requiresFirstFrame:true}};
       if(anchors)shot={...shot,durationSeconds:4,requiredAssetIds:[anchors.firstAssetId,anchors.lastAssetId],metadata:{...object(shot.metadata),operation:'FRAME_TO_VIDEO',videoTask:'FRAME_TO_VIDEO',audioPolicy:'SILENT',dialogueSegments:[],requiresSourceAudioPreservation:false,resolution:'480p',aspectRatio:'1:1',firstFrameAssetId:anchors.firstAssetId,lastFrameAssetId:anchors.lastAssetId,requiresFirstFrame:true,requiresLastFrame:true}};
     }
     const metadata = object(shot.metadata);
     const continuity = await resolveGenerationContinuity(ctx, { projectId: access.project._id, productionId: production._id, snapshot: version.planningContextSnapshot, explicitResourceVersionIds: metadata.resourceVersionIds, referenceAssetIds: [...(shot.requiredAssetIds || []),...grants.map(grant=>grant.preparedAssetId)],shotMetadata:metadata,durationSeconds:shot.durationSeconds });
+    if (performed && continuity.referenceAssetIds.some(id=>id!==object(object(requested.storyRepair).startImage).assetId &&
+      id!==object(object(requested.storyRepair).replacedVideo).assetId)) throw new Error('This shot needs additional continuity references. Choose a route that can carry them all.');
     if (repair) continuity.referenceAssetIds = [...(shot.requiredAssetIds??[])];
     const qualityTier = generationFinish(requested.qualityTier);
     const request = { ...requested, ...recipeMarkers, prompt: shot.prompt, duration: shot.durationSeconds, qualityTier, firstFrameAssetId: metadata.firstFrameAssetId, lastFrameAssetId: metadata.lastFrameAssetId, referenceAssetIds: continuity.referenceAssetIds };
@@ -312,6 +316,7 @@ async function resolveCanonicalShotQuote(ctx: ReadCtx, args: GenerationCreateArg
     if(object(normalizedRequest.storyRepair).approachVersion===PERFORMANCE_RETAKE){
       if(requested.constraints!==undefined||requested.generationResolution!==undefined||!['STANDARD','PREMIUM'].includes(String(requested.qualityTier)))throw new Error('PERFORMANCE_RETAKE_SETTINGS_CHANGED');
       normalizedRequest.resolution='720p';
+      if(continuity.dialogueSegments.length) normalizedRequest.prompt=String(normalizedRequest.prompt)+'\nAct these approved dialogue cues on their original timing while the source recording is played in finishing: '+JSON.stringify(continuity.dialogueSegments);
     }
     if(object(normalizedRequest.storyRepair).approachVersion===ACTION_MOTION_REPAIR_VERSION){normalizedRequest.resolution='480p';normalizedRequest.generationResolution=undefined;}
     if (operation === 'LIP_SYNC') {
@@ -667,7 +672,8 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
         await requireApprovedResource(ctx,project._id,'asset',current.assetId,undefined,actor._id);
         const audioSource=await repairAudioCertificate(ctx,project._id,current.audioAssetId,actor._id);
         const startImage=await performanceAnchor(ctx,project._id,img,actor._id);
-        if(stable({...current.proof,audioSource,startImage})!==stable(saved))throw new Error('PERFORMANCE_RETAKE_SETTINGS_CHANGED');
+        const substitution=await performanceSubstitution(ctx,project._id,current.data.shot,img,request.replaceVideoAssetId,actor._id);
+        if(stable({...current.proof,audioSource,startImage,...substitution})!==stable(saved))throw new Error('PERFORMANCE_RETAKE_SETTINGS_CHANGED');
       }
       if(object(request.storyRepair).approachVersion===ACTION_MOTION_REPAIR_VERSION){
         const repair=object(request.storyRepair),takeId=ctx.db.normalizeId('shotVersions',String(repair.sourceTakeId??''));

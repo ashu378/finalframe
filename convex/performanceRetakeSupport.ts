@@ -1,5 +1,5 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Id, Doc } from './_generated/dataModel';
 import { requireApprovedResource } from './resourceStates';
 import { sha256Equal } from '../renderer/src/media/sha256';
 
@@ -24,4 +24,43 @@ export async function performanceAnchor(ctx: QueryCtx | MutationCtx, projectId: 
       [asset.rights, asset.provenance, asset.moderation].some(deniedRepairMedia))
     throw new Error('Choose an approved PNG or JPEG opening image from this project.');
   return { assetId: asset._id, storageId: asset.storageId!, checksum: stored.sha256, byteSize: stored.size };
+}
+
+// A creator may deliberately replace the old picture of a source-video edit.
+// A one-image route cannot carry a separate identity, object, mask or final frame.
+export async function performanceRequirements(
+  ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, shot: Doc<'shots'>,
+) {
+  const meta = shot.metadata ?? {};
+  if (meta.requiresLastFrame || meta.lastFrameAssetId || meta.requiresMask ||
+      ['EXTEND','UPSCALE','LIP_SYNC','PERFORMANCE_TRANSFER','MASKED_EDIT'].includes(meta.operation) ||
+      (meta.referenceBindings?.length ?? 0) > 0)
+    throw new Error('This shot requires controls that a single opening image cannot preserve.');
+  const requiredImages = new Set<string>(meta.firstFrameAssetId ? [meta.firstFrameAssetId] : []);
+  const videos = [];
+  for (const id of new Set(shot.requiredAssetIds ?? [])) {
+    const assetId = ctx.db.normalizeId('assets',id);
+    const a = assetId ? await ctx.db.get(assetId) : null;
+    if (!a || a.scope !== 'PROJECT' || a.deletedAt || a.projectId !== projectId ||
+        [a.rights,a.moderation,a.provenance].some(deniedRepairMedia)) throw new Error('A required shot reference is unavailable.');
+    if (a.mimeType?.startsWith('image/')) requiredImages.add(a._id);
+    else if (a.mimeType?.startsWith('video/') && meta.audioPolicy === 'KEEP_SOURCE') videos.push(a);
+    else throw new Error('This shot needs a reference that a single opening image cannot preserve.');
+  }
+  if (requiredImages.size > 1 || videos.length > 1) throw new Error('This shot needs more references than a one-image performance can preserve.');
+  return { requiredImage: [...requiredImages][0] ?? null, source: videos[0] ?? null };
+}
+export async function performanceSubstitution(
+  ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, shot: Doc<'shots'>,
+  imageId: Id<'assets'>, confirmedVideoId: unknown, actorId?: Id<'users'>,
+) {
+  const { requiredImage, source } = await performanceRequirements(ctx, projectId, shot);
+  if (requiredImage && requiredImage !== imageId) throw new Error('Use the shot’s required opening image.');
+  if ((source?._id ?? null) !== (confirmedVideoId ?? null)) throw new Error('Review the original shot and confirm the video picture being replaced.');
+  if (!source) return {};
+  await requireApprovedResource(ctx, projectId, 'asset', source._id, undefined, actorId);
+  const stored=source.storageId ? await ctx.db.system.get('_storage',source.storageId) : null;
+  if (!stored || !stored.size || !sha256Equal(source.checksum,stored.sha256) || !stored.contentType?.startsWith('video/'))
+    throw new Error('The required source video changed.');
+  return { replacedVideo: {assetId:source._id,storageId:source.storageId!,checksum:stored.sha256,byteSize:stored.size} };
 }

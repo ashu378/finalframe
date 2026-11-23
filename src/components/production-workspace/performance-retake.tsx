@@ -15,6 +15,8 @@ export function PerformanceRetake({takeId}: {takeId: Id<'shotVersions'>}) {
   const files = useQuery(api.assetStorage.listProjectAssets, option?.projectId ? { projectId: option.projectId } : 'skip');
   const [imageId, select] = useState<Id<'assets'> | null>(null);
   const [qualityTier, setQuality] = useState<'PREMIUM'|'STANDARD'>('PREMIUM');
+  const [notes, setNotes] = useState('');
+  const [replaceVideo, confirmVideo] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -26,10 +28,11 @@ export function PerformanceRetake({takeId}: {takeId: Id<'shotVersions'>}) {
   const approve = useMutation(api.approvals.approve);
   const imageState = useQuery(api.resourceStates.get, option?.projectId && imageId ? {projectId: option.projectId, resourceType:'asset',resourceId:imageId} : 'skip');
   if (!option) return null;
+  if (option.unavailable) return <p className="text-sm">{option.unavailable}</p>;
   if (option.job) return <p role="status" className="text-sm">New performance · {option.job.toLowerCase()}. Open Saved takes to review it.</p>;
   const projectId = option.projectId;
   if (!projectId) return null;
-  const images = files?.filter(a => a.scope==='PROJECT' && a.storageId && ['image/png','image/jpeg'].includes(a.mimeType ?? ''));
+  const images = files?.filter(a => (!option.requiredImage || a._id===option.requiredImage) && a.scope==='PROJECT' && a.storageId && ['image/png','image/jpeg'].includes(a.mimeType ?? ''));
   const picked = images?.find(a => a._id===imageId);
   const ready = (s?:string) => s==='APPROVED' || s==='LOCKED';
   async function work(task:()=>Promise<unknown>) {
@@ -61,11 +64,18 @@ export function PerformanceRetake({takeId}: {takeId: Id<'shotVersions'>}) {
         <option value="STANDARD">Standard</option>
       </select>
     </label>
+    <label className="block text-sm">Acting or dialogue timing (optional)
+      <textarea className="mt-1 block w-full rounded border bg-background p-2" value={notes} disabled={busy} maxLength={1200} rows={2} placeholder="Who speaks or moves in this shot, and when?" onChange={e=>{setNotes(e.target.value);setQuote(null);}}/>
+    </label>
+    {option.replaceVideoId?<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={replaceVideo} disabled={busy} onChange={e=>{confirmVideo(e.target.checked);setQuote(null);}}/>
+      Replace the picture from “{option.replaceVideoName || 'original shot'}” with a newly acted shot using this opening image. Keep the approved original recording.
+    </label>:null}
     {picked?.storageUrl?<Image src={picked.storageUrl} alt="Selected opening picture" unoptimized width={224} height={128} className="h-32 w-auto max-w-full rounded object-contain" />:null}
     {!ready(option.state)?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(()=>approveAsset(option.assetId,option.state))}>Approve the source video for reuse</Button>:null}
+    {option.replaceVideoId && option.replaceVideoId!==option.assetId && option.replaceVideoId!==option.audioAssetId && !ready(option.replacementState??undefined)?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(()=>approveAsset(option.replaceVideoId!,option.replacementState??'DRAFT'))}>Approve the earlier source video for reuse</Button>:null}
     {option.audioAssetId!==option.assetId && !ready(option.audioState)?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(()=>approveAsset(option.audioAssetId,option.audioState))}>Approve the original recording</Button>:null}
     {picked&&imageState&&!ready(imageState.state)?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(()=>approveAsset(picked._id,imageState.state))}>Approve the opening picture</Button>:null}
-    {picked&&ready(option.state)&&ready(option.audioState)&&ready(imageState?.state)&&!quote?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(async()=>setQuote(await estimate({takeId,imageId:picked._id,qualityTier})))}>See performance price</Button>:null}
+    {picked&&(!option.replaceVideoId||(replaceVideo&&ready(option.replacementState??undefined)))&&ready(option.state)&&ready(option.audioState)&&ready(imageState?.state)&&!quote?<Button type="button" size="sm" disabled={busy} onClick={()=>void work(async()=>setQuote(await estimate({takeId,imageId:picked._id,qualityTier,...(notes.trim()?{performanceNotes:notes.trim()}:{}),...(option.replaceVideoId&&replaceVideo?{replaceVideoAssetId:option.replaceVideoId}:{})})))}>See performance price</Button>:null}
     {quote?<div className="space-y-2"><p className="text-sm">{quote.model} · {quote.totalCredits} credits · maximum provider hold ${(quote.providerHoldMicros/1e6).toFixed(4)}</p><Button type="button" size="sm" disabled={busy} onClick={()=>void work(async()=>{await confirm({estimateId:quote.estimateId,quoteHash:quote.quoteHash});setQuote(null);router.refresh();})}>Confirm new performance</Button></div>:null}
     {message?<p role="alert" className="text-sm">{message}</p>:null}
   </details>;

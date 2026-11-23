@@ -1,7 +1,7 @@
 import { getOutputPreset } from '../renderer/src/output-presets';
 import { validateReviewedVideoJob } from './videoRouting';
 import { sourceAudioEnabled } from './sourceAudioContracts';
-import { deniedRepairMedia, performanceAnchor } from './performanceRetakeSupport';
+import { deniedRepairMedia, performanceAnchor, performanceRequirements, performanceSubstitution } from './performanceRetakeSupport';
 import { PERFORMANCE_RETAKE, performanceDirection, performanceRetakeKey, performanceSeconds } from '../src/lib/production/performance-retake';
 import { ACTION_MOTION_REPAIR_VERSION,motionRepairKey } from '../src/lib/production/action-motion-repair';
 export { ACTION_MOTION_REPAIR_VERSION,motionRepairKey } from '../src/lib/production/action-motion-repair';
@@ -95,7 +95,7 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  const frameToRegion=motion&&region?assertFrameToRegion({version:'FRAME_TO_REGION_V1',region,providerOutput:{width:640,height:640,fps:24,frames:96},anchorPreparation:{method:'LANCZOS',width:640,height:640},normalization:{method:'UNIFORM_FRAME_SELECTION_LANCZOS',targetWidth:region.width,targetHeight:region.height,targetFrames:region.window.endFrame-region.window.startFrame,targetFps:24}}):undefined;
  const repairActions=window?missing.map(a=>({...a,startSeconds:a.startSeconds-window!.startSeconds,endSeconds:a.endSeconds-window!.startSeconds,...(a.beforeSeconds!==null?{beforeSeconds:a.beforeSeconds-window!.startSeconds}:{})})):missing;
  const motionPrompt=motion&&window?`Animate only this stationary cropped subject for FOUR seconds between the supplied first and last source frames. Keep identity, costume, lighting, camera and crop borders fixed. Create the missing physical motion visibly, not speech mouth movement. Return smoothly to the supplied last pose. This silent picture will be uniformly retimed to ${(window.endFrame-window.startFrame)/24} seconds and composited into the original shot; its original voices remain unchanged. Timings below refer to the FOUR-second generated clip, not the final full scene. `+actionRepairPrompt(repairActions.map(a=>({...a,startSeconds:a.startSeconds*96/(window.endFrame-window.startFrame),endSeconds:a.endSeconds*96/(window.endFrame-window.startFrame),beforeSeconds:a.beforeSeconds===null?null:a.beforeSeconds*96/(window.endFrame-window.startFrame)}))):undefined;
- return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:performance?performanceDirection(data.shot.prompt,data.actions,missing.map(a=>a.id)):motionPrompt??(region?'This input is a close crop of the selected stationary subject. Keep the crop boundaries and exact dimensions unchanged. Correct the visible action inside this crop; do not add the rest of the scene. ':'')+actionRepairPrompt(repairActions),proof:{approachVersion:performance?PERFORMANCE_RETAKE:motion?ACTION_MOTION_REPAIR_VERSION:region?ACTION_REGION_REPAIR_VERSION:isolated?ACTION_WINDOW_REPAIR_VERSION:ACTION_REPAIR_VERSION,...(region?{region,regionReviewId:human!._id}:{}),...(frameToRegion?{frameToRegion}:{}),...(window?{window}:{}),...(isolated?{baselineTakeId}:{}),sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
+ return {data,assetId:asset._id,audioAssetId:audioAssetId as Id<'assets'>,prompt:performance?performanceDirection([data.shot.prompt,...Object.entries(object(object(data.shot.metadata).editInstructions)).filter(([key,value])=>['change','preserve','timing'].includes(key)&&typeof value==='string'&&value.trim()).map(([key,value])=>`${key}: ${value}`)].join('\n'),data.actions,missing.map(a=>a.id)):motionPrompt??(region?'This input is a close crop of the selected stationary subject. Keep the crop boundaries and exact dimensions unchanged. Correct the visible action inside this crop; do not add the rest of the scene. ':'')+actionRepairPrompt(repairActions),proof:{approachVersion:performance?PERFORMANCE_RETAKE:motion?ACTION_MOTION_REPAIR_VERSION:region?ACTION_REGION_REPAIR_VERSION:isolated?ACTION_WINDOW_REPAIR_VERSION:ACTION_REPAIR_VERSION,...(region?{region,regionReviewId:human!._id}:{}),...(frameToRegion?{frameToRegion}:{}),...(window?{window}:{}),...(isolated?{baselineTakeId}:{}),sourceTakeId:takeId,sourceAssetId:asset._id,requirementKey:data.requirementKey,failedActionIds:missing.map(a=>a.id),reviewId:human?._id??null,checkId:ai?._id??null}};
 }
 export const regionContext=internalQuery({args:{takeId:v.id('shotVersions')},returns:v.any(),handler:async(ctx,args)=>{
  if(process.env.FINALFRAME_ACTION_REGION_REPAIR_ENABLED!=='true'||process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED!=='true')throw new Error('ACTION_REGION_NOT_ENABLED');
@@ -188,18 +188,23 @@ export const performanceOption = query({
    const production=await ctx.db.get(take.productionId!);
    if(production?.currentVersionId!==take.productionVersionId)return null;
    const duration=performanceSeconds(repair.data.shot.durationSeconds);
-   return {projectId:take.projectId,assetId:repair.assetId,duration,audioAssetId:repair.audioAssetId,audioState:(await getEffectiveResourceState(ctx,take.projectId,'asset',repair.audioAssetId)).currentState,
+   let inputs;
+   try{inputs=await performanceRequirements(ctx,take.projectId,repair.data.shot);}catch{return {unavailable:'This shot has required references or controls that a single opening picture cannot carry. Keep its original editing route.'};}
+   const {requiredImage,source}=inputs;
+   const replacementState=source?(await getEffectiveResourceState(ctx,take.projectId,'asset',source._id)).currentState:null;
+   return {projectId:take.projectId,assetId:repair.assetId,duration,requiredImage,replacementState,replaceVideoId:source?._id??null,replaceVideoName:source?.name??null,audioAssetId:repair.audioAssetId,audioState:(await getEffectiveResourceState(ctx,take.projectId,'asset',repair.audioAssetId)).currentState,
      state:(await getEffectiveResourceState(ctx,take.projectId,'asset',repair.assetId)).currentState};
   }catch{return null;}
  },
 });
-const performanceSelection={takeId:v.id('shotVersions'),imageId:v.id('assets'),qualityTier:v.union(v.literal('PREMIUM'),v.literal('STANDARD'))};
+const performanceSelection={takeId:v.id('shotVersions'),imageId:v.id('assets'),replaceVideoAssetId:v.optional(v.id('assets')),qualityTier:v.union(v.literal('PREMIUM'),v.literal('STANDARD'))};
 export const performanceModel = internalQuery({
- args:performanceSelection,returns:v.string(),handler:async(ctx,{takeId,imageId,qualityTier})=>{
+ args:performanceSelection,returns:v.string(),handler:async(ctx,{takeId,imageId,qualityTier,replaceVideoAssetId})=>{
   const take=await ctx.db.get(takeId);if(!take?.projectId)throw new Error('Take unavailable.');
   const access=await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);
   const repair=await resolveStoryRepair(ctx,takeId,take.shotId,true,false,true);
   await performanceAnchor(ctx,take.projectId,imageId);
+  await performanceSubstitution(ctx,take.projectId,repair.data.shot,imageId,replaceVideoAssetId);
   const production=await ctx.db.get(take.productionId!), version=await ctx.db.get(take.productionVersionId!);
   if(!production||!version||production.currentVersionId!==version._id||version.status!=='APPROVED')throw new Error('Open the current approved production.');
   const plan=version.sourcePlanId?await ctx.db.get(version.sourcePlanId):null;
@@ -213,13 +218,15 @@ export const performanceModel = internalQuery({
  },
 });
 export const estimatePerformance = action({
- args:performanceSelection,returns:v.any(),handler:async(ctx,args):Promise<any>=>{
+ args:{...performanceSelection,performanceNotes:v.optional(v.string())},returns:v.any(),handler:async(ctx,args):Promise<any>=>{
+  const {performanceNotes,...selection}=args;
+  if(performanceNotes&&performanceNotes.length>1200)throw new Error('Keep performance notes under 1,200 characters.');
   const data=await ctx.runQuery(internal.storyActionRepairs.context,{takeId:args.takeId,performance:true});
   await measureRepairSources(ctx,data,false);
   await ctx.runAction(api.videoRouting.refreshReviewedForQuote,{projectId:data.projectId});
-  const model=await ctx.runQuery(internal.storyActionRepairs.performanceModel,args);
+  const model=await ctx.runQuery(internal.storyActionRepairs.performanceModel,selection);
   return ctx.runMutation(api.generationJobs.previewShotEstimate,{productionId:data.productionId,shotId:data.shotId,
     provider:'openrouter',model,capability:'VIDEO_FINAL',estimatedCost:1,idempotencyKey:performanceRetakeKey(args.takeId),
-    request:{storyRepairTakeId:args.takeId,storyRepairMode:'FULL_PERFORMANCE',performanceImageId:args.imageId,qualityTier:args.qualityTier}});
+    request:{storyRepairTakeId:args.takeId,storyRepairMode:'FULL_PERFORMANCE',performanceImageId:args.imageId,...(performanceNotes?.trim()?{performanceNotes:performanceNotes.trim()}:{}),...(args.replaceVideoAssetId?{replaceVideoAssetId:args.replaceVideoAssetId}:{}),qualityTier:args.qualityTier}});
  },
 });

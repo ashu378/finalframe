@@ -38,8 +38,18 @@ const routing = load('src/lib/ai/video-routing.ts');
   c.rows.get('opening').projectId='project';c.rows.get('opening').rights={status:'REVOKED'};
   await assert.rejects(c.call('storyActionRepairs','performanceModel',selection));
   delete c.rows.get('opening').rights;
+  const before=structuredClone(c.rows.get('shot').metadata);
+  for (const binding of [{lastFrameAssetId:'opening'},{requiresMask:true},{referenceBindings:[{role:'OBJECT',assetId:'opening'}]}]) {
+    Object.assign(c.rows.get('shot').metadata,binding);
+    await assert.rejects(c.call('storyActionRepairs','performanceModel',selection));
+    c.rows.get('shot').metadata={...before};
+  }
+  c.rows.get('shot').requiredAssetIds=['source'];
+  c.rows.get('shot').metadata.audioPolicy='KEEP_SOURCE';
+  await assert.rejects(c.call('storyActionRepairs','performanceModel',selection),/confirm the video/);
+  selection.replaceVideoAssetId='source';
   assert.equal(await c.call('storyActionRepairs','performanceModel',selection),model.modelId);
-  const intent={productionId:'production',shotId:'shot',provider:'openrouter',model:model.modelId,capability:'VIDEO_FINAL',estimatedCost:1,idempotencyKey:performanceRetakeKey('failed'),request:{storyRepairTakeId:'failed',storyRepairMode:'FULL_PERFORMANCE',performanceImageId:'opening',qualityTier:'PREMIUM'}};
+  const intent={productionId:'production',shotId:'shot',provider:'openrouter',model:model.modelId,capability:'VIDEO_FINAL',estimatedCost:1,idempotencyKey:performanceRetakeKey('failed'),request:{storyRepairTakeId:'failed',storyRepairMode:'FULL_PERFORMANCE',performanceImageId:'opening',performanceNotes:'Woman speaks first, man replies, then Grandma speaks.',replaceVideoAssetId:'source',qualityTier:'PREMIUM'}};
   await assert.rejects(c.call('generationJobs','previewShotEstimate',{...intent,idempotencyKey:'another-purchase'}));
   const quote=await c.call('generationJobs','previewShotEstimate',intent);
   const consent={estimateId:quote.estimateId,quoteHash:quote.quoteHash};
@@ -48,7 +58,7 @@ const routing = load('src/lib/ai/video-routing.ts');
   assert.equal(job.request.operation,'FRAME_TO_VIDEO');assert.equal(job.request.audioPolicy,'SILENT');assert.equal(job.request.firstFrameAssetId,'opening');assert.equal(job.request.durationSeconds,8);
   assert.deepEqual(job.request.referenceAssetIds,['opening']);assert.equal(job.request.storyRepair.audioSource.assetId,'source');
   assert.match(job.request.prompt,/Required correction.*visibly chew/);
-  assert.equal(job.request.storyRepair.region,undefined);
+  assert.equal(job.request.storyRepair.region,undefined);assert.match(job.request.prompt,/Woman speaks first/);assert.equal(job.request.storyRepair.replacedVideo.assetId,'source');
   const duplicate=await c.call('generationJobs','createReviewedTake',consent);assert.equal(duplicate._id??duplicate.id,id);assert.equal(c.count('providerBudgetReservations'),1);
   Object.assign(job,{leaseId:'lease',leaseExpiresAt:Date.now()+60000});
   const fence={jobId:id,leaseId:'lease',liveCatalogFingerprint:routing.videoCatalogQuoteFingerprint(model),liveCatalogCheckedAt:Date.now()};
