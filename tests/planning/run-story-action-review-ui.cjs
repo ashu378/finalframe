@@ -29,6 +29,7 @@ const stubs = {
   '@/lib/production/story-actions': load('src/lib/production/story-actions.ts'),
   '@/components/ui/button': { Button: 'button' },
   './story-action-assistant': { StoryActionAssistant: 'assistant' },
+  './performance-cutaway': { PerformanceCutaway: 'cutaway' },
   './story-repair-region': { StoryRepairRegion: 'region' },
 };
 component.require = name => stubs[name] ?? require(name);

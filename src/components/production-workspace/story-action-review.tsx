@@ -7,6 +7,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { validateStoryActionObservations, type StoryAction, type StoryActionObservation } from '@/lib/production/story-actions';
 import { Button } from '@/components/ui/button';
 import { StoryActionAssistant } from './story-action-assistant';
+import { PerformanceCutaway } from './performance-cutaway';
 import { StoryRepairRegion } from './story-repair-region';
 
 const inputClass = 'mt-1 min-h-11 w-full rounded-lg border border-border bg-background p-2 text-sm';
@@ -151,6 +152,7 @@ export function StoryActionReview({ takeId, canReview, canEdit }: { takeId: stri
       )}
       <StoryActionAssistant takeId={id} canEdit={canEdit} humanFailed={current?.passed === false} />
       </details>
+      {current?.passed === false && canEdit && <PerformanceCutaway key={id} takeId={id} />}
       <p role="status" className="text-sm">
         {data.passed ? 'All required actions were reviewed for this exact take.' : 'Approval is blocked until every action is visibly present at the right time.'}
       </p>
