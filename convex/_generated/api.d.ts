@@ -63,6 +63,8 @@ import type * as outputPresets from "../outputPresets.js";
 import type * as paymentCheckoutState from "../paymentCheckoutState.js";
 import type * as paymentWebhook from "../paymentWebhook.js";
 import type * as payments from "../payments.js";
+import type * as performanceCutaways from "../performanceCutaways.js";
+import type * as performanceRetakeSupport from "../performanceRetakeSupport.js";
 import type * as planning from "../planning.js";
 import type * as planningVideo from "../planningVideo.js";
 import type * as platformAdministration from "../platformAdministration.js";
@@ -197,6 +199,8 @@ declare const fullApi: ApiFromModules<{
   paymentCheckoutState: typeof paymentCheckoutState;
   paymentWebhook: typeof paymentWebhook;
   payments: typeof payments;
+  performanceCutaways: typeof performanceCutaways;
+  performanceRetakeSupport: typeof performanceRetakeSupport;
   planning: typeof planning;
   planningVideo: typeof planningVideo;
   platformAdministration: typeof platformAdministration;
