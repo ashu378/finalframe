@@ -1,7 +1,7 @@
 import { getOutputPreset } from '../renderer/src/output-presets';
 import { validateReviewedVideoJob } from './videoRouting';
 import { sourceAudioEnabled } from './sourceAudioContracts';
-import { deniedRepairMedia, performanceAnchor, performanceRequirements, performanceSubstitution } from './performanceRetakeSupport';
+import { deniedRepairMedia, performanceAnchor, performanceRequirements, performanceSubstitution, originalPerformanceRecording } from './performanceRetakeSupport';
 import { PERFORMANCE_RETAKE, performanceDirection, performanceRetakeKey, performanceSeconds } from '../src/lib/production/performance-retake';
 import { ACTION_MOTION_REPAIR_VERSION,motionRepairKey } from '../src/lib/production/action-motion-repair';
 export { ACTION_MOTION_REPAIR_VERSION,motionRepairKey } from '../src/lib/production/action-motion-repair';
@@ -39,7 +39,7 @@ export const sourceApproval=query({args:{takeId:v.id('shotVersions')},returns:v.
 }});
 
 /** Server-derived repair instructions. Never mutate the approved plan or take. */
-export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'shotVersions'>,shotId:Id<'shots'>,allowUnmeasured=false,motion=false,performance=false){
+export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'shotVersions'>,shotId:Id<'shots'>,allowUnmeasured=false,motion=false,performance=false,actorId?:Id<'users'>){
  if(motion&&process.env.FINALFRAME_FRAME_TO_REGION_REPAIR_ENABLED!=='true')throw new Error('FRAME_TO_REGION_NOT_ENABLED');
  const data=await reviewContext(ctx,takeId);
  if(motion){const production=await ctx.db.get(data.take.productionId!),version=await ctx.db.get(data.take.productionVersionId!),plan=version?.sourcePlanId?await ctx.db.get(version.sourcePlanId):null;const type=object(plan?.input).videoType??production?.projectType;const transform=object(object(plan?.input).canonicalPlanSettings).workflow==='FOOTAGE_TRANSFORM'&&object(version?.snapshot).workflow==='FOOTAGE_TRANSFORM';if((!type||normalizeVideoType(type)!=='ANIMATED_COMEDY_2D')&&!transform)throw new Error('FRAME_TO_REGION_CARTOON_SOURCE_REQUIRED');}
@@ -86,6 +86,7 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
   if((request.audioPolicy==='KEEP_SOURCE'||[ACTION_MOTION_REPAIR_VERSION,PERFORMANCE_RETAKE].includes(object(request.storyRepair).approachVersion))&&JSON.stringify(request.editSource)===JSON.stringify(frozen.editSource)&&JSON.stringify(request.storyRepair)===JSON.stringify(frozen.storyRepair))audioAssetId=object(request.storyRepair).audioSource?.assetId??object(request.editSource).assetId??asset._id;
  }
  if(performance){
+  audioAssetId=await originalPerformanceRecording(ctx,data.take.projectId!,audioAssetId,actorId);
   const recording=audioAssetId===asset._id?asset:await ctx.db.get(audioAssetId as Id<'assets'>);
   if(!recording||recording.deletedAt||recording.scope!=='PROJECT'||recording.projectId!==data.take.projectId||[asset,recording].some(media=>[media.rights,media.provenance,media.moderation].some(deniedRepairMedia)))throw new Error('REPAIR_SOURCE_UNAVAILABLE');
  }

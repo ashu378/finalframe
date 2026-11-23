@@ -64,3 +64,39 @@ export async function performanceSubstitution(
     throw new Error('The required source video changed.');
   return { replacedVideo: {assetId:source._id,storageId:source.storageId!,checksum:stored.sha256,byteSize:stored.size} };
 }
+
+// Older repair receipts can point to the sound track of an earlier cartoon
+// conversion. Follow only server-owned keep-source receipts back to the upload.
+export async function originalPerformanceRecording(ctx: QueryCtx | MutationCtx, projectId: Id<'projects'>, start: Id<'assets'>, actorId?: Id<'users'>) {
+  const seen = new Set<string>();
+  let id = start;
+  while (!seen.has(id) && seen.size < 12) {
+    seen.add(id);
+    const media = await ctx.db.get(id);
+    if (!media || media.projectId!==projectId || media.scope!=='PROJECT' || media.deletedAt ||
+        [media.rights,media.provenance,media.moderation].some(deniedRepairMedia))
+      throw new Error('The original recording is unavailable.');
+    const jobId=ctx.db.normalizeId('generationJobs',String(media.metadata?.generationJobId??''));
+    const job=jobId?await ctx.db.get(jobId):null;
+    const request=job?.request;
+    if (!request || request.audioPolicy!=='KEEP_SOURCE' && !request.storyRepair?.audioSource) return id;
+    await requireApprovedResource(ctx, projectId, 'asset', id, undefined, actorId);
+    const take=job?.shotVersionId?await ctx.db.get(job.shotVersionId):null;
+    const frozen=take?.contextSnapshot?.request;
+    const certificate=request.storyRepair?.audioSource??request.editSource;
+    const frozenCertificate=frozen?.storyRepair?.audioSource??frozen?.editSource;
+    if (!take || !job || job.status!=='COMPLETED' || job.projectId!==projectId || job.response?.assetId!==id ||
+        take.projectId!==projectId || take.assetId!==id || take.productionId!==job.productionId ||
+        take.productionVersionId!==job.productionVersionId || take.shotId!==job.shotId || take.status!=='COMPLETED' ||
+        !certificate?.hasAudio || JSON.stringify(certificate)!==JSON.stringify(frozenCertificate))
+      throw new Error('The earlier edit cannot prove which recording it used.');
+    const nextId=ctx.db.normalizeId('assets',String(certificate.assetId??''));
+    const next=nextId?await ctx.db.get(nextId):null;
+    const stored=next?.storageId?await ctx.db.system.get('_storage',next.storageId):null;
+    if (!next || !stored || next.projectId!==projectId || next.storageId!==certificate.storageId ||
+        stored.size!==certificate.byteSize || !sha256Equal(stored.sha256,certificate.checksum))
+      throw new Error('The original recording changed.');
+    id=next._id;
+  }
+  throw new Error('The original recording could not be resolved.');
+}

@@ -75,5 +75,15 @@ const routing = load('src/lib/ai/video-routing.ts');
   assert.equal((await editedSourceContext(c,'project',completed.shotVersionId)).original.asset._id,'source');
   completed.request={...completed.request,firstFrameAssetId:'wrong'};await assert.rejects(editedSourceContext(c,'project',completed.shotVersionId));
   assert.equal(c.rows.get('failed').assetId,'source');
+  const {originalPerformanceRecording}=load('convex/performanceRetakeSupport.ts');
+  const audioCert=job.request.storyRepair.audioSource;
+  c.put('assets',{...c.rows.get('source'),_id:'prior-picture',metadata:{generationJobId:'conversion'}});
+  c.put('shotVersions',{_id:'previous-take',projectId:'project',productionId:'production',productionVersionId:'version',shotId:'shot',assetId:'prior-picture',status:'COMPLETED',contextSnapshot:{request:{audioPolicy:'KEEP_SOURCE',editSource:audioCert}}});
+  c.put('generationJobs',{_id:'conversion',projectId:'project',productionId:'production',productionVersionId:'version',shotId:'shot',shotVersionId:'previous-take',status:'COMPLETED',request:{audioPolicy:'KEEP_SOURCE',editSource:audioCert},response:{assetId:'prior-picture'}});
+  await assert.rejects(originalPerformanceRecording(c,'project','prior-picture'));
+  c.put('resourceStates',{_id:'approval-conversion',projectId:'project',resourceId:'prior-picture',resourceType:'asset',state:'APPROVED'});
+  assert.equal(await originalPerformanceRecording(c,'project','prior-picture'),'source');
+  c.rows.get('previous-take').assetId='wrong';await assert.rejects(originalPerformanceRecording(c,'project','prior-picture'));
+
   console.log('PASS failed shot → approved picture → reviewed route → one confirmed job → single dispatch → new take → original recording; foreign/revoked/forged anchors and duplicate charges denied.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

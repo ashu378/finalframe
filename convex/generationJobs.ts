@@ -668,7 +668,7 @@ export const fenceSubmission = internalMutation({ args: { ...leaseArgs, liveCata
       if(object(request.storyRepair).approachVersion===PERFORMANCE_RETAKE){
         const saved=object(request.storyRepair), src=ctx.db.normalizeId('shotVersions',String(saved.sourceTakeId??'')), img=ctx.db.normalizeId('assets',String(request.firstFrameAssetId??''));
         if(!src||!img||!job.shotId||request.operation!=='FRAME_TO_VIDEO'||request.audioPolicy!=='SILENT'||request.lastFrameAssetId)throw new Error('PERFORMANCE_RETAKE_SETTINGS_CHANGED');
-        const current=await resolveStoryRepair(ctx,src,job.shotId,false,false,true);
+        const current=await resolveStoryRepair(ctx,src,job.shotId,false,false,true,actor._id);
         await requireApprovedResource(ctx,project._id,'asset',current.assetId,undefined,actor._id);
         const audioSource=await repairAudioCertificate(ctx,project._id,current.audioAssetId,actor._id);
         const startImage=await performanceAnchor(ctx,project._id,img,actor._id);
