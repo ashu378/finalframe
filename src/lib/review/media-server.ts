@@ -75,19 +75,21 @@ export async function serveReviewMedia(request: Request, params: { kind: string;
     return streamMedia(request, media);
 }
 
-/** Caller must resolve a project-authorized, completed export first. */
-export function serveAuthorizedDownload(request: Request, value: unknown) {
+/** Caller must resolve an authorized stored asset or completed export first. */
+export function serveAuthorizedDownload(request: Request, value: unknown, originalName?: string) {
     const origin = convexMediaOrigin(process.env.NEXT_PUBLIC_CONVEX_URL);
     const media = origin && mediaSource(value, origin);
     if (!media) return empty(404);
-    return streamMedia(request, media, true);
+    return streamMedia(request, media, originalName || 'finalframe-export');
 }
 
-async function streamMedia(request: Request, media: NonNullable<ReturnType<typeof mediaSource>>, attachment = false) {
+async function streamMedia(request: Request, media: NonNullable<ReturnType<typeof mediaSource>>, attachmentName?: string) {
     const headers = new Headers({ ...PRIVATE_HEADERS, 'Accept-Ranges': 'bytes', 'Content-Type': media.contentType });
-    if (attachment) {
+    if (attachmentName) {
         const extension = media.contentType === 'video/webm' ? 'webm' : media.contentType === 'video/quicktime' ? 'mov' : 'mp4';
-        headers.set('Content-Disposition', `attachment; filename="finalframe-export.${extension}"`);
+        const stem = attachmentName.split(/[\\/]/).pop()?.replace(/\.(mp4|webm|mov)$/i, '')
+            .replace(/[^a-zA-Z0-9 _-]/g, '_').trim().slice(0, 100) || 'finalframe-export';
+        headers.set('Content-Disposition', `attachment; filename="${stem}.${extension}"`);
     }
     if (request.method === 'HEAD') {
         headers.set('Content-Length', media.size.toString());

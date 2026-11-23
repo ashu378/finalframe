@@ -7,6 +7,7 @@ import { FileImage, FileVideo, FileAudio, Trash2, Download, Check } from 'lucide
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
+import { LibraryVideoPreview } from './library-video-preview';
 import { useRouter } from 'next/navigation';
 
 interface AssetGridProps {
@@ -15,14 +16,6 @@ interface AssetGridProps {
     searchQuery?: string;
     filterType?: AssetType | 'all';
     isPresetMode?: boolean;
-}
-
-function LibraryVideoPreview({ url, name }: { url: string; name: string }) {
-    const [open, setOpen] = useState(false);
-    return <details className="border-t border-border p-3" onClick={event => event.stopPropagation()} onToggle={event => setOpen(event.currentTarget.open)}>
-        <summary aria-label={`Preview video ${name}`} className="min-h-11 cursor-pointer rounded-xl px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Preview video</summary>
-        {open ? <video src={url} controls playsInline preload="metadata" aria-label={`Saved video ${name}`} className="mt-2 aspect-video w-full rounded-xl bg-black object-contain" /> : null}
-    </details>;
 }
 
 export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterType = 'all', isPresetMode = false }: AssetGridProps) {
@@ -207,7 +200,7 @@ export function AssetGrid({ initialAssets, studioId, searchQuery = '', filterTyp
                                 )}
                             </div>
 
-                            {asset.type === 'video' ? <LibraryVideoPreview key={`${asset.id}:${asset.url}`} url={asset.url} name={asset.name} /> : null}
+                            {asset.type === 'video' ? <LibraryVideoPreview key={`${asset.id}:${asset.url}`} assetId={asset.id} url={asset.url} name={asset.name} mimeType={asset.mime_type} /> : null}
 
                             {/* Metadata */}
                             <div className="p-5 bg-background border-t border-border">
