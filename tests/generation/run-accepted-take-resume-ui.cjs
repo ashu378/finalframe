@@ -68,8 +68,24 @@ function ui(state, canEdit = true) {
     tree = m.exports.__ShotCard({ data, shot });
     return tree;
   }
+  let renderedCardKey;
+  function renderRoutedShot(data, shot, requestedTake) {
+    const cardState = cells.splice(0);
+    cursor = 0;
+    const workspace = m.exports.ShotWorkspace({
+      data: { ...data, scenes: [{ id: 'scene', shots: [shot] }] },
+      initialStep: 'review', initialShot: shot.id, initialTake: requestedTake,
+    });
+    const card = find(node => node.type === m.exports.__ShotCard, workspace);
+    assert.ok(card);
+    cells.length = 0;
+    if (card.key === renderedCardKey) cells.push(...cardState);
+    renderedCardKey = card.key;
+    cursor = 0;
+    tree = card.type(card.props);
+  }
   render();
-  return { calls, refreshes, renderShot, find: predicate => find(predicate, tree), render, text: () => text(tree), resume: () => find(node => node.type === Button && ['Continue saved take', 'Requesting resume…'].includes(node.props.children), tree), refresh: () => find(node => node.type === Button && node.props.children === 'Refresh saved takes', tree), async flush() { await new Promise(resolve => setImmediate(resolve)); render(); }, pause() { let release; waiting = new Promise(resolve => { release = resolve; }); return () => { waiting = undefined; release(); }; } };
+  return { calls, refreshes, renderRoutedShot, renderShot, find: predicate => find(predicate, tree), render, text: () => text(tree), resume: () => find(node => node.type === Button && ['Continue saved take', 'Requesting resume…'].includes(node.props.children), tree), refresh: () => find(node => node.type === Button && node.props.children === 'Refresh saved takes', tree), async flush() { await new Promise(resolve => setImmediate(resolve)); render(); }, pause() { let release; waiting = new Promise(resolve => { release = resolve; }); return () => { waiting = undefined; release(); }; } };
 }
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
@@ -129,6 +145,33 @@ async function check(name, run) { await run(); checks++; console.log('PASS ' + n
     for (const patch of [{ providerJobId: undefined }, { executionStage: 'RECONCILIATION_REQUIRED' }, { status: 'COMPLETED' }, { status: 'CANCELED' }]) {
       const state = await fixture(patch), before = state.writes.length, reservations = state.creditReservations.length;
       await assert.rejects(state.jobs.retry.handler(state.ctx, { jobId: state.jobId })); assert.equal(state.writes.length, before); assert.equal(state.creditReservations.length, reservations);
+    }
+  });
+  await check('a client-side review link selects its new take while ordinary refresh preserves manual selection', async () => {
+    const screen = ui(await fixture());
+    const data = { versionState: 'APPROVED', canEdit: true, boundResources: [], continuationSources: [], assets: [] };
+    const shot = { id:'shot', title:'Kitchen', state:'DRAFT', resourceVersionIds:[],
+      operationControls:{ operation:'GENERATE', audioPolicy:'SILENT', referenceAssetIds:[] },
+      takes:[10,11,12].map(n=>({id:'take-'+n,versionNumber:n,state:'DRAFT',status:'COMPLETED'})) };
+    const picker = () => screen.find(n => n.type === 'select' && shot.takes.some(t => t.id === n.props.value));
+    const oldWindow = global.window;
+    let address = new URL('https://example.test/workspace/takes?take=take-11');
+    global.window = { location:address, history:{ state:{}, replaceState(_state,_title,url){ address = url; } } };
+    try {
+      screen.renderRoutedShot(data,shot,'take-11');
+      assert.equal(picker().props.value,'take-11');
+      picker().props.onChange({target:{value:'take-10'}});
+      screen.renderRoutedShot(data,shot,'take-11');
+      assert.equal(picker().props.value,'take-10');
+      assert.equal(address.searchParams.get('take'),'take-10');
+      screen.renderRoutedShot(data,shot,'take-12');
+      assert.equal(picker().props.value,'take-12');
+      screen.renderRoutedShot(data,shot,'take-11');
+      assert.equal(picker().props.value,'take-11');
+      assert.equal(screen.calls.length,0);
+    } finally {
+      if (oldWindow === undefined) delete global.window;
+      else global.window = oldWindow;
     }
   });
   await check('source edit defaults to original audio and compares only the exact saved approved source', async () => {
