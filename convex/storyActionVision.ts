@@ -16,7 +16,7 @@ export const estimate=action({args:{takeId:v.id('shotVersions')},returns:v.any()
   const model=catalog.find(m=>m.id===id);if(!model)continue;
   let quote;try{quote=quoteActionCheck(model);}catch{continue;}
   const requestKey=createHash('sha256').update(JSON.stringify([ACTION_CHECK_VERSION,data.projectId,data.actorUserId,data.requirementKey,data.checksum,id,quote])).digest('hex');
-  const checkId=await ctx.runMutation(internal.storyActionChecks.saveQuote,{projectId:data.projectId,takeId:args.takeId,requirementKey:data.requirementKey,requestKey,model:id,...quote});
+  const checkId=await ctx.runMutation(internal.storyActionChecks.saveQuote,{projectId:data.projectId,takeId:args.takeId,requirementKey:data.requirementKey,requestKey,model:id,checkVersion:ACTION_CHECK_VERSION,...quote});
   return {checkId,maximumCostUsd:quote.maximumCostUsd,model:id};
  }
  throw new Error('No configured model can inspect video with verified pricing.');

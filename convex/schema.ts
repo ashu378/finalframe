@@ -404,6 +404,7 @@ export default defineSchema({
   storyActionChecks: defineTable({
     projectId: v.id('projects'), takeId: v.id('shotVersions'), requirementKey: v.string(),
     requestKey: v.string(), actorUserId: v.id('users'), model: v.string(),
+    checkVersion: v.optional(v.string()),
     maximumCostUsd: v.number(), priceCeiling: v.object({prompt:v.number(),completion:v.number()}),
     expiresAt: timestamp, createdAt: timestamp,
     observations: v.optional(v.array(v.object({actionId:v.string(),result:v.union(v.literal('PASS'),v.literal('FAIL'),v.literal('UNCERTAIN')),observedStartSeconds:v.union(v.number(),v.null()),observedEndSeconds:v.union(v.number(),v.null()),evidence:v.string()}))),

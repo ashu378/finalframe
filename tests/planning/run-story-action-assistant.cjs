@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict');
 const {load,fixture}=require('../recipes/backend-fixture.cjs');
-const {validateActionCheck,quoteActionCheck,actionRepairPrompt}=load('src/lib/production/story-action-check.ts');
+const {ACTION_CHECK_VERSION,validateActionCheck,quoteActionCheck,actionRepairPrompt}=load('src/lib/production/story-action-check.ts');
 const {resolveStoryRepair}=load('convex/storyActionRepairs.ts');
 const {requireStoryActionsPassed}=load('convex/storyActionReviews.ts');
 const action={id:'chew',subject:'Man',action:'Chew before the question',startSeconds:4,endSeconds:6,beforeSeconds:5};
@@ -9,6 +9,13 @@ const pass={...fail,result:'PASS',observedStartSeconds:4.2,observedEndSeconds:4.
 function setup(){const c=fixture();c.put('productionVersions',{_id:'version',productionId:'production',status:'APPROVED'});c.put('shots',{_id:'shot',projectId:'project',productionId:'production',productionVersionId:'version',durationSeconds:8,prompt:'Biscuit gag',metadata:{storyActions:[action]}});c.put('assets',{_id:'asset',projectId:'project',scope:'PROJECT',checksum:'hash',storageId:'storage',mimeType:'video/mp4'});c.storageObjects.set('storage',{size:100,sha256:'hash',contentType:'video/mp4'});c.put('shotVersions',{_id:'take',projectId:'project',productionId:'production',productionVersionId:'version',shotId:'shot',assetId:'asset',status:'COMPLETED'});return c;}
 (async()=>{
  assert.equal(validateActionCheck([action],{observations:[fail]})[0].result,'FAIL');assert.equal(validateActionCheck([action],{observations:[{...fail,result:'UNCERTAIN'}]})[0].result,'UNCERTAIN');
+ for (const [performance, expected] of [['AS_DIRECTED','PASS'], ['STILL_OR_CAMERA_ONLY','FAIL'], ['DETACHED_PATCH','FAIL'], ['WRONG_OR_MISSING_ACTION','FAIL'], ['UNCLEAR','UNCERTAIN']]) {
+   const [result]=validateActionCheck([action],{observations:[{...pass, performance}]},8,ACTION_CHECK_VERSION);
+   assert.equal(result.result,expected);
+ }
+ assert.throws(()=>validateActionCheck([action],{observations:[pass]},8,ACTION_CHECK_VERSION),/INVALID_RESULT/);
+ assert.equal(validateActionCheck([action],{observations:[pass]},8)[0].result,'PASS');
+ console.log('PASS a moving face patch, camera-only shot or unclear performance cannot earn an AI pass; completed legacy receipts remain readable');
  const late={...fail,observedStartSeconds:6.4,observedEndSeconds:7.2,evidence:'Chewing starts at 6.4 seconds, after the question and required window.'};
  assert.deepEqual(validateActionCheck([action],{observations:[late]},8),[late]);
  assert.throws(()=>validateActionCheck([action],{observations:[{...late,result:'PASS'}]},8));

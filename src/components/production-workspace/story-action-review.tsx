@@ -102,7 +102,7 @@ function ReviewActions({ takeId, requirementKey, actions, observations, canRevie
             onChange={event => update({ result: event.target.value as 'PASS' | 'FAIL' })}>
             <option value="" disabled>Choose after watching</option>
             <option value="PASS">Action is clearly visible at the required time</option>
-            <option value="FAIL">Missing, unclear, wrong person or too late</option>
+            <option value="FAIL">Missing, unnatural, wrong person or too late</option>
           </select>
         </label>
         {answer?.result === 'PASS' && (
@@ -143,7 +143,7 @@ export function StoryActionReview({ takeId, canReview, canEdit }: { takeId: stri
   return (
     <section aria-label="Visible story action checks" className="space-y-3 rounded-xl border border-border p-4">
       <h6 className="text-balance font-semibold">Does the action match the story?</h6>
-      <p className="text-pretty text-sm text-muted-foreground">Watch the take and check each movement on screen.</p>
+      <p className="text-pretty text-sm text-muted-foreground">Play the shot at normal speed. Watch the person doing the action. A sliding face, a zoom over a still picture, or speech from a motionless character can all make a shot fail.</p>
       <details className="rounded-lg border border-border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Check or repair this take with AI</summary>
       {data.regionEnabled && canEdit && data.regionSource && current?.passed === false && (
