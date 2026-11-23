@@ -39,7 +39,7 @@ export const sourceApproval=query({args:{takeId:v.id('shotVersions')},returns:v.
 }});
 
 /** Server-derived repair instructions. Never mutate the approved plan or take. */
-export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'shotVersions'>,shotId:Id<'shots'>,allowUnmeasured=false,motion=false,performance=false,actorId?:Id<'users'>){
+export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'shotVersions'>,shotId:Id<'shots'>,allowUnmeasured=false,motion=false,performance:boolean|'SAVED_PERFORMANCE'=false,actorId?:Id<'users'>){
  if(motion&&process.env.FINALFRAME_FRAME_TO_REGION_REPAIR_ENABLED!=='true')throw new Error('FRAME_TO_REGION_NOT_ENABLED');
  const data=await reviewContext(ctx,takeId);
  if(motion){const production=await ctx.db.get(data.take.productionId!),version=await ctx.db.get(data.take.productionVersionId!),plan=version?.sourcePlanId?await ctx.db.get(version.sourcePlanId):null;const type=object(plan?.input).videoType??production?.projectType;const transform=object(object(plan?.input).canonicalPlanSettings).workflow==='FOOTAGE_TRANSFORM'&&object(version?.snapshot).workflow==='FOOTAGE_TRANSFORM';if((!type||normalizeVideoType(type)!=='ANIMATED_COMEDY_2D')&&!transform)throw new Error('FRAME_TO_REGION_CARTOON_SOURCE_REQUIRED');}
@@ -59,7 +59,7 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  });
  if(!missing.length)throw new Error('Review and identify the missing action before repairing.');
  const priorRepair=object(object(data.take.contextSnapshot).request).storyRepair;
- if(performance&&object(priorRepair).approachVersion===PERFORMANCE_RETAKE)throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');
+ if(performance===true&&object(priorRepair).approachVersion===PERFORMANCE_RETAKE)throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');
  const isolated=!performance&&process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true';
  const regionReview=isolated&&process.env.FINALFRAME_ACTION_REGION_REPAIR_ENABLED==='true'?human?.repairRegion:undefined;
  const region=regionReview?assertActionRegion(regionReview.selection):undefined;

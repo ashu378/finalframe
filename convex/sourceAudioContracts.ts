@@ -87,6 +87,24 @@ export async function validateSourceAudioManifest(ctx:ReadCtx,projectId:Id<'proj
  for(const value of Array.isArray(inspection.items)?inspection.items:[]){
   const item=record(value);if(item.kind!=='video'||!item.shotVersionId)continue;
   const id=ctx.db.normalizeId('shotVersions',String(item.shotVersionId)),take=id?await ctx.db.get(id):null;
+  if (take?.contextSnapshot?.source==='PERFORMANCE_CUTAWAY') {
+    if (!take.assetId || item.assetId!==take.assetId || take.projectId!==projectId || take.productionVersionId!==expectedProductionVersionId ||
+        typeof item.volume!=='number' || !Number.isFinite(item.volume) || item.volume<=0)
+      throw new Error('Use the reviewed cutaway with its original sound enabled.');
+    const output=await asset(ctx,projectId,take.assetId,actorId);
+    const metadata=record(output.asset.metadata), proof=record(metadata.proof);
+    if (proof.version!=='PERFORMANCE_CUTAWAY_V1' || proof.originalAudioCopied!==true || !sha256Equal(output.stored.sha256,proof.checksum))
+      throw new Error('The saved cutaway and its recorded sound no longer match.');
+    for(const [field,digest] of [['sourcePicture','sourceChecksum'],['donor','donorChecksum'],['originalRecording','recordingChecksum']] as const) {
+      const binding=record(take.contextSnapshot[field]);
+      const id=ctx.db.normalizeId('assets',String(binding.assetId??''));
+      if (!id || JSON.stringify(metadata[field])!==JSON.stringify(binding)) throw new Error('The saved performance sources changed.');
+      const current=await asset(ctx,projectId,id,actorId);
+      if (current.asset.storageId!==binding.storageId || current.stored.size!==binding.byteSize ||
+          !sha256Equal(current.stored.sha256,binding.checksum) || !sha256Equal(binding.checksum,proof[digest]))
+        throw new Error('The saved performance sources changed.');
+    }
+  }
   if(record(record(take?.contextSnapshot).request).storyRepair&&!item.sourceAudioRestoration)throw new Error('Restore the original recording for the repaired shot in the editor before exporting.');
  }
  if(!sourceAudioRequirements(manifest))return;
