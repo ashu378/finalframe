@@ -77,7 +77,9 @@ function CutawayForm({takeId, options}: {takeId: Take; options: Options}) {
     && Number(last) >= Number(first) && Number(end) >= Number(start);
   const targetFrames = Number(last) - Number(first) + 1;
   const donorFrames = Number(end) - Number(start) + 1;
-  const enabled = valid && base !== donor && [base, donor].every(id => options.videos.some(v => v.id === id));
+  const compatible = targetFrames >= 1 && donorFrames >= targetFrames && donorFrames <= targetFrames * 3
+    && (targetFrames > 1 || donorFrames === 1) && Number(last) < 360 && Number(end) < 360;
+  const enabled = valid && compatible && base !== donor && [base, donor].every(id => options.videos.some(v => v.id === id));
 
   async function submit() {
     if (!enabled || lock.current) return;
@@ -110,6 +112,7 @@ function CutawayForm({takeId, options}: {takeId: Take; options: Options}) {
       <ClipRange label="1. Shot to fix" videos={options.videos} selected={base} choose={setBase} start={first} end={last} changeStart={setFirst} changeEnd={setLast} fps={options.fps} />
       <ClipRange label="2. Footage with the action" videos={options.videos.filter(v => v.id !== base)} selected={donor} choose={value => {setDonor(value);setStart('');setEnd('');}} start={start} end={end} changeStart={setStart} changeEnd={setEnd} fps={options.fps} />
     </fieldset>
+    {valid && !compatible && <p className="text-sm" role="status">Use footage up to 15 seconds long. The action can play at its original speed or up to three times faster.</p>}
     {enabled && <p className="text-sm">{donorFrames} source frames will play in {targetFrames} frames at {(donorFrames / targetFrames).toFixed(2)}× speed. The new take uses the original recording.</p>}
     <Button type="button" disabled={!enabled || busy} onClick={() => void submit()}>{busy ? 'Saving new take…' : 'Save new take · no AI charge'}</Button>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
