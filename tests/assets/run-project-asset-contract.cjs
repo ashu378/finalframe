@@ -62,7 +62,11 @@ assert.match(uploadButton, /projectExternalId\?: string/);
 assert.match(uploadButton, /formData\.append\('projectId', projectExternalId\)/);
 assert.match(assetPanel, /getProjectAssets\(projectId\)/);
 assert.match(assetPanel, /projectExternalId=\{projectId\}/);
-assert.match(blueprintPage, /getProjectAssets\(project\.id\)/);
+// The blueprint reads project resource versions for the selected episode.
+// Uploads and asset selection live in the editor's project-scoped panel.
+assert.match(blueprintPage, /getProductionWorkspace\(id, selectedProductionId\)/);
+assert.match(blueprintPage, /'continuity:resourceVersionPage'\), \{ projectId: workspace\.production\.projectId/);
+assert.match(blueprintPage, /'continuity:resourceVersionPage'\), \{ projectId: navigation\.projectId/);
 assert.match(sceneCard, /formData\.append\('projectId', projectExternalId\)/);
 
 console.log('Project P0-2 asset isolation contract checks passed.');
