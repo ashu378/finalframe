@@ -30,7 +30,7 @@ function rate(value: unknown) {
   if (!Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator) || denominator < 1 || numerator / denominator < 1 || numerator / denominator > 60) fail('CFR_REQUIRED');
   return { numerator, denominator, fps: numerator / denominator };
 }
-function createTools(options: ActionWindowOptions) {
+export function createActionMediaTools(options: ActionWindowOptions) {
   const runner = options.runner ?? new ChildProcessCommandRunner();
   const timeout = options.timeoutMs ?? 120_000;
   if (!Number.isFinite(timeout) || timeout < 1 || timeout > 180_000) fail('TIMEOUT_INVALID');
@@ -43,7 +43,7 @@ function createTools(options: ActionWindowOptions) {
     const canonical = await realpath(localPath(path));
     const file = await stat(canonical);
     if (!file.isFile() || file.size < 1 || file.size > MAX_BYTES) fail('SOURCE_LIMIT');
-    const result = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-threads','1','-protocol_whitelist','file,pipe','-select_streams','v:0','-show_frames','-show_streams','-show_format','-show_entries','frame=best_effort_timestamp_time,pkt_duration_time:stream:format','-of','json',canonical]);
+    const result = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-threads','1','-protocol_whitelist','file,pipe','-select_streams','v:0','-show_frames','-show_streams','-show_format','-show_entries','frame=best_effort_timestamp_time,pkt_duration_time,key_frame:stream:format','-of','json',canonical]);
     let data: any; try { data = JSON.parse(result.stdout); } catch { return fail('PROBE_INVALID'); }
     const video = data.streams?.find((s: any) => s.codec_type === 'video');
     const frames = data.frames;
@@ -61,11 +61,11 @@ function createTools(options: ActionWindowOptions) {
     const audioResult = await run(options.ffprobeCommand ?? 'ffprobe', ['-v','error','-protocol_whitelist','file,pipe','-select_streams','a','-show_streams','-of','json',canonical], 131072);
     let audio: any[]; try { audio = JSON.parse(audioResult.stdout).streams ?? []; } catch { return fail('PROBE_INVALID'); }
     if (audio.length > 4 || audio.some(s => !['aac','mp3','alac'].includes(s.codec_name) || !Number.isFinite(Number(s.start_time)) || Math.abs(Number(s.start_time)) > .000002 || Number(s.duration) > 60.000001)) fail('AUDIO_FORMAT');
-    return { canonical, width: video.width as number, height: video.height as number, ...r, frames: frames.length, duration, audio };
+    return { canonical, codec: String(video.codec_name), keyframes: frames.flatMap((f: {key_frame?: number}, i: number) => f.key_frame === 1 ? [i] : []), width: video.width as number, height: video.height as number, ...r, frames: frames.length, duration, audio };
   };
-  return { probe, ffmpeg: (args: string[]) => run(options.ffmpegCommand ?? 'ffmpeg', args, 262144) };
+  return { probe, run, ffmpeg: (args: string[]) => run(options.ffmpegCommand ?? 'ffmpeg', args, 262144) };
 }
-type Probe = Awaited<ReturnType<ReturnType<typeof createTools>['probe']>>;
+type Probe = Awaited<ReturnType<ReturnType<typeof createActionMediaTools>['probe']>>;
 function windowFor(input: ActionWindowInput, source: Probe) {
   if (!Number.isFinite(input.startSeconds) || !Number.isFinite(input.endSeconds) || input.startSeconds < 0 || input.endSeconds <= input.startSeconds || input.endSeconds > source.duration + 1e-9) fail('RANGE_INVALID');
   // Expand to whole source frames; caller must show these actual boundaries
@@ -90,7 +90,7 @@ function result(source: Probe, window: ReturnType<typeof windowFor>, outputPath:
   return { version:'ACTION_WINDOW_V1', outputPath, width:source.width, height:source.height, fps:source.fps, fpsNumerator:source.numerator, fpsDenominator:source.denominator, sourceFrames:source.frames, ...window, sourceDurationSeconds:source.duration, outputFrames:frames, originalAudioCopied };
 }
 export async function prepareActionWindow(input: ActionWindowInput, options: ActionWindowOptions = {}): Promise<ActionWindowResult> {
-  const tools = createTools(options), source = await tools.probe(input.sourcePath), window = windowFor(input,source), out = await outputPath(input,source);
+  const tools = createActionMediaTools(options), source = await tools.probe(input.sourcePath), window = windowFor(input,source), out = await outputPath(input,source);
   try {
     await tools.ffmpeg([...preamble,...inputArgs(source.canonical),'-vf',`trim=start_frame=${window.startFrame}:end_frame=${window.endFrame},setpts=PTS-STARTPTS`,'-map','0:v:0','-an',...encodeArgs,out]);
     const measured = await tools.probe(out);
@@ -99,7 +99,7 @@ export async function prepareActionWindow(input: ActionWindowInput, options: Act
   } catch (error) { await unlink(out).catch(() => undefined); throw error; }
 }
 export async function composeActionWindow(input: ActionWindowInput & { repairPath: string; trailingFramePolicy?: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }, options: ActionWindowOptions = {}): Promise<ActionWindowResult> {
-  const tools = createTools(options), source = await tools.probe(input.sourcePath), window = windowFor(input,source), repair = await tools.probe(input.repairPath), out = await outputPath(input,source,repair);
+  const tools = createActionMediaTools(options), source = await tools.probe(input.sourcePath), window = windowFor(input,source), repair = await tools.probe(input.repairPath), out = await outputPath(input,source,repair);
   // A certified provider may return one inclusive end frame. Explicitly record
   // its removal; never stretch, pad, resize, or discard any in-window frame.
   if (repair.width !== source.width || repair.height !== source.height) fail('DIMENSIONS_CHANGED');
@@ -133,7 +133,7 @@ function measuredRegion(value: unknown, source: Probe) {
 /** Focus the edit on the reviewed subject area. No resizing or invented frames.
  * The returned crop is silent: source speech is restored only at composition. */
 export async function prepareActionRegion(input: ActionRegionInput, options: ActionWindowOptions = {}): Promise<ActionRegionResult> {
-  const tools = createTools(options), source = await tools.probe(input.sourcePath);
+  const tools = createActionMediaTools(options), source = await tools.probe(input.sourcePath);
   const region = measuredRegion(input.region, source), w = region.window;
   const out = await outputPath({ ...input, startSeconds: w.startSeconds, endSeconds: w.endSeconds }, source);
   try {
@@ -149,7 +149,7 @@ export async function prepareActionRegion(input: ActionRegionInput, options: Act
  * pixels or frames. Hard boundaries require visual review; tracking, feathering,
  * scaling, interpolation and synthetic speech are intentionally not inferred. */
 export async function composeActionRegion(input: ActionRegionInput & { repairPath: string; trailingFramePolicy?: 'DROP_ONE_PROVIDER_TRAILING_FRAME' }, options: ActionWindowOptions = {}): Promise<ActionRegionResult> {
-  const tools = createTools(options), source = await tools.probe(input.sourcePath), repair = await tools.probe(input.repairPath);
+  const tools = createActionMediaTools(options), source = await tools.probe(input.sourcePath), repair = await tools.probe(input.repairPath);
   const region = measuredRegion(input.region, source), w = region.window;
   const out = await outputPath({ ...input, startSeconds: w.startSeconds, endSeconds: w.endSeconds }, source, repair);
   if (repair.width !== region.width || repair.height !== region.height) fail('DIMENSIONS_CHANGED');
@@ -175,7 +175,7 @@ export async function composeActionRegion(input: ActionRegionInput & { repairPat
 /** Explicit generated-action alternative. This path alone permits the reviewed
  * 640px/96-frame provider clip to be downscaled and uniformly shortened. */
 export async function prepareFrameToRegion(input:{sourcePath:string;firstFramePath:string;lastFramePath:string;frameToRegion:FrameToRegion},options:ActionWindowOptions={}) {
- const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath);
+ const c=assertFrameToRegion(input.frameToRegion),tools=createActionMediaTools(options),source=await tools.probe(input.sourcePath);
  measuredRegion(c.region,source);
  if(resolve(input.firstFramePath)===resolve(input.lastFramePath))fail('OVERWRITE_SOURCE');
  const files:string[]=[];
@@ -193,7 +193,7 @@ export async function prepareFrameToRegion(input:{sourcePath:string;firstFramePa
 }
 export async function composeFrameToRegion(input:{sourcePath:string;repairPath:string;normalizedPath:string;outputPath:string;frameToRegion:FrameToRegion;actionTiming?:ActionTiming},options:ActionWindowOptions={}) {
  const deadline=Date.now()+(options.timeoutMs??120_000);
- const c=assertFrameToRegion(input.frameToRegion),tools=createTools(options),source=await tools.probe(input.sourcePath),repair=await tools.probe(input.repairPath);
+ const c=assertFrameToRegion(input.frameToRegion),tools=createActionMediaTools(options),source=await tools.probe(input.sourcePath),repair=await tools.probe(input.repairPath);
  measuredRegion(c.region,source);
  // Some four-second outputs include the endpoint at t=4.000. Keep the
  // approved half-open interval [0, 4s) and its original frame selection.

@@ -1,3 +1,4 @@
+import { composePerformanceCutaway, selectCutawayFrames } from './performance-cutaway.js';
 import { mkdtemp,open,readFile,rm,stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,11 +14,7 @@ const object=(v:unknown):Record<string,any>=>v&&typeof v==='object'?v as Record<
 /** Authenticated worker handler. Only checksum-pinned canonical Convex files
  * are accepted; caller input can never choose a local path or remote output. */
 export async function remoteActionWindow(value:unknown,options:{allowedHosts:readonly string[];fetch?:typeof fetch}){
- const p=object(value),window=assertActionWindow(p.window),compose=p.operation==='COMPOSE';
- const region=p.region===undefined?undefined:assertActionRegion(p.region);
- if(region&&JSON.stringify(region.window)!==JSON.stringify(window))throw new Error('ACTION_WINDOW_BINDING_CHANGED');
- if(!['PREPARE','COMPOSE'].includes(p.operation))throw new Error('ACTION_WINDOW_INVALID_OPERATION');
-  if(p.trailingFramePolicy!==undefined&&(!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
+ const p=object(value);
  const directory=await mkdtemp(join(tmpdir(),'finalframe-action-window-'));
  const download=async(input:unknown,name:string)=>{
   const source=object(input),url=assertProbeUrl(source.url,options.allowedHosts);
@@ -30,6 +27,24 @@ export async function remoteActionWindow(value:unknown,options:{allowedHosts:rea
   if(size!==source.byteSize||!sha256Equal(hash.digest('hex'),source.checksum))throw new Error('ACTION_WINDOW_SOURCE_CHANGED');return path;
  };
  try{
+  if (p.operation === 'PERFORMANCE_CUTAWAY') {
+    const {targetStartFrame,targetEndFrame,donorStartFrame,donorEndFrame}=p;
+    const range={targetStartFrame,targetEndFrame,donorStartFrame,donorEndFrame};
+    selectCutawayFrames(range);
+    const sourcePath=await download(p.source,'source.mp4');
+    const donorPath=await download(p.donor,'donor.mp4');
+    const sameRecording = p.recording && p.recording.url === p.source.url &&
+      p.recording.byteSize === p.source.byteSize && sha256Equal(p.recording.checksum,p.source.checksum);
+    const recordingPath = sameRecording ? sourcePath : await download(p.recording,'recording.mp4');
+    const {bytes,proof}=await composePerformanceCutaway(directory,sourcePath,donorPath,recordingPath,range);
+    return {bytes, proof:{...proof,sourceChecksum:p.source.checksum,donorChecksum:p.donor.checksum,
+      recordingChecksum:p.recording.checksum,checksum:createHash('sha256').update(bytes).digest('hex'),byteSize:bytes.length}};
+  }
+ const window=assertActionWindow(p.window),compose=p.operation==='COMPOSE';
+ const region=p.region===undefined?undefined:assertActionRegion(p.region);
+ if(region&&JSON.stringify(region.window)!==JSON.stringify(window))throw new Error('ACTION_WINDOW_BINDING_CHANGED');
+ if(!['PREPARE','COMPOSE'].includes(p.operation))throw new Error('ACTION_WINDOW_INVALID_OPERATION');
+  if(p.trailingFramePolicy!==undefined&&(!compose||p.trailingFramePolicy!=='DROP_ONE_PROVIDER_TRAILING_FRAME'))throw new Error('ACTION_WINDOW_INVALID_FRAME_POLICY');
   const sourcePath=await download(p.source,'source.mp4'),outputPath=join(directory,'output.mp4');
   const args={sourcePath,outputPath,startSeconds:window.startSeconds,endSeconds:window.endSeconds};
   const result=region?(compose?await composeActionRegion({sourcePath,outputPath,region,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionRegion({sourcePath,outputPath,region})):(compose?await composeActionWindow({...args,repairPath:await download(p.repair,'repair.mp4'),trailingFramePolicy:p.trailingFramePolicy}):await prepareActionWindow(args));
