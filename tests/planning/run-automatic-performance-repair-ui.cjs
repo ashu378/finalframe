@@ -26,12 +26,16 @@ const mocks = {
     persisted = result;
     return result;
   }},
-  'next/navigation': {useRouter: () => ({push: url => visits.push(url), refresh() {}})},
+  'next/navigation': {
+    useRouter: () => {throw new Error('Review must navigate directly to the newly saved take');},
+    useParams: () => ({id:'Creator project'}),
+    useSearchParams: () => new URL(window.location.href).searchParams,
+  },
   '@/components/ui/button': {Button:'button'},
 };
 entry.require = name => mocks[name] || require(name);
 entry._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText,file);
-global.window = {location:{href:'https://finalframe.test/workspace?production=episode&take=failed'}};
+global.window = {location:{href:'https://finalframe.test/dashboard/projects/Creator%20project/workspace/storyboard?production=episode&clipStep=make&shot=old&take=failed'}};
 function walk(element) {
   if (Array.isArray(element)) return element.flatMap(walk);
   return element?.props ? [element,...walk(element.props.children)] : [];
@@ -45,6 +49,15 @@ function button(label) {
   assert(found, label);
   return found;
 }
+function reviewLink(take) {
+  const link=elements().find(e=>e.type==='a' && e.props.children==='Review repaired take');
+  assert(link);
+  assert.equal(link.props.onClick,undefined,'The browser must request the exact destination in a single navigation.');
+  const target=new URL(link.props.href,window.location.href);
+  assert.equal(target.pathname,'/dashboard/projects/Creator%20project/workspace/takes');
+  assert.deepEqual(Object.fromEntries(target.searchParams),{production:'episode',clipStep:'review',shot:'shot',take});
+  return target;
+}
 function reset() {slots.length=0;calls.length=0;visits.length=0;persisted=null;}
 const settle=()=>new Promise(setImmediate);
 (async()=>{
@@ -57,8 +70,10 @@ const settle=()=>new Promise(setImmediate);
   const confirm=button('Confirm search and repair');
   confirm.props.onClick(); confirm.props.onClick(); await settle();
   assert.deepEqual(calls,[{method:'estimate',args:{takeId:'failed'}},{method:'launch',args:{takeId:'failed',quoteKey:'bound-quote'}}]);
-  button('Review repaired take').props.onClick();
-  assert.match(visits[0],/production=episode/);assert.match(visits[0],/take=draft/);
+  const target=reviewLink('draft');
+  window.location.href=target.href;
+  reviewLink('draft'); // Reloading the saved review keeps the same exact take.
+
   reset();price=0;result={status:'NO_MATCH',message:'No clear performance in your project clips.'};
   button('Find footage and fix this shot').props.onClick();await settle();
   assert.deepEqual(calls.map(c=>c.method),['estimate','launch']);
@@ -71,8 +86,7 @@ const settle=()=>new Promise(setImmediate);
   assert(elements().some(e=>e.props.role==='status' && /return to review/.test(e.props.children)));
   assert(!elements().some(e=>e.type==='button'));
   persisted={status:'SAVED',shotId:'shot',shotVersionId:'saved-in-background',assetId:'output'};
-  button('Review repaired take').props.onClick();
-  assert.match(visits[0],/take=saved-in-background/);
+  reviewLink('saved-in-background');
   assert.deepEqual(calls,[]);
   console.log('PASS automatic search UI: no passive purchase, capped confirmation, no donor or timing input, duplicate suppression, draft-only review, zero-cost/no-match, invalid estimate.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

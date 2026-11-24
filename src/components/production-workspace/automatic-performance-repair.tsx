@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useAction, useQuery } from 'convex/react';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { useRouter } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { Button } from '@/components/ui/button';
 
@@ -23,7 +23,8 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
   const launch = useAction(launchRef);
   const result = useQuery(statusRef, {takeId});
   const searching = result?.status === 'QUEUED' || result?.status === 'RUNNING';
-  const router = useRouter();
+  const {id:projectId} = useParams<{id:string}>();
+  const search = useSearchParams();
   const pending = useRef(false);
   const [phase, setPhase] = useState<'idle' | 'pricing' | 'finding'>('idle');
   const [quote, setQuote] = useState<Estimate | null>(null);
@@ -59,14 +60,14 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
     }
   }
 
-  function openDraft(saved: Extract<Result, {status: 'SAVED'}>) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('clipStep', 'review');
-    url.searchParams.set('shot', saved.shotId);
-    url.searchParams.set('take', saved.shotVersionId);
-    // The draft was created by an action. Load the latest server-side shot list.
-    router.refresh();
-    router.push(url.pathname + url.search);
+  function reviewHref(saved: Extract<Result, {status: 'SAVED'}>) {
+    const query = new URLSearchParams();
+    const production = search.get('production');
+    if (production) query.set('production', production);
+    query.set('clipStep', 'review');
+    query.set('shot', saved.shotId);
+    query.set('take', saved.shotVersionId);
+    return `/dashboard/projects/${encodeURIComponent(projectId)}/workspace/takes?${query}`;
   }
 
   return <section aria-label="Automatic shot repair" className="space-y-3 rounded-lg border border-border p-3">
@@ -74,7 +75,7 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
     <p className="text-sm text-muted-foreground">FinalFrame looks through approved clips in this project for the same character doing the missing action. It fits the movement into this shot and keeps the original recording.</p>
     {result?.status === 'SAVED' ? <>
       <p role="status" className="text-sm">The repaired take is ready. Review the movement and listen to the voices before approving it.</p>
-      <Button type="button" onClick={() => openDraft(result)}>Review repaired take</Button>
+      <a className="ff-button-primary" href={reviewHref(result)}>Review repaired take</a>
     </> : searching ? <p role="status" className="text-sm">FinalFrame is checking the footage and preparing your edit. You can leave this page and return to review it.</p> : <>
       {result?.status === 'NO_MATCH' && <p role="status" className="text-sm">{result.message || 'No matching performance was found. Add another approved clip to the project to try again.'}</p>}
       {result?.status === 'FAILED' && <p role="alert" className="text-sm">{result.message || 'The search stopped. Check the estimate to see whether it can resume.'}</p>}
