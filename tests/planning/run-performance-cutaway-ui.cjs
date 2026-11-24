@@ -24,6 +24,7 @@ const mocks = {
     useAction: ref => async args => {writes.push([getFunctionName(ref), args]);return {shotVersionId:'new',assetId:'output'};}},
   'next/navigation':{useRouter:()=>({refresh(){},push(url){visits.push(url);}})},
   '@/components/ui/button':{Button:'button'},
+  './automatic-performance-repair':{AutomaticPerformanceRepair:'automatic-repair'},
 };
 component.require = name => mocks[name] || require(name);
 component._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText,file);

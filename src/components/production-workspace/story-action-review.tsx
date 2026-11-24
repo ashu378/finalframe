@@ -152,7 +152,7 @@ export function StoryActionReview({ takeId, canReview, canEdit }: { takeId: stri
       )}
       <StoryActionAssistant takeId={id} canEdit={canEdit} humanFailed={current?.passed === false} />
       </details>
-      {current?.passed === false && canEdit && <PerformanceCutaway key={id} takeId={id} />}
+      {(current?.passed === false || data.failedPictureCheck) && canEdit && <PerformanceCutaway key={id} takeId={id} />}
       <p role="status" className="text-sm">
         {data.passed ? 'All required actions were reviewed for this exact take.' : 'Approval is blocked until every action is visibly present at the right time.'}
       </p>

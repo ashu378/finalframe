@@ -21,7 +21,10 @@ export async function reviewContext(ctx: ReadCtx, takeId: Id<'shotVersions'>) {
     const check = await ctx.db.query('storyActionChecks').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
     const unresolvedCheck = check?.requirementKey===requirementKey && check.completedAt && check.observations?.some(o=>o.result!=='PASS') && (!latest||latest.createdAt<check.completedAt);
     const passed = !actions.length || Boolean(latest?.requirementKey === requirementKey && latest.passed && !unresolvedCheck);
-    return { take, shot, asset, actions, requirementKey, latest, passed };
+    const failedPictureCheck = Boolean(check?.requirementKey === requirementKey && check.completedAt &&
+        check.observations?.some(o => o.result === 'FAIL') &&
+        (latest?.requirementKey !== requirementKey || latest.createdAt < check.completedAt));
+    return { take, shot, asset, actions, requirementKey, latest, passed, failedPictureCheck };
 }
 /** Used by both approval and assembly; a prompt or completed file is not evidence. */
 export async function requireStoryActionsPassed(ctx: ReadCtx, takeId: Id<'shotVersions'>) {
@@ -39,7 +42,7 @@ export const get = query({
         if(take.status!=='COMPLETED'||!take.assetId)return null;
         const data=await reviewContext(ctx,args.takeId);
         const regionEnabled=process.env.FINALFRAME_ACTION_REGION_REPAIR_ENABLED==='true'&&process.env.FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED==='true';
-        return {actions:data.actions,requirementKey:data.requirementKey,passed:data.passed,latest:data.latest,regionEnabled,regionSource:regionEnabled?{width:data.asset.width??null,height:data.asset.height??null,url:data.asset.storageId?await ctx.storage.getUrl(data.asset.storageId):null}:null};
+        return {actions:data.actions,requirementKey:data.requirementKey,passed:data.passed,failedPictureCheck:data.failedPictureCheck,latest:data.latest,regionEnabled,regionSource:regionEnabled?{width:data.asset.width??null,height:data.asset.height??null,url:data.asset.storageId?await ctx.storage.getUrl(data.asset.storageId):null}:null};
     },
 });
 
