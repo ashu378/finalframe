@@ -185,6 +185,7 @@ createServer(async (request, response) => {
           expectedByteSize: typeof payload.byteSize === 'number' ? payload.byteSize : undefined,
           verifyAudioDuration: payload.verifyAudioDuration === true,
           verifyVideoTiming: payload.verifyVideoTiming === true,
+          repairSample: payload.repairSample,
           maxAudioDurationSeconds: payload.maxAudioDurationSeconds===undefined?undefined:typeof payload.maxAudioDurationSeconds==='number'?payload.maxAudioDurationSeconds:NaN,
           ffmpeg: new InjectableFFmpegAdapter(),
         });

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import type { FFprobeAdapter, FFmpegAdapter } from './ffmpeg.js';
 import { normalizeSha256, sha256Equal } from './sha256.js';
 import { ChildProcessCommandRunner, type CommandRunner } from './command-runner.js';
+import { repairVisionSamples, type RepairSampleRequest } from './repair-vision-samples.js';
 import { decodedVideoTiming, type DecodedVideoTiming } from './source-audio-contract.js';
 
 export function assertProbeUrl(source: unknown, allowedHosts: readonly string[]): URL {
@@ -23,7 +24,7 @@ export async function probeRemoteMedia(source: unknown, options: {
   kind?: 'video' | 'audio';
   expectedChecksum?: string; expectedByteSize?: number;
   verifyAudioDuration?: boolean; maxAudioDurationSeconds?: number; ffmpeg?: FFmpegAdapter;
-  verifyVideoTiming?: boolean; runner?: CommandRunner;
+  verifyVideoTiming?: boolean; runner?: CommandRunner; repairSample?: RepairSampleRequest;
 }) {
   const url = assertProbeUrl(source, options.allowedHosts);
   const audioCap=options.maxAudioDurationSeconds??600;
@@ -100,6 +101,11 @@ export async function probeRemoteMedia(source: unknown, options: {
       }
       videoTiming=decodedVideoTiming({version:'DECODED_VIDEO_FRAMES_V1',frameCount:frames.length,fpsNumerator:numerator,fpsDenominator:denominator,firstFrameSeconds:first,durationSeconds:frames.length*step});
     }
-    return { durationSeconds, width, height, hasVideo: true, checksum:options.expectedChecksum??checksum, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize,...(videoTiming?{videoTiming}:{}) };
+    let repairSamples;
+    if (options.repairSample) {
+      if (!videoTiming || !options.ffmpeg) throw new Error('Repair sampling requires measured canonical video.');
+      repairSamples = await repairVisionSamples(path, directory, videoTiming, options.repairSample, options.ffmpeg, remaining(30_000));
+    }
+    return { ...(repairSamples ? {repairSamples} : {}), durationSeconds, width, height, hasVideo: true, checksum:options.expectedChecksum??checksum, videoCodec: video.codec_name, audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : undefined, hasAudio: Boolean(audio), byteSize,...(videoTiming?{videoTiming}:{}) };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
