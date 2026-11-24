@@ -4,10 +4,10 @@ const vision=load('src/lib/production/repair-source-vision.ts');
 const fs=require('node:fs'),path=require('node:path'),Module=require('node:module'),ts=require('typescript');
 const filename=path.resolve('convex/automaticRepairVision.ts');
 const brief={action:{id:'beat',subject:'performer in green',action:'lift the glass and drink',startSeconds:1,endSeconds:2,beforeSeconds:2},
-  scene:'sunlit terrace',frameCount:48,targetStartFrame:24,targetEndFrame:48};
+  scene:'sunlit terrace',originalFrameCount:72,frameCount:48,targetStartFrame:24,targetEndFrame:48};
 function match(){
   return {status:'MATCH',actionId:'beat',confidence:.93,identityMatches:true,sceneMatches:true,framingCompatible:true,movement:'ARTICULATED',
-    firstFrame:0,lastFrame:24,evidence:'The hand lifts the glass up to the lips.',phases:[0,12,21].map((frame,i)=>({phaseNumber:i+1,frame,observation:['Fingers curl around the glass.','Elbow bends and glass rises.','Glass tilts against the lips.'][i]}))};
+    firstFrame:0,lastFrame:33,exit:{kind:'NATURAL_RETURN',angle:'SAME_ANGLE',continuity:'COMPATIBLE',releaseFrame:27,settledFrame:33,donorPose:'The right hand rests beside the glass.',nextOriginalPose:'The lowered hand rests on the table.',evidence:'The elbow lowers past the plate and the hand settles beside the glass.'},evidence:'The hand lifts the glass up to the lips.',phases:[0,12,21].map((frame,i)=>({phaseNumber:i+1,frame,observation:['Fingers curl around the glass.','Elbow bends and glass rises.','Glass tilts against the lips.'][i]}))};
 }
 const negative={...match(),status:'NO_MATCH',confidence:.97,firstFrame:null,lastFrame:null,phases:[]};
 function handlers(execute){
@@ -27,7 +27,8 @@ function handlers(execute){
 function context(){
  const events=[],receipts=new Map(),mask=async ref=>{throw Error('Unexpected ref: '+ref);};
  const base={storageId:'base',assetId:'a',checksum:'a'.repeat(64),byteSize:7000,frameCount:48};
- const candidate={...base,assetId:'b',storageId:'candidate',checksum:'b'.repeat(64)};
+ base.frameCount=72;
+ const candidate={...base,frameCount:48,assetId:'b',storageId:'candidate',checksum:'b'.repeat(64)};
  const data={...brief,contextHash:'pin',projectId:'one',fps:24,base,candidates:[candidate]};
  const c={storage:{getUrl:async id=>'https://fixture.convex.cloud/api/storage/'+id},runQuery:async(ref,a)=>{
    if(ref==='automaticPerformanceRepair.context')return data;if(ref==='providerTextRequests.inspect')return receipts.get(a.requestKey);return mask(ref);
@@ -41,24 +42,39 @@ function context(){
    if(url==='https://openrouter.ai/api/v1/key')return Response.json({data:{limit_remaining:headroom}});
    assert.equal(url,'https://worker.invalid/media/probe');const req=JSON.parse(opts.body);assert.equal(req.verifyVideoTiming,true);assert.equal(opts.redirect,'error');
    const isBase=req.repairSample.kind==='CONTEXT';assert.equal(req.url,'https://fixture.convex.cloud/api/storage/'+(isBase?'base':'candidate'));assert.equal(req.checksum,(isBase?base:candidate).checksum);
-   const images=(isBase?['/9j/AAAA']:['/9j/BBBB','/9j/CCCC']);
+   const images=(isBase?[req.repairSample.frame===24?'/9j/AAAA':'/9j/DDDD']:['/9j/BBBB','/9j/CCCC']);
    return Response.json({checksum:invalid?'0'.repeat(64):req.checksum,byteSize:base.byteSize,repairSamples:{version:'REPAIR_SAMPLES_V1',kind:req.repairSample.kind,
-      firstFrame:isBase?24:0,stride:isBase?1:3,frameCount:48,images}});
+      firstFrame:isBase?req.repairSample.frame:0,stride:isBase?1:3,frameCount:isBase?72:48,images}});
  };
  return {c,data,events,setHeadroom:x=>{headroom=x;},invalidate:()=>{invalid=true;}};
 }
 (async()=>{
  const v=x=>vision.verifyDiscovery(brief,x);
- assert.deepEqual(v(match()),{status:'MATCH',donorStartFrame:0,donorEndFrame:25});
+ assert.deepEqual(v(match()),{status:'MATCH',donorStartFrame:0,donorEndFrame:34,targetEndFrame:48});
  for(const patch of [{movement:'DETACHED_PATCH'},{movement:'STILL_OR_CAMERA_ONLY'},{identityMatches:false},{sceneMatches:false},{framingCompatible:false},{confidence:.63},{lastFrame:49},{firstFrame:1},{phases:[]},{phases:match().phases.reverse()},negative])assert.deepEqual(v({...match(),...patch}),{status:'NO_MATCH'});
+ const direction=match(),exit=direction.exit;
+ for(const patch of [
+   {exit:undefined}, // A previously successful V1 observation.
+   {firstFrame:0,lastFrame:18,phases:[0,6,18].map((frame,i)=>({...direction.phases[i],frame})),exit:{...exit,releaseFrame:18,settledFrame:18}},
+   {exit:{...exit,kind:'ABRUPT_OR_UNCLEAR'}}, {exit:{...exit,kind:'END_OF_SHOT'}},
+   {exit:{...exit,releaseFrame:30,settledFrame:30}}, {exit:{...exit,settledFrame:30}},
+   {exit:{...exit,nextOriginalPose:''}}, {exit:{...exit,continuity:'DISCONTINUITY'}}, {exit:{...exit,kind:'COMPATIBLE_CAMERA_CUT'}}, {exit:{...exit,releaseFrame:19}},
+ ])assert.deepEqual(v({...direction,...patch}),{status:'NO_MATCH'});
+ assert.equal(v({...direction,exit:{...exit,kind:'COMPATIBLE_CAMERA_CUT',angle:'DIFFERENT_ANGLE'}}).status,'MATCH');
+ assert.equal(vision.verifyDiscovery({...brief,targetStartFrame:0,targetEndFrame:42},direction).status,'NO_MATCH','short donor cannot rejoin at an unchecked earlier frame');
+ const terminal={...brief,originalFrameCount:brief.targetEndFrame};
+ assert.equal(vision.verifyDiscovery(terminal,{...direction,exit:{...exit,kind:'END_OF_SHOT',nextOriginalPose:''}}).status,'MATCH');
+ assert.equal(vision.verifyDiscovery(terminal,direction).status,'NO_MATCH');
+ assert.match(vision.discoveryMessages(terminal,'base',null,['sheet'])[0].content[3].text,/END OF SHOT/);
+ console.log('PASS release and settled boundary are observed after the gesture; abrupt, unobserved, prematurely truncated and legacy matches rejected');
  assert.throws(()=>v({...match(),actionId:'other'}));assert.match(vision.discoveryPrompt(brief),/sunlit terrace/);
  console.log('PASS verified actor, scene, camera, action phases, confidence, bounds, timing and real no-match');
  Object.assign(process.env,{OPENROUTER_API_KEY:'test',RENDER_WORKER_SHARED_SECRET:'test',RENDER_WORKER_URL:'https://worker.invalid'});
  let calls=0;
  const api=handlers(async(_cap,m,o)=>{
    calls++;await o.beforeChatSubmit();assert.equal(o.model,'approved/reviewer');assert.deepEqual(o.fallbackModels,[]);assert.equal(o.maxRetries,0);assert.equal(o.retry.maxRetries,0);
-   assert.deepEqual(m[0].content.filter(x=>x.type==='image_url').map(x=>x.image_url.url),['data:image/jpeg;base64,/9j/AAAA','data:image/jpeg;base64,/9j/BBBB','data:image/jpeg;base64,/9j/CCCC']);
-   assert.match(m[0].content[3].text,/0, 3, 6/);assert.match(m[0].content[5].text,/24, 27, 30/);
+   assert.deepEqual(m[0].content.filter(x=>x.type==='image_url').map(x=>x.image_url.url),['data:image/jpeg;base64,/9j/AAAA','data:image/jpeg;base64,/9j/DDDD','data:image/jpeg;base64,/9j/BBBB','data:image/jpeg;base64,/9j/CCCC']);
+   assert.match(m[0].content[3].text,/ORIGINAL EXIT.*frame 48/);assert.match(m[0].content[5].text,/0, 3, 6/);assert.match(m[0].content[7].text,/24, 27, 30/);
    return {content:JSON.stringify(negative),modelUsed:'approved/reviewer',requestId:'gen-existing',costUsd:.01};
  });
  const get=async f=>({...await api.estimate.handler(f.c,{takeId:'take',contextHash:'pin'}),takeId:'take',contextHash:'pin',candidateIndex:0});

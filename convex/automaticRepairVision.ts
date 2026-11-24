@@ -14,7 +14,7 @@ import { sha256Equal } from '../renderer/src/media/sha256';
 const contextRef = (internal as any).automaticPerformanceRepair.context;
 const args = { takeId:v.id('shotVersions'), contextHash:v.string() };
 type BoundVideo = {assetId:Id<'assets'>; storageId:Id<'_storage'>; checksum:string; byteSize:number; frameCount:number};
-type Context = Omit<RepairDiscoveryBrief,'frameCount'> & {projectId:Id<'projects'>;base:BoundVideo;candidates:BoundVideo[];contextHash:string};
+type Context = Omit<RepairDiscoveryBrief,'frameCount'|'originalFrameCount'> & {projectId:Id<'projects'>;base:BoundVideo;candidates:BoundVideo[];contextHash:string};
 const fail = (message:string):never=>{throw new ConvexError(message);};
 async function resolve(ctx:ActionCtx,takeId:Id<'shotVersions'>,hash:string):Promise<Context>{
   const data=await ctx.runQuery(contextRef,{takeId});
@@ -79,7 +79,7 @@ export const inspect=internalAction({
     if(!Number.isInteger(a.candidateIndex)||a.candidateIndex<0||a.candidateIndex>=3)return fail('Invalid approved candidate.');
     const candidate=data.candidates[a.candidateIndex];
     if(!candidate)return fail('The approved clip is unavailable.');
-    const brief:RepairDiscoveryBrief={action:data.action,scene:data.scene,targetStartFrame:data.targetStartFrame,targetEndFrame:data.targetEndFrame,frameCount:candidate.frameCount};
+    const brief:RepairDiscoveryBrief={action:data.action,scene:data.scene,targetStartFrame:data.targetStartFrame,targetEndFrame:data.targetEndFrame,frameCount:candidate.frameCount,originalFrameCount:data.base.frameCount};
     // Independent of list order, quote time, and operator. A second editor cannot rebuy the same observation.
     const requestKey=createHash('sha256').update(JSON.stringify([REPAIR_DISCOVERY_VERSION,data.projectId,
       data.base.checksum,candidate.checksum,brief,a.model])).digest('hex');
@@ -93,8 +93,10 @@ export const inspect=internalAction({
         fresh.priceCeiling.completion!==a.priceCeiling.completion)return fail('Visual reviewer pricing changed. Review a fresh estimate.');
     // Serialized on the shared worker before any paid request.
     const [reference]=await measuredSamples(ctx,data.base,data.targetStartFrame);
+    const exitReference=data.targetEndFrame<data.base.frameCount
+      ? (await measuredSamples(ctx,data.base,data.targetEndFrame))[0] : null;
     const frames=await measuredSamples(ctx,candidate,null);
-    const messages=discoveryMessages(brief,reference,frames);
+    const messages=discoveryMessages(brief,reference,exitReference,frames);
     await requireProviderHeadroom(a.maximumCostUsd);
     await resolve(ctx,a.takeId,a.contextHash);
     const receipt=await ctx.runMutation(internal.providerTextRequests.reserve,{projectId:data.projectId,requestKey,capability:'VISION_QC',model:a.model,estimatedCostUsd:a.maximumCostUsd});
