@@ -47,15 +47,18 @@ const { fixture, runFixture, load }=require('../recipes/backend-fixture.cjs');
       checks++;
       return args.candidateIndex===1?{status:'MATCH',donorStartFrame:12,donorEndFrame:36}:{status:'NO_MATCH'};
     }
-    if(name==='performanceCutaways.save'){
+    if(name==='performanceCutaways.saveDiscovered'){
       submits++;
-      const {key,request}=await c.call('performanceCutaways','prepare',args);
+      const {discoveryContextHash,...choice}=args;
+      const {key,request}=await c.call('performanceCutaways','prepare',choice);
       assert.equal(args.donorAssetId,chosen);
       const {source,donor,recording,operation,...range}=request;
       const frames=load('renderer/src/media/performance-cutaway-contract.ts').selectCutawayFrames(range);
       const checksum='4'.repeat(64);
       c.storageObjects.set('repair-output',{contentType:'video/mp4',size:400,sha256:checksum});
-      return c.call('performanceCutaways','adopt',{...args,key,storageId:'repair-output',proof:{version:'PERFORMANCE_CUTAWAY_V1',...range,selectedDonorFrames:frames,originalAudioCopied:true,sourceFrames:144,outputFrames:144,donorFrames:96,fps:24,width:640,height:360,sourceChecksum:source.checksum,donorChecksum:donor.checksum,recordingChecksum:recording.checksum,checksum,byteSize:400}});
+      const payload={...choice,discoveryContextHash,key,storageId:'repair-output',proof:{version:'PERFORMANCE_CUTAWAY_V1',...range,selectedDonorFrames:frames,originalAudioCopied:true,sourceFrames:144,outputFrames:144,donorFrames:96,fps:24,width:640,height:360,sourceChecksum:source.checksum,donorChecksum:donor.checksum,recordingChecksum:recording.checksum,checksum,byteSize:400}};
+      await assert.rejects(c.call('performanceCutaways','adopt',{...payload,discoveryContextHash:'changed-while-rendering'}),/changed/);
+      return c.call('performanceCutaways','adopt',payload);
     }
     return origAction(ref,args);
   };

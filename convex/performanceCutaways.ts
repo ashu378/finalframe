@@ -1,6 +1,6 @@
 import { ConvexError, v } from 'convex/values';
 import type { Id, Doc } from './_generated/dataModel';
-import { action, internalMutation, internalQuery, query, type QueryCtx, type MutationCtx } from './_generated/server';
+import { action, internalAction, internalMutation, internalQuery, query, type ActionCtx, type QueryCtx, type MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { requireProjectRole } from './authorization';
 import { requireApprovedResource, ensureResourceState, isResourceEditable, getEffectiveResourceState, requireEditable, isResourceApproved } from './resourceStates';
@@ -169,11 +169,17 @@ function validateProof(p:any,r:Range,source:Binding,donor:Binding,recording:Bind
     return fail('The worker could not verify the selected frames and original recording.');
 }
 export const adopt=internalMutation({
-  args:{...args,key:v.string(),storageId:v.id('_storage'),proof:v.any()},returns:v.any(),
+  args:{...args,key:v.string(),storageId:v.id('_storage'),proof:v.any(),discoveryContextHash:v.optional(v.string())},returns:v.any(),
   handler:async(ctx,input)=>{
     const {c,source,donor,recording,key,prior,range,nextNumber}=await select(ctx,input);
     if (input.key!==key) return fail('The reviewed shot or its source files changed. Review them again.');
     if (prior?.assetId) return {shotVersionId:prior._id,assetId:prior.assetId};
+    if(input.discoveryContextHash){
+      const discovery=await ctx.runQuery((internal as any).automaticPerformanceRepair.context,{takeId:input.shotVersionId});
+      if(discovery.contextHash!==input.discoveryContextHash || discovery.base?.assetId!==input.baseAssetId ||
+          !discovery.candidates?.some((clip:Binding)=>clip.assetId===input.donorAssetId))
+        return fail('The approved footage or action review changed while the video was being edited.');
+    }
     await requireEditable(ctx,c.projectId,'shot',c.data.shot._id);
     await requireEditable(ctx,c.projectId,'scene',c.scene._id);
     const proof=input.proof;
@@ -183,7 +189,7 @@ export const adopt=internalMutation({
       return fail('The saved video differs from the verified edit.');
     const now=Date.now();
     const shared={projectId:c.projectId,productionId:c.production._id,studioId:c.production.studioId,studioExternalId:c.production.studioExternalId};
-    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range};
+    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range,...(input.discoveryContextHash?{discoveryContextHash:input.discoveryContextHash}:{})};
     const assetId=await ctx.db.insert('assets',{...shared,scope:'PROJECT',source:'EDITED',name:'Saved performance cutaway',originAssetId:source.assetId,
       roles:['FOOTAGE'],mimeType:'video/mp4',storageId:input.storageId,checksum:stored.sha256,byteSize:stored.size,width:proof.width,height:proof.height,
       durationSeconds:proof.outputFrames/24,frameRate:24,provenance:{kind:'PERFORMANCE_CUTAWAY',...lineage},metadata:{...lineage,proof},createdAt:now});
@@ -194,8 +200,7 @@ export const adopt=internalMutation({
     return {shotVersionId,assetId};
   },
 });
-export const save=action({
-  args,returns:v.any(),handler:async(ctx,input):Promise<{shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>}>=>{
+async function saveCutaway(ctx:ActionCtx,input:Choice,discoveryContextHash?:string):Promise<{shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>}> {
     const {saved,key,request}=await ctx.runQuery(functions.prepare,input);
     if(saved) return saved;
     const worker=process.env.RENDER_WORKER_URL?.trim(), secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();
@@ -216,7 +221,12 @@ export const save=action({
     finally{await reader.cancel().catch(()=>undefined);}
     if (bytes!==proof.byteSize) return fail('The video transfer stopped early. Try the saved edit again.');
     const storageId=await ctx.storage.store(new Blob(chunks as BlobPart[],{type:'video/mp4'}));
-    try { return await ctx.runMutation(functions.adopt,{...input,key,proof,storageId}); }
+    try { return await ctx.runMutation(functions.adopt,{...input,key,proof,storageId,...(discoveryContextHash?{discoveryContextHash}:{})}); }
     finally { await ctx.runMutation((internal as any).repairTiming.cleanup,{storageId}).catch(()=>undefined); }
-  },
+}
+export const save=action({args,returns:v.any(),handler:(ctx,input)=>saveCutaway(ctx,input)});
+/** Discovery is server-directed. Manual selection cannot forge this provenance. */
+export const saveDiscovered=internalAction({
+  args:{...args,discoveryContextHash:v.string()},returns:v.any(),
+  handler:(ctx,{discoveryContextHash,...input})=>saveCutaway(ctx,input,discoveryContextHash),
 });

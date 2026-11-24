@@ -1,5 +1,5 @@
 import { action, internalQuery, type ActionCtx, type QueryCtx } from './_generated/server';
-import { api, internal } from './_generated/api';
+import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { ConvexError, v } from 'convex/values';
 import { allowedMedia, currentCutaway, cutawayMedia, existingCorrection, type Binding } from './performanceCutaways';
@@ -188,7 +188,7 @@ async function measureInputs(ctx:ActionCtx,takeId:Id<'shotVersions'>) {
   data=await ctx.runQuery(refs.context,{takeId});return data;
 }
 
-const noMatch='No matching performance was verified in this search of up to three approved project clips.';
+const noMatch='The footage check could not confidently match this action and character in the approved clips it searched (up to three).';
 type VisionQuote={model:string;maximumCostUsd:number;priceCeiling:{prompt:number;completion:number}};
 async function quoteFor(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,period:number) {
   let pricing:VisionQuote|null=null;
@@ -227,7 +227,7 @@ export const run=action({
     const next=await ctx.runQuery(refs.context,{takeId});
     if(next.saved)return next.saved;
     if(next.contextHash!==data.contextHash)throw new ConvexError('The source or action review changed. Check it again.');
-    const saved=await ctx.runAction((api as any).performanceCutaways.save,{shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
+    const saved=await ctx.runAction((internal as any).performanceCutaways.saveDiscovered,{discoveryContextHash:data.contextHash,shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
     return {status:'SAVED',shotId:data.shotId,...saved};
   },
 });
