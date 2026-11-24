@@ -2,6 +2,8 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
 
+import { EXACT_REPAIR_ALIGNMENT_VERSION } from "../src/lib/production/exact-repair-alignment";
+
 const timestamp = v.number();
 const json = v.any();
 
@@ -404,7 +406,7 @@ export default defineSchema({
   automaticRepairRuns: defineTable({
     projectId:v.id('projects'),takeId:v.id('shotVersions'),actorId:v.id('users'),
     quoteKey:v.string(),contextHash:v.string(),maximumCostUsd:v.number(),
-    pricing:v.union(v.null(),v.object({model:v.string(),maximumCostUsd:v.number(),priceCeiling:v.object({prompt:v.number(),completion:v.number()})})),
+    pricing:v.union(v.null(),v.object({model:v.string(),maximumCostUsd:v.number(),priceCeiling:v.object({prompt:v.number(),completion:v.number()}),alignmentMode:v.optional(v.literal(EXACT_REPAIR_ALIGNMENT_VERSION))})),
     status:v.union(v.literal('QUEUED'),v.literal('RUNNING'),v.literal('SAVED'),v.literal('NO_MATCH'),v.literal('FAILED')),
     message:v.optional(v.string()),shotId:v.optional(v.id('shots')),shotVersionId:v.optional(v.id('shotVersions')),assetId:v.optional(v.id('assets')),
     createdAt:timestamp,updatedAt:timestamp,

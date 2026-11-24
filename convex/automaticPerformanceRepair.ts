@@ -243,7 +243,7 @@ async function measureInputs(ctx:ActionCtx,takeId:Id<'shotVersions'>) {
 }
 
 const noMatch='The footage check could not confidently match this action and character in the approved clips it searched (up to three). Add and approve a clip showing the performance, then try again.';
-type VisionQuote={model:string;maximumCostUsd:number;priceCeiling:{prompt:number;completion:number}};
+type VisionQuote = NonNullable<Doc<'automaticRepairRuns'>['pricing']>;
 async function quoteFor(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,period:number) {
   let pricing:VisionQuote|null=null;
   if (!data.saved && !data.reviewed && data.candidates.length) pricing=await ctx.runAction(vision.estimate,{takeId,contextHash:data.contextHash});
