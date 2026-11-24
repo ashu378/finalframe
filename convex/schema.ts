@@ -401,6 +401,14 @@ export default defineSchema({
     name: v.string(), profile: json, assetIds: v.array(v.id("assets")), status, createdAt: timestamp, updatedAt: timestamp,
   }).index("by_production", ["productionId"]).index("by_version", ["productionVersionId"]).index("by_studio", ["studioExternalId"]),
 
+  automaticRepairRuns: defineTable({
+    projectId:v.id('projects'),takeId:v.id('shotVersions'),actorId:v.id('users'),
+    quoteKey:v.string(),contextHash:v.string(),maximumCostUsd:v.number(),
+    pricing:v.union(v.null(),v.object({model:v.string(),maximumCostUsd:v.number(),priceCeiling:v.object({prompt:v.number(),completion:v.number()})})),
+    status:v.union(v.literal('QUEUED'),v.literal('RUNNING'),v.literal('SAVED'),v.literal('NO_MATCH'),v.literal('FAILED')),
+    message:v.optional(v.string()),shotId:v.optional(v.id('shots')),shotVersionId:v.optional(v.id('shotVersions')),assetId:v.optional(v.id('assets')),
+    createdAt:timestamp,updatedAt:timestamp,
+  }).index('by_take',['takeId']).index('by_take_quote',['takeId','quoteKey']),
   storyActionChecks: defineTable({
     projectId: v.id('projects'), takeId: v.id('shotVersions'), requirementKey: v.string(),
     requestKey: v.string(), actorUserId: v.id('users'), model: v.string(),

@@ -57,7 +57,7 @@ async function verifyRepair(aiOnly){
     [c.rows.get('different-shot'),'projectId','other-project']]){
     const old=r[k];r[k]=bad;assert.equal((await call('context')).reviewed,null);r[k]=old;
   }
-  let checks=0,submits=0,donorStartFrame=12;
+  let checks=0,submits=0,donorStartFrame=12,matchesIndex=1;
   const origAction=c.runAction;
   let chosen='donor';
   c.runAction=async(ref,args)=>{
@@ -65,7 +65,7 @@ async function verifyRepair(aiOnly){
     if(name==='automaticRepairVision.estimate')return {model:'test/vision',maximumCostUsd:.05,priceCeiling:{prompt:1,completion:2}};
     if(name==='automaticRepairVision.inspect'){
       checks++;
-      return args.candidateIndex===1?{status:'MATCH',targetEndFrame:84,donorStartFrame,donorEndFrame:donorStartFrame+36}:{status:'NO_MATCH'};
+      return args.candidateIndex===matchesIndex?{status:'MATCH',targetEndFrame:84,donorStartFrame,donorEndFrame:donorStartFrame+36}:{status:'NO_MATCH',reason:'EXIT_DISCONTINUITY'};
     }
     if(name==='performanceCutaways.saveDiscovered'){
       submits++;
@@ -84,11 +84,42 @@ async function verifyRepair(aiOnly){
   };
   const free=await call('estimate');assert.equal(free.maximumCostUsd,0);assert.equal(submits,0);
   await assert.rejects(call('run',{quoteKey:'0.forged'}));
+  // Server-scheduled work resolves the actor's current permissions, not the
+  // authorization they used before a membership was withdrawn.
+  await call('launch',{quoteKey:free.quoteKey});
+  const deniedJob=c.scheduled.filter(j=>j.ref==='automaticPerformanceRepair.work').at(-1).args;
+  c.role='VIEWER';c.signedIn=false;await c.call('automaticPerformanceRepair','work',deniedJob,false);
+  c.role='OWNER';c.signedIn=true;assert.equal((await call('status')).status,'FAILED');
+  assert.equal(checks,0);assert.equal(submits,0);
   c.rows.get('different-shot-state').state='REVISION_REQUESTED';
   const paid=await call('estimate');assert.equal(paid.candidateCount,2);assert.equal(paid.maximumCostUsd,.1);
   await assert.rejects(call('run',{quoteKey:free.quoteKey}),/changed/);
   const actual=await call('context'); chosen=actual.candidates[1].assetId;
-  const result=await call('run',{quoteKey:paid.quoteKey});assert.equal(result.status,'SAVED');assert.equal(checks,2);assert.equal(submits,1);
+  await assert.rejects(call('launch',{quoteKey:'0.forged'}));
+  assert.equal((await call('status')).status,'FAILED');
+  const launch=await call('launch',{quoteKey:paid.quoteKey});
+  assert.equal(launch.status,'QUEUED');
+  assert.deepEqual(await call('launch',{quoteKey:paid.quoteKey}),launch);
+  assert.equal(c.scheduled.filter(j=>j.ref==='automaticPerformanceRepair.work').length,2);
+  const {args:job}=c.scheduled.filter(j=>j.ref==='automaticPerformanceRepair.work').at(-1);
+  c.role='VIEWER';await assert.rejects(call('status'));c.role='OWNER';
+  c.signedIn=false; // A scheduled Convex action does not inherit the browser's identity.
+  await c.call('automaticPerformanceRepair','work',job,false);
+  await c.call('automaticPerformanceRepair','work',job,false);
+  c.signedIn=true;
+  const durable=await call('status');
+  assert.equal(durable?.status,'SAVED',JSON.stringify([...c.rows.values()].filter(r=>r._table==='automaticRepairRuns')));
+  const journal=c.rows.get(job.runId);
+  c.rows.delete(job.runId); // The adoption survives loss of final run acknowledgment and older installations.
+  assert.deepEqual(await call('status'),durable); // An older FAILED run cannot hide a valid adoption.
+  const deniedJournal=c.rows.get(deniedJob.runId);c.rows.delete(deniedJob.runId);
+  assert.equal(c.count('automaticRepairRuns'),0);assert.deepEqual(await call('status'),durable);
+  c.rows.set(deniedJob.runId,deniedJournal);
+  c.rows.get(deniedJob.runId).status='RUNNING';c.rows.get(deniedJob.runId).createdAt=Date.now()-13*60_000;
+  c.signedIn=false;await c.call('automaticPerformanceRepair','expire',deniedJob);c.signedIn=true;
+  assert.equal(c.rows.get(deniedJob.runId).status,'SAVED');
+  c.rows.set(job.runId,journal);
+  const {updatedAt:_time,...result}=durable;assert.equal(result.status,'SAVED');assert.equal(checks,2);assert.equal(submits,1);
   assert.equal(c.rows.get(result.shotVersionId).actualCost,0);assert.equal(c.rows.get('failed').assetId,'baseline');
   const receipt=c.rows.get(result.shotVersionId).contextSnapshot;
   if(aiOnly){assert.equal(receipt.reviewId,null);assert.equal(receipt.checkId,'picture-check');}
@@ -102,6 +133,7 @@ async function verifyRepair(aiOnly){
   await review(result.shotVersionId,false);
   assert.equal(await call('repairOrigin',{takeId:result.shotVersionId}),'failed');
   await assert.rejects(c.call('performanceCutaways','prepare',{...receipt.range,shotVersionId:'failed',shotId:'shot',baseAssetId:'baseline',donorAssetId:chosen,discoveryContextHash:receipt.discoveryContextHash}),/changed/);
+  assert.equal(await call('status'),null,'Withdrawn repair must disappear after reload');
   const same=await call('context');
   assert.ok(!same.saved && !same.candidates.some(a=>a.assetId===chosen));
   // Simulate a draft adopted by an older method. It can be reevaluated only
@@ -109,10 +141,19 @@ async function verifyRepair(aiOnly){
   delete c.rows.get(result.shotVersionId).contextSnapshot.discoveryVersion; // Unversioned v1 rows in storage
   const newer=await call('context');assert.ok(newer.candidates.some(a=>a.assetId===chosen));
   const newQuote=await call('estimate',{takeId:result.shotVersionId});
-  const unchanged=await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
-  assert.equal(unchanged.status,'NO_MATCH');assert.equal(submits,1);
-  donorStartFrame=24;
-  const newEdit=await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
+  const retryQueued=await call('launch',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
+  assert.equal(retryQueued.status,'QUEUED');
+  const nextJob=c.scheduled.filter(j=>j.ref==='automaticPerformanceRepair.work').at(-1).args;
+  c.signedIn=false;await c.call('automaticPerformanceRepair','work',nextJob,false);c.signedIn=true;
+  const unchanged=await call('status',{takeId:result.shotVersionId});
+  assert.equal(unchanged.status,'NO_MATCH');assert.match(unchanged.message,/movement jump/);assert.equal(submits,1);
+  assert.deepEqual(await call('status'),unchanged,'search result and editorial reason survive reconnect');
+  assert.equal((await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey})).status,'NO_MATCH');
+  pic('new-approved-angle','5'.repeat(64),96); // New footage changes the estimate and can supply a new edit.
+  const changed=await call('context');matchesIndex=changed.candidates.findIndex(a=>a.assetId==='new-approved-angle');
+  chosen='new-approved-angle';donorStartFrame=24;
+  const revised=await call('estimate',{takeId:result.shotVersionId});
+  const newEdit=await call('run',{takeId:result.shotVersionId,quoteKey:revised.quoteKey});
   assert.equal(newEdit.status,'SAVED');assert.notEqual(newEdit.shotVersionId,result.shotVersionId);
   const nextReceipt=c.rows.get(newEdit.shotVersionId).contextSnapshot;
   assert.equal(nextReceipt.failedTakeId,'failed');assert.equal(nextReceipt.sourcePicture.assetId,'baseline');

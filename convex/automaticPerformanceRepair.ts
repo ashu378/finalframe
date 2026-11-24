@@ -1,8 +1,8 @@
-import { action, internalQuery, type ActionCtx, type QueryCtx } from './_generated/server';
+import { action, query, internalAction, internalMutation, internalQuery, type ActionCtx, type QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { ConvexError, v } from 'convex/values';
-import { allowedMedia, currentCutaway, cutawayMedia, existingCorrection, type Binding } from './performanceCutaways';
+import { allowedMedia, repairAccess, currentCutaway, cutawayMedia, existingCorrection, type Binding } from './performanceCutaways';
 import { reviewContext } from './storyActionReviews';
 import { requireProjectRole } from './authorization';
 import { getEffectiveResourceState, isResourceApproved, isResourceEditable, requireApprovedResource } from './resourceStates';
@@ -33,7 +33,7 @@ async function measurement(ctx:QueryCtx, projectId:Id<'projects'>,binding:Bindin
 
 /** Across shots only a matching frozen, still-approved cast can attest identity.
  * Identical character names and action labels carry no project access. */
-async function castSignature(ctx:QueryCtx,take:Doc<'shotVersions'>,shot:Doc<'shots'>) {
+async function castSignature(ctx:QueryCtx,take:Doc<'shotVersions'>,shot:Doc<'shots'>,actorId?:Id<'users'>) {
   const frozen=take.contextSnapshot?.request?.resourceBindings;
   const authored=shot.metadata?.resourceBindings;
   if (!take.projectId || !Array.isArray(frozen)||!frozen.length||frozen.length>32||!Array.isArray(authored)) return null;
@@ -44,7 +44,7 @@ async function castSignature(ctx:QueryCtx,take:Doc<'shotVersions'>,shot:Doc<'sho
     const id=ctx.db.normalizeId('projectResourceVersions',String(row.resourceVersionId));
     const version=id?await ctx.db.get(id):null,owner=version?await ctx.db.get(version.resourceId):null;
     if(!version||!owner||owner.archivedAt||owner.projectId!==take.projectId||version.projectId!==take.projectId)return null;
-    const state=await getEffectiveResourceState(ctx,take.projectId,'projectResourceVersion',version._id);
+    const state=await getEffectiveResourceState(ctx,take.projectId,'projectResourceVersion',version._id,undefined,actorId);
     if (!isResourceApproved(state.currentState)) return null;
     if (owner.kind==='CHARACTER') hasCharacter=true;
   }
@@ -102,19 +102,19 @@ async function reviewedSource(ctx:QueryCtx,c:Cutaway,checked:Doc<'shotVersions'>
       if(!obs || obs.observedStartSeconds==null || obs.observedEndSeconds==null) continue;
       const sameShot=take.shotId===c.data.shot._id&&take.productionVersionId===c.version._id;
       if(!sameShot){
-        cast??=await castSignature(ctx,c.data.take,c.data.shot);
-        if(!cast||cast!==await castSignature(ctx,take,prior.shot)) continue;
+        cast??=await castSignature(ctx,c.data.take,c.data.shot,c.actorId);
+        if(!cast||cast!==await castSignature(ctx,take,prior.shot,c.actorId)) continue;
       }
       const v=await ctx.db.get(take.productionVersionId),prod=await ctx.db.get(take.productionId);
       if (!prod||prod.projectId!==c.projectId||v?.productionId!==take.productionId||v.status!=='APPROVED') continue;
-      await requireApprovedResource(ctx,c.projectId,'shotVersion',take._id,take.productionId);
-      const pic=await cutawayMedia(ctx,c.projectId,take.assetId);
+      await requireApprovedResource(ctx,c.projectId,'shotVersion',take._id,take.productionId,c.actorId);
+      const pic=await cutawayMedia(ctx,c.projectId,take.assetId,true,c.actorId);
       let donor=pic,donorStartFrame=Math.floor(obs.observedStartSeconds*24+1e-7),donorEndFrame=Math.ceil(obs.observedEndSeconds*24-1e-7);
       if (take.contextSnapshot?.source==='PERFORMANCE_CUTAWAY') {
         const proof=prior.asset.metadata?.proof, saved=take.contextSnapshot.donor, r=take.contextSnapshot.range;
         if(!saved?.assetId || proof?.version!=='PERFORMANCE_CUTAWAY_V1'||!sha256Equal(proof.checksum,pic.checksum)||
            !r || donorStartFrame<r.targetStartFrame || donorEndFrame>r.targetEndFrame || !sha256Equal(proof.donorChecksum,saved.checksum)) continue;
-        donor=await cutawayMedia(ctx,c.projectId,saved.assetId);
+        donor=await cutawayMedia(ctx,c.projectId,saved.assetId,true,c.actorId);
         if(donor.storageId!==saved.storageId||!sha256Equal(donor.checksum,saved.checksum)||donor.byteSize!==saved.byteSize) continue;
         // Use the actual independent performed footage, never a previous delivery as the donor.
         donorStartFrame=r.donorStartFrame;donorEndFrame=r.donorEndFrame;
@@ -161,20 +161,20 @@ export const repairOrigin=internalQuery({
 });
 
 export const context=internalQuery({
-  args:takeArgs,returns:v.any(),handler:async(ctx,{takeId})=>{
-    const c=await currentCutaway(ctx,takeId);
-    const access=await requireProjectRole(ctx,c.projectId,['OWNER','EDITOR']);
+  args:{...takeArgs,actorId:v.optional(v.id('users'))},returns:v.any(),handler:async(ctx,{takeId,actorId})=>{
+    const c=await currentCutaway(ctx,takeId,actorId);
+    const access=await repairAccess(ctx,c.projectId,actorId);
     const saved=await existingCorrection(ctx,c,true);
     if(saved){
       const take=await ctx.db.get(saved.shotVersionId);
       return {saved:{status:'SAVED',shotId:c.data.shot._id,shotVersionId:saved.shotVersionId,assetId:take!.assetId!}};
     }
     for(const [type,id] of [['shot',c.data.shot._id],['scene',c.scene._id]] as const) {
-      if(!isResourceEditable((await getEffectiveResourceState(ctx,c.projectId,type,id)).currentState))
+      if(!isResourceEditable((await getEffectiveResourceState(ctx,c.projectId,type,id,undefined,c.actorId)).currentState))
         throw new ConvexError('Create a revision of this locked shot or scene before repairing it.');
     }
-    const baseBinding=await cutawayMedia(ctx,c.projectId,c.data.asset._id);
-    const original=await cutawayMedia(ctx,c.projectId,c.audioAssetId);
+    const baseBinding=await cutawayMedia(ctx,c.projectId,c.data.asset._id,true,c.actorId);
+    const original=await cutawayMedia(ctx,c.projectId,c.audioAssetId,true,c.actorId);
     const {blocked,checked,blockedChecksums,rejectedEdits}=await inspectedTakes(ctx,c);
     const reviewed=await reviewedSource(ctx,c,checked,blocked);
     const records=await ctx.db.query('assets').withIndex('by_project',q=>q.eq('projectId',c.projectId)).order('desc').take(160);
@@ -187,7 +187,7 @@ export const context=internalQuery({
     for(const a of ranked) {
       if(bindings.length>=8)break;
       try{
-        const b=await cutawayMedia(ctx,c.projectId,a._id);
+        const b=await cutawayMedia(ctx,c.projectId,a._id,true,c.actorId);
         if(!seen.has(b.checksum)){bindings.push(b);seen.add(b.checksum);}
       }catch{continue;}
     }
@@ -259,30 +259,171 @@ export const estimate=action({
     return result;
   },
 });
-export const run=action({
-  args:{...takeArgs,quoteKey:v.string()},returns:v.any(),handler:async(ctx,{takeId,quoteKey}):Promise<any>=>{
-    takeId=await ctx.runQuery(refs.repairOrigin,{takeId});
-    const data=await ctx.runQuery(refs.context,{takeId});
-    if(data.saved)return data.saved;
-    const period=Number(quoteKey.split('.')[0]), minute=Math.floor(Date.now()/60000);
-    if(!Number.isSafeInteger(period)||period>minute||minute-period>4)throw new ConvexError('This estimate expired. Check the current repair estimate.');
-    const q=await quoteFor(ctx,takeId,data,period);
-    if(q.quoteKey!==quoteKey)throw new ConvexError('The footage, review or price changed. Get a fresh estimate.');
+type RepairResult = {status:'SAVED';shotId:Id<'shots'>;shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>}|{status:'NO_MATCH';message:string};
+async function executeRepair(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,q:{pricing:VisionQuote|null},actor:{actorId?:Id<'users'>}={}):Promise<RepairResult>{
+    let exitDiscontinuity=false;
     let choice=data.reviewed ? {donorAssetId:data.reviewed.donor.assetId,...data.reviewed.range}:null;
     for(let i=0;!choice&&q.pricing&&i<data.candidates.length;i++){
-      const m=await ctx.runAction(vision.inspect,{takeId,contextHash:data.contextHash,...q.pricing,candidateIndex:i});
-      if(m.status!=='MATCH')continue;
+      const m=await ctx.runAction(vision.inspect,{takeId,contextHash:data.contextHash,...actor,...q.pricing,candidateIndex:i});
+      if(m.status!=='MATCH'){exitDiscontinuity ||= m.reason==='EXIT_DISCONTINUITY';continue;}
       const range={targetStartFrame:data.targetStartFrame,targetEndFrame:m.targetEndFrame,donorStartFrame:m.donorStartFrame,donorEndFrame:m.donorEndFrame};
       if(!Number.isSafeInteger(m.targetEndFrame) || m.targetEndFrame!==data.targetEndFrame || m.donorEndFrame>data.candidates[i].frameCount ||
           sameRejectedEdit(data.rejectedEdits,data.candidates[i].checksum,range))continue;
       try{selectCutawayFrames(range);}catch{continue;}
       choice={donorAssetId:data.candidates[i].assetId,...range};
     }
-    if(!choice)return {status:'NO_MATCH',message:data.message??noMatch};
-    const next=await ctx.runQuery(refs.context,{takeId});
+    if(!choice)return {status:'NO_MATCH',message:data.message??(exitDiscontinuity?'We found the gesture, but cutting back would make the movement jump. Add an approved clip showing the character finishing the movement, then try again.':noMatch)};
+    const next=await ctx.runQuery(refs.context,{takeId,...actor});
     if(next.saved)return next.saved;
     if(next.contextHash!==data.contextHash)throw new ConvexError('The source or action review changed. Check it again.');
-    const saved=await ctx.runAction((internal as any).performanceCutaways.saveDiscovered,{discoveryContextHash:data.contextHash,shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
+    const saved=await ctx.runAction((internal as any).performanceCutaways.saveDiscovered,{...actor,discoveryContextHash:data.contextHash,shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
     return {status:'SAVED',shotId:data.shotId,...saved};
+}
+async function validatePurchase(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,quoteKey:string) {
+  const period=Number(quoteKey.split('.')[0]),minute=Math.floor(Date.now()/60000);
+  if(!Number.isSafeInteger(period)||period>minute||minute-period>4)throw new ConvexError('This estimate expired. Check the current repair estimate.');
+  const q=await quoteFor(ctx,takeId,data,period);
+  if(q.quoteKey!==quoteKey)throw new ConvexError('The footage, review or price changed. Get a fresh estimate.');
+  return q;
+}
+type RunDoc=Doc<'automaticRepairRuns'>;
+const publicResult=(r:RunDoc)=>({status:r.status,updatedAt:r.updatedAt,...(r.message?{message:r.message}:{}),
+  ...(r.status==='SAVED'?{shotId:r.shotId,shotVersionId:r.shotVersionId,assetId:r.assetId}:{})});
+const runArgs={runId:v.id('automaticRepairRuns')};
+const active=(s:RunDoc['status'])=>s==='QUEUED'||s==='RUNNING';
+
+export const status=query({
+  args:takeArgs,returns:v.any(),handler:async(ctx,{takeId}):Promise<any>=>{
+    const take=await ctx.db.get(takeId);
+    if(!take?.projectId)return null;
+    await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);
+    let origin:Id<'shotVersions'>;
+    try{origin=await ctx.runQuery(refs.repairOrigin,{takeId});}catch{return null;}
+    const row=await ctx.db.query('automaticRepairRuns').withIndex('by_take',q=>q.eq('takeId',origin)).order('desc').first();
+    if(row && row.projectId!==take.projectId)return null;
+    // An adoption can predate durable runs, or finish just before the action
+    // loses its connection. The exact, still-eligible result is authoritative.
+    const c=await currentCutaway(ctx,origin),saved=await existingCorrection(ctx,c,true);
+    if(saved){
+      const repaired=await ctx.db.get(saved.shotVersionId);
+      if(repaired?.assetId)return {status:'SAVED',shotId:c.data.shot._id,shotVersionId:saved.shotVersionId,assetId:repaired.assetId,updatedAt:repaired.createdAt};
+    }
+    return !row||row.status==='SAVED'?null:publicResult(row);
+  },
+});
+
+export const enqueue=internalMutation({
+  args:{...takeArgs,quoteKey:v.string(),contextHash:v.string(),maximumCostUsd:v.number(),pricing:v.any()},returns:v.any(),
+  handler:async(ctx,{takeId,quoteKey,contextHash,maximumCostUsd,pricing}):Promise<any>=>{
+    const c=await currentCutaway(ctx,takeId),{user}=await requireProjectRole(ctx,c.projectId,['OWNER','EDITOR']);
+    const data=await ctx.runQuery(refs.context,{takeId});
+    if(data.saved)return {...data.saved,updatedAt:Date.now()};
+    if(data.contextHash!==contextHash || !Number.isFinite(maximumCostUsd) || maximumCostUsd<0 ||
+        (pricing?Math.ceil(pricing.maximumCostUsd*1e6)*data.candidates.length/1e6:0)!==maximumCostUsd)
+      throw new ConvexError('The footage or estimate changed. Check it again.');
+    const current=await ctx.db.query('automaticRepairRuns').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
+    if(current && active(current.status))return publicResult(current);
+    const same=await ctx.db.query('automaticRepairRuns').withIndex('by_take_quote',q=>q.eq('takeId',takeId).eq('quoteKey',quoteKey)).unique();
+    if(same?.status==='SAVED')throw new ConvexError('The earlier correction is no longer available. Review a fresh estimate.');
+    if(same)return publicResult(same);
+    const now=Date.now();
+    const runId=await ctx.db.insert('automaticRepairRuns',{projectId:c.projectId,takeId,actorId:user._id,
+      quoteKey,contextHash,maximumCostUsd,pricing,status:'QUEUED',createdAt:now,updatedAt:now});
+    await ctx.scheduler.runAfter(0,refs.work,{runId});
+    await ctx.scheduler.runAfter(12*60_000,refs.expire,{runId});
+    return {status:'QUEUED',updatedAt:now};
+  },
+});
+async function launchConfirmed(ctx:ActionCtx,takeId:Id<'shotVersions'>,quoteKey:string):Promise<{origin:Id<'shotVersions'>;result:any}>{
+  const origin:Id<'shotVersions'>=await ctx.runQuery(refs.repairOrigin,{takeId});
+  const data=await ctx.runQuery(refs.context,{takeId:origin});
+  if(data.saved)return {origin,result:{...data.saved,updatedAt:Date.now()}};
+  const q=await validatePurchase(ctx,origin,data,quoteKey);
+  const result=await ctx.runMutation(refs.enqueue,{takeId:origin,quoteKey,contextHash:data.contextHash,maximumCostUsd:q.maximumCostUsd,pricing:q.pricing});
+  return {origin,result};
+}
+export const launch=action({
+  args:{...takeArgs,quoteKey:v.string()},returns:v.any(),handler:async(ctx,{takeId,quoteKey}):Promise<any>=>
+    (await launchConfirmed(ctx,takeId,quoteKey)).result,
+});
+export const readRun=internalQuery({
+  args:{...takeArgs,quoteKey:v.string()},returns:v.any(),handler:async(ctx,{takeId,quoteKey})=>{
+    const take=await ctx.db.get(takeId);if(!take?.projectId)return null;
+    await requireProjectRole(ctx,take.projectId,['OWNER','EDITOR']);
+    const exact=await ctx.db.query('automaticRepairRuns').withIndex('by_take_quote',q=>q.eq('takeId',takeId).eq('quoteKey',quoteKey)).unique();
+    const row=exact??await ctx.db.query('automaticRepairRuns').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
+    return row&&row.projectId===take.projectId?{runId:row._id,result:publicResult(row)}:null;
+  },
+});
+/** Historical direct callers can wait for the same queued work as the browser.
+ * Losing the caller has no impact on the scheduled action or its saved outcome. */
+export const run=action({
+  args:{...takeArgs,quoteKey:v.string()},returns:v.any(),handler:async(ctx,{takeId,quoteKey}):Promise<any>=>{
+    const {origin,result}=await launchConfirmed(ctx,takeId,quoteKey);
+    let state=result;
+    if(active(state.status)){
+      let entry=await ctx.runQuery(refs.readRun,{takeId:origin,quoteKey});
+      if(!entry)throw new ConvexError('The repair status is unavailable. Reopen this shot.');
+      await ctx.runAction(refs.work,{runId:entry.runId}); // Atomic claim; racing the scheduler cannot resubmit.
+      for(let i=0;i<90;i++){
+        entry=await ctx.runQuery(refs.readRun,{takeId:origin,quoteKey});
+        if(!entry)throw new ConvexError('The repair status is unavailable. Reopen this shot.');
+        state=entry.result;
+        if(!active(state.status))break;
+        await new Promise(resolve=>setTimeout(resolve,2000));
+      }
+    }
+    if(state.status==='FAILED')throw new ConvexError(state.message);
+    if(active(state.status))throw new ConvexError('The repair is running. Reopen this shot to see its saved progress.');
+    const {updatedAt:_time,...completed}=state;
+    return completed;
+  },
+});
+export const claim=internalMutation({
+  args:runArgs,returns:v.any(),handler:async(ctx,{runId})=>{
+    const row=await ctx.db.get(runId);
+    if(!row||row.status!=='QUEUED')return null;
+    await ctx.db.patch(runId,{status:'RUNNING',updatedAt:Date.now()});
+    return row;
+  },
+});
+const resultArgs={status:v.union(v.literal('SAVED'),v.literal('FAILED'),v.literal('NO_MATCH')),message:v.optional(v.string()),
+  shotId:v.optional(v.id('shots')),shotVersionId:v.optional(v.id('shotVersions')),assetId:v.optional(v.id('assets'))};
+export const finish=internalMutation({
+  args:{...runArgs,...resultArgs},returns:v.null(),handler:async(ctx,{runId,...result})=>{
+    const row=await ctx.db.get(runId);
+    if(row?.status==='RUNNING')await ctx.db.patch(runId,{...result,updatedAt:Date.now()});
+    return null;
+  },
+});
+export const expire=internalMutation({
+  args:runArgs,returns:v.null(),handler:async(ctx,{runId})=>{
+    const row=await ctx.db.get(runId);
+    if(row&&active(row.status)&&Date.now()-row.createdAt>=12*60_000){
+      // A worker may have adopted a take just before it lost its connection.
+      let saved:Extract<RepairResult,{status:'SAVED'}>|undefined;
+      try{saved=(await ctx.runQuery(refs.context,{takeId:row.takeId,actorId:row.actorId})).saved;}catch{ /* Access or reference changed. */ }
+      await ctx.db.patch(runId,{...(saved??{status:'FAILED' as const,message:'The repair worker stopped before reporting a result. Its provider receipts are saved. Check your takes and request a fresh estimate to resume.'}),updatedAt:Date.now()});
+    }
+    return null;
+  },
+});
+export const work=internalAction({
+  args:runArgs,returns:v.null(),handler:async(ctx,{runId}):Promise<null>=>{
+    const row:RunDoc|null=await ctx.runMutation(refs.claim,{runId});
+    if(!row)return null;
+    try{
+      const actor={actorId:row.actorId};
+      const data=await ctx.runQuery(refs.context,{takeId:row.takeId,...actor});
+      if(!data.saved&&(data.contextHash!==row.contextHash||Date.now()-row.createdAt>5*60_000))
+        throw new ConvexError('The source or estimate changed while this search was queued. Check a fresh estimate.');
+      const result:RepairResult=data.saved??await executeRepair(ctx,row.takeId,data,{pricing:row.pricing},actor);
+      await ctx.runMutation(refs.finish,{runId,...result});
+    }catch(error){
+      const message=error instanceof ConvexError && typeof error.data==='string'?error.data.slice(0,450):
+        'The repair could not finish. Its receipts are saved. Check your project access and request a fresh estimate to resume.';
+      await ctx.runMutation(refs.finish,{runId,status:'FAILED',message});
+    }
+    return null;
   },
 });

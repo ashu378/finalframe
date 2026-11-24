@@ -12,12 +12,12 @@ import { discoveryMessages, verifyDiscovery, REPAIR_DISCOVERY_SCHEMA, REPAIR_DIS
 import { sha256Equal } from '../renderer/src/media/sha256';
 
 const contextRef = (internal as any).automaticPerformanceRepair.context;
-const args = { takeId:v.id('shotVersions'), contextHash:v.string() };
+const args = { actorId:v.optional(v.id('users')), takeId:v.id('shotVersions'), contextHash:v.string() };
 type BoundVideo = {assetId:Id<'assets'>; storageId:Id<'_storage'>; checksum:string; byteSize:number; frameCount:number};
 type Context = Omit<RepairDiscoveryBrief,'frameCount'|'originalFrameCount'> & {projectId:Id<'projects'>;base:BoundVideo;candidates:BoundVideo[];contextHash:string};
 const fail = (message:string):never=>{throw new ConvexError(message);};
-async function resolve(ctx:ActionCtx,takeId:Id<'shotVersions'>,hash:string):Promise<Context>{
-  const data=await ctx.runQuery(contextRef,{takeId});
+async function resolve(ctx:ActionCtx,takeId:Id<'shotVersions'>,hash:string,actorId?:Id<'users'>):Promise<Context>{
+  const data=await ctx.runQuery(contextRef,{takeId,...(actorId?{actorId}:{})});
   if(!data || data.contextHash!==hash || !data.base || !data.candidates?.length || data.fps!==24)
     return fail('The approved footage or review changed. Get a fresh repair estimate.');
   return data;
@@ -36,7 +36,7 @@ async function currentQuote(){
   return fail('No configured visual reviewer supports these inputs with verified pricing.');
 }
 export const estimate=internalAction({args,returns:v.any(),handler:async(ctx,a)=>{
-  await resolve(ctx,a.takeId,a.contextHash);
+  await resolve(ctx,a.takeId,a.contextHash,a.actorId);
   return currentQuote();
 }});
 
@@ -75,7 +75,7 @@ async function measuredSamples(ctx:ActionCtx, input:BoundVideo, frame:number|nul
 export const inspect=internalAction({
   args:{...args,candidateIndex:v.number(),model:v.string(),maximumCostUsd:v.number(),priceCeiling:v.object({prompt:v.number(),completion:v.number()})},
   returns:v.any(), handler:async(ctx,a):Promise<ReturnType<typeof verifyDiscovery>>=>{
-    const data=await resolve(ctx,a.takeId,a.contextHash);
+    const data=await resolve(ctx,a.takeId,a.contextHash,a.actorId);
     if(!Number.isInteger(a.candidateIndex)||a.candidateIndex<0||a.candidateIndex>=3)return fail('Invalid approved candidate.');
     const candidate=data.candidates[a.candidateIndex];
     if(!candidate)return fail('The approved clip is unavailable.');
@@ -83,7 +83,7 @@ export const inspect=internalAction({
     // Independent of list order, quote time, and operator. A second editor cannot rebuy the same observation.
     const requestKey=createHash('sha256').update(JSON.stringify([REPAIR_DISCOVERY_VERSION,data.projectId,
       data.base.checksum,candidate.checksum,brief,a.model])).digest('hex');
-    const previous=await ctx.runQuery(internal.providerTextRequests.inspect,{projectId:data.projectId,requestKey});
+    const previous=await ctx.runQuery(internal.providerTextRequests.inspect,{projectId:data.projectId,requestKey,...(a.actorId?{actorId:a.actorId}:{})});
     if(previous){
       if(previous.status==='COMPLETED'&&typeof previous.content==='string')return verifyDiscovery(brief,JSON.parse(previous.content));
       return fail('This source was already checked or submitted. Its receipt is saved for review.');
@@ -98,8 +98,8 @@ export const inspect=internalAction({
     const frames=await measuredSamples(ctx,candidate,null);
     const messages=discoveryMessages(brief,reference,exitReference,frames);
     await requireProviderHeadroom(a.maximumCostUsd);
-    await resolve(ctx,a.takeId,a.contextHash);
-    const receipt=await ctx.runMutation(internal.providerTextRequests.reserve,{projectId:data.projectId,requestKey,capability:'VISION_QC',model:a.model,estimatedCostUsd:a.maximumCostUsd});
+    await resolve(ctx,a.takeId,a.contextHash,a.actorId);
+    const receipt=await ctx.runMutation(internal.providerTextRequests.reserve,{projectId:data.projectId,requestKey,...(a.actorId?{actorId:a.actorId}:{}),capability:'VISION_QC',model:a.model,estimatedCostUsd:a.maximumCostUsd});
     if(!receipt.created||!receipt.request)return fail('This source check is already recorded.');
     const requestId=receipt.request._id;
     let submitted=false;
@@ -107,7 +107,7 @@ export const inspect=internalAction({
       const response=await executeAITask('VALIDATION',messages,{model:a.model,fallbackModels:[],maxRetries:0,retry:{maxRetries:0},
         providerPriceCeiling:a.priceCeiling,maxTokens:ACTION_CHECK_OUTPUT_TOKENS,
         structuredOutput:{name:'repair_source_discovery',strict:true,schema:REPAIR_DISCOVERY_SCHEMA},
-        beforeChatSubmit:async()=>{await ctx.runMutation(internal.providerTextRequests.markSubmitting,{requestId});submitted=true;}});
+        beforeChatSubmit:async()=>{await ctx.runMutation(internal.providerTextRequests.markSubmitting,{requestId,...(a.actorId?{actorId:a.actorId}:{})});submitted=true;}});
       await ctx.runMutation(internal.providerTextRequests.finish,{requestId,submitted,model:response.modelUsed,providerRequestId:response.requestId,
         actualCostUsd:response.costUsd,...(response.content===null?{}:{content:response.content}),usage:response.usage?{promptTokens:response.usage.promptTokens,completionTokens:response.usage.completionTokens,totalTokens:response.usage.totalTokens}:undefined});
       if(!response.content)return fail('The visual reviewer returned no observations.');
