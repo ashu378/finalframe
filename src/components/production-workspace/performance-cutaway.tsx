@@ -65,7 +65,7 @@ export function PerformanceCutaway({takeId}: {takeId: Take}) {
   const options = useQuery(list, {shotVersionId: takeId,includeVideos:open});
   const repair=options?.approvedRepair;
   return <div className="space-y-3">
-    {options && !repair && <AutomaticPerformanceRepair key={takeId} takeId={takeId} />}
+    {options !== undefined && !repair && <AutomaticPerformanceRepair key={takeId} takeId={takeId} />}
     {repair && <div className="space-y-2 rounded-lg border border-border p-3">
       <p className="text-sm font-medium">Take {repair.versionNumber} is the approved fix for this action.</p>
       <Button type="button" onClick={()=>router.push(reviewUrl(options.shotId,repair.shotVersionId))}>Open approved take</Button>
