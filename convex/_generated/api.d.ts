@@ -22,6 +22,8 @@ import type * as auth from "../auth.js";
 import type * as authEmailLimits from "../authEmailLimits.js";
 import type * as authSession from "../authSession.js";
 import type * as authorization from "../authorization.js";
+import type * as automaticPerformanceRepair from "../automaticPerformanceRepair.js";
+import type * as automaticRepairVision from "../automaticRepairVision.js";
 import type * as bachsCheckout from "../bachsCheckout.js";
 import type * as beatAnalysis from "../beatAnalysis.js";
 import type * as beatCutContracts from "../beatCutContracts.js";
@@ -158,6 +160,8 @@ declare const fullApi: ApiFromModules<{
   authEmailLimits: typeof authEmailLimits;
   authSession: typeof authSession;
   authorization: typeof authorization;
+  automaticPerformanceRepair: typeof automaticPerformanceRepair;
+  automaticRepairVision: typeof automaticRepairVision;
   bachsCheckout: typeof bachsCheckout;
   beatAnalysis: typeof beatAnalysis;
   beatCutContracts: typeof beatCutContracts;
