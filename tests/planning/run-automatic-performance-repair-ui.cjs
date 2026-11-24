@@ -11,7 +11,10 @@ const entry = new Module(file, module);
 entry.filename = file;
 entry.paths = Module._nodeModulePaths(path.dirname(file));
 const slots = [], calls = [], visits = [];
-let cursor, price, result, persisted = null;
+let cursor, price, result, persisted = null, routeId='project_x|y';
+const routeFile=path.resolve('src/lib/project/route-id.ts');
+const routeIdModule=new Module(routeFile,module);
+routeIdModule._compile(ts.transpileModule(fs.readFileSync(routeFile,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,routeFile);
 function slot(value) {
   const key = cursor++;
   if (!(key in slots)) slots[key] = value;
@@ -28,14 +31,15 @@ const mocks = {
   }},
   'next/navigation': {
     useRouter: () => {throw new Error('Review must navigate directly to the newly saved take');},
-    useParams: () => ({id:'Creator project'}),
+    useParams: () => ({id:routeId}),
     useSearchParams: () => new URL(window.location.href).searchParams,
   },
   '@/components/ui/button': {Button:'button'},
+  '@/lib/project/route-id':routeIdModule.exports,
 };
 entry.require = name => mocks[name] || require(name);
 entry._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText,file);
-global.window = {location:{href:'https://finalframe.test/dashboard/projects/Creator%20project/workspace/storyboard?production=episode&clipStep=make&shot=old&take=failed'}};
+global.window = {location:{href:'https://finalframe.test/dashboard/projects/project_x%7Cy/workspace/storyboard?production=episode&clipStep=make&shot=old&take=failed'}};
 function walk(element) {
   if (Array.isArray(element)) return element.flatMap(walk);
   return element?.props ? [element,...walk(element.props.children)] : [];
@@ -54,7 +58,7 @@ function reviewLink(take) {
   assert(link);
   assert.equal(link.props.onClick,undefined,'The browser must request the exact destination in a single navigation.');
   const target=new URL(link.props.href,window.location.href);
-  assert.equal(target.pathname,'/dashboard/projects/Creator%20project/workspace/takes');
+  assert.equal(target.pathname,'/dashboard/projects/project_x%7Cy/workspace/takes');
   assert.deepEqual(Object.fromEntries(target.searchParams),{production:'episode',clipStep:'review',shot:'shot',take});
   return target;
 }
@@ -71,6 +75,8 @@ const settle=()=>new Promise(setImmediate);
   confirm.props.onClick(); confirm.props.onClick(); await settle();
   assert.deepEqual(calls,[{method:'estimate',args:{takeId:'failed'}},{method:'launch',args:{takeId:'failed',quoteKey:'bound-quote'}}]);
   const target=reviewLink('draft');
+  routeId='project_x%7Cy'; // A proxy-preserved dynamic segment must never become %257C.
+  assert.equal(reviewLink('draft').href,target.href);
   window.location.href=target.href;
   reviewLink('draft'); // Reloading the saved review keeps the same exact take.
 

@@ -7,6 +7,7 @@ import { makeFunctionReference } from 'convex/server';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { Button } from '@/components/ui/button';
+import { decodeProjectRouteId } from '@/lib/project/route-id';
 
 type TakeId = Id<'shotVersions'>;
 type Estimate = { quoteKey: string; maximumCostUsd: number; candidateCount: number };
@@ -67,7 +68,7 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
     query.set('clipStep', 'review');
     query.set('shot', saved.shotId);
     query.set('take', saved.shotVersionId);
-    return `/dashboard/projects/${encodeURIComponent(projectId)}/workspace/takes?${query}`;
+    return `/dashboard/projects/${encodeURIComponent(decodeProjectRouteId(projectId))}/workspace/takes?${query}`;
   }
 
   return <section aria-label="Automatic shot repair" className="space-y-3 rounded-lg border border-border p-3">
