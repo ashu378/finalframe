@@ -186,6 +186,7 @@ createServer(async (request, response) => {
           verifyAudioDuration: payload.verifyAudioDuration === true,
           verifyVideoTiming: payload.verifyVideoTiming === true,
           repairSample: payload.repairSample,
+          repairFingerprints: payload.repairFingerprints === true,
           maxAudioDurationSeconds: payload.maxAudioDurationSeconds===undefined?undefined:typeof payload.maxAudioDurationSeconds==='number'?payload.maxAudioDurationSeconds:NaN,
           ffmpeg: new InjectableFFmpegAdapter(),
         });
