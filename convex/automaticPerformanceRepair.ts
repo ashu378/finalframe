@@ -8,7 +8,8 @@ import { requireProjectRole } from './authorization';
 import { getEffectiveResourceState, isResourceApproved, isResourceEditable, requireApprovedResource } from './resourceStates';
 import { recipeHash } from '../src/lib/production/recipes/compiler';
 import { sha256Equal } from '../renderer/src/media/sha256';
-import { selectCutawayFrames } from '../renderer/src/media/performance-cutaway-contract';
+import { REPAIR_DISCOVERY_VERSION } from '../src/lib/production/repair-source-vision';
+import { selectCutawayFrames, type CutawayRange } from '../renderer/src/media/performance-cutaway-contract';
 
 const refs=(internal as any).automaticPerformanceRepair;
 const vision=(internal as any).automaticRepairVision;
@@ -54,7 +55,13 @@ async function inspectedTakes(ctx:QueryCtx,c:Cutaway) {
   const takes=await ctx.db.query('shotVersions').withIndex('by_project',q=>q.eq('projectId',c.projectId)).order('desc').take(128);
   const blocked=new Set<string>([c.data.asset._id,c.audioAssetId]);
   const checked=[];
-  for(const take of takes) {
+  const blockedChecksums=new Set<string>();
+  const rejectedEdits:{donorChecksum:string;range:CutawayRange}[]=[];
+  // The project-wide search is bounded for cost, but no rejected edit on this shot
+  // can age out. A shot is limited to 200 takes by the compositor.
+  const sameShot=await ctx.db.query('shotVersions').withIndex('by_shot',q=>q.eq('shotId',c.data.shot._id)).take(200);
+  const unique=new Map([...takes,...sameShot].map(t=>[t._id,t]));
+  for(const take of unique.values()) {
     if(!take.assetId || take.status!=='COMPLETED')continue;
     const [human,automated]=await Promise.all([
       ctx.db.query('storyActionReviews').withIndex('by_take',q=>q.eq('takeId',take._id)).order('desc').first(),
@@ -63,12 +70,22 @@ async function inspectedTakes(ctx:QueryCtx,c:Cutaway) {
     if(human?.passed===false || automated?.completedAt && automated.observations?.some(o=>o.result!=='PASS') && (!human || human.createdAt<automated.completedAt))
       {
         blocked.add(take.assetId);
-        if(take.contextSnapshot?.source==='PERFORMANCE_CUTAWAY' && take.contextSnapshot.failedTakeId===c.data.take._id &&
-            take.contextSnapshot.donor?.assetId)blocked.add(take.contextSnapshot.donor.assetId);
+        const receipt=take.contextSnapshot;
+        if(take.projectId===c.projectId && take.productionVersionId===c.version._id && take.shotId===c.data.shot._id &&
+            receipt?.source==='PERFORMANCE_CUTAWAY' && receipt.failedTakeId===c.data.take._id && receipt.donor?.assetId){
+          if(receipt.range && typeof receipt.donor.checksum==='string')rejectedEdits.push({donorChecksum:receipt.donor.checksum,range:receipt.range});
+          // Unversioned automatic drafts used discovery v1. A published change in
+          // the visual test permits one new observation; manual rejections remain excluded.
+          const method=receipt.discoveryVersion??(receipt.discoveryContextHash?'REPAIR_DISCOVERY_V1':null);
+          if(!method || method===REPAIR_DISCOVERY_VERSION){
+            blocked.add(receipt.donor.assetId);
+            if(receipt.donor.checksum)blockedChecksums.add(receipt.donor.checksum);
+          }
+        }
       }
     else if(human?.passed&&human.projectId===c.projectId&&human.assetId===take.assetId) checked.push(take);
   }
-  return {blocked,checked};
+  return {blocked,checked,blockedChecksums,rejectedEdits};
 }
 
 async function reviewedSource(ctx:QueryCtx,c:Cutaway,checked:Doc<'shotVersions'>[],blocked:Set<string>) {
@@ -112,6 +129,37 @@ async function reviewedSource(ctx:QueryCtx,c:Cutaway,checked:Doc<'shotVersions'>
   return null;
 }
 
+function sameRejectedEdit(edits:{donorChecksum:string;range:CutawayRange}[],checksum:string,range:CutawayRange) {
+  return edits.some(edit=>sha256Equal(edit.donorChecksum,checksum) &&
+    edit.range.targetStartFrame===range.targetStartFrame && edit.range.targetEndFrame===range.targetEndFrame &&
+    edit.range.donorStartFrame===range.donorStartFrame && edit.range.donorEndFrame===range.donorEndFrame);
+}
+
+/** Open a rejected automatic draft or its original failed take. Rebuild the same
+ * failed cue from its original media, even if the draft was never approved. */
+export const repairOrigin=internalQuery({
+  args:takeArgs,returns:v.id('shotVersions'),handler:async(ctx,{takeId})=>{
+    const c=await currentCutaway(ctx,takeId), t=c.data.take, receipt=t.contextSnapshot;
+    if(receipt?.source!=='PERFORMANCE_CUTAWAY' || !receipt.discoveryContextHash)return takeId;
+    const related=c.deadlines.some(w=>receipt.failedActionIds?.includes(w.actionId));
+    if(!related)return takeId; // A new requirement on an edited shot has its own lineage.
+    const previous=ctx.db.normalizeId('shotVersions',String(receipt.failedTakeId));
+    if(!previous || previous===takeId)throw new ConvexError('The earlier failed shot could not be verified.');
+    const origin=await currentCutaway(ctx,previous), media=c.data.asset;
+    if(origin.projectId!==c.projectId || origin.version._id!==c.version._id || origin.data.shot._id!==t.shotId ||
+      origin.data.asset._id!==receipt.sourcePicture?.assetId || origin.audioAssetId!==receipt.originalRecording?.assetId ||
+      origin.proof.reviewId!==receipt.reviewId || origin.proof.checkId!==receipt.checkId ||
+      !origin.deadlines.some(w=>c.deadlines.some(a=>a.actionId===w.actionId)) ||
+      media.source!=='EDITED' || media.originAssetId!==origin.data.asset._id || media.metadata?.failedTakeId!==previous ||
+      media.metadata.discoveryContextHash!==receipt.discoveryContextHash || !sha256Equal(media.metadata.proof?.checksum,media.checksum))
+      throw new ConvexError('The original shot or action review changed. Open its current version to repair it.');
+    const source=await cutawayMedia(ctx,c.projectId,origin.data.asset._id);
+    if(receipt.sourcePicture.storageId!==source.storageId || !sha256Equal(receipt.sourcePicture.checksum,source.checksum))
+      throw new ConvexError('The approved original footage has changed.');
+    return previous;
+  },
+});
+
 export const context=internalQuery({
   args:takeArgs,returns:v.any(),handler:async(ctx,{takeId})=>{
     const c=await currentCutaway(ctx,takeId);
@@ -127,15 +175,15 @@ export const context=internalQuery({
     }
     const baseBinding=await cutawayMedia(ctx,c.projectId,c.data.asset._id);
     const original=await cutawayMedia(ctx,c.projectId,c.audioAssetId);
-    const {blocked,checked}=await inspectedTakes(ctx,c);
+    const {blocked,checked,blockedChecksums,rejectedEdits}=await inspectedTakes(ctx,c);
     const reviewed=await reviewedSource(ctx,c,checked,blocked);
     const records=await ctx.db.query('assets').withIndex('by_project',q=>q.eq('projectId',c.projectId)).order('desc').take(160);
     const reviewedAssets=new Set(checked.map(t=>t.assetId));
     const ranked=records.filter(a=>allowedMedia(a)&&!blocked.has(a._id)&&!a.metadata?.proof && a.source!=='EDITED' &&
       (!a.metadata?.generationJobId || reviewedAssets.has(a._id)));
     ranked.sort((a,b)=>Number(b.productionId===c.production._id)-Number(a.productionId===c.production._id));
-    const bindings:Binding[]=reviewed?[reviewed.donor]:[];
-    const seen=new Set([baseBinding.checksum,original.checksum,...bindings.map(b=>b.checksum)]);
+    const bindings:Binding[]=reviewed&&!blockedChecksums.has(reviewed.donor.checksum)?[reviewed.donor]:[];
+    const seen=new Set([baseBinding.checksum,original.checksum,...blockedChecksums,...bindings.map(b=>b.checksum)]);
     for(const a of ranked) {
       if(bindings.length>=8)break;
       try{
@@ -160,8 +208,8 @@ export const context=internalQuery({
       Math.ceil(a.endSeconds*24)>target.start);
     const supported=!overlaps&&base&&recording&&recording.hasAudio&&recording.audioCodec==='aac'&&Math.abs(base.frameCount-recording.frameCount)<=1&&target.end<=base.frameCount;
     const ready=supported?candidates:[];
-    const verified=reviewed && ready.some(x=>x.assetId===reviewed.donor.assetId&&x.frameCount>=reviewed.range.donorEndFrame)?reviewed:null;
-    const authority={projectId:c.projectId,actorUserId:access.user._id,takeId,shotId:c.data.shot._id,productionVersionId:c.version._id,requirementKey:c.data.requirementKey,
+    const verified=reviewed && !blockedChecksums.has(reviewed.donor.checksum) && !sameRejectedEdit(rejectedEdits,reviewed.donor.checksum,reviewed.range) && ready.some(x=>x.assetId===reviewed.donor.assetId&&x.frameCount>=reviewed.range.donorEndFrame)?reviewed:null;
+    const authority={discoveryVersion:REPAIR_DISCOVERY_VERSION,rejectedEdits,projectId:c.projectId,actorUserId:access.user._id,takeId,shotId:c.data.shot._id,productionVersionId:c.version._id,requirementKey:c.data.requirementKey,
       reviewId:c.proof.reviewId,checkId:c.proof.checkId,action:rawAction,base,recording,scene,targetStartFrame:target.start,targetEndFrame:target.end,candidates:ready,reviewed:verified};
     let message:string|undefined;
     if(overlaps)message='Two required actions overlap here. Review their timing before replacing this part of the shot.';
@@ -205,6 +253,7 @@ async function quoteFor(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,period:
 }
 export const estimate=action({
   args:takeArgs,returns:v.any(),handler:async(ctx,{takeId}):Promise<any>=>{
+    takeId=await ctx.runQuery(refs.repairOrigin,{takeId});
     const data=await measureInputs(ctx,takeId);
     const {pricing:_pricing,...result}=await quoteFor(ctx,takeId,data,Math.floor(Date.now()/60000));
     return result;
@@ -212,6 +261,7 @@ export const estimate=action({
 });
 export const run=action({
   args:{...takeArgs,quoteKey:v.string()},returns:v.any(),handler:async(ctx,{takeId,quoteKey}):Promise<any>=>{
+    takeId=await ctx.runQuery(refs.repairOrigin,{takeId});
     const data=await ctx.runQuery(refs.context,{takeId});
     if(data.saved)return data.saved;
     const period=Number(quoteKey.split('.')[0]), minute=Math.floor(Date.now()/60000);
@@ -222,9 +272,9 @@ export const run=action({
     for(let i=0;!choice&&q.pricing&&i<data.candidates.length;i++){
       const m=await ctx.runAction(vision.inspect,{takeId,contextHash:data.contextHash,...q.pricing,candidateIndex:i});
       if(m.status!=='MATCH')continue;
-      const length=m.donorEndFrame-m.donorStartFrame;
-      const range={targetStartFrame:data.targetStartFrame,targetEndFrame:Math.min(data.targetEndFrame,data.targetStartFrame+length),donorStartFrame:m.donorStartFrame,donorEndFrame:m.donorEndFrame};
-      if(m.donorEndFrame>data.candidates[i].frameCount)continue;
+      const range={targetStartFrame:data.targetStartFrame,targetEndFrame:m.targetEndFrame,donorStartFrame:m.donorStartFrame,donorEndFrame:m.donorEndFrame};
+      if(!Number.isSafeInteger(m.targetEndFrame) || m.targetEndFrame!==data.targetEndFrame || m.donorEndFrame>data.candidates[i].frameCount ||
+          sameRejectedEdit(data.rejectedEdits,data.candidates[i].checksum,range))continue;
       try{selectCutawayFrames(range);}catch{continue;}
       choice={donorAssetId:data.candidates[i].assetId,...range};
     }

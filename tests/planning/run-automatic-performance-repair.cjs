@@ -6,7 +6,7 @@ async function verifyRepair(aiOnly){
   const beat={id:'lift',subject:'The returning performer',action:'Lift a blue cup to eye height and lower it.',startSeconds:2,endSeconds:4,beforeSeconds:3.5};
   const binding={role:'cast_0',resourceVersionId:'person-v1'};
   await runFixture(c,{generation:true,shotMetadata:{storyActions:[beat]}});
-  Object.assign(c.rows.get('shot'),{durationSeconds:6}); c.rows.get('shot').metadata.resourceBindings=[binding];
+  Object.assign(c.rows.get('shot'),{durationSeconds:6,title:'The cup trick'}); c.rows.get('shot').metadata.resourceBindings=[binding];
   c.rows.get('scene').projectId='project';
   c.put('projectResources',{_id:'person',projectId:'project',kind:'CHARACTER'});
   c.put('projectResourceVersions',{_id:'person-v1',projectId:'project',resourceId:'person'});
@@ -57,7 +57,7 @@ async function verifyRepair(aiOnly){
     [c.rows.get('different-shot'),'projectId','other-project']]){
     const old=r[k];r[k]=bad;assert.equal((await call('context')).reviewed,null);r[k]=old;
   }
-  let checks=0,submits=0;
+  let checks=0,submits=0,donorStartFrame=12;
   const origAction=c.runAction;
   let chosen='donor';
   c.runAction=async(ref,args)=>{
@@ -65,12 +65,12 @@ async function verifyRepair(aiOnly){
     if(name==='automaticRepairVision.estimate')return {model:'test/vision',maximumCostUsd:.05,priceCeiling:{prompt:1,completion:2}};
     if(name==='automaticRepairVision.inspect'){
       checks++;
-      return args.candidateIndex===1?{status:'MATCH',donorStartFrame:12,donorEndFrame:36}:{status:'NO_MATCH'};
+      return args.candidateIndex===1?{status:'MATCH',targetEndFrame:84,donorStartFrame,donorEndFrame:donorStartFrame+36}:{status:'NO_MATCH'};
     }
     if(name==='performanceCutaways.saveDiscovered'){
       submits++;
       const {discoveryContextHash,...choice}=args;
-      const {key,request}=await c.call('performanceCutaways','prepare',choice);
+      const {key,request}=await c.call('performanceCutaways','prepare',args);
       assert.equal(args.donorAssetId,chosen);
       const {source,donor,recording,operation,...range}=request;
       const frames=load('renderer/src/media/performance-cutaway-contract.ts').selectCutawayFrames(range);
@@ -93,9 +93,34 @@ async function verifyRepair(aiOnly){
   const receipt=c.rows.get(result.shotVersionId).contextSnapshot;
   if(aiOnly){assert.equal(receipt.reviewId,null);assert.equal(receipt.checkId,'picture-check');}
   else {assert.ok(receipt.reviewId);assert.equal(receipt.checkId,null);}
+  const version=load('src/lib/production/repair-source-vision.ts').REPAIR_DISCOVERY_VERSION;
+  assert.equal(receipt.discoveryVersion,version);
+  assert.equal(c.rows.get(result.assetId).name,'The cup trick - take 2');
   const fresh=await call('estimate');assert.equal(fresh.maximumCostUsd,0);const replay=await call('run',{quoteKey:paid.quoteKey});
   assert.deepEqual(result,replay);assert.equal(checks,2);assert.equal(submits,1);
+  // A rejected draft and its original lead back to the very same performance and audio.
+  await review(result.shotVersionId,false);
+  assert.equal(await call('repairOrigin',{takeId:result.shotVersionId}),'failed');
+  await assert.rejects(c.call('performanceCutaways','prepare',{...receipt.range,shotVersionId:'failed',shotId:'shot',baseAssetId:'baseline',donorAssetId:chosen,discoveryContextHash:receipt.discoveryContextHash}),/changed/);
+  const same=await call('context');
+  assert.ok(!same.saved && !same.candidates.some(a=>a.assetId===chosen));
+  // Simulate a draft adopted by an older method. It can be reevaluated only
+  // after a new quote and still cannot be silently readopted at the same frames.
+  delete c.rows.get(result.shotVersionId).contextSnapshot.discoveryVersion; // Unversioned v1 rows in storage
+  const newer=await call('context');assert.ok(newer.candidates.some(a=>a.assetId===chosen));
+  const newQuote=await call('estimate',{takeId:result.shotVersionId});
+  const unchanged=await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
+  assert.equal(unchanged.status,'NO_MATCH');assert.equal(submits,1);
+  donorStartFrame=24;
+  const newEdit=await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
+  assert.equal(newEdit.status,'SAVED');assert.notEqual(newEdit.shotVersionId,result.shotVersionId);
+  const nextReceipt=c.rows.get(newEdit.shotVersionId).contextSnapshot;
+  assert.equal(nextReceipt.failedTakeId,'failed');assert.equal(nextReceipt.sourcePicture.assetId,'baseline');
+  assert.equal(nextReceipt.originalRecording.assetId,'baseline');assert.equal(nextReceipt.range.donorStartFrame,24);
+  assert.equal(c.rows.get(newEdit.assetId).name,'The cup trick - take 3');
+  const reread=await call('run',{takeId:result.shotVersionId,quoteKey:newQuote.quoteKey});
+  assert.deepEqual(reread,newEdit);
   c.role='VIEWER';await assert.rejects(call('estimate'));c.role='OWNER';
-  console.log(aiOnly?'PASS AI-only failure, PASS/UNCERTAIN/stale/foreign/incomplete evidence denied;':'PASS creator-reviewed failure;', 'fresh failed action, authorized search, same-cast approved timing, wrong/foreign/revoked identity rejection, 2 unmarked candidates, 24-frame short action, reviewed cost, one draft, original sound, no replayed purchase.');
+  console.log(aiOnly?'PASS AI-only failure, PASS/UNCERTAIN/stale/foreign/incomplete evidence denied;':'PASS creator-reviewed failure;', 'fresh failed action, authorized search, same-cast approved timing, wrong/foreign/revoked identity rejection, 2 unmarked candidates, approved shorter action, versioned entry/exit range, original sound, rejected edit skipped, corrected sibling, no replayed purchase.');
 }
 (async()=>{await verifyRepair(false);await verifyRepair(true);})().catch(e=>{console.error(e);process.exitCode=1;});

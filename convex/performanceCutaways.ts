@@ -9,6 +9,7 @@ import { reviewContext } from './storyActionReviews';
 import { deniedRepairMedia } from './performanceRetakeSupport';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { selectCutawayFrames, type CutawayRange as Range } from '../renderer/src/media/performance-cutaway-contract';
+import { REPAIR_DISCOVERY_VERSION } from '../src/lib/production/repair-source-vision';
 import { ACTION_WINDOW_MAX_BYTES } from '../renderer/src/media/action-window-contract';
 
 const fail = (message: string): never => { throw new ConvexError(message); };
@@ -150,9 +151,19 @@ async function select(ctx:Context,input:Choice) {
   }
   return {c,source,donor,recording,key,prior,range,nextNumber:Math.max(0,...takes.map(t=>t.versionNumber))+1};
 }
+type SavedTake = {shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>};
+async function checkDiscovery(ctx:Context,input:Choice & {discoveryContextHash?:string},prior:Doc<'shotVersions'>|undefined):Promise<void>{
+  if(!input.discoveryContextHash)return;
+  const discovery:{saved?:SavedTake;contextHash?:string;base?:Binding;candidates?:Binding[]}=await ctx.runQuery((internal as any).automaticPerformanceRepair.context,{takeId:input.shotVersionId});
+  if(prior?.assetId && discovery.saved?.shotVersionId===prior._id && discovery.saved.assetId===prior.assetId)return;
+  if(prior || discovery.contextHash!==input.discoveryContextHash || discovery.base?.assetId!==input.baseAssetId ||
+    !discovery.candidates?.some(clip=>clip.assetId===input.donorAssetId))
+    return fail('The approved footage or action review changed while the video was being edited.');
+}
 export const prepare=internalQuery({
-  args,returns:v.any(),handler:async(ctx,input)=>{
+  args:{...args,discoveryContextHash:v.optional(v.string())},returns:v.any(),handler:async(ctx,input)=>{
     const {source,donor,recording,key,prior,range}=await select(ctx,input);
+    await checkDiscovery(ctx,input,prior);
     if (prior?.assetId) return {saved:{shotVersionId:prior._id,assetId:prior.assetId}};
     const withUrl=async (b:Binding)=>({...b,url:await ctx.storage.getUrl(b.storageId)??fail('The selected video is unavailable.')});
     return {key,request:{operation:'PERFORMANCE_CUTAWAY',...range,source:await withUrl(source),donor:await withUrl(donor),recording:await withUrl(recording)}};
@@ -168,19 +179,13 @@ function validateProof(p:any,r:Range,source:Binding,donor:Binding,recording:Bind
       JSON.stringify(frames)!==JSON.stringify(p.selectedDonorFrames) || Object.entries(r).some(([key,n])=>p[key]!==n))
     return fail('The worker could not verify the selected frames and original recording.');
 }
-type SavedTake = {shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>};
 export const adopt=internalMutation({
   args:{...args,key:v.string(),storageId:v.id('_storage'),proof:v.any(),discoveryContextHash:v.optional(v.string())},returns:v.any(),
   handler:async(ctx,input):Promise<SavedTake>=>{
     const {c,source,donor,recording,key,prior,range,nextNumber}=await select(ctx,input);
     if (input.key!==key) return fail('The reviewed shot or its source files changed. Review them again.');
+    await checkDiscovery(ctx,input,prior);
     if (prior?.assetId) return {shotVersionId:prior._id,assetId:prior.assetId};
-    if(input.discoveryContextHash){
-      const discovery:{contextHash?:string;base?:Binding;candidates?:Binding[]}=await ctx.runQuery((internal as any).automaticPerformanceRepair.context,{takeId:input.shotVersionId});
-      if(discovery.contextHash!==input.discoveryContextHash || discovery.base?.assetId!==input.baseAssetId ||
-          !discovery.candidates?.some((clip:Binding)=>clip.assetId===input.donorAssetId))
-        return fail('The approved footage or action review changed while the video was being edited.');
-    }
     await requireEditable(ctx,c.projectId,'shot',c.data.shot._id);
     await requireEditable(ctx,c.projectId,'scene',c.scene._id);
     const proof=input.proof;
@@ -190,8 +195,9 @@ export const adopt=internalMutation({
       return fail('The saved video differs from the verified edit.');
     const now=Date.now();
     const shared={projectId:c.projectId,productionId:c.production._id,studioId:c.production.studioId,studioExternalId:c.production.studioExternalId};
-    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range,...(input.discoveryContextHash?{discoveryContextHash:input.discoveryContextHash}:{})};
-    const assetId:Id<'assets'>=await ctx.db.insert('assets',{...shared,scope:'PROJECT',source:'EDITED',name:'Saved performance cutaway',originAssetId:source.assetId,
+    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range,...(input.discoveryContextHash?{discoveryContextHash:input.discoveryContextHash,discoveryVersion:REPAIR_DISCOVERY_VERSION}:{})};
+    const name=input.discoveryContextHash?`${c.data.shot.title?.trim() || 'Shot'} - take ${nextNumber}`:'Saved performance cutaway';
+    const assetId:Id<'assets'>=await ctx.db.insert('assets',{...shared,scope:'PROJECT',source:'EDITED',name,originAssetId:source.assetId,
       roles:['FOOTAGE'],mimeType:'video/mp4',storageId:input.storageId,checksum:stored.sha256,byteSize:stored.size,width:proof.width,height:proof.height,
       durationSeconds:proof.outputFrames/24,frameRate:24,provenance:{kind:'PERFORMANCE_CUTAWAY',...lineage},metadata:{...lineage,proof},createdAt:now});
     const shotVersionId:Id<'shotVersions'>=await ctx.db.insert('shotVersions',{...shared,productionVersionId:c.version._id,shotId:input.shotId,versionNumber:nextNumber,
@@ -202,7 +208,7 @@ export const adopt=internalMutation({
   },
 });
 async function saveCutaway(ctx:ActionCtx,input:Choice,discoveryContextHash?:string):Promise<SavedTake> {
-    const {saved,key,request}=await ctx.runQuery(functions.prepare,input);
+    const {saved,key,request}=await ctx.runQuery(functions.prepare,{...input,...(discoveryContextHash?{discoveryContextHash}:{})});
     if(saved) return saved;
     const worker=process.env.RENDER_WORKER_URL?.trim(), secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();
     if (!worker || !secret) return fail('The video editing worker is unavailable. Try again when it is online.');
