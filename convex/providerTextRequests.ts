@@ -1,4 +1,5 @@
-import { internalMutation, internalQuery } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+import { internalMutation, internalQuery, type MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
 import { requireProjectAccess, resolveProjectAccessForActor } from './authorization';
 import { reserveProviderBudget, settleProviderBudget } from './providerBudget';
@@ -13,10 +14,8 @@ export const inspect = internalQuery({
   },
 });
 
-export const reserve = internalMutation({
-  args: { actorId:v.optional(v.id('users')), projectId: v.id('projects'), requestKey: v.string(), capability: v.string(), model: v.string(), estimatedCostUsd: v.number() },
-  returns: v.any(),
-  handler: async (ctx, args) => {
+type TextReservation = {actorId?:Id<'users'>;projectId:Id<'projects'>;requestKey:string;capability:string;model:string;estimatedCostUsd:number};
+export async function reserveTextRequest(ctx:MutationCtx,args:TextReservation){
     const access = await (args.actorId?resolveProjectAccessForActor(ctx,args.projectId,args.actorId,['OWNER','EDITOR']):requireProjectAccess(ctx, args.projectId, ['OWNER', 'EDITOR']));
     const previous = await ctx.db.query('providerTextRequests').withIndex('by_request_key', q => q.eq('requestKey', args.requestKey)).unique();
     if (previous) {
@@ -27,7 +26,11 @@ export const reserve = internalMutation({
     const {actorId:_actor,...request}=args;
     const id = await ctx.db.insert('providerTextRequests', { ...request, studioExternalId: access.project.studioExternalId, createdByUserId: access.user._id, provider: 'openrouter', reservationId, status: 'RESERVED', createdAt: Date.now(), updatedAt: Date.now() });
     return { created: true, request: await ctx.db.get(id) };
-  },
+}
+export const reserve = internalMutation({
+  args: { actorId:v.optional(v.id('users')), projectId: v.id('projects'), requestKey: v.string(), capability: v.string(), model: v.string(), estimatedCostUsd: v.number() },
+  returns: v.any(),
+  handler: reserveTextRequest,
 });
 
 export const markSubmitting = internalMutation({

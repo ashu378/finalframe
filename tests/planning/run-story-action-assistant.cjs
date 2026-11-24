@@ -36,7 +36,7 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  const d=setup();const dctx=await d.call('storyActionChecks','context',{takeId:'take'});d.put('storyActionReviews',{_id:'review',takeId:'take',requirementKey:dctx.requirementKey,observations:[pass],passed:true,createdAt:1});d.put('storyActionChecks',{_id:'check',takeId:'take',requirementKey:dctx.requirementKey,observations:[fail],completedAt:2});await assert.rejects(requireStoryActionsPassed(d,'take'));d.rows.get('review').createdAt=3;await requireStoryActionsPassed(d,'take');console.log('PASS newer AI concern requires explicit subsequent human review');
  const humanFailed=setup();const hfctx=await humanFailed.call('storyActionChecks','context',{takeId:'take'});
  humanFailed.put('storyActionReviews',{_id:'review',takeId:'take',requirementKey:hfctx.requirementKey,observations:[fail],passed:false,createdAt:1});
- humanFailed.put('storyActionChecks',{_id:'check',takeId:'take',requirementKey:hfctx.requirementKey,observations:[pass],completedAt:2});
+ humanFailed.put('storyActionChecks',{_id:'check',projectId:'project',takeId:'take',requirementKey:hfctx.requirementKey,observations:[pass],completedAt:2});
  await assert.rejects(requireStoryActionsPassed(humanFailed,'take'));
  assert.deepEqual((await resolveStoryRepair(humanFailed,'take','shot')).proof.failedActionIds,['chew']);
  humanFailed.rows.get('check').observations=[{...fail,result:'UNCERTAIN'}];
@@ -48,6 +48,24 @@ function setup(){const c=fixture();c.put('productionVersions',{_id:'version',pro
  await assert.rejects(requireStoryActionsPassed(humanFailed,'take'));
  assert.deepEqual((await resolveStoryRepair(humanFailed,'take','shot')).proof.failedActionIds,['chew']);
  console.log('PASS AI pass or uncertainty cannot hide human failure; newer human review clears it and later AI failure remains actionable');
+ for(const errorCode of ['ACTION_CHECK_HTTP_400','ACTION_CHECK_HTTP_503','ACTION_CHECK_FAILED','TIMEOUT']){
+  const g=setup(),size=19_000_000,checksum='b'.repeat(64);
+  Object.assign(g.rows.get('asset'),{byteSize:size,checksum});Object.assign(g.storageObjects.get('storage'),{size,sha256:checksum});
+  const {requirementKey}=await g.call('storyActionChecks','context',{takeId:'take'});
+  const oldKey='old-url';const old=await g.call('storyActionChecks','saveQuote',{...quote,requirementKey,requestKey:oldKey});
+  g.put('providerTextRequests',{_id:'old-receipt',projectId:'project',requestKey:oldKey,status:'RECONCILIATION_REQUIRED',errorCode,reservationId:'old-hold'});
+  await g.call('storyActionChecks','bindReceipt',{checkId:old,receiptId:'old-receipt'});
+  const fresh={...quote,requirementKey,requestKey:'picture-grids-v1:reviewed'};
+  assert.equal((await g.call('storyActionChecks','get',{takeId:'take'})).canRetryWithFrames,errorCode==='ACTION_CHECK_HTTP_400');
+  if(errorCode!=='ACTION_CHECK_HTTP_400'){await assert.rejects(g.call('storyActionChecks','saveQuote',fresh),/saved or pending/);continue;}
+  process.env.FINALFRAME_PAID_TEST_RUN='recipe-test';
+  const id=await g.call('storyActionChecks','saveQuote',fresh);
+  assert.notEqual(id,old);assert.equal((await g.call('storyActionChecks','reserveGrid',{checkId:id})).created,true);
+  assert.equal((await g.call('storyActionChecks','reserveGrid',{checkId:id})).created,false);
+  await assert.rejects(g.call('storyActionChecks','saveQuote',{...fresh,requestKey:'picture-grids-v1:different-model'}),/saved or pending/);
+  assert.equal(g.rows.get('old-receipt').status,'RECONCILIATION_REQUIRED');assert.equal(g.rows.get('old-receipt').reservationId,'old-hold');
+ }
+ console.log('PASS only definitive legacy HTTP 400 enables a separately approved grid check; prior hold, timeouts, model changes and concurrent reservations protected');
  const e=setup();e.rows.get('asset').projectId='other';await assert.rejects(e.call('storyActionChecks','context',{takeId:'take'}),/unavailable/);console.log('PASS cross-project check source denied');
 })().catch(e=>{console.error(e);process.exitCode=1});
 // The export fence must run even when no audio-restoration marker was supplied.
