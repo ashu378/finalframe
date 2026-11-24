@@ -37,16 +37,22 @@ function context(){
    const row=receipts.get(a.requestId);if(ref==='providerTextRequests.markSubmitting'){row.status='SUBMITTING';return null;}
    if(ref==='providerTextRequests.finish'){if(row.status==='COMPLETED')return null;row.status=a.content?'COMPLETED':'RECONCILIATION_REQUIRED';row.content=a.content;return null;}return mask(ref);
  }};
- let headroom=10,invalid=false;
+ let headroom=10,invalid=false,native=false;
+ const hash=n=>require('node:crypto').createHash('sha256').update(String(n)).digest('hex');
  global.fetch=async(url,opts)=>{
    if(url==='https://openrouter.ai/api/v1/key')return Response.json({data:{limit_remaining:headroom}});
    assert.equal(url,'https://worker.invalid/media/probe');const req=JSON.parse(opts.body);assert.equal(req.verifyVideoTiming,true);assert.equal(opts.redirect,'error');
-   const isBase=req.repairSample.kind==='CONTEXT';assert.equal(req.url,'https://fixture.convex.cloud/api/storage/'+(isBase?'base':'candidate'));assert.equal(req.checksum,(isBase?base:candidate).checksum);
-   const images=(isBase?[req.repairSample.frame===24?'/9j/AAAA':'/9j/DDDD']:['/9j/BBBB','/9j/CCCC']);
-   return Response.json({checksum:invalid?'0'.repeat(64):req.checksum,byteSize:base.byteSize,repairSamples:{version:'REPAIR_SAMPLES_V1',kind:req.repairSample.kind,
-      firstFrame:isBase?req.repairSample.frame:0,stride:isBase?1:3,frameCount:isBase?72:48,images}});
+   const isBase=req.url.endsWith('/base');const input=isBase?base:candidate;assert.equal(req.checksum,input.checksum);
+   if(req.repairFingerprints){
+     const hashes=Array.from({length:input.frameCount},(_,i)=>hash(isBase?i:native?(i>=8&&i<32?1000+i:i+16):2000+i));
+     return Response.json({checksum:req.checksum,byteSize:input.byteSize,videoTiming:{version:'DECODED_VIDEO_FRAMES_V1',fpsNumerator:24,fpsDenominator:1,firstFrameSeconds:0,frameCount:input.frameCount},repairFingerprints:{version:'DECODED_REPAIR_FRAMES_V1',hashes}});
+   }
+   const context=req.repairSample.kind==='CONTEXT';
+   const images=context?[isBase?(req.repairSample.frame===24?'/9j/AAAA':'/9j/DDDD'):'/9j/FFFF']:['/9j/BBBB','/9j/CCCC'];
+   return Response.json({checksum:invalid?'0'.repeat(64):req.checksum,byteSize:input.byteSize,repairSamples:{version:'REPAIR_SAMPLES_V1',kind:req.repairSample.kind,
+      firstFrame:context?req.repairSample.frame:0,stride:context?1:3,frameCount:input.frameCount,images}});
  };
- return {c,data,events,setHeadroom:x=>{headroom=x;},invalidate:()=>{invalid=true;}};
+ return {c,data,events,receipts,native:()=>{native=true;},setHeadroom:x=>{headroom=x;},invalidate:()=>{invalid=true;}};
 }
 (async()=>{
  const v=x=>vision.verifyDiscovery(brief,x);
@@ -87,7 +93,7 @@ function context(){
  });
  const get=async f=>({...await api.estimate.handler(f.c,{takeId:'take',contextHash:'pin'}),takeId:'take',contextHash:'pin',candidateIndex:0});
  const f=context(),a=await get(f);assert.equal(a.maximumCostUsd,.016384);
- await assert.rejects(api.inspect.handler(f.c,{...a,maximumCostUsd:.001}),/pricing changed/);
+ await assert.rejects(api.inspect.handler(f.c,{...a,maximumCostUsd:.001}),/settings changed/);
  await assert.rejects(api.inspect.handler(f.c,{...a,contextHash:'forged'}),/changed/);
  f.setHeadroom(.001);await assert.rejects(api.inspect.handler(f.c,a),/allowance/);assert.equal(f.events.length,0);
  f.setHeadroom(10);assert.deepEqual(await api.inspect.handler(f.c,a),exitResult);
@@ -98,5 +104,30 @@ function context(){
  await assert.rejects(throws.inspect.handler(lost.c,await get(lost)),/receipt is saved/);
  await assert.rejects(throws.inspect.handler(lost.c,await get(lost)),/already checked/);
  assert(lost.events.some(([name,a])=>name.endsWith('finish')&&a.submitted&&!a.content));
+ const newMode=load('src/lib/production/exact-repair-alignment.ts');
+ const H=n=>require('node:crypto').createHash('sha256').update(String(n)).digest('hex');
+ const orig=Array.from({length:72},(_,i)=>H(i)),copy=orig.slice(16,64);
+ for(let i=8;i<32;i++)copy[i]=H(i+500);
+ assert.deepEqual(newMode.exactSourceAlignment(orig,copy,24,48),{donorStartFrame:8,donorEndFrame:32,targetEndFrame:48});
+ assert.equal(newMode.exactSourceAlignment(orig,[...copy,...copy],24,48),null);
+ assert.equal(newMode.exactSourceAlignment(orig,orig,24,48),null);
+ assert.equal(newMode.exactSourceAlignment(orig,copy.map((v,i)=>i===32?H(999):v),24,48),null);
+ assert.equal(newMode.exactSourceAlignment(orig.map((v,i)=>i>=16&&i<24?H(10):v),copy,24,48),null);
+ const observation={actionId:'beat',result:'MATCH',confidence:.94,sameActor:true,sameScene:true,correctArticulatedAction:true,joinsNaturally:true,evidence:'The performer takes the glass from the table and drinks.',phases:[
+   {phaseNumber:1,frame:8,observation:'His hand reaches the glass.'},{phaseNumber:2,frame:18,observation:'His elbow bends as the glass rises.'},{phaseNumber:3,frame:31,observation:'The glass is tilted to his lips.'}]};
+ const selected={status:'MATCH',method:newMode.EXACT_REPAIR_ALIGNMENT_VERSION,donorStartFrame:8,donorEndFrame:32,targetEndFrame:48};
+ for(const patch of [{sameActor:false},{sameScene:false},{correctArticulatedAction:false},{joinsNaturally:false},{confidence:.3},{phases:[...observation.phases.slice(0,2),{...observation.phases[2],frame:32}]}])
+   assert.deepEqual(newMode.verifyAligned(brief,selected,{...observation,...patch}),{status:'NO_MATCH'});
+ let buys=0;const exact=handlers(async(_c,m,o)=>{buys++;await o.beforeChatSubmit();assert.equal(o.structuredOutput.name,'native_performance_check');assert.match(JSON.stringify(m),/LAST candidate frame 31/);return{content:JSON.stringify(observation),modelUsed:'approved/reviewer',requestId:'gen-exact',costUsd:.01};});
+ process.env.FINALFRAME_EXACT_REPAIR_ALIGNMENT_ENABLED='true';
+ const n=context();n.native();const quoted=await get(n);assert.equal(quoted.alignmentMode,newMode.EXACT_REPAIR_ALIGNMENT_VERSION);
+ assert.deepEqual(await exact.inspect.handler(n.c,quoted),selected);assert.deepEqual(await exact.inspect.handler(n.c,quoted),selected);assert.equal(buys,1);
+ const blocked=context();blocked.native();const q=await get(blocked);const key=lost.events.find(([name])=>name.endsWith('reserve'))[1].requestKey;
+ blocked.receipts.set(key,{status:'RECONCILIATION_REQUIRED'});await assert.rejects(exact.inspect.handler(blocked.c,q),/already checked/);
+ blocked.receipts.set(key,{status:'COMPLETED',content:JSON.stringify({...negative,identityMatches:false})});assert.deepEqual(await exact.inspect.handler(blocked.c,q),{status:'NO_MATCH'});assert.equal(buys,1);
+ const unmatched=context();const other=await get(unmatched);unmatched.receipts.set(key,{status:'COMPLETED',content:JSON.stringify(cannotJoin)});
+ assert.deepEqual(await exact.inspect.handler(unmatched.c,other),exitResult);assert.equal(buys,1);
+ delete process.env.FINALFRAME_EXACT_REPAIR_ALIGNMENT_ENABLED;
+ console.log('PASS one unique diverse native offset, semantic review with exact observed endpoint, ambiguous handles rejected, prior wrong-actor/uncertain receipts cannot be repurchased, unchanged V2 results reused.');
  console.log('PASS ordered source pixels, pinned checksums, quote and allowance checks, retained no-match, ambiguous acceptance and no duplicate submission; no network used');
 })().catch(e=>{console.error(e);process.exitCode=1;});

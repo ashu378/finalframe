@@ -9,6 +9,7 @@ import { reviewContext } from './storyActionReviews';
 import { deniedRepairMedia } from './performanceRetakeSupport';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { selectCutawayFrames, type CutawayRange as Range } from '../renderer/src/media/performance-cutaway-contract';
+import { EXACT_REPAIR_ALIGNMENT_VERSION } from '../src/lib/production/exact-repair-alignment';
 import { REPAIR_DISCOVERY_VERSION } from '../src/lib/production/repair-source-vision';
 import { ACTION_WINDOW_MAX_BYTES } from '../renderer/src/media/action-window-contract';
 
@@ -184,7 +185,7 @@ function validateProof(p:any,r:Range,source:Binding,donor:Binding,recording:Bind
     return fail('The worker could not verify the selected frames and original recording.');
 }
 export const adopt=internalMutation({
-  args:{...args,actorId:v.optional(v.id('users')),key:v.string(),storageId:v.id('_storage'),proof:v.any(),discoveryContextHash:v.optional(v.string())},returns:v.any(),
+  args:{...args,actorId:v.optional(v.id('users')),key:v.string(),storageId:v.id('_storage'),proof:v.any(),alignmentMode:v.optional(v.literal(EXACT_REPAIR_ALIGNMENT_VERSION)),discoveryContextHash:v.optional(v.string())},returns:v.any(),
   handler:async(ctx,input):Promise<SavedTake>=>{
     const {c,source,donor,recording,key,prior,range,nextNumber}=await select(ctx,input);
     if (input.key!==key) return fail('The reviewed shot or its source files changed. Review them again.');
@@ -201,7 +202,7 @@ export const adopt=internalMutation({
       return fail('The saved video differs from the verified edit.');
     const now=Date.now();
     const shared={projectId:c.projectId,productionId:c.production._id,studioId:c.production.studioId,studioExternalId:c.production.studioExternalId};
-    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range,...(input.discoveryContextHash?{discoveryContextHash:input.discoveryContextHash,discoveryVersion:REPAIR_DISCOVERY_VERSION}:{})};
+    const lineage={source:'PERFORMANCE_CUTAWAY',failedTakeId:input.shotVersionId,reviewId:c.proof.reviewId,checkId:c.proof.checkId,failedActionIds:c.proof.failedActionIds,sourcePicture:source,donor,originalRecording:recording,range,...(input.discoveryContextHash?{discoveryContextHash:input.discoveryContextHash,discoveryVersion:input.alignmentMode??REPAIR_DISCOVERY_VERSION}:{})};
     const name=input.discoveryContextHash?`${c.data.shot.title?.trim() || 'Shot'} - take ${nextNumber}`:'Saved performance cutaway';
     const assetId:Id<'assets'>=await ctx.db.insert('assets',{...shared,scope:'PROJECT',source:'EDITED',name,originAssetId:source.assetId,
       roles:['FOOTAGE'],mimeType:'video/mp4',storageId:input.storageId,checksum:stored.sha256,byteSize:stored.size,width:proof.width,height:proof.height,
@@ -213,7 +214,7 @@ export const adopt=internalMutation({
     return {shotVersionId,assetId};
   },
 });
-async function saveCutaway(ctx:ActionCtx,input:Choice & {actorId?:ActorId},discoveryContextHash?:string):Promise<SavedTake> {
+async function saveCutaway(ctx:ActionCtx,input:Choice & {actorId?:ActorId},discoveryContextHash?:string,alignmentMode?:typeof EXACT_REPAIR_ALIGNMENT_VERSION):Promise<SavedTake> {
     const {saved,key,request}=await ctx.runQuery(functions.prepare,{...input,...(discoveryContextHash?{discoveryContextHash}:{})});
     if(saved) return saved;
     const worker=process.env.RENDER_WORKER_URL?.trim(), secret=process.env.RENDER_WORKER_SHARED_SECRET?.trim();
@@ -234,12 +235,12 @@ async function saveCutaway(ctx:ActionCtx,input:Choice & {actorId?:ActorId},disco
     finally{await reader.cancel().catch(()=>undefined);}
     if (bytes!==proof.byteSize) return fail('The video transfer stopped early. Try the saved edit again.');
     const storageId=await ctx.storage.store(new Blob(chunks as BlobPart[],{type:'video/mp4'}));
-    try { return await ctx.runMutation(functions.adopt,{...input,key,proof,storageId,...(discoveryContextHash?{discoveryContextHash}:{})}); }
+    try { return await ctx.runMutation(functions.adopt,{...input,key,proof,storageId,...(alignmentMode?{alignmentMode}:{}),...(discoveryContextHash?{discoveryContextHash}:{})}); }
     finally { await ctx.runMutation((internal as any).repairTiming.cleanup,{storageId}).catch(()=>undefined); }
 }
 export const save=action({args,returns:v.any(),handler:(ctx,input)=>saveCutaway(ctx,input)});
 /** Discovery is server-directed. Manual selection cannot forge this provenance. */
 export const saveDiscovered=internalAction({
-  args:{...args,actorId:v.optional(v.id('users')),discoveryContextHash:v.string()},returns:v.any(),
-  handler:(ctx,{discoveryContextHash,...input})=>saveCutaway(ctx,input,discoveryContextHash),
+  args:{...args,actorId:v.optional(v.id('users')),alignmentMode:v.optional(v.literal(EXACT_REPAIR_ALIGNMENT_VERSION)),discoveryContextHash:v.string()},returns:v.any(),
+  handler:(ctx,{discoveryContextHash,alignmentMode,...input})=>saveCutaway(ctx,input,discoveryContextHash,alignmentMode),
 });

@@ -8,6 +8,7 @@ import { requireProjectRole } from './authorization';
 import { getEffectiveResourceState, isResourceApproved, isResourceEditable, requireApprovedResource } from './resourceStates';
 import { recipeHash } from '../src/lib/production/recipes/compiler';
 import { sha256Equal } from '../renderer/src/media/sha256';
+import { EXACT_REPAIR_ALIGNMENT_VERSION } from '../src/lib/production/exact-repair-alignment';
 import { REPAIR_DISCOVERY_VERSION } from '../src/lib/production/repair-source-vision';
 import { selectCutawayFrames, type CutawayRange } from '../renderer/src/media/performance-cutaway-contract';
 
@@ -77,7 +78,7 @@ async function inspectedTakes(ctx:QueryCtx,c:Cutaway) {
           // Unversioned automatic drafts used discovery v1. A published change in
           // the visual test permits one new observation; manual rejections remain excluded.
           const method=receipt.discoveryVersion??(receipt.discoveryContextHash?'REPAIR_DISCOVERY_V1':null);
-          if(!method || method===REPAIR_DISCOVERY_VERSION){
+          if(!method || method===EXACT_REPAIR_ALIGNMENT_VERSION || method===REPAIR_DISCOVERY_VERSION&&process.env.FINALFRAME_EXACT_REPAIR_ALIGNMENT_ENABLED!=='true'){
             blocked.add(receipt.donor.assetId);
             if(receipt.donor.checksum)blockedChecksums.add(receipt.donor.checksum);
           }
@@ -209,7 +210,7 @@ export const context=internalQuery({
     const supported=!overlaps&&base&&recording&&recording.hasAudio&&recording.audioCodec==='aac'&&Math.abs(base.frameCount-recording.frameCount)<=1&&target.end<=base.frameCount;
     const ready=supported?candidates:[];
     const verified=reviewed && !blockedChecksums.has(reviewed.donor.checksum) && !sameRejectedEdit(rejectedEdits,reviewed.donor.checksum,reviewed.range) && ready.some(x=>x.assetId===reviewed.donor.assetId&&x.frameCount>=reviewed.range.donorEndFrame)?reviewed:null;
-    const authority={discoveryVersion:REPAIR_DISCOVERY_VERSION,rejectedEdits,projectId:c.projectId,actorUserId:access.user._id,takeId,shotId:c.data.shot._id,productionVersionId:c.version._id,requirementKey:c.data.requirementKey,
+    const authority={discoveryVersion:REPAIR_DISCOVERY_VERSION,...(process.env.FINALFRAME_EXACT_REPAIR_ALIGNMENT_ENABLED==='true'?{alignmentMode:EXACT_REPAIR_ALIGNMENT_VERSION}:{}),rejectedEdits,projectId:c.projectId,actorUserId:access.user._id,takeId,shotId:c.data.shot._id,productionVersionId:c.version._id,requirementKey:c.data.requirementKey,
       reviewId:c.proof.reviewId,checkId:c.proof.checkId,action:rawAction,base,recording,scene,targetStartFrame:target.start,targetEndFrame:target.end,candidates:ready,reviewed:verified};
     let message:string|undefined;
     if(overlaps)message='Two required actions overlap here. Review their timing before replacing this part of the shot.';
@@ -261,7 +262,7 @@ export const estimate=action({
 });
 type RepairResult = {status:'SAVED';shotId:Id<'shots'>;shotVersionId:Id<'shotVersions'>;assetId:Id<'assets'>}|{status:'NO_MATCH';message:string};
 async function executeRepair(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,q:{pricing:VisionQuote|null},actor:{actorId?:Id<'users'>}={}):Promise<RepairResult>{
-    let exitDiscontinuity=false;
+    let exitDiscontinuity=false,exactSource=false;
     let choice=data.reviewed ? {donorAssetId:data.reviewed.donor.assetId,...data.reviewed.range}:null;
     for(let i=0;!choice&&q.pricing&&i<data.candidates.length;i++){
       const m=await ctx.runAction(vision.inspect,{takeId,contextHash:data.contextHash,...actor,...q.pricing,candidateIndex:i});
@@ -271,12 +272,13 @@ async function executeRepair(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,q:
           sameRejectedEdit(data.rejectedEdits,data.candidates[i].checksum,range))continue;
       try{selectCutawayFrames(range);}catch{continue;}
       choice={donorAssetId:data.candidates[i].assetId,...range};
+      exactSource=m.method===EXACT_REPAIR_ALIGNMENT_VERSION;
     }
     if(!choice)return {status:'NO_MATCH',message:data.message??(exitDiscontinuity?'We found the gesture, but cutting back would make the movement jump. Add an approved clip showing the character finishing the movement, then try again.':noMatch)};
     const next=await ctx.runQuery(refs.context,{takeId,...actor});
     if(next.saved)return next.saved;
     if(next.contextHash!==data.contextHash)throw new ConvexError('The source or action review changed. Check it again.');
-    const saved=await ctx.runAction((internal as any).performanceCutaways.saveDiscovered,{...actor,discoveryContextHash:data.contextHash,shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
+    const saved=await ctx.runAction((internal as any).performanceCutaways.saveDiscovered,{...actor,...(exactSource?{alignmentMode:EXACT_REPAIR_ALIGNMENT_VERSION}:{}),discoveryContextHash:data.contextHash,shotVersionId:takeId,shotId:data.shotId,baseAssetId:data.base.assetId,...choice});
     return {status:'SAVED',shotId:data.shotId,...saved};
 }
 async function validatePurchase(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,quoteKey:string) {
