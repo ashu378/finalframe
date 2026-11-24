@@ -11,7 +11,7 @@ const entry = new Module(file, module);
 entry.filename = file;
 entry.paths = Module._nodeModulePaths(path.dirname(file));
 const slots = [], calls = [], visits = [];
-let cursor, price, result;
+let cursor, price, result, persisted = null;
 function slot(value) {
   const key = cursor++;
   if (!(key in slots)) slots[key] = value;
@@ -19,10 +19,12 @@ function slot(value) {
 }
 const mocks = {
   react: {...React, useState: slot, useRef: value => slot({current:value})[0]},
-  'convex/react': {useAction: ref => async args => {
+  'convex/react': {useQuery: () => persisted, useAction: ref => async args => {
     const method = getFunctionName(ref).split(':')[1];
     calls.push({method,args});
-    return method === 'estimate' ? {maximumCostUsd:price, candidateCount:2, quoteKey:'bound-quote'} : result;
+    if (method === 'estimate') return {maximumCostUsd:price, candidateCount:2, quoteKey:'bound-quote'};
+    persisted = result;
+    return result;
   }},
   'next/navigation': {useRouter: () => ({push: url => visits.push(url), refresh() {}})},
   '@/components/ui/button': {Button:'button'},
@@ -43,7 +45,7 @@ function button(label) {
   assert(found, label);
   return found;
 }
-function reset() {slots.length=0;calls.length=0;visits.length=0;}
+function reset() {slots.length=0;calls.length=0;visits.length=0;persisted=null;}
 const settle=()=>new Promise(setImmediate);
 (async()=>{
   price=0.08;
@@ -54,16 +56,23 @@ const settle=()=>new Promise(setImmediate);
   assert.deepEqual(calls.map(c=>c.method),['estimate']);
   const confirm=button('Confirm search and repair');
   confirm.props.onClick(); confirm.props.onClick(); await settle();
-  assert.deepEqual(calls,[{method:'estimate',args:{takeId:'failed'}},{method:'run',args:{takeId:'failed',quoteKey:'bound-quote'}}]);
+  assert.deepEqual(calls,[{method:'estimate',args:{takeId:'failed'}},{method:'launch',args:{takeId:'failed',quoteKey:'bound-quote'}}]);
   button('Review repaired take').props.onClick();
   assert.match(visits[0],/production=episode/);assert.match(visits[0],/take=draft/);
   reset();price=0;result={status:'NO_MATCH',message:'No clear performance in your project clips.'};
   button('Find footage and fix this shot').props.onClick();await settle();
-  assert.deepEqual(calls.map(c=>c.method),['estimate','run']);
+  assert.deepEqual(calls.map(c=>c.method),['estimate','launch']);
   assert(elements().some(e=>e.props.role==='status' && e.props.children===result.message));
   assert.deepEqual(visits,[]);
   reset();price=NaN;
   button('Find footage and fix this shot').props.onClick();await settle();
   assert.deepEqual(calls.map(c=>c.method),['estimate']);assert(elements().some(e=>e.props.role==='alert'));
+  reset();persisted={status:'RUNNING'};
+  assert(elements().some(e=>e.props.role==='status' && /return to review/.test(e.props.children)));
+  assert(!elements().some(e=>e.type==='button'));
+  persisted={status:'SAVED',shotId:'shot',shotVersionId:'saved-in-background',assetId:'output'};
+  button('Review repaired take').props.onClick();
+  assert.match(visits[0],/take=saved-in-background/);
+  assert.deepEqual(calls,[]);
   console.log('PASS automatic search UI: no passive purchase, capped confirmation, no donor or timing input, duplicate suppression, draft-only review, zero-cost/no-match, invalid estimate.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

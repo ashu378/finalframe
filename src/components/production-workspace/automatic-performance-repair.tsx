@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { useAction } from 'convex/react';
+import { useAction, useQuery } from 'convex/react';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { useRouter } from 'next/navigation';
@@ -12,23 +12,25 @@ type TakeId = Id<'shotVersions'>;
 type Estimate = { quoteKey: string; maximumCostUsd: number; candidateCount: number };
 type Result =
   | {status: 'SAVED'; shotId: Id<'shots'>; shotVersionId: TakeId; assetId: Id<'assets'>}
-  | {status: 'NO_MATCH'; message?: string};
+  | {status: 'NO_MATCH' | 'FAILED' | 'QUEUED' | 'RUNNING'; message?: string};
 
 const estimateRef = makeFunctionReference<'action', {takeId: TakeId}, Estimate>('automaticPerformanceRepair:estimate');
-const runRef = makeFunctionReference<'action', {takeId: TakeId; quoteKey: string}, Result>('automaticPerformanceRepair:run');
+const launchRef = makeFunctionReference<'action', {takeId: TakeId; quoteKey: string}, Result>('automaticPerformanceRepair:launch');
+const statusRef = makeFunctionReference<'query', {takeId: TakeId}, Result | null>('automaticPerformanceRepair:status');
 
 export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
   const estimate = useAction(estimateRef);
-  const run = useAction(runRef);
+  const launch = useAction(launchRef);
+  const result = useQuery(statusRef, {takeId});
+  const searching = result?.status === 'QUEUED' || result?.status === 'RUNNING';
   const router = useRouter();
   const pending = useRef(false);
   const [phase, setPhase] = useState<'idle' | 'pricing' | 'finding'>('idle');
   const [quote, setQuote] = useState<Estimate | null>(null);
-  const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
 
   async function findAndFix() {
-    if (pending.current) return;
+    if (pending.current || searching || result === undefined) return;
     pending.current = true;
     setError('');
     try {
@@ -45,7 +47,7 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
         }
       }
       setPhase('finding');
-      setResult(await run({takeId, quoteKey: authorized.quoteKey}));
+      await launch({takeId, quoteKey: authorized.quoteKey});
       setQuote(null);
     } catch (cause) {
       setQuote(null);
@@ -73,14 +75,15 @@ export function AutomaticPerformanceRepair({takeId}: {takeId: TakeId}) {
     {result?.status === 'SAVED' ? <>
       <p role="status" className="text-sm">The repaired take is ready. Review the movement and listen to the voices before approving it.</p>
       <Button type="button" onClick={() => openDraft(result)}>Review repaired take</Button>
-    </> : <>
+    </> : searching ? <p role="status" className="text-sm">FinalFrame is checking the footage and preparing your edit. You can leave this page and return to review it.</p> : <>
       {result?.status === 'NO_MATCH' && <p role="status" className="text-sm">{result.message || 'No matching performance was found. Add another approved clip to the project to try again.'}</p>}
+      {result?.status === 'FAILED' && <p role="alert" className="text-sm">{result.message || 'The search stopped. Check the estimate to see whether it can resume.'}</p>}
       {quote && <p className="text-sm">Inspect up to {quote.candidateCount} project {quote.candidateCount === 1 ? 'clip' : 'clips'} for up to ${quote.maximumCostUsd.toFixed(4)}.</p>}
       {phase !== 'idle' && <p role="status" className="text-sm">{phase === 'pricing' ? 'Checking available footage and cost…' : 'Finding the action and preparing a new take…'}</p>}
-      <Button type="button" disabled={phase !== 'idle'} onClick={() => void findAndFix()}>
+      <Button type="button" disabled={phase !== 'idle' || result === undefined} onClick={() => void findAndFix()}>
         {quote ? 'Confirm search and repair' : 'Find footage and fix this shot'}
       </Button>
     </>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && !searching && result?.status !== 'SAVED' && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </section>;
 }
