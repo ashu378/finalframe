@@ -163,7 +163,12 @@ export const context=internalQuery({
     const verified=reviewed && ready.some(x=>x.assetId===reviewed.donor.assetId&&x.frameCount>=reviewed.range.donorEndFrame)?reviewed:null;
     const authority={projectId:c.projectId,actorUserId:access.user._id,takeId,shotId:c.data.shot._id,productionVersionId:c.version._id,requirementKey:c.data.requirementKey,
       reviewId:c.proof.reviewId,checkId:c.proof.checkId,action:rawAction,base,recording,scene,targetStartFrame:target.start,targetEndFrame:target.end,candidates:ready,reviewed:verified};
-    return {...authority,...(overlaps?{message:'Two required actions overlap here. Review their timing before replacing this part of the shot.'}:{}),needsMeasurement,contextHash:await recipeHash(authority),fps:24,width:base?.width??0,height:base?.height??0};
+    let message:string|undefined;
+    if(overlaps)message='Two required actions overlap here. Review their timing before replacing this part of the shot.';
+    else if(!base || !recording)message='Use a 24 fps MP4, up to 15 seconds and 1280 × 720 or 720 × 1280, for the shot and its original recording.';
+    else if(!supported)message='Check that the original recording contains AAC audio, matches the shot length, and covers the required action.';
+    else if(!ready.length)message='Add and approve a different clip from this project showing the action. Use the same picture size and 24 fps as this shot.';
+    return {...authority,...(message?{message}:{}),needsMeasurement,contextHash:await recipeHash(authority),fps:24,width:base?.width??0,height:base?.height??0};
   },
 });
 
@@ -188,7 +193,7 @@ async function measureInputs(ctx:ActionCtx,takeId:Id<'shotVersions'>) {
   data=await ctx.runQuery(refs.context,{takeId});return data;
 }
 
-const noMatch='The footage check could not confidently match this action and character in the approved clips it searched (up to three).';
+const noMatch='The footage check could not confidently match this action and character in the approved clips it searched (up to three). Add and approve a clip showing the performance, then try again.';
 type VisionQuote={model:string;maximumCostUsd:number;priceCeiling:{prompt:number;completion:number}};
 async function quoteFor(ctx:ActionCtx,takeId:Id<'shotVersions'>,data:any,period:number) {
   let pricing:VisionQuote|null=null;

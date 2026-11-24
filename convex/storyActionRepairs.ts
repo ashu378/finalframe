@@ -13,12 +13,12 @@ import { action, internalQuery, internalMutation, query } from './_generated/ser
 import type { QueryCtx, MutationCtx, ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { api, internal } from './_generated/api';
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { reviewContext } from './storyActionReviews';
 import { requireProjectRole } from './authorization';
 import { getEffectiveResourceState, requireApprovedResource } from './resourceStates';
 import { resolveVideoEditSourceCertificate } from './videoRouting';
-import { actionRepairPrompt, ACTION_REPAIR_VERSION } from '../src/lib/production/story-action-check';
+import { actionRepairPrompt, ACTION_REPAIR_VERSION, ACTION_CHECK_VERSION } from '../src/lib/production/story-action-check';
 import { planActionWindow, ACTION_WINDOW_REPAIR_VERSION } from '../renderer/src/media/action-window-contract';
 import { sha256Equal } from '../renderer/src/media/sha256';
 import { assertActionRegion, ACTION_REGION_REPAIR_VERSION } from '../renderer/src/media/action-region-contract';
@@ -47,7 +47,8 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
  if(data.shot._id!==shotId)throw new Error('REPAIR_WRONG_SHOT');
  const check=await ctx.db.query('storyActionChecks').withIndex('by_take',q=>q.eq('takeId',takeId)).order('desc').first();
  const human=data.latest?.requirementKey===data.requirementKey?data.latest:null;
- const ai=check?.requirementKey===data.requirementKey&&check.completedAt?check:null;
+ const currentPictureCheck=check?.requirementKey===data.requirementKey && check.projectId===data.take.projectId && check.completedAt;
+ const ai=currentPictureCheck && (performance!=='SAVED_PERFORMANCE' || check.checkVersion===ACTION_CHECK_VERSION)?check:null;
  // An advisory AI pass must not erase a creator's observed failure. A newer
  // human review can clear it; a newer AI failure can add a concern for review.
  // Otherwise approval remains blocked while repair incorrectly finds nothing.
@@ -57,6 +58,7 @@ export async function resolveStoryRepair(ctx:QueryCtx|MutationCtx,takeId:Id<'sho
   if(human&&human.createdAt>=(ai?.completedAt??0))return false;
   return ai?.observations?.some(o=>o.actionId===action.id&&o.result==='FAIL')??false;
  });
+ if(!missing.length && performance==='SAVED_PERFORMANCE')throw new ConvexError('No missing action is confirmed for this version of the shot. Run the picture check again or save a review that identifies the missing action.');
  if(!missing.length)throw new Error('Review and identify the missing action before repairing.');
  const priorRepair=object(object(data.take.contextSnapshot).request).storyRepair;
  if(performance===true&&object(priorRepair).approachVersion===PERFORMANCE_RETAKE)throw new Error('ACTION_REPAIR_NEEDS_NEW_APPROACH');

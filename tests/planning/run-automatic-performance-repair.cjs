@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict');
 const { fixture, runFixture, load }=require('../recipes/backend-fixture.cjs');
-(async()=>{
+async function verifyRepair(aiOnly){
   Object.assign(process.env,{FINALFRAME_MANIFEST_V5_ENABLED:'true',FINALFRAME_SOURCE_AUDIO_RESTORE_ENABLED:'true',FINALFRAME_ACTION_WINDOW_REPAIR_ENABLED:'true',FINALFRAME_RECIPE_ENABLED:'true'});
   const c=fixture();
   const beat={id:'lift',subject:'The returning performer',action:'Lift a blue cup to eye height and lower it.',startSeconds:2,endSeconds:4,beforeSeconds:3.5};
@@ -25,8 +25,28 @@ const { fixture, runFixture, load }=require('../recipes/backend-fixture.cjs');
     const data=await c.call('storyActionReviews','get',{takeId:id});
     return c.call('storyActionReviews','record',{takeId:id,requirementKey:data.requirementKey,observations:[{actionId:beat.id,result:passed?'PASS':'FAIL',observedStartSeconds:start,observedEndSeconds:end,evidence:passed?'The performer clearly raises the blue cup.':'The hand stays still by the cup.'}]});
   };
-  await review('failed',false);
   const call=(f,args={})=>c.call('automaticPerformanceRepair',f,{takeId:'failed',...args},false);
+  if(aiOnly){
+    const { requirementKey }=await c.call('storyActionReviews','get',{takeId:'failed'});
+    const { ACTION_CHECK_VERSION }=load('src/lib/production/story-action-check.ts');
+    const observation={actionId:beat.id,result:'FAIL',performance:'STILL_OR_CAMERA_ONLY',observedStartSeconds:null,observedEndSeconds:null,evidence:'The hand remains beside the cup.'};
+    const check={_id:'picture-check',projectId:'project',takeId:'failed',requirementKey,requestKey:'verified-receipt',actorUserId:'user',model:'test/vision',checkVersion:ACTION_CHECK_VERSION,priceCeiling:{prompt:1,completion:1},maximumCostUsd:.01,createdAt:1,expiresAt:11,completedAt:3,observations:[observation]};
+    for(const changes of [
+      {observations:[{...observation,result:'PASS',performance:'AS_DIRECTED'}]},
+      {observations:[{...observation,result:'UNCERTAIN',performance:'UNCLEAR'}]},
+      {requirementKey:'superseded-picture-or-shot'},
+      {projectId:'other-project'},
+      {checkVersion:'prior-prompt-without-performance-check'},
+      {completedAt:undefined},
+    ]){
+      c.put('storyActionChecks',{...check,...changes});
+      await assert.rejects(call('estimate'),/Run the picture check again/);
+    }
+    c.put('storyActionChecks',check);
+    const { latest,failedPictureCheck }=await c.call('storyActionReviews','get',{takeId:'failed'});
+    assert.equal(latest,null);
+    assert.equal(failedPictureCheck,true);
+  } else await review('failed',false);
   const initial=await call('context');assert.equal(initial.base.assetId,'baseline');assert.deepEqual(initial.candidates.map(x=>x.assetId),['donor','other']);
   c.put('shots',{...c.rows.get('shot'),_id:'another-shot',metadata:{storyActions:[{...beat,startSeconds:0,beforeSeconds:null}],resourceBindings:[binding]}});
   take('different-shot','another-shot','donor');await review('different-shot',true,.5,1.5);approved('shotVersion','different-shot');
@@ -70,8 +90,12 @@ const { fixture, runFixture, load }=require('../recipes/backend-fixture.cjs');
   const actual=await call('context'); chosen=actual.candidates[1].assetId;
   const result=await call('run',{quoteKey:paid.quoteKey});assert.equal(result.status,'SAVED');assert.equal(checks,2);assert.equal(submits,1);
   assert.equal(c.rows.get(result.shotVersionId).actualCost,0);assert.equal(c.rows.get('failed').assetId,'baseline');
+  const receipt=c.rows.get(result.shotVersionId).contextSnapshot;
+  if(aiOnly){assert.equal(receipt.reviewId,null);assert.equal(receipt.checkId,'picture-check');}
+  else {assert.ok(receipt.reviewId);assert.equal(receipt.checkId,null);}
   const fresh=await call('estimate');assert.equal(fresh.maximumCostUsd,0);const replay=await call('run',{quoteKey:paid.quoteKey});
   assert.deepEqual(result,replay);assert.equal(checks,2);assert.equal(submits,1);
   c.role='VIEWER';await assert.rejects(call('estimate'));c.role='OWNER';
-  console.log('PASS fresh failed action, authorized search, same-cast approved timing, wrong/foreign/revoked identity rejection, 2 unmarked candidates, 24-frame short action, reviewed cost, one draft, original sound, no replayed purchase.');
-})().catch(e=>{console.error(e);process.exitCode=1;});
+  console.log(aiOnly?'PASS AI-only failure, PASS/UNCERTAIN/stale/foreign/incomplete evidence denied;':'PASS creator-reviewed failure;', 'fresh failed action, authorized search, same-cast approved timing, wrong/foreign/revoked identity rejection, 2 unmarked candidates, 24-frame short action, reviewed cost, one draft, original sound, no replayed purchase.');
+}
+(async()=>{await verifyRepair(false);await verifyRepair(true);})().catch(e=>{console.error(e);process.exitCode=1;});
