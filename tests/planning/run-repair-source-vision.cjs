@@ -58,11 +58,19 @@ function context(){
    {firstFrame:0,lastFrame:18,phases:[0,6,18].map((frame,i)=>({...direction.phases[i],frame})),exit:{...exit,releaseFrame:18,settledFrame:18}},
    {exit:{...exit,kind:'ABRUPT_OR_UNCLEAR'}}, {exit:{...exit,kind:'END_OF_SHOT'}},
    {exit:{...exit,releaseFrame:30,settledFrame:30}}, {exit:{...exit,settledFrame:30}},
-   {exit:{...exit,nextOriginalPose:''}}, {exit:{...exit,continuity:'DISCONTINUITY'}}, {exit:{...exit,kind:'COMPATIBLE_CAMERA_CUT'}}, {exit:{...exit,releaseFrame:19}},
+   {exit:{...exit,nextOriginalPose:''}}, {exit:{...exit,kind:'COMPATIBLE_CAMERA_CUT'}}, {exit:{...exit,releaseFrame:19}},
  ])assert.deepEqual(v({...direction,...patch}),{status:'NO_MATCH'});
  assert.equal(v({...direction,exit:{...exit,kind:'COMPATIBLE_CAMERA_CUT',angle:'DIFFERENT_ANGLE'}}).status,'MATCH');
  assert.equal(vision.verifyDiscovery({...brief,targetStartFrame:0,targetEndFrame:42},direction).status,'NO_MATCH','short donor cannot rejoin at an unchecked earlier frame');
+ const cannotJoin={...negative,exit:{...exit,kind:'ABRUPT_OR_UNCLEAR',continuity:'DISCONTINUITY',releaseFrame:null,settledFrame:null,
+   donorPose:'The arm remains raised above the table.',nextOriginalPose:'Both hands rest at the glass.',evidence:'The hand jumps from head height straight to the glass in the next original frame.'}};
+ const exitResult={status:'NO_MATCH',reason:'EXIT_DISCONTINUITY'};
+ assert.deepEqual(v(cannotJoin),exitResult);
+ for(const patch of [{identityMatches:false},{sceneMatches:false},{movement:'WRONG_ACTION'},{confidence:.4},{status:'UNCERTAIN'},
+   {exit:{...cannotJoin.exit,continuity:'UNCERTAIN'}},{exit:{...cannotJoin.exit,nextOriginalPose:''}}])
+   assert.deepEqual(v({...cannotJoin,...patch}),{status:'NO_MATCH'});
  const terminal={...brief,originalFrameCount:brief.targetEndFrame};
+ assert.deepEqual(vision.verifyDiscovery(terminal,cannotJoin),{status:'NO_MATCH'});
  assert.equal(vision.verifyDiscovery(terminal,{...direction,exit:{...exit,kind:'END_OF_SHOT',nextOriginalPose:''}}).status,'MATCH');
  assert.equal(vision.verifyDiscovery(terminal,direction).status,'NO_MATCH');
  assert.match(vision.discoveryMessages(terminal,'base',null,['sheet'])[0].content[3].text,/END OF SHOT/);
@@ -75,15 +83,15 @@ function context(){
    calls++;await o.beforeChatSubmit();assert.equal(o.model,'approved/reviewer');assert.deepEqual(o.fallbackModels,[]);assert.equal(o.maxRetries,0);assert.equal(o.retry.maxRetries,0);
    assert.deepEqual(m[0].content.filter(x=>x.type==='image_url').map(x=>x.image_url.url),['data:image/jpeg;base64,/9j/AAAA','data:image/jpeg;base64,/9j/DDDD','data:image/jpeg;base64,/9j/BBBB','data:image/jpeg;base64,/9j/CCCC']);
    assert.match(m[0].content[3].text,/ORIGINAL EXIT.*frame 48/);assert.match(m[0].content[5].text,/0, 3, 6/);assert.match(m[0].content[7].text,/24, 27, 30/);
-   return {content:JSON.stringify(negative),modelUsed:'approved/reviewer',requestId:'gen-existing',costUsd:.01};
+   return {content:JSON.stringify(cannotJoin),modelUsed:'approved/reviewer',requestId:'gen-existing',costUsd:.01};
  });
  const get=async f=>({...await api.estimate.handler(f.c,{takeId:'take',contextHash:'pin'}),takeId:'take',contextHash:'pin',candidateIndex:0});
  const f=context(),a=await get(f);assert.equal(a.maximumCostUsd,.016384);
  await assert.rejects(api.inspect.handler(f.c,{...a,maximumCostUsd:.001}),/pricing changed/);
  await assert.rejects(api.inspect.handler(f.c,{...a,contextHash:'forged'}),/changed/);
  f.setHeadroom(.001);await assert.rejects(api.inspect.handler(f.c,a),/allowance/);assert.equal(f.events.length,0);
- f.setHeadroom(10);assert.deepEqual(await api.inspect.handler(f.c,a),{status:'NO_MATCH'});
- assert.deepEqual(await api.inspect.handler(f.c,a),{status:'NO_MATCH'});assert.equal(calls,1);
+ f.setHeadroom(10);assert.deepEqual(await api.inspect.handler(f.c,a),exitResult);
+ assert.deepEqual(await api.inspect.handler(f.c,a),exitResult);assert.equal(calls,1);
  assert.equal(f.events.filter(x=>x[0].endsWith('reserve')).length,1);assert.equal(f.events.find(x=>x[0].endsWith('finish'))[1].actualCostUsd,.01);
  const bad=context();bad.invalidate();await assert.rejects(api.inspect.handler(bad.c,await get(bad)),/inconsistent/);assert.equal(bad.events.length,0);
  const lost=context(),throws=handlers(async(_c,_m,o)=>{await o.beforeChatSubmit();throw Error('private failure');});

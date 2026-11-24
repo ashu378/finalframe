@@ -64,7 +64,7 @@ export function discoveryMessages(brief:RepairDiscoveryBrief,reference:string,ex
 }
 
 export function verifyDiscovery(brief:RepairDiscoveryBrief, value:unknown):
-  {status:'NO_MATCH'} | {status:'MATCH';donorStartFrame:number;donorEndFrame:number;targetEndFrame:number} {
+  {status:'NO_MATCH';reason?:'EXIT_DISCONTINUITY'} | {status:'MATCH';donorStartFrame:number;donorEndFrame:number;targetEndFrame:number} {
   const o = value as {status?:string;actionId?:string;confidence?:number;identityMatches?:boolean;sceneMatches?:boolean;framingCompatible?:boolean;
     exit?:{kind?:string;angle?:string;continuity?:string;releaseFrame?:number|null;settledFrame?:number|null;donorPose?:string;nextOriginalPose?:string;evidence?:string};
     movement?:string;firstFrame?:number|null;lastFrame?:number|null;evidence?:string;phases?:Array<{phaseNumber?:number;frame?:number;observation?:string}>};
@@ -72,7 +72,15 @@ export function verifyDiscovery(brief:RepairDiscoveryBrief, value:unknown):
   if (!o || o.actionId!==brief.action.id || !['MATCH','NO_MATCH','UNCERTAIN'].includes(o.status??'') ||
       typeof o.confidence!=='number'||!Number.isFinite(o.confidence)||o.confidence<0||o.confidence>1 ||
       typeof o.evidence!=='string'||o.evidence.trim().length<8 || !Array.isArray(o.phases)) throw new Error('The footage check returned invalid observations.');
-  if(o.status!=='MATCH'||o.confidence<0.85||o.identityMatches!==true||o.sceneMatches!==true||o.framingCompatible!==true||o.movement!=='ARTICULATED')return noMatch;
+  const describes=(s:unknown)=>typeof s==='string'&&s.trim().length>=12;
+  if(o.confidence<0.85||o.identityMatches!==true||o.sceneMatches!==true||o.movement!=='ARTICULATED')return noMatch;
+  // A negative observation has no donor range. The reviewer can nevertheless
+  // identify a discontinuity by comparing its ending with the original exit.
+  if(o.status!=='UNCERTAIN' && brief.targetEndFrame<brief.originalFrameCount &&
+     o.exit?.continuity==='DISCONTINUITY' && describes(o.exit.donorPose) &&
+     describes(o.exit.nextOriginalPose) && describes(o.exit.evidence))
+    return {...noMatch,reason:'EXIT_DISCONTINUITY'};
+  if(o.status!=='MATCH'||o.framingCompatible!==true)return noMatch;
   const sampled=(f:unknown):f is number=>typeof f==='number'&&Number.isInteger(f)&&f>=0&&f<brief.frameCount&&f%3===0;
   if(!sampled(o.firstFrame)||!sampled(o.lastFrame)||o.lastFrame<=o.firstFrame||o.phases.length!==discoveryPhases(brief.action).length)return noMatch;
   const donorStartFrame=o.firstFrame, donorEndFrame=Math.min(brief.frameCount,o.lastFrame+1);
@@ -86,7 +94,6 @@ export function verifyDiscovery(brief:RepairDiscoveryBrief, value:unknown):
   if(!Number.isInteger(originalFrameCount)||originalFrameCount<targetEndFrame)return noMatch;
   const rejoins=targetEndFrame<originalFrameCount;
   const exit=o.exit;
-  const describes=(s:unknown)=>typeof s==='string'&&s.trim().length>=12;
   if(!exit || exit.continuity!=='COMPATIBLE'||(exit.kind==='COMPATIBLE_CAMERA_CUT'&&exit.angle!=='DIFFERENT_ANGLE') || !(rejoins?['NATURAL_RETURN','COMPATIBLE_CAMERA_CUT']:['END_OF_SHOT']).includes(exit.kind??'') ||
      !sampled(exit.releaseFrame)||!sampled(exit.settledFrame)||exit.releaseFrame<=previous||
      exit.settledFrame<=exit.releaseFrame||exit.settledFrame!==o.lastFrame||
